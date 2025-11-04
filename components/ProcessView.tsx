@@ -120,7 +120,7 @@ export const ProcessView: React.FC<ProcessViewProps> = ({ processId }) => {
                 </div>
                 <div className="flex items-center space-x-3">
                     {process.seniority && <InfoChip icon={Briefcase} text={process.seniority} />}
-                    {process.salaryRange && <InfoChip icon={DollarSign} text={process.salaryRange} />}
+                    {process.salaryRange && <InfoChip icon={DollarSign} text={`${state.settings?.currencySymbol || ''}${process.salaryRange.replace(/[$\€£S/]/g, '').trim()}`} />}
                     {process.experienceLevel && <InfoChip icon={BarChart} text={process.experienceLevel} />}
                     {process.startDate && process.endDate && <InfoChip icon={Clock} text={`${process.startDate} to ${process.endDate}`} />}
                 </div>

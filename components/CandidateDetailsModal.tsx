@@ -128,7 +128,7 @@ export const CandidateDetailsModal: React.FC<{ candidate: Candidate, onClose: ()
                                     <DetailItem icon={Info} label="DNI" value={candidate.dni} />
                                     <DetailItem icon={Briefcase} label="Source" value={candidate.source} />
                                     <DetailItem icon={MapPin} label="Address" value={candidate.address} />
-                                    <DetailItem icon={DollarSign} label="Salary Expectation" value={candidate.salaryExpectation} />
+                                    <DetailItem icon={DollarSign} label="Salary Expectation" value={candidate.salaryExpectation ? `${state.settings?.currencySymbol || ''}${candidate.salaryExpectation.replace(/[$\€£S/]/g, '').trim()}` : 'N/A'} />
                                     </div>
                                 </div>
 

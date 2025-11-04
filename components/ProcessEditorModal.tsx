@@ -18,7 +18,7 @@ const fileToBase64 = (file: File): Promise<string> => {
 };
 
 export const ProcessEditorModal: React.FC<ProcessEditorModalProps> = ({ process, onClose }) => {
-    const { actions } = useAppState();
+    const { state, actions } = useAppState();
     const [title, setTitle] = useState(process?.title || '');
     const [description, setDescription] = useState(process?.description || '');
     const [salaryRange, setSalaryRange] = useState(process?.salaryRange || '');
@@ -102,7 +102,7 @@ export const ProcessEditorModal: React.FC<ProcessEditorModalProps> = ({ process,
                         {/* Process Details */}
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                             <div><label className="block text-sm font-medium text-gray-700">Process Title</label><input type="text" value={title} onChange={e => setTitle(e.target.value)} required className="mt-1 block w-full input"/></div>
-                            <div><label className="block text-sm font-medium text-gray-700">Salary Range</label><input type="text" placeholder="$100k - $120k" value={salaryRange} onChange={e => setSalaryRange(e.target.value)} className="mt-1 block w-full input"/></div>
+                            <div><label className="block text-sm font-medium text-gray-700">Salary Range</label><input type="text" placeholder={`${state.settings?.currencySymbol || '$'}100k - ${state.settings?.currencySymbol || '$'}120k`} value={salaryRange} onChange={e => setSalaryRange(e.target.value)} className="mt-1 block w-full input"/></div>
                             <div><label className="block text-sm font-medium text-gray-700">Experience Level</label><input type="text" placeholder="e.g., 5+ Years" value={experienceLevel} onChange={e => setExperienceLevel(e.target.value)} className="mt-1 block w-full input"/></div>
                             <div><label className="block text-sm font-medium text-gray-700">Seniority</label><input type="text" placeholder="e.g., Senior, Mid-Level" value={seniority} onChange={e => setSeniority(e.target.value)} className="mt-1 block w-full input"/></div>
                             <div><label className="block text-sm font-medium text-gray-700">Start Date</label><input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="mt-1 block w-full input"/></div>

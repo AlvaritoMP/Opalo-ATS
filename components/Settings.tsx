@@ -1,8 +1,9 @@
 
+
 import React, { useState, useEffect } from 'react';
 import { useAppState } from '../App';
 import { AppSettings } from '../types';
-import { Save, Database, HardDrive } from 'lucide-react';
+import { Save, Database, HardDrive, Globe } from 'lucide-react';
 
 export const Settings: React.FC = () => {
     const { state, actions } = useAppState();
@@ -37,7 +38,16 @@ export const Settings: React.FC = () => {
         });
     };
 
+    const handleSettingChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        if (!settings) return;
+        setSettings({
+            ...settings,
+            [e.target.name]: e.target.value
+        });
+    };
+
     const handleSave = async () => {
+        if (!settings) return;
         setIsSaving(true);
         await actions.saveSettings(settings);
         setIsSaving(false);
@@ -57,6 +67,26 @@ export const Settings: React.FC = () => {
                 </button>
             </div>
             <div className="space-y-8 max-w-4xl">
+                {/* Localization Settings */}
+                <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
+                    <h2 className="text-xl font-semibold mb-1 flex items-center"><Globe className="mr-2"/> Localization</h2>
+                    <p className="text-sm text-gray-500 mb-6">Set your preferred currency symbol.</p>
+                    <div className="space-y-4">
+                        <div>
+                            <label htmlFor="currencySymbol" className="block text-sm font-medium text-gray-700">Currency Symbol</label>
+                            <input 
+                                type="text" 
+                                id="currencySymbol" 
+                                name="currencySymbol" 
+                                value={settings.currencySymbol || ''} 
+                                onChange={handleSettingChange} 
+                                placeholder="$" 
+                                className="mt-1 block w-full max-w-xs px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-primary-500 focus:border-primary-500" 
+                            />
+                        </div>
+                    </div>
+                </div>
+
                 {/* Database Settings */}
                 <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
                     <h2 className="text-xl font-semibold mb-1 flex items-center"><Database className="mr-2"/> Database Connection</h2>

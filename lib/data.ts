@@ -148,6 +148,7 @@ export const initialSettings: AppSettings = {
         provider: 'None',
         connected: false,
     },
+    currencySymbol: '$',
 };
 
 export const initialFormIntegrations: FormIntegration[] = [

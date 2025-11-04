@@ -88,6 +88,7 @@ export interface AppSettings {
         provider: 'Google Drive' | 'None';
         connected: boolean;
     };
+    currencySymbol?: string;
 }
 
 export interface FormIntegration {

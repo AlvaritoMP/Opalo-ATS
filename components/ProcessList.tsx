@@ -13,6 +13,7 @@ const ProcessCard: React.FC<{
     canEdit: boolean;
 }> = ({ process, candidateCount, onView, onEdit, onDelete, canEdit }) => {
     const [dropdownOpen, setDropdownOpen] = useState(false);
+    const { state } = useAppState();
 
     return (
         <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden flex flex-col group">
@@ -52,7 +53,7 @@ const ProcessCard: React.FC<{
                 <div>
                     <div className="flex items-center justify-between text-sm text-gray-500 mb-2">
                         <span className="font-medium text-gray-700">Salary Range:</span>
-                        <span>{process.salaryRange || 'N/A'}</span>
+                        <span>{process.salaryRange ? `${state.settings?.currencySymbol || ''}${process.salaryRange.replace(/[$\€£S/]/g, '').trim()}` : 'N/A'}</span>
                     </div>
                     <div className="flex items-center justify-between text-sm text-gray-500">
                         <span className="font-medium text-gray-700">Candidates:</span>
