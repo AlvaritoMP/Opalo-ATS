@@ -1,4 +1,3 @@
-
 import React, { createContext, useContext, useState, useEffect, useMemo } from 'react';
 import { initialProcesses, initialCandidates, initialUsers, initialSettings, initialFormIntegrations, initialInterviewEvents } from './lib/data';
 import { Process, Candidate, User, AppSettings, FormIntegration, InterviewEvent, CandidateHistory, Application } from './types';
@@ -37,6 +36,8 @@ interface AppActions {
     addCandidate: (candidateData: Omit<Candidate, 'id' | 'history'>) => Promise<void>;
     updateCandidate: (candidateData: Candidate, movedBy?: string) => Promise<void>;
     deleteCandidate: (candidateId: string) => Promise<void>;
+    moveCandidateToProcess: (candidateId: string, targetProcessId: string) => Promise<void>;
+    duplicateCandidateToProcess: (candidateId: string, targetProcessId: string) => Promise<void>;
     addUser: (userData: Omit<User, 'id'>) => Promise<void>;
     updateUser: (userData: User) => Promise<void>;
     deleteUser: (userId: string) => Promise<void>;
@@ -203,6 +204,60 @@ const App: React.FC = () => {
         },
         deleteCandidate: async (candidateId) => {
             setState(s => ({ ...s, candidates: s.candidates.filter(c => c.id !== candidateId) }));
+        },
+        moveCandidateToProcess: async (candidateId, targetProcessId) => {
+            setState(s => {
+                const candidate = s.candidates.find(c => c.id === candidateId);
+                const targetProcess = s.processes.find(p => p.id === targetProcessId);
+
+                if (!candidate || !targetProcess || !targetProcess.stages.length) return s;
+
+                const firstStageId = targetProcess.stages[0].id;
+                const movedBy = s.currentUser?.name || 'System';
+                
+                const updatedHistory = [
+                    ...candidate.history,
+                    {
+                        stageId: firstStageId,
+                        movedAt: new Date().toISOString(),
+                        movedBy: `Moved from ${s.processes.find(p => p.id === candidate.processId)?.title || 'previous process'} by ${movedBy}`
+                    }
+                ];
+
+                const updatedCandidate: Candidate = {
+                    ...candidate,
+                    processId: targetProcessId,
+                    stageId: firstStageId,
+                    history: updatedHistory
+                };
+
+                return { ...s, candidates: s.candidates.map(c => c.id === candidateId ? updatedCandidate : c) };
+            });
+        },
+        duplicateCandidateToProcess: async (candidateId, targetProcessId) => {
+            setState(s => {
+                const originalCandidate = s.candidates.find(c => c.id === candidateId);
+                const targetProcess = s.processes.find(p => p.id === targetProcessId);
+
+                if (!originalCandidate || !targetProcess || !targetProcess.stages.length) return s;
+
+                const firstStageId = targetProcess.stages[0].id;
+                const movedBy = s.currentUser?.name || 'System';
+
+                const newCandidate: Candidate = {
+                    ...originalCandidate,
+                    id: `cand-${Date.now()}`,
+                    processId: targetProcessId,
+                    stageId: firstStageId,
+                    history: [{
+                        stageId: firstStageId,
+                        movedAt: new Date().toISOString(),
+                        movedBy: `Duplicated from ${s.processes.find(p => p.id === originalCandidate.processId)?.title || 'another process'} by ${movedBy}`
+                    }]
+                };
+                
+                return { ...s, candidates: [...s.candidates, newCandidate] };
+            });
         },
         addUser: async (userData) => {
             const newUser: User = { ...userData, id: `user-${Date.now()}` };

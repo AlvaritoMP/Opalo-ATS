@@ -1,8 +1,9 @@
 import React, { useRef, useState } from 'react';
 import { useAppState } from '../App';
 import { Candidate, Attachment, InterviewEvent, UserRole } from '../types';
-import { X, Mail, Phone, Linkedin, User, FileText, Eye, Download, Upload, Trash2, Briefcase, DollarSign, Calendar, Info, MapPin, Edit } from 'lucide-react';
+import { X, Mail, Phone, Linkedin, User, FileText, Eye, Download, Upload, Trash2, Briefcase, DollarSign, Calendar, Info, MapPin, Edit, ArrowRightLeft } from 'lucide-react';
 import { ScheduleInterviewModal } from './ScheduleInterviewModal';
+import { ChangeProcessModal } from './ChangeProcessModal';
 
 const fileToBase64 = (file: File): Promise<string> => {
     return new Promise((resolve, reject) => {
@@ -37,6 +38,7 @@ export const CandidateDetailsModal: React.FC<{ candidate: Candidate, onClose: ()
     const [activeTab, setActiveTab] = useState<'details' | 'history' | 'schedule'>('details');
     const [isScheduling, setIsScheduling] = useState(false);
     const [editingEvent, setEditingEvent] = useState<InterviewEvent | null>(null);
+    const [isChangeProcessModalOpen, setIsChangeProcessModalOpen] = useState(false);
 
     const avatarInputRef = useRef<HTMLInputElement>(null);
     const attachmentInputRef = useRef<HTMLInputElement>(null);
@@ -147,9 +149,14 @@ export const CandidateDetailsModal: React.FC<{ candidate: Candidate, onClose: ()
                     </div>
                     <div className="flex items-center space-x-2">
                         {canEdit && !isEditing && (
-                            <button onClick={() => setIsEditing(true)} className="flex items-center px-3 py-1.5 bg-white border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 hover:bg-gray-50">
-                                <Edit className="w-4 h-4 mr-2" /> Edit
-                            </button>
+                            <>
+                                <button onClick={() => setIsChangeProcessModalOpen(true)} className="flex items-center px-3 py-1.5 bg-white border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 hover:bg-gray-50" title="Move or Duplicate Candidate">
+                                    <ArrowRightLeft className="w-4 h-4" />
+                                </button>
+                                <button onClick={() => setIsEditing(true)} className="flex items-center px-3 py-1.5 bg-white border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 hover:bg-gray-50">
+                                    <Edit className="w-4 h-4 mr-2" /> Edit
+                                </button>
+                            </>
                         )}
                         <button onClick={onClose} className="p-2 rounded-full hover:bg-gray-100"><X /></button>
                     </div>
@@ -323,6 +330,7 @@ export const CandidateDetailsModal: React.FC<{ candidate: Candidate, onClose: ()
              <style>{`.input { padding: 0.5rem 0.75rem; border: 1px solid #D1D5DB; border-radius: 0.375rem; box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05); }`}</style>
         </div>
         {isScheduling && <ScheduleInterviewModal event={editingEvent} defaultCandidateId={initialCandidate.id} onClose={() => setIsScheduling(false)} />}
+        {isChangeProcessModalOpen && <ChangeProcessModal candidate={initialCandidate} onClose={() => setIsChangeProcessModalOpen(false)} />}
         </>
     );
 };
