@@ -14,6 +14,15 @@ export interface Process {
 export interface CandidateHistory {
     stageId: string;
     movedAt: string; // ISO date string
+    movedBy: string; // User name
+}
+
+export interface Attachment {
+    id: string;
+    name: string;
+    url: string;
+    type: string; // e.g., 'application/pdf', 'image/png'
+    size: number; // in bytes
 }
 
 export interface Candidate {
@@ -26,7 +35,7 @@ export interface Candidate {
     stageId: string;
     history: CandidateHistory[];
     notes?: string;
-    resumeUrl?: string;
+    attachments: Attachment[];
 }
 
 export type UserRole = 'admin' | 'recruiter' | 'viewer';
@@ -38,8 +47,16 @@ export interface User {
     role: UserRole;
 }
 
-export interface ApiSettings {
-    apiKey: string;
+export interface AppSettings {
+    database: {
+        type: 'baserow' | 'mock';
+        apiUrl: string;
+        apiToken: string;
+    };
+    fileStorage: {
+        type: 'gdrive' | 'local';
+        connected: boolean;
+    };
 }
 
 export type FormFieldType = 'text' | 'textarea' | 'select' | 'checkbox' | 'radio' | 'file';
@@ -59,6 +76,16 @@ export interface Form {
     fields: FormField[];
     processId: string; // Link form to a process
 }
+
+export interface FormIntegration {
+    id: string;
+    platform: 'Tally' | 'Google Forms' | 'Microsoft Forms';
+    formName: string;
+    formIdOrUrl: string;
+    processId: string;
+    webhookUrl: string;
+}
+
 
 export interface Application {
     id: string;

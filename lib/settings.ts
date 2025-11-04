@@ -1,12 +1,13 @@
-import { ApiSettings } from '../types';
+// Fix: Corrected the type import from 'ApiSettings' to 'AppSettings' as defined in the types.ts file.
+import { AppSettings } from '../types';
 
 const SETTINGS_KEY = 'ats_pro_settings';
 
-export const getSettings = (): ApiSettings | null => {
+export const getSettings = (): AppSettings | null => {
     try {
         const rawSettings = localStorage.getItem(SETTINGS_KEY);
         if (rawSettings) {
-            return JSON.parse(rawSettings) as ApiSettings;
+            return JSON.parse(rawSettings) as AppSettings;
         }
         return null;
     } catch (error) {
@@ -15,7 +16,7 @@ export const getSettings = (): ApiSettings | null => {
     }
 };
 
-export const saveSettings = (settings: ApiSettings) => {
+export const saveSettings = (settings: AppSettings) => {
     try {
         localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
     } catch (error) {

@@ -1,8 +1,8 @@
 
 import React, { useState } from 'react';
 import { useAppState } from '../App';
-import { Process } from '../types';
-import { X } from 'lucide-react';
+import { Process, Attachment } from '../types';
+import { X, FileText, Paperclip } from 'lucide-react';
 
 interface AddCandidateModalProps {
     process: Process;
@@ -14,6 +14,15 @@ export const AddCandidateModal: React.FC<AddCandidateModalProps> = ({ process, o
     const [name, setName] = useState('');
     const [email, setEmail] = useState('');
     const [phone, setPhone] = useState('');
+    const [attachments, setAttachments] = useState<Attachment[]>([]);
+    const [file, setFile] = useState<File | null>(null);
+
+    const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const selectedFile = e.target.files?.[0];
+        if (selectedFile) {
+            setFile(selectedFile);
+        }
+    };
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -21,12 +30,25 @@ export const AddCandidateModal: React.FC<AddCandidateModalProps> = ({ process, o
             alert("This process has no stages. Please add stages first.");
             return;
         }
+
+        let newAttachments: Attachment[] = [];
+        if (file) {
+            newAttachments.push({
+                id: `file-${Date.now()}`,
+                name: file.name,
+                url: URL.createObjectURL(file), // Mock URL
+                type: file.type,
+                size: file.size,
+            });
+        }
+
         await actions.addCandidate({
             name,
             email,
             phone,
             processId: process.id,
             stageId: process.stages[0].id, // Add to the first stage
+            attachments: newAttachments,
         });
         onClose();
     };
@@ -53,6 +75,32 @@ export const AddCandidateModal: React.FC<AddCandidateModalProps> = ({ process, o
                          <div>
                             <label htmlFor="phone" className="block text-sm font-medium text-gray-700">Phone (Optional)</label>
                             <input type="tel" id="phone" value={phone} onChange={e => setPhone(e.target.value)} className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-primary-500 focus:border-primary-500" />
+                        </div>
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700">Resume (Optional)</label>
+                            <div className="mt-1 flex justify-center px-6 pt-5 pb-6 border-2 border-gray-300 border-dashed rounded-md">
+                                <div className="space-y-1 text-center">
+                                    {file ? (
+                                        <>
+                                            <FileText className="mx-auto h-12 w-12 text-gray-400" />
+                                            <p className="text-sm text-gray-600">{file.name}</p>
+                                            <button type="button" onClick={() => setFile(null)} className="text-xs text-red-500 hover:underline">Remove</button>
+                                        </>
+                                    ) : (
+                                        <>
+                                            <Paperclip className="mx-auto h-12 w-12 text-gray-400" />
+                                            <div className="flex text-sm text-gray-600">
+                                                <label htmlFor="file-upload" className="relative cursor-pointer bg-white rounded-md font-medium text-primary-600 hover:text-primary-500 focus-within:outline-none focus-within:ring-2 focus-within:ring-offset-2 focus-within:ring-primary-500">
+                                                    <span>Upload a file</span>
+                                                    <input id="file-upload" name="file-upload" type="file" className="sr-only" onChange={handleFileChange}/>
+                                                </label>
+                                                <p className="pl-1">or drag and drop</p>
+                                            </div>
+                                            <p className="text-xs text-gray-500">PDF, DOCX up to 10MB</p>
+                                        </>
+                                    )}
+                                </div>
+                            </div>
                         </div>
                     </div>
                     <div className="p-6 bg-gray-50 rounded-b-xl flex justify-end space-x-3">

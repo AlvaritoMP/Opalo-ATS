@@ -15,6 +15,7 @@ export const ProcessView: React.FC<ProcessViewProps> = ({ processId }) => {
     const { state, actions } = useAppState();
     const [isAddModalOpen, setAddModalOpen] = useState(false);
     const [selectedCandidate, setSelectedCandidate] = useState<Candidate | null>(null);
+    const { currentUser } = state;
 
     const process = state.processes.find(p => p.id === processId);
     
@@ -35,13 +36,12 @@ export const ProcessView: React.FC<ProcessViewProps> = ({ processId }) => {
 
     const handleDrop = (candidateId: string, newStageId: string) => {
         const candidate = state.candidates.find(c => c.id === candidateId);
-        if (candidate && candidate.stageId !== newStageId) {
+        if (candidate && candidate.stageId !== newStageId && currentUser) {
             const updatedCandidate = {
                 ...candidate,
                 stageId: newStageId,
-                history: [...candidate.history, { stageId: newStageId, movedAt: new Date().toISOString() }]
             };
-            actions.updateCandidate(updatedCandidate);
+            actions.updateCandidate(updatedCandidate, currentUser.name);
         }
     };
 

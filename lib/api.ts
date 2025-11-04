@@ -1,6 +1,6 @@
 
-import { Process, Candidate, User, Form, Application } from '../types';
-import { initialProcesses, initialCandidates, initialUsers, initialForms, initialApplications } from './data';
+import { Process, Candidate, User, Form, Application, AppSettings, FormIntegration } from '../types';
+import { initialProcesses, initialCandidates, initialUsers, initialForms, initialApplications, initialSettings, initialFormIntegrations } from './data';
 
 const getFromStorage = <T>(key: string, fallback: T): T => {
     try {
@@ -58,13 +58,13 @@ export const api = {
         await delay(300);
         return getFromStorage('candidates', initialCandidates);
     },
-    addCandidate: async (candidateData: Omit<Candidate, 'id' | 'history'>): Promise<Candidate> => {
+    addCandidate: async (candidateData: Omit<Candidate, 'id' | 'history'>, addedBy: string): Promise<Candidate> => {
         await delay(300);
         const candidates = await api.getCandidates();
         const newCandidate: Candidate = { 
             ...candidateData, 
             id: `candidate-${Date.now()}`,
-            history: [{ stageId: candidateData.stageId, movedAt: new Date().toISOString() }]
+            history: [{ stageId: candidateData.stageId, movedAt: new Date().toISOString(), movedBy: addedBy }]
         };
         saveToStorage('candidates', [...candidates, newCandidate]);
         return newCandidate;
@@ -88,5 +88,39 @@ export const api = {
     getApplications: async (): Promise<Application[]> => {
         await delay(300);
         return getFromStorage('applications', initialApplications);
+    },
+
+    // Settings
+    getSettings: async (): Promise<AppSettings> => {
+        await delay(100);
+        return getFromStorage('settings', initialSettings);
+    },
+    saveSettings: async (settings: AppSettings): Promise<AppSettings> => {
+        await delay(300);
+        saveToStorage('settings', settings);
+        return settings;
+    },
+
+    // Form Integrations
+    getFormIntegrations: async (): Promise<FormIntegration[]> => {
+        await delay(200);
+        return getFromStorage('form_integrations', initialFormIntegrations);
+    },
+    addFormIntegration: async (integrationData: Omit<FormIntegration, 'id' | 'webhookUrl'>): Promise<FormIntegration> => {
+        await delay(300);
+        const integrations = await api.getFormIntegrations();
+        const newIntegration: FormIntegration = { 
+            ...integrationData, 
+            id: `fi-${Date.now()}`,
+            webhookUrl: `https://ats-pro.app/api/webhooks/${integrationData.platform.toLowerCase().replace(' ','')}/${Date.now()}`
+        };
+        saveToStorage('form_integrations', [...integrations, newIntegration]);
+        return newIntegration;
+    },
+    deleteFormIntegration: async (integrationId: string): Promise<void> => {
+        await delay(300);
+        let integrations = await api.getFormIntegrations();
+        integrations = integrations.filter(i => i.id !== integrationId);
+        saveToStorage('form_integrations', integrations);
     },
 };

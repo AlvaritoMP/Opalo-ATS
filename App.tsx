@@ -8,7 +8,7 @@ import { Users } from './components/Users';
 import { Settings } from './components/Settings';
 import { Forms } from './components/Forms';
 import { Spinner } from './components/Spinner';
-import { Candidate, Process, User, Form, Application } from './types';
+import { Candidate, Process, User, Form, Application, AppSettings, FormIntegration } from './types';
 import { api } from './lib/api';
 import { Briefcase, LayoutGrid, BarChart2, Users as UsersIcon, Settings as SettingsIcon, FileText } from 'lucide-react';
 
@@ -24,18 +24,24 @@ interface AppState {
     users: User[];
     forms: Form[];
     applications: Application[];
+    formIntegrations: FormIntegration[];
+    settings: AppSettings | null;
     currentUser: User | null;
 }
 
 type Action =
     | { type: 'SET_LOADING'; payload: boolean }
-    | { type: 'SET_DATA'; payload: { processes: Process[]; candidates: Candidate[]; users: User[]; forms: Form[]; applications: Application[] } }
+    | { type: 'SET_DATA'; payload: { processes: Process[]; candidates: Candidate[]; users: User[]; forms: Form[]; applications: Application[]; formIntegrations: FormIntegration[]; settings: AppSettings | null } }
     | { type: 'SET_VIEW'; payload: { view: View; processId?: string | null } }
     | { type: 'ADD_PROCESS'; payload: Process }
     | { type: 'UPDATE_PROCESS'; payload: Process }
     | { type: 'DELETE_PROCESS'; payload: string }
     | { type: 'ADD_CANDIDATE'; payload: Candidate }
-    | { type: 'UPDATE_CANDIDATE'; payload: Candidate };
+    | { type: 'UPDATE_CANDIDATE'; payload: Candidate }
+    | { type: 'SAVE_SETTINGS'; payload: AppSettings }
+    | { type: 'ADD_FORM_INTEGRATION'; payload: FormIntegration }
+    | { type: 'DELETE_FORM_INTEGRATION'; payload: string };
+
 
 const initialState: AppState = {
     loading: true,
@@ -46,6 +52,8 @@ const initialState: AppState = {
     users: [],
     forms: [],
     applications: [],
+    formIntegrations: [],
+    settings: null,
     currentUser: { id: 'user-1', name: 'Super Admin', email: 'admin@ats.com', role: 'admin' }, // mock current user
 };
 
@@ -77,6 +85,12 @@ const appReducer = (state: AppState, action: Action): AppState => {
                 ...state,
                 candidates: state.candidates.map(c => c.id === action.payload.id ? action.payload : c),
             };
+        case 'SAVE_SETTINGS':
+            return { ...state, settings: action.payload };
+        case 'ADD_FORM_INTEGRATION':
+            return { ...state, formIntegrations: [...state.formIntegrations, action.payload] };
+        case 'DELETE_FORM_INTEGRATION':
+            return { ...state, formIntegrations: state.formIntegrations.filter(fi => fi.id !== action.payload) };
         default:
             return state;
     }
@@ -90,7 +104,10 @@ interface AppContextType {
         updateProcess: (process: Process) => Promise<void>;
         deleteProcess: (processId: string) => Promise<void>;
         addCandidate: (candidateData: Omit<Candidate, 'id' | 'history'>) => Promise<void>;
-        updateCandidate: (candidate: Candidate) => Promise<void>;
+        updateCandidate: (candidate: Candidate, movedBy?: string) => Promise<void>;
+        saveSettings: (settings: AppSettings) => Promise<void>;
+        addFormIntegration: (integrationData: Omit<FormIntegration, 'id' | 'webhookUrl'>) => Promise<void>;
+        deleteFormIntegration: (integrationId: string) => Promise<void>;
     };
 }
 
@@ -107,7 +124,6 @@ export const useAppState = () => {
 const NavLink: React.FC<{
     view: View;
     currentView: View;
-    // Fix: Allow processId to be passed to setView
     setView: (view: View, processId?: string) => void;
     icon: React.ElementType;
     children: React.ReactNode;
@@ -159,14 +175,16 @@ const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
     useEffect(() => {
         const loadData = async () => {
             dispatch({ type: 'SET_LOADING', payload: true });
-            const [processes, candidates, users, forms, applications] = await Promise.all([
+            const [processes, candidates, users, forms, applications, formIntegrations, settings] = await Promise.all([
                 api.getProcesses(),
                 api.getCandidates(),
                 api.getUsers(),
                 api.getForms(),
                 api.getApplications(),
+                api.getFormIntegrations(),
+                api.getSettings(),
             ]);
-            dispatch({ type: 'SET_DATA', payload: { processes, candidates, users, forms, applications } });
+            dispatch({ type: 'SET_DATA', payload: { processes, candidates, users, forms, applications, formIntegrations, settings } });
         };
         loadData();
     }, []);
@@ -188,14 +206,35 @@ const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
             dispatch({ type: 'DELETE_PROCESS', payload: processId });
         },
         addCandidate: async (candidateData: Omit<Candidate, 'id'| 'history'>) => {
-            const newCandidate = await api.addCandidate(candidateData);
+            const newCandidate = await api.addCandidate(candidateData, state.currentUser?.name || 'System');
             dispatch({ type: 'ADD_CANDIDATE', payload: newCandidate });
         },
-        updateCandidate: async (candidate: Candidate) => {
-            const updatedCandidate = await api.updateCandidate(candidate);
-            dispatch({ type: 'UPDATE_CANDIDATE', payload: updatedCandidate });
+        updateCandidate: async (candidate: Candidate, movedBy: string | undefined = undefined) => {
+            let updatedCandidate = { ...candidate };
+            const originalCandidate = state.candidates.find(c => c.id === candidate.id);
+
+            if (movedBy && originalCandidate && originalCandidate.stageId !== candidate.stageId) {
+                updatedCandidate.history = [
+                    ...candidate.history,
+                    { stageId: candidate.stageId, movedAt: new Date().toISOString(), movedBy }
+                ];
+            }
+            const savedCandidate = await api.updateCandidate(updatedCandidate);
+            dispatch({ type: 'UPDATE_CANDIDATE', payload: savedCandidate });
         },
-    }), []);
+        saveSettings: async (settings: AppSettings) => {
+            const savedSettings = await api.saveSettings(settings);
+            dispatch({ type: 'SAVE_SETTINGS', payload: savedSettings });
+        },
+        addFormIntegration: async (integrationData: Omit<FormIntegration, 'id' | 'webhookUrl'>) => {
+            const newIntegration = await api.addFormIntegration(integrationData);
+            dispatch({ type: 'ADD_FORM_INTEGRATION', payload: newIntegration });
+        },
+        deleteFormIntegration: async (integrationId: string) => {
+            await api.deleteFormIntegration(integrationId);
+            dispatch({ type: 'DELETE_FORM_INTEGRATION', payload: integrationId });
+        },
+    }), [state.candidates, state.currentUser]);
     
     return (
         <AppContext.Provider value={{ state, actions }}>

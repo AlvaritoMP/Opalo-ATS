@@ -1,5 +1,5 @@
 
-import { Process, Candidate, User, Form, Application } from '../types';
+import { Process, Candidate, User, Form, Application, AppSettings, FormIntegration } from '../types';
 
 export const initialProcesses: Process[] = [
     {
@@ -37,12 +37,15 @@ export const initialCandidates: Candidate[] = [
         processId: 'process-1',
         stageId: 'stage-1-3',
         history: [
-            { stageId: 'stage-1-1', movedAt: '2023-10-01T10:00:00Z' },
-            { stageId: 'stage-1-2', movedAt: '2023-10-03T14:00:00Z' },
-            { stageId: 'stage-1-3', movedAt: '2023-10-10T11:00:00Z' },
+            { stageId: 'stage-1-1', movedAt: '2023-10-01T10:00:00Z', movedBy: 'System' },
+            { stageId: 'stage-1-2', movedAt: '2023-10-03T14:00:00Z', movedBy: 'Recruiter Rick' },
+            { stageId: 'stage-1-3', movedAt: '2023-10-10T11:00:00Z', movedBy: 'Super Admin' },
         ],
         notes: "Strong React skills. Impressive portfolio project.",
-        resumeUrl: "/resumes/alice.pdf",
+        attachments: [
+            { id: 'file-1', name: 'alice_johnson_resume.pdf', url: 'about:blank', type: 'application/pdf', size: 123456 },
+            { id: 'file-2', name: 'portfolio_preview.png', url: 'https://images.unsplash.com/photo-1580927752452-89d86da3fa0a?q=80&w=800', type: 'image/png', size: 78910 }
+        ]
     },
     {
         id: 'candidate-2',
@@ -51,9 +54,11 @@ export const initialCandidates: Candidate[] = [
         processId: 'process-1',
         stageId: 'stage-1-2',
         history: [
-            { stageId: 'stage-1-1', movedAt: '2023-10-02T09:00:00Z' },
-            { stageId: 'stage-1-2', movedAt: '2023-10-04T16:00:00Z' },
+            { stageId: 'stage-1-1', movedAt: '2023-10-02T09:00:00Z', movedBy: 'System' },
+            { stageId: 'stage-1-2', movedAt: '2023-10-04T16:00:00Z', movedBy: 'Recruiter Rick' },
         ],
+        notes: "",
+        attachments: [],
     },
     {
         id: 'candidate-3',
@@ -62,10 +67,11 @@ export const initialCandidates: Candidate[] = [
         processId: 'process-2',
         stageId: 'stage-2-2',
         history: [
-            { stageId: 'stage-2-1', movedAt: '2023-10-05T12:00:00Z' },
-            { stageId: 'stage-2-2', movedAt: '2023-10-08T17:00:00Z' },
+            { stageId: 'stage-2-1', movedAt: '2023-10-05T12:00:00Z', movedBy: 'System' },
+            { stageId: 'stage-2-2', movedAt: '2023-10-08T17:00:00Z', movedBy: 'Super Admin' },
         ],
         notes: "Excellent eye for detail in their portfolio.",
+        attachments: [],
     },
     {
         id: 'candidate-4',
@@ -74,14 +80,15 @@ export const initialCandidates: Candidate[] = [
         processId: 'process-1',
         stageId: 'stage-1-6',
         history: [
-            { stageId: 'stage-1-1', movedAt: '2023-09-15T10:00:00Z' },
-            { stageId: 'stage-1-2', movedAt: '2023-09-18T14:00:00Z' },
-            { stageId: 'stage-1-3', movedAt: '2023-09-22T11:00:00Z' },
-            { stageId: 'stage-1-4', movedAt: '2023-09-28T11:00:00Z' },
-            { stageId: 'stage-1-5', movedAt: '2023-10-02T11:00:00Z' },
-            { stageId: 'stage-1-6', movedAt: '2023-10-05T11:00:00Z' },
+            { stageId: 'stage-1-1', movedAt: '2023-09-15T10:00:00Z', movedBy: 'System' },
+            { stageId: 'stage-1-2', movedAt: '2023-09-18T14:00:00Z', movedBy: 'Recruiter Rick' },
+            { stageId: 'stage-1-3', movedAt: '2023-09-22T11:00:00Z', movedBy: 'Super Admin' },
+            { stageId: 'stage-1-4', movedAt: '2023-09-28T11:00:00Z', movedBy: 'Super Admin' },
+            { stageId: 'stage-1-5', movedAt: '2023-10-02T11:00:00Z', movedBy: 'Super Admin' },
+            { stageId: 'stage-1-6', movedAt: '2023-10-05T11:00:00Z', movedBy: 'Super Admin' },
         ],
         notes: "Accepted the offer!",
+        attachments: [],
     },
 ];
 
@@ -93,3 +100,26 @@ export const initialUsers: User[] = [
 
 export const initialForms: Form[] = [];
 export const initialApplications: Application[] = [];
+
+export const initialSettings: AppSettings = {
+    database: {
+        type: 'mock',
+        apiUrl: '',
+        apiToken: '',
+    },
+    fileStorage: {
+        type: 'local',
+        connected: false,
+    },
+};
+
+export const initialFormIntegrations: FormIntegration[] = [
+    {
+        id: 'fi-1',
+        platform: 'Tally',
+        formName: 'Frontend Developer Application',
+        formIdOrUrl: 'w1gL9b',
+        processId: 'process-1',
+        webhookUrl: 'https://ats-pro.app/api/webhooks/tally/xyz123'
+    }
+];

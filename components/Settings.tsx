@@ -1,42 +1,102 @@
 
-import React from 'react';
+import React, { useState, useEffect } from 'react';
+import { useAppState } from '../App';
+import { AppSettings } from '../types';
+import { Save, Database, HardDrive } from 'lucide-react';
 
 export const Settings: React.FC = () => {
+    const { state, actions } = useAppState();
+    const [settings, setSettings] = useState<AppSettings | null>(state.settings);
+    const [isSaving, setIsSaving] = useState(false);
+
+    useEffect(() => {
+        setSettings(state.settings);
+    }, [state.settings]);
+
+    if (!settings) {
+        return null; // Or a loading state
+    }
+    
+    const handleDbChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        setSettings({
+            ...settings,
+            database: {
+                ...settings.database,
+                [e.target.name]: e.target.value,
+            }
+        });
+    };
+
+    const handleFileStorageToggle = () => {
+        setSettings({
+            ...settings,
+            fileStorage: {
+                ...settings.fileStorage,
+                connected: !settings.fileStorage.connected,
+            }
+        });
+    };
+
+    const handleSave = async () => {
+        setIsSaving(true);
+        await actions.saveSettings(settings);
+        setIsSaving(false);
+        // Maybe show a toast notification here
+    };
+
     return (
         <div className="p-8">
-            <h1 className="text-3xl font-bold text-gray-800 mb-8">Settings</h1>
-            <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm max-w-2xl">
-                <h2 className="text-xl font-semibold mb-4">Application Settings</h2>
-                <p className="text-gray-600">
-                    This is where application settings would be configured. 
-                    For this application, the Google Generative AI API key is configured securely via environment variables and is not managed through this interface.
-                </p>
-                <div className="mt-6">
-                    {/* Placeholder for future settings */}
+            <div className="flex justify-between items-center mb-8">
+                <h1 className="text-3xl font-bold text-gray-800">Settings</h1>
+                <button
+                    onClick={handleSave}
+                    disabled={isSaving}
+                    className="flex items-center px-4 py-2 bg-primary-600 text-white rounded-lg shadow-sm hover:bg-primary-700 disabled:bg-primary-300"
+                >
+                    <Save className="w-5 h-5 mr-2" /> {isSaving ? 'Saving...' : 'Save Changes'}
+                </button>
+            </div>
+            <div className="space-y-8 max-w-4xl">
+                {/* Database Settings */}
+                <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
+                    <h2 className="text-xl font-semibold mb-1 flex items-center"><Database className="mr-2"/> Database Connection</h2>
+                    <p className="text-sm text-gray-500 mb-6">Configure the connection to your database (e.g., Baserow).</p>
                     <div className="space-y-4">
                         <div>
-                            <label className="text-base font-medium text-gray-900">Notifications</label>
-                            <p className="text-sm leading-5 text-gray-500">Manage your notification preferences.</p>
-                            <div className="mt-4 flex items-center space-x-4">
-                                <label className="flex items-center">
-                                    <input type="checkbox" className="h-4 w-4 text-primary-600 border-gray-300 rounded" defaultChecked/>
-                                    <span className="ml-2 text-sm text-gray-600">Email Notifications</span>
-                                </label>
-                                 <label className="flex items-center">
-                                    <input type="checkbox" className="h-4 w-4 text-primary-600 border-gray-300 rounded"/>
-                                    <span className="ml-2 text-sm text-gray-600">Push Notifications</span>
-                                </label>
-                            </div>
+                            <label className="block text-sm font-medium text-gray-700">Database Type</label>
+                            <input type="text" value="Baserow" disabled className="mt-1 block w-full px-3 py-2 bg-gray-100 border border-gray-300 rounded-md shadow-sm" />
                         </div>
-                         <div>
-                            <label htmlFor="theme" className="text-base font-medium text-gray-900">Theme</label>
-                             <p className="text-sm leading-5 text-gray-500">Choose your preferred application theme.</p>
-                             <select id="theme" className="mt-2 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-primary-500 focus:border-primary-500 sm:text-sm rounded-md">
-                                 <option>Light</option>
-                                 <option>Dark</option>
-                                 <option>System</option>
-                             </select>
+                        <div>
+                            <label htmlFor="apiUrl" className="block text-sm font-medium text-gray-700">API URL</label>
+                            <input type="text" id="apiUrl" name="apiUrl" value={settings.database.apiUrl} onChange={handleDbChange} placeholder="https://api.baserow.io" className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-primary-500 focus:border-primary-500" />
                         </div>
+                        <div>
+                            <label htmlFor="apiToken" className="block text-sm font-medium text-gray-700">API Token</label>
+                            <input type="password" id="apiToken" name="apiToken" value={settings.database.apiToken} onChange={handleDbChange} placeholder="••••••••••••••••••••" className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-primary-500 focus:border-primary-500" />
+                        </div>
+                    </div>
+                </div>
+                {/* File Storage Settings */}
+                <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
+                    <h2 className="text-xl font-semibold mb-1 flex items-center"><HardDrive className="mr-2"/> File Storage</h2>
+                    <p className="text-sm text-gray-500 mb-6">Connect to a cloud storage provider for candidate attachments.</p>
+                    <div className="flex items-center justify-between p-4 bg-gray-50 rounded-lg border">
+                        <div>
+                            <p className="font-medium">Google Drive</p>
+                            <span className={`text-sm ${settings.fileStorage.connected ? 'text-green-600' : 'text-gray-500'}`}>
+                                {settings.fileStorage.connected ? 'Connected' : 'Not Connected'}
+                            </span>
+                        </div>
+                        <button
+                            onClick={handleFileStorageToggle}
+                            className={`px-4 py-2 text-sm font-medium rounded-md shadow-sm ${
+                                settings.fileStorage.connected
+                                ? 'bg-red-100 text-red-700 hover:bg-red-200'
+                                : 'bg-white border border-gray-300 text-gray-700 hover:bg-gray-50'
+                            }`}
+                        >
+                           {settings.fileStorage.connected ? 'Disconnect' : 'Connect with Google Drive'}
+                        </button>
                     </div>
                 </div>
             </div>
