@@ -1,13 +1,59 @@
-
-import React from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { useAppState } from '../App';
-import { Download, Users, Briefcase } from 'lucide-react';
+import { Download, Users, Briefcase, ChevronDown } from 'lucide-react';
+import { Candidate } from '../types';
+
+const candidateReportOptions: { key: keyof Candidate | 'process' | 'stage'; label: string }[] = [
+    { key: 'name', label: 'Name' },
+    { key: 'email', label: 'Email' },
+    { key: 'phone', label: 'Phone' },
+    { key: 'process', label: 'Process' },
+    { key: 'stage', label: 'Current Stage' },
+    { key: 'source', label: 'Source' },
+    { key: 'salaryExpectation', label: 'Salary Expectation' },
+    { key: 'age', label: 'Age' },
+    { key: 'dni', label: 'DNI' },
+    { key: 'linkedinUrl', label: 'LinkedIn' },
+    { key: 'address', label: 'Address' },
+];
+
 
 export const ReportsView: React.FC = () => {
     const { state } = useAppState();
     const { processes, candidates } = state;
+    const [selectedColumns, setSelectedColumns] = useState<string[]>(['name', 'process', 'stage', 'email']);
+    const [isColumnSelectorOpen, setIsColumnSelectorOpen] = useState(false);
+    const selectorRef = useRef<HTMLDivElement>(null);
 
-    const handleExport = (data: unknown[], fileName: string) => {
+    useEffect(() => {
+        const handleClickOutside = (event: MouseEvent) => {
+            if (selectorRef.current && !selectorRef.current.contains(event.target as Node)) {
+                setIsColumnSelectorOpen(false);
+            }
+        };
+        document.addEventListener('mousedown', handleClickOutside);
+        return () => document.removeEventListener('mousedown', handleClickOutside);
+    }, []);
+
+    const handleColumnToggle = (columnKey: string) => {
+        setSelectedColumns(prev =>
+            prev.includes(columnKey) ? prev.filter(key => key !== columnKey) : [...prev, columnKey]
+        );
+    };
+    
+    const getCandidateValue = (candidate: Candidate, colKey: string): string | number | undefined => {
+        switch(colKey) {
+            case 'process':
+                return processes.find(p => p.id === candidate.processId)?.title || 'N/A';
+            case 'stage':
+                const process = processes.find(p => p.id === candidate.processId);
+                return process?.stages.find(s => s.id === candidate.stageId)?.name || 'N/A';
+            default:
+                return candidate[colKey as keyof Candidate] as string | number | undefined;
+        }
+    };
+
+    const handleExport = (data: any[], fileName: string) => {
         const json = JSON.stringify(data, null, 2);
         const blob = new Blob([json], { type: 'application/json' });
         const url = URL.createObjectURL(blob);
@@ -29,33 +75,67 @@ export const ReportsView: React.FC = () => {
                 <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
                     <div className="flex justify-between items-center mb-4">
                         <h2 className="text-xl font-semibold flex items-center"><Users className="mr-2" /> All Candidates</h2>
-                        <button onClick={() => handleExport(candidates, 'all_candidates')} className="flex items-center text-sm font-medium text-primary-600 hover:text-primary-800">
-                            <Download className="w-4 h-4 mr-1" /> Export as JSON
-                        </button>
+                        <div className="flex items-center space-x-4">
+                             <div className="relative" ref={selectorRef}>
+                                <button
+                                    onClick={() => setIsColumnSelectorOpen(prev => !prev)}
+                                    className="flex items-center text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md shadow-sm px-4 py-2 hover:bg-gray-50"
+                                >
+                                    Select Columns <ChevronDown className="w-4 h-4 ml-2" />
+                                </button>
+                                {isColumnSelectorOpen && (
+                                    <div className="absolute right-0 mt-2 w-56 rounded-md shadow-lg bg-white ring-1 ring-black ring-opacity-5 z-10">
+                                        <div className="p-2 max-h-60 overflow-y-auto">
+                                            {candidateReportOptions.map(option => (
+                                                <label key={option.key} className="flex items-center space-x-2 p-2 rounded-md hover:bg-gray-100 cursor-pointer">
+                                                    <input
+                                                        type="checkbox"
+                                                        checked={selectedColumns.includes(option.key)}
+                                                        onChange={() => handleColumnToggle(option.key)}
+                                                        className="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                                                    />
+                                                    <span className="text-sm text-gray-700">{option.label}</span>
+                                                </label>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                            <button onClick={() => {
+                                const dataToExport = candidates.map(candidate => {
+                                    const row: Record<string, any> = {};
+                                    selectedColumns.forEach(key => {
+                                        row[key] = getCandidateValue(candidate, key) || '';
+                                    });
+                                    return row;
+                                });
+                                handleExport(dataToExport, 'custom_candidates_report');
+                            }} className="flex items-center text-sm font-medium text-primary-600 hover:text-primary-800">
+                                <Download className="w-4 h-4 mr-1" /> Export as JSON
+                            </button>
+                        </div>
                     </div>
                     <div className="overflow-x-auto">
                         <table className="w-full text-sm text-left text-gray-500">
                             <thead className="text-xs text-gray-700 uppercase bg-gray-50">
                                 <tr>
-                                    <th scope="col" className="px-6 py-3">Name</th>
-                                    <th scope="col" className="px-6 py-3">Process</th>
-                                    <th scope="col" className="px-6 py-3">Current Stage</th>
-                                    <th scope="col" className="px-6 py-3">Email</th>
+                                    {selectedColumns.map(key => (
+                                        <th scope="col" key={key} className="px-6 py-3">
+                                            {candidateReportOptions.find(opt => opt.key === key)?.label || key}
+                                        </th>
+                                    ))}
                                 </tr>
                             </thead>
                             <tbody>
-                                {candidates.map(candidate => {
-                                    const process = processes.find(p => p.id === candidate.processId);
-                                    const stage = process?.stages.find(s => s.id === candidate.stageId);
-                                    return (
-                                        <tr key={candidate.id} className="bg-white border-b hover:bg-gray-50">
-                                            <th scope="row" className="px-6 py-4 font-medium text-gray-900 whitespace-nowrap">{candidate.name}</th>
-                                            <td className="px-6 py-4">{process?.title || 'N/A'}</td>
-                                            <td className="px-6 py-4">{stage?.name || 'N/A'}</td>
-                                            <td className="px-6 py-4">{candidate.email}</td>
-                                        </tr>
-                                    );
-                                })}
+                                {candidates.map(candidate => (
+                                    <tr key={candidate.id} className="bg-white border-b hover:bg-gray-50">
+                                        {selectedColumns.map(key => (
+                                             <td key={key} className="px-6 py-4">
+                                                {String(getCandidateValue(candidate, key) || 'N/A')}
+                                            </td>
+                                        ))}
+                                    </tr>
+                                ))}
                             </tbody>
                         </table>
                     </div>
@@ -65,7 +145,16 @@ export const ReportsView: React.FC = () => {
                 <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
                     <div className="flex justify-between items-center mb-4">
                         <h2 className="text-xl font-semibold flex items-center"><Briefcase className="mr-2" /> All Processes</h2>
-                        <button onClick={() => handleExport(processes, 'all_processes')} className="flex items-center text-sm font-medium text-primary-600 hover:text-primary-800">
+                        {/* Fix: Corrected the onClick handler to export a summary of process data, resolving the original type error. */}
+                        <button onClick={() => {
+                            const dataToExport = processes.map(process => ({
+                                title: process.title,
+                                description: process.description,
+                                stageCount: process.stages.length,
+                                candidateCount: candidates.filter(c => c.processId === process.id).length
+                            }));
+                            handleExport(dataToExport, 'all_processes');
+                        }} className="flex items-center text-sm font-medium text-primary-600 hover:text-primary-800">
                             <Download className="w-4 h-4 mr-1" /> Export as JSON
                         </button>
                     </div>
