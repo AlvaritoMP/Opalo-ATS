@@ -28,6 +28,7 @@ export const AddCandidateModal: React.FC<AddCandidateModalProps> = ({ process, o
     const [age, setAge] = useState<number | ''>('');
     const [dni, setDni] = useState('');
     const [linkedinUrl, setLinkedinUrl] = useState('');
+    const [address, setAddress] = useState('');
     const [attachments, setAttachments] = useState<Attachment[]>([]);
     
     const attachmentInputRef = useRef<HTMLInputElement>(null);
@@ -54,6 +55,7 @@ export const AddCandidateModal: React.FC<AddCandidateModalProps> = ({ process, o
             age: age === '' ? undefined : age,
             dni,
             linkedinUrl,
+            address,
         });
         onClose();
     };
@@ -114,7 +116,8 @@ export const AddCandidateModal: React.FC<AddCandidateModalProps> = ({ process, o
                         <div><label className="block text-sm font-medium text-gray-700">Phone Number</label><input type="tel" value={phone} onChange={e => setPhone(e.target.value)} className="mt-1 block w-full input"/></div>
                         <div><label className="block text-sm font-medium text-gray-700">Age</label><input type="number" value={age} onChange={e => setAge(e.target.value === '' ? '' : parseInt(e.target.value, 10))} className="mt-1 block w-full input"/></div>
                         <div><label className="block text-sm font-medium text-gray-700">DNI</label><input type="text" value={dni} onChange={e => setDni(e.target.value)} className="mt-1 block w-full input"/></div>
-                        <div><label className="block text-sm font-medium text-gray-700">Salary Expectation</label><input type="text" value={salaryExpectation} onChange={e => setSalaryExpectation(e.target.value)} placeholder="$100,000" className="mt-1 block w-full input"/></div>
+                        <div><label className="block text-sm font-medium text-gray-700">Address / City</label><input type="text" value={address} onChange={e => setAddress(e.target.value)} placeholder="e.g., New York, NY" className="mt-1 block w-full input"/></div>
+                        <div className="md:col-span-2"><label className="block text-sm font-medium text-gray-700">Salary Expectation</label><input type="text" value={salaryExpectation} onChange={e => setSalaryExpectation(e.target.value)} placeholder="$100,000" className="mt-1 block w-full input"/></div>
                         <div className="md:col-span-2"><label className="block text-sm font-medium text-gray-700">LinkedIn Profile URL</label><input type="url" value={linkedinUrl} onChange={e => setLinkedinUrl(e.target.value)} placeholder="https://linkedin.com/in/..." className="mt-1 block w-full input"/></div>
                          <div>
                             <label className="block text-sm font-medium text-gray-700">Source</label>

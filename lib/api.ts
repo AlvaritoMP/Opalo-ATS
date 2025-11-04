@@ -1,5 +1,5 @@
 
-import { Process, Candidate, User, Form, Application, AppSettings, FormIntegration } from '../types';
+import { Process, Candidate, User, Form, Application, AppSettings, FormIntegration, UserRole } from '../types';
 import { initialProcesses, initialCandidates, initialUsers, initialForms, initialApplications, initialSettings, initialFormIntegrations } from './data';
 
 const getFromStorage = <T>(key: string, fallback: T): T => {
@@ -77,10 +77,32 @@ export const api = {
         return updatedCandidate;
     },
     
+    // Users
     getUsers: async (): Promise<User[]> => {
         await delay(300);
         return getFromStorage('users', initialUsers);
     },
+    addUser: async (userData: Omit<User, 'id'>): Promise<User> => {
+        await delay(300);
+        const users = await api.getUsers();
+        const newUser: User = { ...userData, id: `user-${Date.now()}`};
+        saveToStorage('users', [...users, newUser]);
+        return newUser;
+    },
+    updateUser: async (updatedUser: User): Promise<User> => {
+        await delay(300);
+        let users = await api.getUsers();
+        users = users.map(u => u.id === updatedUser.id ? updatedUser : u);
+        saveToStorage('users', users);
+        return updatedUser;
+    },
+    deleteUser: async (userId: string): Promise<void> => {
+        await delay(300);
+        let users = await api.getUsers();
+        users = users.filter(u => u.id !== userId);
+        saveToStorage('users', users);
+    },
+
     getForms: async (): Promise<Form[]> => {
         await delay(300);
         return getFromStorage('forms', initialForms);

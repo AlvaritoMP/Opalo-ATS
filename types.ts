@@ -1,5 +1,5 @@
 // Populated the `types.ts` file with type definitions based on their usage across the application. This resolves multiple "Cannot find name" and "is not a module" errors.
-export type UserRole = 'admin' | 'recruiter' | 'viewer';
+export type UserRole = 'admin' | 'recruiter' | 'viewer' | 'client';
 
 export interface User {
     id: string;
@@ -57,6 +57,7 @@ export interface Candidate {
     age?: number;
     dni?: string;
     linkedinUrl?: string;
+    address?: string;
     socials?: {
         github?: string;
         portfolio?: string;

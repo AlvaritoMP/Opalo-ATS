@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { useAppState } from '../App';
 import { Briefcase, Users, FileText, CheckCircle } from 'lucide-react';
-import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend } from 'recharts';
+import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend, BarChart, CartesianGrid, XAxis, YAxis, Bar } from 'recharts';
 
 const StatCard: React.FC<{
     icon: React.ElementType;
@@ -20,7 +20,20 @@ const StatCard: React.FC<{
     </div>
 );
 
-const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042'];
+const ChartContainer: React.FC<{title: string, children: React.ReactNode, hasData: boolean, className?: string}> = ({title, children, hasData, className=""}) => (
+    <div className={`bg-white p-6 rounded-xl border border-gray-200 shadow-sm ${className}`}>
+        <h2 className="text-xl font-semibold text-gray-800 mb-4">{title}</h2>
+        {hasData ? (
+            <ResponsiveContainer width="100%" height={250}>
+                {children}
+            </ResponsiveContainer>
+        ) : (
+             <div className="flex items-center justify-center h-[250px] text-gray-500">No data for selected filters.</div>
+        )}
+    </div>
+);
+
+const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#AF19FF'];
 
 export const Dashboard: React.FC = () => {
     const { state } = useAppState();
@@ -38,7 +51,6 @@ export const Dashboard: React.FC = () => {
             const endDate = dateFilter.end ? new Date(dateFilter.end) : null;
             if(startDate) startDate.setHours(0,0,0,0);
             if(endDate) endDate.setHours(23,59,59,999);
-
 
             const dateMatch = (!startDate || applicationDate >= startDate) && (!endDate || applicationDate <= endDate);
 
@@ -65,6 +77,33 @@ export const Dashboard: React.FC = () => {
         });
         return Array.from(sourceMap, ([name, value]) => ({ name, value }));
     }, [filteredCandidates]);
+    
+    const candidateLocations = useMemo(() => {
+        const locationMap = new Map<string, number>();
+        filteredCandidates.forEach(c => {
+            if (c.address) {
+                locationMap.set(c.address, (locationMap.get(c.address) || 0) + 1);
+            }
+        });
+        return Array.from(locationMap, ([name, value]) => ({ name, Candidates: value }));
+    }, [filteredCandidates]);
+    
+    const ageDistribution = useMemo(() => {
+        const ageBrackets = { '20-29': 0, '30-39': 0, '40-49': 0, '50+': 0, 'Unknown': 0 };
+        filteredCandidates.forEach(c => {
+            if (c.age) {
+                if (c.age >= 20 && c.age <= 29) ageBrackets['20-29']++;
+                else if (c.age >= 30 && c.age <= 39) ageBrackets['30-39']++;
+                else if (c.age >= 40 && c.age <= 49) ageBrackets['40-49']++;
+                else if (c.age >= 50) ageBrackets['50+']++;
+                else ageBrackets['Unknown']++;
+            } else {
+                 ageBrackets['Unknown']++;
+            }
+        });
+        return Object.entries(ageBrackets).map(([name, value]) => ({ name, Candidates: value }));
+    }, [filteredCandidates]);
+
 
     return (
         <div className="p-8 bg-gray-50/50 min-h-full">
@@ -116,8 +155,8 @@ export const Dashboard: React.FC = () => {
                 <StatCard icon={CheckCircle} title="Filtered Hired" value={hiredCandidates} color="bg-teal-500" />
             </div>
 
-            <div className="grid grid-cols-1 lg:grid-cols-5 gap-8">
-                 <div className="lg:col-span-3 bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 mb-8">
+                 <div className="lg:col-span-2 bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
                     <h2 className="text-xl font-semibold text-gray-800 mb-4">Recent Candidates</h2>
                     <div className="space-y-3">
                         {filteredCandidates.slice(-5).reverse().map(candidate => {
@@ -134,37 +173,53 @@ export const Dashboard: React.FC = () => {
                                 </div>
                             );
                         })}
+                         {filteredCandidates.length === 0 && <p className="text-center text-gray-500 py-8">No recent candidates match the filters.</p>}
                     </div>
                 </div>
 
-                <div className="lg:col-span-2 bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
-                    <h2 className="text-xl font-semibold text-gray-800 mb-4">Candidate Source</h2>
-                    {candidateSources.length > 0 ? (
-                        <ResponsiveContainer width="100%" height={250}>
-                            <PieChart>
-                                <Pie
-                                    data={candidateSources}
-                                    cx="50%"
-                                    cy="50%"
-                                    labelLine={false}
-                                    outerRadius={80}
-                                    fill="#8884d8"
-                                    dataKey="value"
-                                    nameKey="name"
-                                    label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
-                                >
-                                    {candidateSources.map((entry, index) => (
-                                        <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                                    ))}
-                                </Pie>
-                                <Tooltip />
-                                <Legend />
-                            </PieChart>
-                        </ResponsiveContainer>
-                    ) : (
-                        <div className="flex items-center justify-center h-full text-gray-500">No data for selected filters.</div>
-                    )}
-                </div>
+                <ChartContainer title="Candidate Source" hasData={candidateSources.length > 0} className="lg:col-span-1">
+                    <PieChart>
+                        <Pie
+                            data={candidateSources}
+                            cx="50%"
+                            cy="50%"
+                            labelLine={false}
+                            outerRadius={80}
+                            fill="#8884d8"
+                            dataKey="value"
+                            nameKey="name"
+                            label={({ name, percent }) => `${(percent * 100).toFixed(0)}%`}
+                        >
+                            {candidateSources.map((entry, index) => (
+                                <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                            ))}
+                        </Pie>
+                        <Tooltip />
+                        <Legend />
+                    </PieChart>
+                </ChartContainer>
+            </div>
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                 <ChartContainer title="Candidate Locations" hasData={candidateLocations.length > 0}>
+                    <BarChart data={candidateLocations} layout="vertical" margin={{ top: 5, right: 20, left: 20, bottom: 5 }}>
+                        <CartesianGrid strokeDasharray="3 3" />
+                        <XAxis type="number" />
+                        <YAxis type="category" dataKey="name" width={100} />
+                        <Tooltip />
+                        <Bar dataKey="Candidates" fill="#8884d8" />
+                    </BarChart>
+                </ChartContainer>
+                
+                <ChartContainer title="Age Distribution" hasData={ageDistribution.some(d => d.Candidates > 0)}>
+                    <BarChart data={ageDistribution} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
+                        <CartesianGrid strokeDasharray="3 3" />
+                        <XAxis dataKey="name" />
+                        <YAxis />
+                        <Tooltip />
+                        <Bar dataKey="Candidates" fill="#82ca9d" />
+                    </BarChart>
+                </ChartContainer>
             </div>
 
         </div>

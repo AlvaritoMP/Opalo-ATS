@@ -1,15 +1,42 @@
 
-import React from 'react';
+import React, { useState } from 'react';
 import { useAppState } from '../App';
+import { User, UserRole } from '../types';
+import { UserEditorModal } from './UserEditorModal';
 import { UserPlus, Edit, Trash2 } from 'lucide-react';
 
 export const Users: React.FC = () => {
-    const { state } = useAppState();
+    const { state, actions } = useAppState();
+    const [isEditorOpen, setIsEditorOpen] = useState(false);
+    const [editingUser, setEditingUser] = useState<User | null>(null);
 
-    const getRoleBadgeColor = (role: string) => {
+    const isAdmin = state.currentUser?.role === 'admin';
+
+    const handleAddNew = () => {
+        setEditingUser(null);
+        setIsEditorOpen(true);
+    };
+
+    const handleEdit = (user: User) => {
+        setEditingUser(user);
+        setIsEditorOpen(true);
+    };
+    
+    const handleDelete = (userId: string) => {
+        if (userId === state.currentUser?.id) {
+            alert("You cannot delete your own account.");
+            return;
+        }
+        if (window.confirm("Are you sure you want to delete this user?")) {
+            actions.deleteUser(userId);
+        }
+    };
+
+    const getRoleBadgeColor = (role: UserRole) => {
         switch (role) {
             case 'admin': return 'bg-red-100 text-red-800';
             case 'recruiter': return 'bg-blue-100 text-blue-800';
+            case 'client': return 'bg-green-100 text-green-800';
             case 'viewer': return 'bg-gray-100 text-gray-800';
             default: return 'bg-gray-100 text-gray-800';
         }
@@ -19,11 +46,14 @@ export const Users: React.FC = () => {
         <div className="p-8">
             <div className="flex justify-between items-center mb-8">
                 <h1 className="text-3xl font-bold text-gray-800">User Management</h1>
-                <button
-                    className="flex items-center px-4 py-2 bg-primary-600 text-white rounded-lg shadow-sm hover:bg-primary-700"
-                >
-                    <UserPlus className="w-5 h-5 mr-2" /> Add User
-                </button>
+                {isAdmin && (
+                    <button
+                        onClick={handleAddNew}
+                        className="flex items-center px-4 py-2 bg-primary-600 text-white rounded-lg shadow-sm hover:bg-primary-700"
+                    >
+                        <UserPlus className="w-5 h-5 mr-2" /> Add User
+                    </button>
+                )}
             </div>
 
             <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
@@ -42,21 +72,24 @@ export const Users: React.FC = () => {
                                 <th scope="row" className="px-6 py-4 font-medium text-gray-900 whitespace-nowrap">{user.name}</th>
                                 <td className="px-6 py-4">{user.email}</td>
                                 <td className="px-6 py-4">
-                                    <span className={`px-2 py-1 text-xs font-medium rounded-full ${getRoleBadgeColor(user.role)}`}>
+                                    <span className={`px-2 py-1 text-xs font-medium rounded-full capitalize ${getRoleBadgeColor(user.role)}`}>
                                         {user.role}
                                     </span>
                                 </td>
                                 <td className="px-6 py-4 text-right">
-                                    <div className="flex justify-end space-x-2">
-                                        <button className="p-2 rounded-md hover:bg-gray-100"><Edit className="w-4 h-4 text-gray-600" /></button>
-                                        <button className="p-2 rounded-md hover:bg-red-100"><Trash2 className="w-4 h-4 text-red-500" /></button>
-                                    </div>
+                                    {isAdmin && (
+                                        <div className="flex justify-end space-x-2">
+                                            <button onClick={() => handleEdit(user)} className="p-2 rounded-md hover:bg-gray-100"><Edit className="w-4 h-4 text-gray-600" /></button>
+                                            <button onClick={() => handleDelete(user.id)} className="p-2 rounded-md hover:bg-red-100"><Trash2 className="w-4 h-4 text-red-500" /></button>
+                                        </div>
+                                    )}
                                 </td>
                             </tr>
                         ))}
                     </tbody>
                 </table>
             </div>
+            {isEditorOpen && <UserEditorModal user={editingUser} onClose={() => setIsEditorOpen(false)} />}
         </div>
     );
 };

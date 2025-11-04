@@ -53,12 +53,19 @@ export const initialCandidates: Candidate[] = [
             { stageId: 'stage-1-3', movedAt: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString(), movedBy: 'Jane Smith' },
         ],
         avatarUrl: 'https://i.pravatar.cc/150?u=alice',
-        attachments: [],
+        attachments: [{
+            id: 'att-1',
+            name: 'Alice_Johnson_Resume.pdf',
+            url: 'https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf',
+            type: 'application/pdf',
+            size: 13264
+        }],
         source: 'LinkedIn',
         salaryExpectation: '$140,000',
         age: 32,
         dni: '12345678A',
-        linkedinUrl: 'https://linkedin.com/in/alicejohnson'
+        linkedinUrl: 'https://linkedin.com/in/alicejohnson',
+        address: 'New York, NY'
     },
     {
         id: 'candidate-2',
@@ -77,7 +84,8 @@ export const initialCandidates: Candidate[] = [
         salaryExpectation: '$130,000',
         age: 28,
         dni: '87654321B',
-        linkedinUrl: 'https://linkedin.com/in/bobwilliams'
+        linkedinUrl: 'https://linkedin.com/in/bobwilliams',
+        address: 'San Francisco, CA'
     },
     {
         id: 'candidate-3',
@@ -95,7 +103,8 @@ export const initialCandidates: Candidate[] = [
         salaryExpectation: '$100,000',
         age: 29,
         dni: '45678912C',
-        linkedinUrl: 'https://linkedin.com/in/charliebrown'
+        linkedinUrl: 'https://linkedin.com/in/charliebrown',
+        address: 'Austin, TX'
     },
      {
         id: 'candidate-4',
@@ -114,7 +123,8 @@ export const initialCandidates: Candidate[] = [
         salaryExpectation: '$110,000',
         age: 35,
         dni: '78912345D',
-        linkedinUrl: 'https://linkedin.com/in/dianaprince'
+        linkedinUrl: 'https://linkedin.com/in/dianaprince',
+        address: 'Chicago, IL'
     },
 ];
 
@@ -123,6 +133,7 @@ export const initialUsers: User[] = [
     { id: 'user-2', name: 'John Doe', email: 'john.d@ats.com', role: 'recruiter' },
     { id: 'user-3', name: 'Jane Smith', email: 'jane.s@ats.com', role: 'recruiter' },
     { id: 'user-4', name: 'Peter Jones', email: 'peter.j@ats.com', role: 'viewer' },
+    { id: 'user-5', name: 'Hiring Manager', email: 'manager@client.com', role: 'client' },
 ];
 
 export const initialForms: Form[] = [];

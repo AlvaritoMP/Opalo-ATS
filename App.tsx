@@ -40,7 +40,10 @@ type Action =
     | { type: 'UPDATE_CANDIDATE'; payload: Candidate }
     | { type: 'SAVE_SETTINGS'; payload: AppSettings }
     | { type: 'ADD_FORM_INTEGRATION'; payload: FormIntegration }
-    | { type: 'DELETE_FORM_INTEGRATION'; payload: string };
+    | { type: 'DELETE_FORM_INTEGRATION'; payload: string }
+    | { type: 'ADD_USER'; payload: User }
+    | { type: 'UPDATE_USER'; payload: User }
+    | { type: 'DELETE_USER'; payload: string };
 
 
 const initialState: AppState = {
@@ -91,6 +94,12 @@ const appReducer = (state: AppState, action: Action): AppState => {
             return { ...state, formIntegrations: [...state.formIntegrations, action.payload] };
         case 'DELETE_FORM_INTEGRATION':
             return { ...state, formIntegrations: state.formIntegrations.filter(fi => fi.id !== action.payload) };
+        case 'ADD_USER':
+            return { ...state, users: [...state.users, action.payload] };
+        case 'UPDATE_USER':
+            return { ...state, users: state.users.map(u => u.id === action.payload.id ? action.payload : u) };
+        case 'DELETE_USER':
+            return { ...state, users: state.users.filter(u => u.id !== action.payload) };
         default:
             return state;
     }
@@ -108,6 +117,9 @@ interface AppContextType {
         saveSettings: (settings: AppSettings) => Promise<void>;
         addFormIntegration: (integrationData: Omit<FormIntegration, 'id' | 'webhookUrl'>) => Promise<void>;
         deleteFormIntegration: (integrationId: string) => Promise<void>;
+        addUser: (userData: Omit<User, 'id'>) => Promise<void>;
+        updateUser: (user: User) => Promise<void>;
+        deleteUser: (userId: string) => Promise<void>;
     };
 }
 
@@ -143,6 +155,7 @@ const NavLink: React.FC<{
 
 const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
     const { state, actions } = useAppState();
+    const isAdmin = state.currentUser?.role === 'admin';
 
     return (
         <div className="flex h-screen bg-gray-100 font-sans">
@@ -155,10 +168,10 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
                     <NavLink view="processes" currentView={state.view} setView={actions.setView} icon={Briefcase}>Processes</NavLink>
                     <NavLink view="reports" currentView={state.view} setView={actions.setView} icon={BarChart2}>Reports</NavLink>
                     <NavLink view="forms" currentView={state.view} setView={actions.setView} icon={FileText}>Forms</NavLink>
-                    <NavLink view="users" currentView={state.view} setView={actions.setView} icon={UsersIcon}>Users</NavLink>
+                    {isAdmin && <NavLink view="users" currentView={state.view} setView={actions.setView} icon={UsersIcon}>Users</NavLink>}
                 </nav>
                  <div className="p-4 border-t">
-                    <NavLink view="settings" currentView={state.view} setView={actions.setView} icon={SettingsIcon}>Settings</NavLink>
+                    {isAdmin && <NavLink view="settings" currentView={state.view} setView={actions.setView} icon={SettingsIcon}>Settings</NavLink>}
                 </div>
             </aside>
             <main className="flex-1 overflow-y-auto">
@@ -233,6 +246,18 @@ const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
         deleteFormIntegration: async (integrationId: string) => {
             await api.deleteFormIntegration(integrationId);
             dispatch({ type: 'DELETE_FORM_INTEGRATION', payload: integrationId });
+        },
+        addUser: async (userData: Omit<User, 'id'>) => {
+            const newUser = await api.addUser(userData);
+            dispatch({ type: 'ADD_USER', payload: newUser });
+        },
+        updateUser: async (user: User) => {
+            const updatedUser = await api.updateUser(user);
+            dispatch({ type: 'UPDATE_USER', payload: updatedUser });
+        },
+        deleteUser: async (userId: string) => {
+            await api.deleteUser(userId);
+            dispatch({ type: 'DELETE_USER', payload: userId });
         },
     }), [state.candidates, state.currentUser]);
     

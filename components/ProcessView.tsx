@@ -4,7 +4,7 @@ import { CandidateCard } from './CandidateCard';
 import { Plus, Edit, Briefcase, DollarSign, BarChart, Clock, Paperclip, X, FileText } from 'lucide-react';
 import { AddCandidateModal } from './AddCandidateModal';
 import { ProcessEditorModal } from './ProcessEditorModal';
-import { Attachment } from '../types';
+import { Attachment, UserRole } from '../types';
 
 interface ProcessViewProps {
     processId: string;
@@ -37,6 +37,11 @@ export const ProcessView: React.FC<ProcessViewProps> = ({ processId }) => {
 
     const process = state.processes.find(p => p.id === processId);
     const candidates = state.candidates.filter(c => c.processId === processId);
+    
+    const userRole = state.currentUser?.role as UserRole;
+    const canManageProcess = ['admin', 'recruiter'].includes(userRole);
+    const canMoveCandidates = ['admin', 'recruiter', 'client'].includes(userRole);
+
 
     const handleSelectCandidate = (candidateId: string) => {
         setSelectedCandidates(prev =>
@@ -45,18 +50,19 @@ export const ProcessView: React.FC<ProcessViewProps> = ({ processId }) => {
     };
 
     const handleDragStart = (e: React.DragEvent<HTMLDivElement>, candidateId: string) => {
+        if (!canMoveCandidates) return;
         const isBulk = selectedCandidates.includes(candidateId);
         dragPayload.current = { candidateId, isBulk };
         e.dataTransfer.setData("text/plain", candidateId); // Necessary for Firefox
     };
 
     const handleDrop = (e: React.DragEvent<HTMLDivElement>, stageId: string) => {
-        if (!dragPayload.current) return;
+        if (!canMoveCandidates || !dragPayload.current) return;
         const { candidateId, isBulk } = dragPayload.current;
 
         const movedBy = state.currentUser?.name || 'System';
 
-        if (isBulk) {
+        if (isBulk && selectedCandidates.length > 0) {
             selectedCandidates.forEach(id => {
                 const candidate = state.candidates.find(c => c.id === id);
                 if (candidate && candidate.stageId !== stageId) {
@@ -76,6 +82,7 @@ export const ProcessView: React.FC<ProcessViewProps> = ({ processId }) => {
     };
 
     const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
+        if (!canMoveCandidates) return;
         e.preventDefault();
         e.currentTarget.classList.add('bg-primary-50');
     };
@@ -97,17 +104,19 @@ export const ProcessView: React.FC<ProcessViewProps> = ({ processId }) => {
             <header className="p-4 border-b bg-white flex-shrink-0">
                 <div className="flex justify-between items-center mb-3">
                      <h1 className="text-2xl font-bold text-gray-800">{process.title}</h1>
-                     <div className="flex items-center space-x-3">
-                        <button onClick={() => setIsAttachmentsModalOpen(true)} className="flex items-center px-4 py-2 bg-white border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50" disabled={!process.attachments?.length}>
-                           <Paperclip className="w-4 h-4 mr-2"/> View Docs ({process.attachments?.length || 0})
-                        </button>
-                        <button onClick={() => setIsProcessEditorOpen(true)} className="flex items-center px-4 py-2 bg-white border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 hover:bg-gray-50">
-                            <Edit className="w-4 h-4 mr-2"/> Edit Process
-                        </button>
-                        <button onClick={() => setIsAddCandidateOpen(true)} className="flex items-center px-4 py-2 bg-primary-600 text-white rounded-lg shadow-sm hover:bg-primary-700">
-                            <Plus className="w-5 h-5 mr-2" /> Add Candidate
-                        </button>
-                    </div>
+                     {canManageProcess && (
+                        <div className="flex items-center space-x-3">
+                            <button onClick={() => setIsAttachmentsModalOpen(true)} className="flex items-center px-4 py-2 bg-white border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50" disabled={!process.attachments?.length}>
+                            <Paperclip className="w-4 h-4 mr-2"/> View Docs ({process.attachments?.length || 0})
+                            </button>
+                            <button onClick={() => setIsProcessEditorOpen(true)} className="flex items-center px-4 py-2 bg-white border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 hover:bg-gray-50">
+                                <Edit className="w-4 h-4 mr-2"/> Edit Process
+                            </button>
+                            <button onClick={() => setIsAddCandidateOpen(true)} className="flex items-center px-4 py-2 bg-primary-600 text-white rounded-lg shadow-sm hover:bg-primary-700">
+                                <Plus className="w-5 h-5 mr-2" /> Add Candidate
+                            </button>
+                        </div>
+                     )}
                 </div>
                 <div className="flex items-center space-x-3">
                     {process.seniority && <InfoChip icon={Briefcase} text={process.seniority} />}
@@ -133,7 +142,7 @@ export const ProcessView: React.FC<ProcessViewProps> = ({ processId }) => {
                             {candidates
                                 .filter(c => c.stageId === stage.id)
                                 .map(candidate => (
-                                    <div key={candidate.id} draggable onDragStart={(e) => handleDragStart(e, candidate.id)}>
+                                    <div key={candidate.id} draggable={canMoveCandidates} onDragStart={(e) => handleDragStart(e, candidate.id)}>
                                         <CandidateCard 
                                             candidate={candidate}
                                             isSelected={selectedCandidates.includes(candidate.id)}

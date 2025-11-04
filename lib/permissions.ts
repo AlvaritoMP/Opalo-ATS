@@ -6,6 +6,7 @@ type Action = 'manage_processes' | 'manage_users' | 'view_reports' | 'manage_can
 const rolePermissions: Record<UserRole, Action[]> = {
     admin: ['manage_processes', 'manage_users', 'view_reports', 'manage_candidates'],
     recruiter: ['manage_processes', 'view_reports', 'manage_candidates'],
+    client: ['view_reports', 'manage_candidates'],
     viewer: ['view_reports'],
 };
 
