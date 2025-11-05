@@ -84,7 +84,7 @@ export const Settings: React.FC = () => {
     };
 
     return (
-        <div className="p-8">
+        <div className="p-8 h-full overflow-y-auto">
             <div className="flex justify-between items-center mb-8">
                 <h1 className="text-3xl font-bold text-gray-800">Settings</h1>
                 <button
@@ -136,6 +136,26 @@ export const Settings: React.FC = () => {
                         <div>
                             <label htmlFor="modal_edit_process" className="block text-sm font-medium text-gray-700">Modal: Edit Process</label>
                             <input type="text" id="modal_edit_process" name="modal_edit_process" value={settings.customLabels?.modal_edit_process || ''} onChange={handleLabelChange} placeholder="Edit Process" className="mt-1 block w-full input"/>
+                        </div>
+                        <div>
+                            <label htmlFor="dashboard_recent_candidates" className="block text-sm font-medium text-gray-700">Dashboard: Recent Candidates</label>
+                            <input type="text" id="dashboard_recent_candidates" name="dashboard_recent_candidates" value={settings.customLabels?.dashboard_recent_candidates || ''} onChange={handleLabelChange} placeholder="Recent Candidates" className="mt-1 block w-full input"/>
+                        </div>
+                        <div>
+                            <label htmlFor="dashboard_candidate_source" className="block text-sm font-medium text-gray-700">Dashboard: Candidate Source</label>
+                            <input type="text" id="dashboard_candidate_source" name="dashboard_candidate_source" value={settings.customLabels?.dashboard_candidate_source || ''} onChange={handleLabelChange} placeholder="Candidate Source" className="mt-1 block w-full input"/>
+                        </div>
+                        <div>
+                            <label htmlFor="dashboard_candidate_locations" className="block text-sm font-medium text-gray-700">Dashboard: Candidate Locations</label>
+                            <input type="text" id="dashboard_candidate_locations" name="dashboard_candidate_locations" value={settings.customLabels?.dashboard_candidate_locations || ''} onChange={handleLabelChange} placeholder="Candidate Locations" className="mt-1 block w-full input"/>
+                        </div>
+                        <div>
+                            <label htmlFor="dashboard_age_distribution" className="block text-sm font-medium text-gray-700">Dashboard: Age Distribution</label>
+                            <input type="text" id="dashboard_age_distribution" name="dashboard_age_distribution" value={settings.customLabels?.dashboard_age_distribution || ''} onChange={handleLabelChange} placeholder="Age Distribution" className="mt-1 block w-full input"/>
+                        </div>
+                        <div>
+                            <label htmlFor="dashboard_upcoming_interviews" className="block text-sm font-medium text-gray-700">Dashboard: Upcoming Interviews</label>
+                            <input type="text" id="dashboard_upcoming_interviews" name="dashboard_upcoming_interviews" value={settings.customLabels?.dashboard_upcoming_interviews || ''} onChange={handleLabelChange} placeholder="Upcoming Interviews" className="mt-1 block w-full input"/>
                         </div>
                     </div>
                 </div>

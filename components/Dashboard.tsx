@@ -165,7 +165,7 @@ export const Dashboard: React.FC = () => {
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 mb-8">
                  <div className="lg:col-span-2 bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
-                    <h2 className="text-xl font-semibold text-gray-800 mb-4">Recent Candidates</h2>
+                    <h2 className="text-xl font-semibold text-gray-800 mb-4">{getLabel('dashboard_recent_candidates', 'Recent Candidates')}</h2>
                     <div className="space-y-3">
                         {filteredCandidates.slice(-5).reverse().map(candidate => {
                             const process = processes.find(p => p.id === candidate.processId);
@@ -185,7 +185,7 @@ export const Dashboard: React.FC = () => {
                     </div>
                 </div>
 
-                <ChartContainer title="Candidate Source" hasData={candidateSources.length > 0} className="lg:col-span-1">
+                <ChartContainer title={getLabel('dashboard_candidate_source', 'Candidate Source')} hasData={candidateSources.length > 0} className="lg:col-span-1">
                     <PieChart>
                         <Pie
                             data={candidateSources}
@@ -209,7 +209,7 @@ export const Dashboard: React.FC = () => {
             </div>
             
             <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                 <ChartContainer title="Candidate Locations" hasData={candidateLocations.length > 0}>
+                 <ChartContainer title={getLabel('dashboard_candidate_locations', 'Candidate Locations')} hasData={candidateLocations.length > 0}>
                     <BarChart data={candidateLocations} layout="vertical" margin={{ top: 5, right: 20, left: 20, bottom: 5 }}>
                         <CartesianGrid strokeDasharray="3 3" />
                         <XAxis type="number" />
@@ -219,7 +219,7 @@ export const Dashboard: React.FC = () => {
                     </BarChart>
                 </ChartContainer>
                 
-                <ChartContainer title="Age Distribution" hasData={ageDistribution.some(d => d.Candidates > 0)}>
+                <ChartContainer title={getLabel('dashboard_age_distribution', 'Age Distribution')} hasData={ageDistribution.some(d => d.Candidates > 0)}>
                     <BarChart data={ageDistribution} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
                         <CartesianGrid strokeDasharray="3 3" />
                         <XAxis dataKey="name" />
@@ -232,7 +232,7 @@ export const Dashboard: React.FC = () => {
             
             <div className="mt-8">
                 <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
-                    <h2 className="text-xl font-semibold text-gray-800 mb-4 flex items-center"><Calendar className="w-5 h-5 mr-3 text-primary-500" /> Upcoming Interviews</h2>
+                    <h2 className="text-xl font-semibold text-gray-800 mb-4 flex items-center"><Calendar className="w-5 h-5 mr-3 text-primary-500" /> {getLabel('dashboard_upcoming_interviews', 'Upcoming Interviews')}</h2>
                     <div className="space-y-3">
                         {upcomingInterviews.length > 0 ? (
                             upcomingInterviews.map(event => {
