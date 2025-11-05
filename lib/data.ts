@@ -131,11 +131,11 @@ export const initialCandidates: Candidate[] = [
 ];
 
 export const initialUsers: User[] = [
-    { id: 'user-1', name: 'Super Admin', email: 'admin@ats.com', role: 'admin' },
-    { id: 'user-2', name: 'John Doe', email: 'john.d@ats.com', role: 'recruiter' },
-    { id: 'user-3', name: 'Jane Smith', email: 'jane.s@ats.com', role: 'recruiter' },
-    { id: 'user-4', name: 'Peter Jones', email: 'peter.j@ats.com', role: 'viewer' },
-    { id: 'user-5', name: 'Hiring Manager', email: 'manager@client.com', role: 'client' },
+    { id: 'user-1', name: 'Super Admin', email: 'admin@ats.com', role: 'admin', password: 'password' },
+    { id: 'user-2', name: 'John Doe', email: 'john.d@ats.com', role: 'recruiter', password: 'password' },
+    { id: 'user-3', name: 'Jane Smith', email: 'jane.s@ats.com', role: 'recruiter', password: 'password' },
+    { id: 'user-4', name: 'Peter Jones', email: 'peter.j@ats.com', role: 'viewer', password: 'password' },
+    { id: 'user-5', name: 'Hiring Manager', email: 'manager@client.com', role: 'client', password: 'password' },
 ];
 
 export const initialForms: Form[] = [];

@@ -62,6 +62,7 @@ export interface User {
     name: string;
     email: string;
     role: UserRole;
+    password?: string;
 }
 
 // Basic definitions for unused types to satisfy compiler

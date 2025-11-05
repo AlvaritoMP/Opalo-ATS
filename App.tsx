@@ -12,7 +12,7 @@ import { Forms } from './components/Forms';
 import { CalendarView } from './components/CalendarView';
 import { BulkImportView } from './components/BulkImportView';
 import { Spinner } from './components/Spinner';
-import { LayoutDashboard, Briefcase, FileText, Settings as SettingsIcon, Users as UsersIcon, ChevronsLeft, ChevronsRight, BarChart2, Calendar, FileUp } from 'lucide-react';
+import { LayoutDashboard, Briefcase, FileText, Settings as SettingsIcon, Users as UsersIcon, ChevronsLeft, ChevronsRight, BarChart2, Calendar, FileUp, LogOut, X } from 'lucide-react';
 
 
 // State and Actions types
@@ -30,6 +30,8 @@ interface AppState {
 }
 
 interface AppActions {
+    login: (email: string, password: string) => Promise<boolean>;
+    logout: () => void;
     addProcess: (processData: Omit<Process, 'id' | 'attachments'>) => Promise<void>;
     updateProcess: (processData: Process) => Promise<void>;
     deleteProcess: (processId: string) => Promise<void>;
@@ -58,8 +60,148 @@ interface AppContextType {
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
-// --- Sidebar Components (defined in App.tsx to avoid creating new files) ---
+const ForgotPasswordModal: React.FC<{onClose: () => void}> = ({ onClose }) => {
+    const [email, setEmail] = useState('');
+    const [isSubmitting, setIsSubmitting] = useState(false);
+    const [message, setMessage] = useState('');
 
+    const handleSendLink = (e: React.FormEvent) => {
+        e.preventDefault();
+        setIsSubmitting(true);
+        setMessage('');
+
+        // Simulate API call
+        setTimeout(() => {
+            setMessage('If an account with this email exists, a password reset link has been sent.');
+            setIsSubmitting(false);
+        }, 1500);
+    };
+
+    return (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+            <div className="w-full max-w-sm p-8 space-y-6 bg-white rounded-xl shadow-lg relative">
+                 <button onClick={onClose} className="absolute top-2 right-2 p-2 rounded-full hover:bg-gray-100"><X className="w-5 h-5"/></button>
+                 <div className="text-center">
+                    <h1 className="text-2xl font-bold text-gray-900">Reset Password</h1>
+                    <p className="mt-2 text-sm text-gray-600">Enter your email to receive a reset link.</p>
+                </div>
+
+                {message ? (
+                    <div className="text-center p-4 bg-green-50 text-green-700 rounded-md">
+                        {message}
+                    </div>
+                ) : (
+                    <form className="space-y-6" onSubmit={handleSendLink}>
+                        <div>
+                            <label htmlFor="reset-email" className="block text-sm font-medium text-gray-700">Email Address</label>
+                            <input
+                                id="reset-email"
+                                name="email"
+                                type="email"
+                                autoComplete="email"
+                                required
+                                value={email}
+                                onChange={(e) => setEmail(e.target.value)}
+                                className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm"
+                            />
+                        </div>
+                        <div>
+                            <button
+                                type="submit"
+                                disabled={isSubmitting}
+                                className="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-primary-600 hover:bg-primary-700 disabled:bg-primary-300"
+                            >
+                                {isSubmitting ? 'Sending...' : 'Send Reset Link'}
+                            </button>
+                        </div>
+                    </form>
+                )}
+            </div>
+        </div>
+    );
+};
+
+const LoginPage: React.FC = () => {
+    const { state, actions } = useAppState();
+    const [email, setEmail] = useState('');
+    const [password, setPassword] = useState('');
+    const [error, setError] = useState('');
+    const [isLoggingIn, setIsLoggingIn] = useState(false);
+    const [isForgotPasswordOpen, setIsForgotPasswordOpen] = useState(false);
+
+    const handleLogin = async (e: React.FormEvent) => {
+        e.preventDefault();
+        setError('');
+        setIsLoggingIn(true);
+        const success = await actions.login(email, password);
+        if (!success) {
+            setError('Invalid credentials. Please try again.');
+        }
+        setIsLoggingIn(false);
+    };
+
+    return (
+        <>
+            <div className="flex items-center justify-center min-h-screen bg-gray-100 p-4">
+                <div className="w-full max-w-sm p-8 space-y-6 bg-white rounded-xl shadow-lg">
+                    <div className="text-center">
+                        {state.settings?.logoUrl && <img src={state.settings.logoUrl} alt="Logo" className="h-12 mx-auto mb-4 object-contain" />}
+                        <h1 className="text-3xl font-bold text-gray-900">{state.settings?.appName || 'ATS Pro'}</h1>
+                        <p className="mt-2 text-sm text-gray-600">Please sign in to your account</p>
+                    </div>
+                    <form className="space-y-6" onSubmit={handleLogin}>
+                        <div>
+                            <label htmlFor="email" className="block text-sm font-medium text-gray-700">Email Address</label>
+                            <input
+                                id="email"
+                                name="email"
+                                type="email"
+                                autoComplete="email"
+                                required
+                                value={email}
+                                onChange={(e) => setEmail(e.target.value)}
+                                className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-primary-500 focus:border-primary-500"
+                            />
+                        </div>
+                        <div>
+                            <div className="flex items-center justify-between">
+                                <label htmlFor="password"className="block text-sm font-medium text-gray-700">Password</label>
+                                <div className="text-sm">
+                                    <a href="#" onClick={(e) => { e.preventDefault(); setIsForgotPasswordOpen(true); }} className="font-medium text-primary-600 hover:text-primary-500">
+                                        Forgot your password?
+                                    </a>
+                                </div>
+                            </div>
+                             <input
+                                id="password"
+                                name="password"
+                                type="password"
+                                autoComplete="current-password"
+                                required
+                                value={password}
+                                onChange={(e) => setPassword(e.target.value)}
+                                className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-primary-500 focus:border-primary-500"
+                            />
+                        </div>
+                        {error && <p className="text-sm text-red-600 text-center">{error}</p>}
+                        <div>
+                            <button
+                                type="submit"
+                                disabled={isLoggingIn}
+                                className="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-primary-600 hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500 disabled:bg-primary-300"
+                            >
+                                {isLoggingIn ? 'Signing In...' : 'Sign In'}
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+            {isForgotPasswordOpen && <ForgotPasswordModal onClose={() => setIsForgotPasswordOpen(false)} />}
+        </>
+    );
+};
+
+// --- Sidebar Components (defined in App.tsx to avoid creating new files) ---
 const NavItem: React.FC<{
     icon: React.ElementType,
     label: string,
@@ -112,9 +254,26 @@ const Sidebar: React.FC = () => {
                 <NavItem icon={BarChart2} label={getLabel('sidebar_reports', 'Reports')} view="reports" currentView={state.view.type} setView={actions.setView} isCollapsed={isCollapsed} />
                 <NavItem icon={FileUp} label={getLabel('sidebar_bulk_import', 'Bulk Import')} view="bulk-import" currentView={state.view.type} setView={actions.setView} isCollapsed={isCollapsed} />
             </nav>
-            <div className="p-4 border-t space-y-2">
-                <NavItem icon={UsersIcon} label={getLabel('sidebar_users', 'Users')} view="users" currentView={state.view.type} setView={actions.setView} isCollapsed={isCollapsed} />
-                <NavItem icon={SettingsIcon} label="Settings" view="settings" currentView={state.view.type} setView={actions.setView} isCollapsed={isCollapsed} />
+            <div className="p-2 border-t space-y-2">
+                 <div className="p-2">
+                    <NavItem icon={UsersIcon} label={getLabel('sidebar_users', 'Users')} view="users" currentView={state.view.type} setView={actions.setView} isCollapsed={isCollapsed} />
+                    <NavItem icon={SettingsIcon} label="Settings" view="settings" currentView={state.view.type} setView={actions.setView} isCollapsed={isCollapsed} />
+                </div>
+                 <div className="p-2 border-t">
+                    <div className="flex items-center">
+                        <div className={`overflow-hidden transition-opacity duration-300 ${isCollapsed ? 'opacity-0 w-0' : 'opacity-100 flex-1'}`}>
+                            <p className="font-semibold text-sm text-gray-800 truncate">{state.currentUser.name}</p>
+                            <p className="text-xs text-gray-500 capitalize">{state.currentUser.role}</p>
+                        </div>
+                        <button 
+                            onClick={() => actions.logout()} 
+                            className={`p-2 rounded-md hover:bg-red-100 hover:text-red-600 text-gray-500 transition-colors ${isCollapsed ? 'w-full' : 'ml-auto'}`}
+                            title="Logout"
+                        >
+                            <LogOut className="w-5 h-5" />
+                        </button>
+                    </div>
+                </div>
             </div>
         </div>
     );
@@ -137,24 +296,42 @@ const App: React.FC = () => {
     });
 
     useEffect(() => {
-        setTimeout(() => {
-            const loadedSettings = getSettings();
-            setState({
-                processes: initialProcesses,
-                candidates: initialCandidates,
-                users: initialUsers,
-                applications: [],
-                settings: loadedSettings || initialSettings,
-                formIntegrations: initialFormIntegrations,
-                interviewEvents: initialInterviewEvents,
-                currentUser: initialUsers.find(u => u.role === 'admin') || initialUsers[0],
-                view: { type: 'dashboard' },
-                loading: false,
-            });
-        }, 500);
+        const loadedSettings = getSettings();
+        const initialData = {
+            processes: initialProcesses,
+            candidates: initialCandidates,
+            users: initialUsers,
+            applications: [],
+            settings: loadedSettings || initialSettings,
+            formIntegrations: initialFormIntegrations,
+            interviewEvents: initialInterviewEvents,
+        };
+
+        const sessionUserId = localStorage.getItem('ats_pro_user');
+        const currentUser = sessionUserId ? initialUsers.find(u => u.id === sessionUserId) || null : null;
+
+        setState({
+            ...initialData,
+            currentUser,
+            view: { type: 'dashboard' },
+            loading: false,
+        });
     }, []);
 
     const actions: AppActions = useMemo(() => ({
+        login: async (email, password) => {
+            const user = state.users.find(u => u.email.toLowerCase() === email.toLowerCase());
+            if (user && user.password === password) {
+                localStorage.setItem('ats_pro_user', user.id);
+                setState(s => ({ ...s, currentUser: user }));
+                return true;
+            }
+            return false;
+        },
+        logout: () => {
+            localStorage.removeItem('ats_pro_user');
+            setState(s => ({ ...s, currentUser: null, view: { type: 'dashboard' } }));
+        },
         setView: (type, payload) => setState(s => ({ ...s, view: { type, payload } })),
         saveSettings: async (settings) => {
             saveSettingsToStorage(settings);
@@ -290,7 +467,7 @@ const App: React.FC = () => {
         deleteInterviewEvent: async (eventId) => {
             setState(s => ({ ...s, interviewEvents: s.interviewEvents.filter(e => e.id !== eventId) }));
         },
-    }), [state.currentUser]);
+    }), [state.currentUser, state.users]);
 
     const getLabel = (key: string, fallback: string): string => {
         return state.settings?.customLabels?.[key] || fallback;
@@ -315,8 +492,18 @@ const App: React.FC = () => {
         return <div className="w-full h-screen flex items-center justify-center"><Spinner /></div>;
     }
 
+    const appContextValue = { state, actions, getLabel };
+    
+    if (!state.currentUser) {
+        return (
+            <AppContext.Provider value={appContextValue}>
+                <LoginPage />
+            </AppContext.Provider>
+        );
+    }
+
     return (
-        <AppContext.Provider value={{ state, actions, getLabel }}>
+        <AppContext.Provider value={appContextValue}>
             <div className="flex h-screen bg-gray-50 font-sans text-gray-900">
                 <Sidebar />
                 <div className="flex-1 flex flex-col overflow-hidden">

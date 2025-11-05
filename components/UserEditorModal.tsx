@@ -13,15 +13,31 @@ export const UserEditorModal: React.FC<UserEditorModalProps> = ({ user, onClose 
     const [name, setName] = useState(user?.name || '');
     const [email, setEmail] = useState(user?.email || '');
     const [role, setRole] = useState<UserRole>(user?.role || 'viewer');
+    const [password, setPassword] = useState('');
+    const [confirmPassword, setConfirmPassword] = useState('');
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
-        const userData = { name, email, role };
+
+        if (password !== confirmPassword) {
+            alert("Passwords do not match.");
+            return;
+        }
+
+        const userData: Partial<User> = { name, email, role };
+
+        if (password) {
+            userData.password = password;
+        }
 
         if (user) {
             await actions.updateUser({ ...user, ...userData });
         } else {
-            await actions.addUser(userData);
+            if (!password) {
+                alert("Password is required for new users.");
+                return;
+            }
+            await actions.addUser(userData as Omit<User, 'id'>);
         }
         onClose();
     };
@@ -78,6 +94,29 @@ export const UserEditorModal: React.FC<UserEditorModalProps> = ({ user, onClose 
                                     <option key={option.value} value={option.value}>{option.label}</option>
                                 ))}
                             </select>
+                        </div>
+                         <div>
+                            <label htmlFor="password"className="block text-sm font-medium text-gray-700">Password</label>
+                            <input
+                                type="password"
+                                id="password"
+                                value={password}
+                                onChange={e => setPassword(e.target.value)}
+                                required={!user} // Required only for new users
+                                placeholder={user ? "Leave blank to keep current password" : ""}
+                                className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm"
+                            />
+                        </div>
+                         <div>
+                            <label htmlFor="confirmPassword"className="block text-sm font-medium text-gray-700">Confirm Password</label>
+                            <input
+                                type="password"
+                                id="confirmPassword"
+                                value={confirmPassword}
+                                onChange={e => setConfirmPassword(e.target.value)}
+                                required={!user || !!password} // Required if it's a new user or if password is being changed
+                                className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm"
+                            />
                         </div>
                     </div>
                     <div className="p-6 bg-gray-50 rounded-b-xl flex justify-end space-x-3">
