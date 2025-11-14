@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useMemo } from 'react';
 import { initialProcesses, initialCandidates, initialUsers, initialSettings, initialFormIntegrations, initialInterviewEvents } from './lib/data';
-import { Process, Candidate, User, AppSettings, FormIntegration, InterviewEvent, CandidateHistory, Application } from './types';
+import { Process, Candidate, User, AppSettings, FormIntegration, InterviewEvent, CandidateHistory, Application, PostIt, Comment } from './types';
 import { getSettings, saveSettings as saveSettingsToStorage } from './lib/settings';
 import { Dashboard } from './components/Dashboard';
 import { ProcessList } from './components/ProcessList';
@@ -49,6 +49,10 @@ interface AppActions {
     addInterviewEvent: (eventData: Omit<InterviewEvent, 'id'>) => Promise<void>;
     updateInterviewEvent: (eventData: InterviewEvent) => Promise<void>;
     deleteInterviewEvent: (eventId: string) => Promise<void>;
+    addPostIt: (candidateId: string, postIt: Omit<PostIt, 'id' | 'createdAt'>) => Promise<void>;
+    deletePostIt: (candidateId: string, postItId: string) => Promise<void>;
+    addComment: (candidateId: string, comment: Omit<Comment, 'id' | 'createdAt'>) => Promise<void>;
+    deleteComment: (candidateId: string, commentId: string) => Promise<void>;
     setView: (type: string, payload?: any) => void;
 }
 
@@ -466,6 +470,62 @@ const App: React.FC = () => {
         },
         deleteInterviewEvent: async (eventId) => {
             setState(s => ({ ...s, interviewEvents: s.interviewEvents.filter(e => e.id !== eventId) }));
+        },
+        addPostIt: async (candidateId, postItData) => {
+            setState(s => {
+                const candidate = s.candidates.find(c => c.id === candidateId);
+                if (!candidate) return s;
+                
+                const newPostIt: PostIt = {
+                    ...postItData,
+                    id: `postit-${Date.now()}`,
+                    createdAt: new Date().toISOString(),
+                };
+                
+                const updatedPostIts = [...(candidate.postIts || []), newPostIt];
+                const updatedCandidate = { ...candidate, postIts: updatedPostIts };
+                
+                return { ...s, candidates: s.candidates.map(c => c.id === candidateId ? updatedCandidate : c) };
+            });
+        },
+        deletePostIt: async (candidateId, postItId) => {
+            setState(s => {
+                const candidate = s.candidates.find(c => c.id === candidateId);
+                if (!candidate) return s;
+                
+                const updatedPostIts = (candidate.postIts || []).filter(p => p.id !== postItId);
+                const updatedCandidate = { ...candidate, postIts: updatedPostIts };
+                
+                return { ...s, candidates: s.candidates.map(c => c.id === candidateId ? updatedCandidate : c) };
+            });
+        },
+        addComment: async (candidateId, commentData) => {
+            setState(s => {
+                const candidate = s.candidates.find(c => c.id === candidateId);
+                if (!candidate) return s;
+                
+                const newComment: Comment = {
+                    ...commentData,
+                    id: `comment-${Date.now()}`,
+                    createdAt: new Date().toISOString(),
+                };
+                
+                const updatedComments = [...(candidate.comments || []), newComment];
+                const updatedCandidate = { ...candidate, comments: updatedComments };
+                
+                return { ...s, candidates: s.candidates.map(c => c.id === candidateId ? updatedCandidate : c) };
+            });
+        },
+        deleteComment: async (candidateId, commentId) => {
+            setState(s => {
+                const candidate = s.candidates.find(c => c.id === candidateId);
+                if (!candidate) return s;
+                
+                const updatedComments = (candidate.comments || []).filter(c => c.id !== commentId);
+                const updatedCandidate = { ...candidate, comments: updatedComments };
+                
+                return { ...s, candidates: s.candidates.map(c => c.id === candidateId ? updatedCandidate : c) };
+            });
         },
     }), [state.currentUser, state.users]);
 

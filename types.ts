@@ -36,6 +36,22 @@ export interface CandidateHistory {
 
 export type CandidateSource = 'LinkedIn' | 'Referral' | 'Website' | 'Other';
 
+export interface PostIt {
+    id: string;
+    text: string;
+    color: 'yellow' | 'pink' | 'blue' | 'green' | 'orange';
+    createdBy: string; // userId
+    createdAt: string; // ISO date string
+}
+
+export interface Comment {
+    id: string;
+    text: string;
+    userId: string; // userId del usuario que hizo el comentario
+    createdAt: string; // ISO date string
+    attachments?: Attachment[]; // Fotos o capturas de pantalla
+}
+
 export interface Candidate {
     id: string;
     name: string;
@@ -53,6 +69,8 @@ export interface Candidate {
     dni?: string;
     linkedinUrl?: string;
     address?: string;
+    postIts?: PostIt[]; // Post-its para el board
+    comments?: Comment[]; // Comentarios/chat sobre el candidato
 }
 
 export type UserRole = 'admin' | 'recruiter' | 'client' | 'viewer';
@@ -109,4 +127,5 @@ export interface InterviewEvent {
     candidateId: string;
     interviewerId: string;
     notes?: string;
+    attendeeEmails?: string[]; // Emails de los asistentes a la reunión
 }

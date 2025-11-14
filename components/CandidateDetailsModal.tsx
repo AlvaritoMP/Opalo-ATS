@@ -4,6 +4,7 @@ import { Candidate, Attachment, InterviewEvent, UserRole } from '../types';
 import { X, Mail, Phone, Linkedin, User, FileText, Eye, Download, Upload, Trash2, Briefcase, DollarSign, Calendar, Info, MapPin, Edit, ArrowRightLeft } from 'lucide-react';
 import { ScheduleInterviewModal } from './ScheduleInterviewModal';
 import { ChangeProcessModal } from './ChangeProcessModal';
+import { CandidateCommentsModal } from './CandidateCommentsModal';
 
 const fileToBase64 = (file: File): Promise<string> => {
     return new Promise((resolve, reject) => {
@@ -35,10 +36,11 @@ export const CandidateDetailsModal: React.FC<{ candidate: Candidate, onClose: ()
     const [editableCandidate, setEditableCandidate] = useState<Candidate>(initialCandidate);
     
     const [previewFile, setPreviewFile] = useState<Attachment | null>(initialCandidate.attachments?.[0] || null);
-    const [activeTab, setActiveTab] = useState<'details' | 'history' | 'schedule'>('details');
+    const [activeTab, setActiveTab] = useState<'details' | 'history' | 'schedule' | 'comments'>('details');
     const [isScheduling, setIsScheduling] = useState(false);
     const [editingEvent, setEditingEvent] = useState<InterviewEvent | null>(null);
     const [isChangeProcessModalOpen, setIsChangeProcessModalOpen] = useState(false);
+    const [isCommentsModalOpen, setIsCommentsModalOpen] = useState(false);
 
     const avatarInputRef = useRef<HTMLInputElement>(null);
     const attachmentInputRef = useRef<HTMLInputElement>(null);
@@ -114,7 +116,7 @@ export const CandidateDetailsModal: React.FC<{ candidate: Candidate, onClose: ()
 
     if (!process) return null;
     
-    const TabButton: React.FC<{tabId: 'details' | 'history' | 'schedule', children: React.ReactNode}> = ({tabId, children}) => (
+    const TabButton: React.FC<{tabId: 'details' | 'history' | 'schedule' | 'comments', children: React.ReactNode}> = ({tabId, children}) => (
         <button 
             onClick={() => setActiveTab(tabId)}
             className={`px-4 py-2 text-sm font-medium border-b-2 ${activeTab === tabId ? 'border-primary-600 text-primary-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'}`}
@@ -166,6 +168,14 @@ export const CandidateDetailsModal: React.FC<{ candidate: Candidate, onClose: ()
                         <TabButton tabId="details">Details</TabButton>
                         <TabButton tabId="history">History</TabButton>
                         <TabButton tabId="schedule">Schedule</TabButton>
+                        <TabButton tabId="comments">
+                            Comentarios
+                            {initialCandidate.comments && initialCandidate.comments.length > 0 && (
+                                <span className="ml-2 px-2 py-0.5 bg-primary-600 text-white text-xs rounded-full">
+                                    {initialCandidate.comments.length}
+                                </span>
+                            )}
+                        </TabButton>
                     </nav>
                 </div>
                 <main className="flex-1 overflow-y-auto">
@@ -319,6 +329,87 @@ export const CandidateDetailsModal: React.FC<{ candidate: Candidate, onClose: ()
                             </div>
                         </div>
                     )}
+                    {activeTab === 'comments' && (
+                        <div className="p-6">
+                            <div className="flex items-center justify-between mb-4">
+                                <h3 className="text-lg font-semibold text-gray-800">Comentarios y Conversaciones</h3>
+                                <button
+                                    onClick={() => setIsCommentsModalOpen(true)}
+                                    className="px-4 py-2 bg-primary-600 text-white rounded-md hover:bg-primary-700 text-sm font-medium"
+                                >
+                                    Ver todos los comentarios
+                                </button>
+                            </div>
+                            
+                            {initialCandidate.comments && initialCandidate.comments.length > 0 ? (
+                                <div className="space-y-4">
+                                    {initialCandidate.comments.slice(-5).reverse().map((comment) => {
+                                        const user = state.users.find(u => u.id === comment.userId);
+                                        return (
+                                            <div key={comment.id} className="bg-white border border-gray-200 rounded-lg p-4">
+                                                <div className="flex items-center justify-between mb-2">
+                                                    <span className="font-semibold text-sm text-gray-800">
+                                                        {user?.name || 'Usuario desconocido'}
+                                                    </span>
+                                                    <span className="text-xs text-gray-500">
+                                                        {new Date(comment.createdAt).toLocaleDateString('es-ES', {
+                                                            day: 'numeric',
+                                                            month: 'short',
+                                                            hour: '2-digit',
+                                                            minute: '2-digit'
+                                                        })}
+                                                    </span>
+                                                </div>
+                                                {comment.text && (
+                                                    <p className="text-sm text-gray-700 whitespace-pre-wrap mb-2">
+                                                        {comment.text}
+                                                    </p>
+                                                )}
+                                                {comment.attachments && comment.attachments.length > 0 && (
+                                                    <div className="flex gap-2 mt-2">
+                                                        {comment.attachments.slice(0, 3).map((att) => (
+                                                            <img
+                                                                key={att.id}
+                                                                src={att.url}
+                                                                alt={att.name}
+                                                                className="w-16 h-16 object-cover rounded border border-gray-200"
+                                                            />
+                                                        ))}
+                                                        {comment.attachments.length > 3 && (
+                                                            <div className="w-16 h-16 bg-gray-100 rounded border border-gray-200 flex items-center justify-center text-xs text-gray-500">
+                                                                +{comment.attachments.length - 3}
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                )}
+                                            </div>
+                                        );
+                                    })}
+                                    {initialCandidate.comments.length > 5 && (
+                                        <p className="text-center text-sm text-gray-500">
+                                            Mostrando los últimos 5 comentarios. 
+                                            <button
+                                                onClick={() => setIsCommentsModalOpen(true)}
+                                                className="ml-1 text-primary-600 hover:underline"
+                                            >
+                                                Ver todos ({initialCandidate.comments.length})
+                                            </button>
+                                        </p>
+                                    )}
+                                </div>
+                            ) : (
+                                <div className="text-center py-12 bg-gray-50 rounded-lg border border-gray-200">
+                                    <p className="text-gray-500 mb-4">No hay comentarios aún</p>
+                                    <button
+                                        onClick={() => setIsCommentsModalOpen(true)}
+                                        className="px-4 py-2 bg-primary-600 text-white rounded-md hover:bg-primary-700 text-sm font-medium"
+                                    >
+                                        Agregar primer comentario
+                                    </button>
+                                </div>
+                            )}
+                        </div>
+                    )}
                 </main>
                 {isEditing && (
                     <footer className="p-4 bg-gray-50 border-t flex justify-end space-x-3 flex-shrink-0">
@@ -331,6 +422,7 @@ export const CandidateDetailsModal: React.FC<{ candidate: Candidate, onClose: ()
         </div>
         {isScheduling && <ScheduleInterviewModal event={editingEvent} defaultCandidateId={initialCandidate.id} onClose={() => setIsScheduling(false)} />}
         {isChangeProcessModalOpen && <ChangeProcessModal candidate={initialCandidate} onClose={() => setIsChangeProcessModalOpen(false)} />}
+        {isCommentsModalOpen && <CandidateCommentsModal candidateId={initialCandidate.id} onClose={() => setIsCommentsModalOpen(false)} />}
         </>
     );
 };
