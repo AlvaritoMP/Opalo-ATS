@@ -3,6 +3,7 @@
 export interface Stage {
     id: string;
     name: string;
+    requiredDocuments?: string[]; // IDs de categorías de documentos requeridas para avanzar a esta etapa
 }
 
 export interface Attachment {
@@ -11,9 +12,18 @@ export interface Attachment {
     url: string;
     type: string;
     size: number;
+    category?: string; // Categoría del documento (ej: "CV", "DNI", "Contrato", etc.)
+    uploadedAt?: string; // Fecha de subida
 }
 
 export type ProcessStatus = 'en_proceso' | 'standby' | 'terminado';
+
+export interface DocumentCategory {
+    id: string;
+    name: string;
+    description?: string;
+    required: boolean; // Si es requerido para el proceso
+}
 
 export interface Process {
     id: string;
@@ -30,6 +40,7 @@ export interface Process {
     endDate?: string;
     status: ProcessStatus;
     vacancies: number;
+    documentCategories?: DocumentCategory[]; // Categorías de documentos definidas para este proceso
 }
 
 export interface CandidateHistory {

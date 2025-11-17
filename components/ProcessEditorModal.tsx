@@ -1,7 +1,7 @@
 import React, { useState, useRef } from 'react';
 import { useAppState } from '../App';
-import { Process, Stage, Attachment, ProcessStatus } from '../types';
-import { X, Plus, Trash2, GripVertical, Paperclip, Upload, FileText } from 'lucide-react';
+import { Process, Stage, Attachment, ProcessStatus, DocumentCategory } from '../types';
+import { X, Plus, Trash2, GripVertical, Paperclip, Upload, FileText, CheckSquare } from 'lucide-react';
 
 interface ProcessEditorModalProps {
     process: Process | null;
@@ -32,6 +32,7 @@ export const ProcessEditorModal: React.FC<ProcessEditorModalProps> = ({ process,
     const [stages, setStages] = useState<Stage[]>(process?.stages || [{ id: `new-${Date.now()}`, name: 'Applied' }]);
     const [status, setStatus] = useState<ProcessStatus>(process?.status || 'en_proceso');
     const [vacancies, setVacancies] = useState<number>(process?.vacancies || 1);
+    const [documentCategories, setDocumentCategories] = useState<DocumentCategory[]>(process?.documentCategories || []);
     const flyerInputRef = useRef<HTMLInputElement>(null);
     const attachmentInputRef = useRef<HTMLInputElement>(null);
 
@@ -43,6 +44,38 @@ export const ProcessEditorModal: React.FC<ProcessEditorModalProps> = ({ process,
 
     const handleStageNameChange = (id: string, name: string) => {
         setStages(stages.map(stage => stage.id === id ? { ...stage, name } : stage));
+    };
+    
+    const handleStageRequiredDocumentsChange = (stageId: string, categoryIds: string[]) => {
+        setStages(stages.map(stage => 
+            stage.id === stageId 
+                ? { ...stage, requiredDocuments: categoryIds.length > 0 ? categoryIds : undefined }
+                : stage
+        ));
+    };
+    
+    const addDocumentCategory = () => {
+        setDocumentCategories([...documentCategories, {
+            id: `cat-${Date.now()}`,
+            name: '',
+            description: '',
+            required: false,
+        }]);
+    };
+    
+    const updateDocumentCategory = (id: string, updates: Partial<DocumentCategory>) => {
+        setDocumentCategories(documentCategories.map(cat => 
+            cat.id === id ? { ...cat, ...updates } : cat
+        ));
+    };
+    
+    const removeDocumentCategory = (id: string) => {
+        setDocumentCategories(documentCategories.filter(cat => cat.id !== id));
+        // También remover de los requisitos de las etapas
+        setStages(stages.map(stage => ({
+            ...stage,
+            requiredDocuments: stage.requiredDocuments?.filter(catId => catId !== id)
+        })));
     };
 
     const addStage = () => setStages([...stages, { id: `new-${Date.now()}`, name: '' }]);
@@ -95,7 +128,23 @@ export const ProcessEditorModal: React.FC<ProcessEditorModalProps> = ({ process,
         const finalStages = stages.filter(s => s.name.trim() !== '').map((s, i) => ({...s, id: s.id.startsWith('new-') ? `stage-${Date.now()}-${i}` : s.id}));
         if (finalStages.length === 0) { alert('Please add at least one valid stage.'); return; }
 
-        const processData = { title, description, serviceOrderCode, stages: finalStages, salaryRange, experienceLevel, seniority, startDate, endDate, flyerUrl, attachments, status, vacancies };
+        const finalCategories = documentCategories.filter(cat => cat.name.trim() !== '');
+        const processData = { 
+            title, 
+            description, 
+            serviceOrderCode, 
+            stages: finalStages, 
+            salaryRange, 
+            experienceLevel, 
+            seniority, 
+            startDate, 
+            endDate, 
+            flyerUrl, 
+            attachments, 
+            status, 
+            vacancies,
+            documentCategories: finalCategories.length > 0 ? finalCategories : undefined
+        };
 
         if (process) await actions.updateProcess({ ...process, ...processData });
         else await actions.addProcess(processData);
@@ -163,11 +212,120 @@ export const ProcessEditorModal: React.FC<ProcessEditorModalProps> = ({ process,
                             <button type="button" onClick={() => attachmentInputRef.current?.click()} className="mt-2 flex items-center text-sm font-medium text-primary-600 hover:text-primary-800"><Upload className="w-4 h-4 mr-1" /> Subir documento</button>
                         </div>
                         
+                        {/* Document Categories */}
+                        <div className="border-t pt-4">
+                            <div className="flex items-center justify-between mb-3">
+                                <h3 className="text-sm font-medium text-gray-700 flex items-center">
+                                    <CheckSquare className="w-4 h-4 mr-2" />
+                                    Categorías de documentos
+                                </h3>
+                                <button type="button" onClick={addDocumentCategory} className="flex items-center text-sm font-medium text-primary-600 hover:text-primary-800">
+                                    <Plus className="w-4 h-4 mr-1" /> Agregar categoría
+                                </button>
+                            </div>
+                            <p className="text-xs text-gray-500 mb-3">
+                                Define las categorías de documentos que los candidatos deben subir. Puedes marcar categorías como requeridas y definir requisitos por etapa.
+                            </p>
+                            <div className="space-y-3">
+                                {documentCategories.map((cat, index) => (
+                                    <div key={cat.id} className="border rounded-lg p-3 bg-gray-50">
+                                        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-2">
+                                            <div className="md:col-span-2">
+                                                <input
+                                                    type="text"
+                                                    value={cat.name}
+                                                    onChange={(e) => updateDocumentCategory(cat.id, { name: e.target.value })}
+                                                    placeholder="Nombre de la categoría (ej: CV, DNI, Contrato)"
+                                                    className="w-full input text-sm"
+                                                />
+                                            </div>
+                                            <div className="flex items-center gap-2">
+                                                <label className="flex items-center text-sm text-gray-700">
+                                                    <input
+                                                        type="checkbox"
+                                                        checked={cat.required}
+                                                        onChange={(e) => updateDocumentCategory(cat.id, { required: e.target.checked })}
+                                                        className="mr-2"
+                                                    />
+                                                    Requerido
+                                                </label>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => removeDocumentCategory(cat.id)}
+                                                    className="p-1 text-gray-500 hover:text-red-600"
+                                                >
+                                                    <Trash2 className="w-4 h-4" />
+                                                </button>
+                                            </div>
+                                        </div>
+                                        <input
+                                            type="text"
+                                            value={cat.description || ''}
+                                            onChange={(e) => updateDocumentCategory(cat.id, { description: e.target.value })}
+                                            placeholder="Descripción (opcional)"
+                                            className="w-full input text-sm text-gray-600"
+                                        />
+                                    </div>
+                                ))}
+                                {documentCategories.length === 0 && (
+                                    <p className="text-sm text-gray-500 italic text-center py-4">
+                                        No hay categorías definidas. Agrega categorías para organizar los documentos de los candidatos.
+                                    </p>
+                                )}
+                            </div>
+                        </div>
+                        
                         {/* Stages */}
-                        <div>
+                        <div className="border-t pt-4">
                             <h3 className="text-sm font-medium text-gray-700 mb-2">Etapas del proceso</h3>
-                            <div className="space-y-2">{stages.map((stage, index) => (<div key={stage.id} className="flex items-center space-x-2" draggable onDragStart={() => dragItem.current = index} onDragEnter={() => dragOverItem.current = index} onDragEnd={handleSort} onDragOver={(e) => e.preventDefault()}><GripVertical className="w-5 h-5 text-gray-400 cursor-move" /><input type="text" value={stage.name} onChange={(e) => handleStageNameChange(stage.id, e.target.value)} placeholder={`Stage ${index + 1}`} className="flex-1 input" /><button type="button" onClick={() => removeStage(stage.id)} className="p-2 text-gray-500 hover:text-red-600 hover:bg-red-50 rounded-full"><Trash2 className="w-5 h-5" /></button></div>))}</div>
-                             <button type="button" onClick={addStage} className="mt-3 flex items-center text-sm font-medium text-primary-600 hover:text-primary-800"><Plus className="w-4 h-4 mr-1" /> Add Stage</button>
+                            <div className="space-y-3">
+                                {stages.map((stage, index) => (
+                                    <div key={stage.id} className="border rounded-lg p-3 bg-gray-50">
+                                        <div className="flex items-center space-x-2 mb-2" draggable onDragStart={() => dragItem.current = index} onDragEnter={() => dragOverItem.current = index} onDragEnd={handleSort} onDragOver={(e) => e.preventDefault()}>
+                                            <GripVertical className="w-5 h-5 text-gray-400 cursor-move" />
+                                            <input 
+                                                type="text" 
+                                                value={stage.name} 
+                                                onChange={(e) => handleStageNameChange(stage.id, e.target.value)} 
+                                                placeholder={`Etapa ${index + 1}`} 
+                                                className="flex-1 input" 
+                                            />
+                                            <button type="button" onClick={() => removeStage(stage.id)} className="p-2 text-gray-500 hover:text-red-600 hover:bg-red-50 rounded-full">
+                                                <Trash2 className="w-5 h-5" />
+                                            </button>
+                                        </div>
+                                        {documentCategories.length > 0 && (
+                                            <div className="ml-7">
+                                                <label className="block text-xs font-medium text-gray-600 mb-1">
+                                                    Documentos requeridos para avanzar a esta etapa:
+                                                </label>
+                                                <div className="space-y-1">
+                                                    {documentCategories.map(cat => (
+                                                        <label key={cat.id} className="flex items-center text-sm text-gray-700">
+                                                            <input
+                                                                type="checkbox"
+                                                                checked={stage.requiredDocuments?.includes(cat.id) || false}
+                                                                onChange={(e) => {
+                                                                    const current = stage.requiredDocuments || [];
+                                                                    const updated = e.target.checked
+                                                                        ? [...current, cat.id]
+                                                                        : current.filter(id => id !== cat.id);
+                                                                    handleStageRequiredDocumentsChange(stage.id, updated);
+                                                                }}
+                                                                className="mr-2"
+                                                            />
+                                                            {cat.name}
+                                                        </label>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+                                ))}
+                            </div>
+                            <button type="button" onClick={addStage} className="mt-3 flex items-center text-sm font-medium text-primary-600 hover:text-primary-800">
+                                <Plus className="w-4 h-4 mr-1" /> Agregar etapa
+                            </button>
                         </div>
                     </div>
                     <div className="p-6 bg-gray-50 rounded-b-xl flex justify-end space-x-3"><button type="button" onClick={onClose} className="btn-secondary">Cancelar</button><button type="submit" className="btn-primary">{process ? 'Guardar cambios' : 'Crear proceso'}</button></div>

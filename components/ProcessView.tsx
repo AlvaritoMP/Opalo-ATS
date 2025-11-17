@@ -58,6 +58,33 @@ export const ProcessView: React.FC<ProcessViewProps> = ({ processId }) => {
         e.dataTransfer.setData("text/plain", candidateId); // Necessary for Firefox
     };
 
+    const validateDocumentRequirements = (candidate: Candidate, targetStageId: string): { valid: boolean; missingDocs: string[] } => {
+        const targetStage = process?.stages.find(s => s.id === targetStageId);
+        if (!targetStage || !targetStage.requiredDocuments || targetStage.requiredDocuments.length === 0) {
+            return { valid: true, missingDocs: [] };
+        }
+        
+        const candidateAttachments = candidate.attachments || [];
+        const attachmentsByCategory = candidateAttachments.reduce((acc, att) => {
+            if (att.category) {
+                if (!acc[att.category]) acc[att.category] = [];
+                acc[att.category].push(att);
+            }
+            return acc;
+        }, {} as Record<string, Attachment[]>);
+        
+        const missingDocs: string[] = [];
+        targetStage.requiredDocuments.forEach(catId => {
+            const categoryAttachments = attachmentsByCategory[catId] || [];
+            if (categoryAttachments.length === 0) {
+                const category = process?.documentCategories?.find(c => c.id === catId);
+                missingDocs.push(category?.name || catId);
+            }
+        });
+        
+        return { valid: missingDocs.length === 0, missingDocs };
+    };
+
     const handleDrop = (e: React.DragEvent<HTMLDivElement>, stageId: string) => {
         if (!canMoveCandidates || !dragPayload.current) return;
         const { candidateId, isBulk } = dragPayload.current;
@@ -65,16 +92,42 @@ export const ProcessView: React.FC<ProcessViewProps> = ({ processId }) => {
         const movedBy = state.currentUser?.name || 'System';
 
         if (isBulk && selectedCandidates.length > 0) {
+            const candidatesToMove: Candidate[] = [];
+            const candidatesWithMissingDocs: { candidate: Candidate; missingDocs: string[] }[] = [];
+            
             selectedCandidates.forEach(id => {
                 const candidate = state.candidates.find(c => c.id === id);
                 if (candidate && candidate.stageId !== stageId) {
-                    actions.updateCandidate({ ...candidate, stageId }, movedBy);
+                    const validation = validateDocumentRequirements(candidate, stageId);
+                    if (validation.valid) {
+                        candidatesToMove.push(candidate);
+                    } else {
+                        candidatesWithMissingDocs.push({ candidate, missingDocs: validation.missingDocs });
+                    }
                 }
             });
+            
+            if (candidatesWithMissingDocs.length > 0) {
+                const names = candidatesWithMissingDocs.map(c => c.candidate.name).join(', ');
+                const missingDocsList = candidatesWithMissingDocs[0].missingDocs.join(', ');
+                alert(`No se pueden mover los siguientes candidatos porque faltan documentos requeridos:\n\n${names}\n\nDocumentos faltantes: ${missingDocsList}\n\nRevisa la pestaña "Documentos" en los detalles del candidato.`);
+            }
+            
+            candidatesToMove.forEach(candidate => {
+                actions.updateCandidate({ ...candidate, stageId }, movedBy);
+            });
+            
             setSelectedCandidates([]);
         } else {
             const candidate = state.candidates.find(c => c.id === candidateId);
             if (candidate && candidate.stageId !== stageId) {
+                const validation = validateDocumentRequirements(candidate, stageId);
+                if (!validation.valid) {
+                    alert(`No se puede mover a "${process?.stages.find(s => s.id === stageId)?.name}" porque faltan los siguientes documentos requeridos:\n\n${validation.missingDocs.join(', ')}\n\nRevisa la pestaña "Documentos" en los detalles del candidato.`);
+                    dragPayload.current = null;
+                    e.currentTarget.classList.remove('bg-primary-50');
+                    return;
+                }
                 actions.updateCandidate({ ...candidate, stageId }, movedBy);
             }
         }

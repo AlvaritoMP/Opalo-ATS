@@ -1,10 +1,11 @@
 import React, { useRef, useState } from 'react';
 import { useAppState } from '../App';
-import { Candidate, Attachment, InterviewEvent, UserRole } from '../types';
+import { Candidate, Attachment, InterviewEvent, UserRole, Process, DocumentCategory } from '../types';
 import { X, Mail, Phone, Linkedin, User, FileText, Eye, Download, Upload, Trash2, Briefcase, DollarSign, Calendar, Info, MapPin, Edit, ArrowRightLeft, Copy, MessageCircle, PhoneCall, Archive, Undo2 } from 'lucide-react';
 import { ScheduleInterviewModal } from './ScheduleInterviewModal';
 import { ChangeProcessModal } from './ChangeProcessModal';
 import { CandidateCommentsModal } from './CandidateCommentsModal';
+import { DocumentChecklist } from './DocumentChecklist';
 import JSZip from 'jszip';
 import { saveAs } from 'file-saver';
 
@@ -51,12 +52,15 @@ export const CandidateDetailsModal: React.FC<{ candidate: Candidate, onClose: ()
     const [editableCandidate, setEditableCandidate] = useState<Candidate>(initialCandidate);
     
     const [previewFile, setPreviewFile] = useState<Attachment | null>(initialCandidate.attachments?.[0] || null);
-    const [activeTab, setActiveTab] = useState<'details' | 'history' | 'schedule' | 'comments'>('details');
+    const [activeTab, setActiveTab] = useState<'details' | 'history' | 'schedule' | 'comments' | 'documents'>('details');
     const [isScheduling, setIsScheduling] = useState(false);
     const [editingEvent, setEditingEvent] = useState<InterviewEvent | null>(null);
     const [isChangeProcessModalOpen, setIsChangeProcessModalOpen] = useState(false);
     const [isCommentsModalOpen, setIsCommentsModalOpen] = useState(false);
     const [isExporting, setIsExporting] = useState(false);
+    const [pendingFile, setPendingFile] = useState<File | null>(null);
+    const [showCategoryModal, setShowCategoryModal] = useState(false);
+    const [selectedCategory, setSelectedCategory] = useState<string>('');
 
     const avatarInputRef = useRef<HTMLInputElement>(null);
     const attachmentInputRef = useRef<HTMLInputElement>(null);
@@ -107,19 +111,41 @@ export const CandidateDetailsModal: React.FC<{ candidate: Candidate, onClose: ()
     };
     
     const handleAttachmentUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-         const file = e.target.files?.[0];
+        const file = e.target.files?.[0];
         if (file) {
-            const dataUrl = await fileToBase64(file);
-            const newAttachment: Attachment = {
-                id: `att-c-${Date.now()}`,
-                name: file.name,
-                url: dataUrl,
-                type: file.type,
-                size: file.size,
-            };
-            const updatedCandidate = { ...editableCandidate, attachments: [...editableCandidate.attachments, newAttachment] };
-            setEditableCandidate(updatedCandidate);
-            await actions.updateCandidate(updatedCandidate, state.currentUser?.name);
+            // Si hay categorías definidas, mostrar modal para seleccionar categoría
+            if (process?.documentCategories && process.documentCategories.length > 0) {
+                setPendingFile(file);
+                setShowCategoryModal(true);
+            } else {
+                // Si no hay categorías, subir sin categoría
+                await uploadFileWithCategory(file, '');
+            }
+        }
+    };
+    
+    const uploadFileWithCategory = async (file: File, categoryId: string) => {
+        const dataUrl = await fileToBase64(file);
+        const newAttachment: Attachment = {
+            id: `att-c-${Date.now()}`,
+            name: file.name,
+            url: dataUrl,
+            type: file.type,
+            size: file.size,
+            category: categoryId || undefined,
+            uploadedAt: new Date().toISOString(),
+        };
+        const updatedCandidate = { ...editableCandidate, attachments: [...editableCandidate.attachments, newAttachment] };
+        setEditableCandidate(updatedCandidate);
+        await actions.updateCandidate(updatedCandidate, state.currentUser?.name);
+        setPendingFile(null);
+        setShowCategoryModal(false);
+        setSelectedCategory('');
+    };
+    
+    const handleConfirmCategory = async () => {
+        if (pendingFile) {
+            await uploadFileWithCategory(pendingFile, selectedCategory);
         }
     };
     
@@ -231,7 +257,7 @@ export const CandidateDetailsModal: React.FC<{ candidate: Candidate, onClose: ()
 
     if (!process) return null;
     
-    const TabButton: React.FC<{tabId: 'details' | 'history' | 'schedule' | 'comments', children: React.ReactNode}> = ({tabId, children}) => (
+    const TabButton: React.FC<{tabId: 'details' | 'history' | 'schedule' | 'comments' | 'documents', children: React.ReactNode}> = ({tabId, children}) => (
         <button 
             onClick={() => setActiveTab(tabId)}
             className={`px-4 py-2 text-sm font-medium border-b-2 ${activeTab === tabId ? 'border-primary-600 text-primary-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'}`}
@@ -313,6 +339,7 @@ export const CandidateDetailsModal: React.FC<{ candidate: Candidate, onClose: ()
                                 </span>
                             )}
                         </TabButton>
+                        <TabButton tabId="documents">Documentos</TabButton>
                     </nav>
                 </div>
                 <main className="flex-1 overflow-y-auto">
@@ -521,6 +548,11 @@ export const CandidateDetailsModal: React.FC<{ candidate: Candidate, onClose: ()
                             </div>
                         </div>
                     )}
+                    {activeTab === 'documents' && process && (
+                        <div className="p-6">
+                            <DocumentChecklist candidate={currentCandidate} process={process} />
+                        </div>
+                    )}
                     {activeTab === 'comments' && (
                         <div className="p-6">
                             <div className="flex items-center justify-between mb-4">
@@ -615,6 +647,59 @@ export const CandidateDetailsModal: React.FC<{ candidate: Candidate, onClose: ()
         {isScheduling && <ScheduleInterviewModal event={editingEvent} defaultCandidateId={initialCandidate.id} onClose={() => setIsScheduling(false)} />}
         {isChangeProcessModalOpen && <ChangeProcessModal candidate={initialCandidate} onClose={() => setIsChangeProcessModalOpen(false)} />}
         {isCommentsModalOpen && <CandidateCommentsModal candidateId={initialCandidate.id} onClose={() => setIsCommentsModalOpen(false)} />}
+        
+        {/* Modal para seleccionar categoría de documento */}
+        {showCategoryModal && process && pendingFile && (
+            <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[60] p-4">
+                <div className="bg-white rounded-xl shadow-2xl w-full max-w-md">
+                    <div className="p-6 border-b">
+                        <h3 className="text-lg font-semibold text-gray-800">Seleccionar categoría de documento</h3>
+                        <p className="text-sm text-gray-600 mt-1">Archivo: {pendingFile.name}</p>
+                    </div>
+                    <div className="p-6">
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                            Categoría *
+                        </label>
+                        <select
+                            value={selectedCategory}
+                            onChange={(e) => setSelectedCategory(e.target.value)}
+                            className="w-full border-gray-300 rounded-md shadow-sm mb-4"
+                        >
+                            <option value="">Selecciona una categoría</option>
+                            {process.documentCategories?.map(cat => (
+                                <option key={cat.id} value={cat.id}>
+                                    {cat.name} {cat.required && '(Requerido)'}
+                                </option>
+                            ))}
+                        </select>
+                        {process.documentCategories && process.documentCategories.length === 0 && (
+                            <p className="text-sm text-gray-500 mb-4">
+                                No hay categorías definidas. El documento se subirá sin categoría.
+                            </p>
+                        )}
+                    </div>
+                    <div className="p-6 bg-gray-50 rounded-b-xl flex justify-end gap-2">
+                        <button
+                            onClick={() => {
+                                setShowCategoryModal(false);
+                                setPendingFile(null);
+                                setSelectedCategory('');
+                            }}
+                            className="px-4 py-2 bg-white border border-gray-300 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50"
+                        >
+                            Cancelar
+                        </button>
+                        <button
+                            onClick={handleConfirmCategory}
+                            disabled={!selectedCategory && process.documentCategories && process.documentCategories.length > 0}
+                            className="px-4 py-2 bg-primary-600 text-white rounded-md text-sm font-medium hover:bg-primary-700 disabled:bg-gray-300 disabled:cursor-not-allowed"
+                        >
+                            Subir documento
+                        </button>
+                    </div>
+                </div>
+            </div>
+        )}
         </>
     );
 };

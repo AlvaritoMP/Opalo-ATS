@@ -17,7 +17,6 @@ import { ArchivedCandidates } from './components/ArchivedCandidates';
 import { Letters } from './components/Letters';
 import { LayoutDashboard, Briefcase, FileText, Settings as SettingsIcon, Users as UsersIcon, ChevronsLeft, ChevronsRight, BarChart2, Calendar, FileUp, LogOut, X, Archive } from 'lucide-react';
 import { CandidateComparator } from './components/CandidateComparator';
-import { LayoutDashboard, Briefcase, FileText, Settings as SettingsIcon, Users as UsersIcon, ChevronsLeft, ChevronsRight, BarChart2, Calendar, FileUp, LogOut, X, Archive } from 'lucide-react';
 
 
 // State and Actions types
