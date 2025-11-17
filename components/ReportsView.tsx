@@ -67,10 +67,10 @@ export const ReportsView: React.FC = () => {
     };
 
     return (
-        <div className="p-8">
+        <div className="p-8 h-full flex flex-col">
             <h1 className="text-3xl font-bold text-gray-800 mb-8">{getLabel('sidebar_reports', 'Reportes')}</h1>
 
-            <div className="space-y-8">
+            <div className="space-y-8 flex-1 overflow-y-auto pr-1">
                 {/* Candidates Report */}
                 <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
                     <div className="flex justify-between items-center mb-4">

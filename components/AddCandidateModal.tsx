@@ -39,7 +39,7 @@ export const AddCandidateModal: React.FC<AddCandidateModalProps> = ({ process, o
         e.preventDefault();
         const firstStageId = process.stages[0]?.id;
         if (!firstStageId) {
-            alert("This process has no stages configured.");
+            alert("Este proceso no tiene etapas configuradas.");
             return;
         }
 
@@ -113,8 +113,8 @@ export const AddCandidateModal: React.FC<AddCandidateModalProps> = ({ process, o
                             </div>
                         </div>
 
-                        <div><label className="block text-sm font-medium text-gray-700">Full Name</label><input type="text" value={name} onChange={e => setName(e.target.value)} required className="mt-1 block w-full input"/></div>
-                        <div><label className="block text-sm font-medium text-gray-700">Email Address</label><input type="email" value={email} onChange={e => setEmail(e.target.value)} required className="mt-1 block w-full input"/></div>
+                        <div><label className="block text-sm font-medium text-gray-700">Nombre completo</label><input type="text" value={name} onChange={e => setName(e.target.value)} required className="mt-1 block w-full input"/></div>
+                        <div><label className="block text-sm font-medium text-gray-700">Correo electrónico</label><input type="email" value={email} onChange={e => setEmail(e.target.value)} required className="mt-1 block w-full input"/></div>
                         
                         <div className="md:col-span-2"><label className="block text-sm font-medium text-gray-700">Resumen / descripción</label><textarea rows={2} value={description} onChange={e => setDescription(e.target.value)} className="mt-1 block w-full input" /></div>
 
@@ -128,24 +128,24 @@ export const AddCandidateModal: React.FC<AddCandidateModalProps> = ({ process, o
                             <label className="block text-sm font-medium text-gray-700">Fuente</label>
                             <select value={source} onChange={e => setSource(e.target.value as Candidate['source'])} className="mt-1 block w-full input">
                                 <option>LinkedIn</option>
-                                <option>Referral</option>
-                                <option>Website</option>
-                                <option>Other</option>
+                                <option>Referencia</option>
+                                <option>Sitio web</option>
+                                <option>Otro</option>
                             </select>
                         </div>
 
                         <div className="md:col-span-2">
-                            <label className="block text-sm font-medium text-gray-700 mb-2">Attachments (Resume, etc.)</label>
+                            <label className="block text-sm font-medium text-gray-700 mb-2">Adjuntos (CV, etc.)</label>
                             <div className="space-y-2">
                                 {attachments.map(att => (
                                     <div key={att.id} className="flex items-center justify-between p-2 rounded-md border bg-gray-50">
                                         <div className="flex items-center overflow-hidden"><FileText className="w-5 h-5 mr-3 text-gray-500 flex-shrink-0" /><p className="text-sm font-medium text-gray-800 truncate">{att.name}</p></div>
-                                        <button type="button" onClick={() => handleDeleteAttachment(att.id)} className="p-1 rounded-md hover:bg-red-100" title="Delete"><Trash2 className="w-4 h-4 text-red-500" /></button>
+                                        <button type="button" onClick={() => handleDeleteAttachment(att.id)} className="p-1 rounded-md hover:bg-red-100" title="Eliminar"><Trash2 className="w-4 h-4 text-red-500" /></button>
                                     </div>
                                 ))}
                             </div>
                             <input type="file" ref={attachmentInputRef} onChange={handleAttachmentUpload} className="hidden" />
-                            <button type="button" onClick={() => attachmentInputRef.current?.click()} className="mt-2 flex items-center text-sm font-medium text-primary-600 hover:text-primary-800"><Upload className="w-4 h-4 mr-1" /> Upload Document</button>
+                            <button type="button" onClick={() => attachmentInputRef.current?.click()} className="mt-2 flex items-center text-sm font-medium text-primary-600 hover:text-primary-800"><Upload className="w-4 h-4 mr-1" /> Subir documento</button>
                         </div>
                     </div>
                      <div className="p-6 bg-gray-50 rounded-b-xl flex justify-end space-x-3">

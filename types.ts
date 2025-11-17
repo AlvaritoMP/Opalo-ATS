@@ -116,6 +116,14 @@ export interface AppSettings {
     appName: string;
     logoUrl: string;
     customLabels: { [key: string]: string };
+    dashboardLayout?: string[]; // orden de widgets del dashboard
+    templates?: { id: string; name: string; docxBase64: string }[]; // plantillas DOCX guardadas
+    reportTheme?: {
+        primaryColor?: string; // hex
+        accentColor?: string;  // hex
+        coverTitle?: string;
+        footerText?: string;
+    };
 }
 
 export interface FormIntegration {

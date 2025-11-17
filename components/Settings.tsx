@@ -116,6 +116,54 @@ export const Settings: React.FC = () => {
                     </div>
                 </div>
 
+                {/* Report Theme Settings */}
+                <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
+                    <h2 className="text-xl font-semibold mb-1 flex items-center"><Brush className="mr-2"/> Informe (PDF)</h2>
+                    <p className="text-sm text-gray-500 mb-6">Personaliza colores y textos del informe del comparador.</p>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700">Color primario (hex)</label>
+                            <input
+                                type="text"
+                                value={settings.reportTheme?.primaryColor || '#2563eb'}
+                                onChange={e => setSettings({ ...settings, reportTheme: { ...(settings.reportTheme || {}), primaryColor: e.target.value } })}
+                                className="mt-1 block w-full input"
+                                placeholder="#2563eb"
+                            />
+                        </div>
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700">Color acento (hex)</label>
+                            <input
+                                type="text"
+                                value={settings.reportTheme?.accentColor || '#16a34a'}
+                                onChange={e => setSettings({ ...settings, reportTheme: { ...(settings.reportTheme || {}), accentColor: e.target.value } })}
+                                className="mt-1 block w-full input"
+                                placeholder="#16a34a"
+                            />
+                        </div>
+                        <div className="md:col-span-2">
+                            <label className="block text-sm font-medium text-gray-700">Título de portada</label>
+                            <input
+                                type="text"
+                                value={settings.reportTheme?.coverTitle || ''}
+                                onChange={e => setSettings({ ...settings, reportTheme: { ...(settings.reportTheme || {}), coverTitle: e.target.value } })}
+                                className="mt-1 block w-full input"
+                                placeholder="Informe comparativo de candidatos"
+                            />
+                        </div>
+                        <div className="md:col-span-2">
+                            <label className="block text-sm font-medium text-gray-700">Texto de pie de página</label>
+                            <input
+                                type="text"
+                                value={settings.reportTheme?.footerText || ''}
+                                onChange={e => setSettings({ ...settings, reportTheme: { ...(settings.reportTheme || {}), footerText: e.target.value } })}
+                                className="mt-1 block w-full input"
+                                placeholder="Confidencial - Solo para uso interno"
+                            />
+                        </div>
+                    </div>
+                </div>
+
                 {/* UI Labels Settings */}
                 <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
                     <h2 className="text-xl font-semibold mb-1 flex items-center"><Type className="mr-2"/> UI Labels</h2>

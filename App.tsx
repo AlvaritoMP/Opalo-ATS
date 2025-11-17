@@ -8,11 +8,15 @@ import { ProcessView } from './components/ProcessView';
 import { ReportsView } from './components/ReportsView';
 import { Settings } from './components/Settings';
 import { Users } from './components/Users';
+import { Candidates as CandidatesView } from './components/Candidates';
 import { Forms } from './components/Forms';
 import { CalendarView } from './components/CalendarView';
 import { BulkImportView } from './components/BulkImportView';
 import { Spinner } from './components/Spinner';
 import { ArchivedCandidates } from './components/ArchivedCandidates';
+import { Letters } from './components/Letters';
+import { LayoutDashboard, Briefcase, FileText, Settings as SettingsIcon, Users as UsersIcon, ChevronsLeft, ChevronsRight, BarChart2, Calendar, FileUp, LogOut, X, Archive } from 'lucide-react';
+import { CandidateComparator } from './components/CandidateComparator';
 import { LayoutDashboard, Briefcase, FileText, Settings as SettingsIcon, Users as UsersIcon, ChevronsLeft, ChevronsRight, BarChart2, Calendar, FileUp, LogOut, X, Archive } from 'lucide-react';
 
 
@@ -257,9 +261,12 @@ const Sidebar: React.FC = () => {
                 <NavItem icon={LayoutDashboard} label={getLabel('sidebar_dashboard', 'Panel')} view="dashboard" currentView={state.view.type} setView={actions.setView} isCollapsed={isCollapsed} />
                 <NavItem icon={Briefcase} label={getLabel('sidebar_processes', 'Procesos')} view="processes" currentView={state.view.type} setView={actions.setView} isCollapsed={isCollapsed} />
                 <NavItem icon={Archive} label={getLabel('sidebar_archived', 'Archivados')} view="archived" currentView={state.view.type} setView={actions.setView} isCollapsed={isCollapsed} />
+                <NavItem icon={UsersIcon} label={getLabel('menu_candidates', 'Candidatos')} view="candidates" currentView={state.view.type} setView={actions.setView} isCollapsed={isCollapsed} />
                 <NavItem icon={FileText} label={getLabel('sidebar_forms', 'Formularios')} view="forms" currentView={state.view.type} setView={actions.setView} isCollapsed={isCollapsed} />
+                <NavItem icon={FileText} label={getLabel('sidebar_letters', 'Cartas')} view="letters" currentView={state.view.type} setView={actions.setView} isCollapsed={isCollapsed} />
                 <NavItem icon={Calendar} label={getLabel('sidebar_calendar', 'Calendario')} view="calendar" currentView={state.view.type} setView={actions.setView} isCollapsed={isCollapsed} />
                 <NavItem icon={BarChart2} label={getLabel('sidebar_reports', 'Reportes')} view="reports" currentView={state.view.type} setView={actions.setView} isCollapsed={isCollapsed} />
+                <NavItem icon={BarChart2} label={getLabel('sidebar_compare', 'Comparador')} view="compare" currentView={state.view.type} setView={actions.setView} isCollapsed={isCollapsed} />
                 <NavItem icon={FileUp} label={getLabel('sidebar_bulk_import', 'Importación Masiva')} view="bulk-import" currentView={state.view.type} setView={actions.setView} isCollapsed={isCollapsed} />
             </nav>
             <div className="p-2 border-t space-y-2">
@@ -558,7 +565,10 @@ const App: React.FC = () => {
             case 'process-view': return <ProcessView processId={state.view.payload} />;
             case 'reports': return <ReportsView />;
             case 'forms': return <Forms />;
+            case 'letters': return <Letters />;
             case 'calendar': return <CalendarView />;
+            case 'candidates': return <CandidatesView />;
+            case 'compare': return <CandidateComparator />;
             case 'users': return <Users />;
             case 'settings': return <Settings />;
             case 'bulk-import': return <BulkImportView />;
@@ -585,7 +595,7 @@ const App: React.FC = () => {
         <AppContext.Provider value={appContextValue}>
             <div className="flex h-screen bg-gray-50 font-sans text-gray-900">
                 <Sidebar />
-                <div className="flex-1 flex flex-col overflow-hidden">
+                <div className="flex-1 flex flex-col overflow-hidden min-h-0">
                     {renderView()}
                 </div>
             </div>

@@ -2,10 +2,12 @@ import React, { useState, useMemo } from 'react';
 import { useAppState } from '../App';
 import { Calendar as BigCalendar, momentLocalizer } from 'react-big-calendar';
 import moment from 'moment';
+import 'moment/locale/es';
 import { Plus, Calendar as CalendarIcon } from 'lucide-react';
 import { ScheduleInterviewModal } from './ScheduleInterviewModal';
 import { InterviewEvent } from '../types';
 
+moment.locale('es');
 const localizer = momentLocalizer(moment);
 
 export const CalendarView: React.FC = () => {
@@ -60,6 +62,24 @@ export const CalendarView: React.FC = () => {
                     onSelectEvent={handleSelectEvent}
                     onSelectSlot={handleSelectSlot}
                     selectable
+                    messages={{
+                        date: 'Fecha',
+                        time: 'Hora',
+                        event: 'Evento',
+                        allDay: 'Todo el día',
+                        week: 'Semana',
+                        work_week: 'Semana laboral',
+                        day: 'Día',
+                        month: 'Mes',
+                        previous: 'Anterior',
+                        next: 'Siguiente',
+                        yesterday: 'Ayer',
+                        tomorrow: 'Mañana',
+                        today: 'Hoy',
+                        agenda: 'Agenda',
+                        showMore: total => `+${total} más`,
+                        noEventsInRange: 'No hay eventos en este rango.',
+                    }}
                 />
             </div>
             {isScheduling && (

@@ -25,7 +25,7 @@ const DetailItem: React.FC<{icon: React.ElementType, label: string, value?: stri
             {href ? (
                  <a href={href} target="_blank" rel="noopener noreferrer" className="text-primary-600 break-all hover:underline">{value}</a>
             ) : (
-                <span className="text-gray-600">{value || 'N/A'}</span>
+                <span className="text-gray-600">{value || 'N/D'}</span>
             )}
         </div>
     </div>
@@ -137,7 +137,7 @@ export const CandidateDetailsModal: React.FC<{ candidate: Candidate, onClose: ()
     };
 
     const handleDeleteEvent = async (eventId: string) => {
-        if (window.confirm('Are you sure you want to delete this interview?')) {
+        if (window.confirm('¿Seguro que deseas eliminar esta entrevista?')) {
             await actions.deleteInterviewEvent(eventId);
         }
     };
@@ -266,7 +266,7 @@ export const CandidateDetailsModal: React.FC<{ candidate: Candidate, onClose: ()
                                     </span>
                                 )}
                             </div>
-                            <p className="text-sm text-gray-500">Applied for: {process.title}</p>
+                    <p className="text-sm text-gray-500">Postulado a: {process.title}</p>
                         </div>
                     </div>
                     <div className="flex items-center space-x-2">
@@ -289,11 +289,11 @@ export const CandidateDetailsModal: React.FC<{ candidate: Candidate, onClose: ()
                         )}
                         {canEdit && !isEditing && (
                             <>
-                                <button onClick={() => setIsChangeProcessModalOpen(true)} className="flex items-center px-3 py-1.5 bg-white border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 hover:bg-gray-50" title="Move or Duplicate Candidate">
+                        <button onClick={() => setIsChangeProcessModalOpen(true)} className="flex items-center px-3 py-1.5 bg-white border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 hover:bg-gray-50" title="Mover o duplicar candidato">
                                     <ArrowRightLeft className="w-4 h-4" />
                                 </button>
                                 <button onClick={() => setIsEditing(true)} className="flex items-center px-3 py-1.5 bg-white border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 hover:bg-gray-50">
-                                    <Edit className="w-4 h-4 mr-2" /> Edit
+                            <Edit className="w-4 h-4 mr-2" /> Editar
                                 </button>
                             </>
                         )}
@@ -302,9 +302,9 @@ export const CandidateDetailsModal: React.FC<{ candidate: Candidate, onClose: ()
                 </header>
                  <div className="border-b flex-shrink-0">
                     <nav className="flex space-x-4 px-6">
-                        <TabButton tabId="details">Details</TabButton>
-                        <TabButton tabId="history">History</TabButton>
-                        <TabButton tabId="schedule">Schedule</TabButton>
+                <TabButton tabId="details">Detalles</TabButton>
+                <TabButton tabId="history">Historial</TabButton>
+                <TabButton tabId="schedule">Agenda</TabButton>
                         <TabButton tabId="comments">
                             Comentarios
                             {initialCandidate.comments && initialCandidate.comments.length > 0 && (
@@ -325,12 +325,12 @@ export const CandidateDetailsModal: React.FC<{ candidate: Candidate, onClose: ()
                                         {/* Edit Form */}
                                         <div className="space-y-4">
                                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                                                <div><label className="block text-sm font-medium text-gray-700">Full Name</label><input type="text" name="name" value={editableCandidate.name} onChange={handleInputChange} className="mt-1 block w-full input"/></div>
-                                                <div><label className="block text-sm font-medium text-gray-700">Email</label><input type="email" name="email" value={editableCandidate.email} onChange={handleInputChange} className="mt-1 block w-full input"/></div>
-                                                <div><label className="block text-sm font-medium text-gray-700">Phone</label><input type="tel" name="phone" value={editableCandidate.phone || ''} onChange={handleInputChange} className="mt-1 block w-full input"/></div>
-                                                <div><label className="block text-sm font-medium text-gray-700">Age</label><input type="number" name="age" value={editableCandidate.age || ''} onChange={handleInputChange} className="mt-1 block w-full input"/></div>
+                                                <div><label className="block text-sm font-medium text-gray-700">Nombre completo</label><input type="text" name="name" value={editableCandidate.name} onChange={handleInputChange} className="mt-1 block w-full input"/></div>
+                                                <div><label className="block text-sm font-medium text-gray-700">Correo</label><input type="email" name="email" value={editableCandidate.email} onChange={handleInputChange} className="mt-1 block w-full input"/></div>
+                                                <div><label className="block text-sm font-medium text-gray-700">Teléfono</label><input type="tel" name="phone" value={editableCandidate.phone || ''} onChange={handleInputChange} className="mt-1 block w-full input"/></div>
+                                                <div><label className="block text-sm font-medium text-gray-700">Edad</label><input type="number" name="age" value={editableCandidate.age || ''} onChange={handleInputChange} className="mt-1 block w-full input"/></div>
                                                 <div><label className="block text-sm font-medium text-gray-700">DNI</label><input type="text" name="dni" value={editableCandidate.dni || ''} onChange={handleInputChange} className="mt-1 block w-full input"/></div>
-                                                <div><label className="block text-sm font-medium text-gray-700">Address / City</label><input type="text" name="address" value={editableCandidate.address || ''} onChange={handleInputChange} className="mt-1 block w-full input"/></div>
+                                                <div><label className="block text-sm font-medium text-gray-700">Dirección / ciudad</label><input type="text" name="address" value={editableCandidate.address || ''} onChange={handleInputChange} className="mt-1 block w-full input"/></div>
                                                 <div>
                                                     <label className="block text-sm font-medium text-gray-700">Fecha de contratación</label>
                                                     <input
@@ -348,31 +348,31 @@ export const CandidateDetailsModal: React.FC<{ candidate: Candidate, onClose: ()
                                                     )}
                                                 </div>
                                             </div>
-                                            <div><label className="block text-sm font-medium text-gray-700">LinkedIn URL</label><input type="url" name="linkedinUrl" value={editableCandidate.linkedinUrl || ''} onChange={handleInputChange} className="mt-1 block w-full input"/></div>
+                                            <div><label className="block text-sm font-medium text-gray-700">URL de LinkedIn</label><input type="url" name="linkedinUrl" value={editableCandidate.linkedinUrl || ''} onChange={handleInputChange} className="mt-1 block w-full input"/></div>
                                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                                                <div><label className="block text-sm font-medium text-gray-700">Source</label>
+                                                <div><label className="block text-sm font-medium text-gray-700">Fuente</label>
                                                     <select name="source" value={editableCandidate.source || ''} onChange={handleInputChange} className="mt-1 block w-full input">
-                                                        <option>LinkedIn</option><option>Referral</option><option>Website</option><option>Other</option>
+                                                        <option>LinkedIn</option><option>Referencia</option><option>Sitio web</option><option>Otro</option>
                                                     </select>
                                                 </div>
-                                                <div><label className="block text-sm font-medium text-gray-700">Salary Expectation</label><input type="text" name="salaryExpectation" value={editableCandidate.salaryExpectation || ''} onChange={handleInputChange} className="mt-1 block w-full input"/></div>
+                                                <div><label className="block text-sm font-medium text-gray-700">Expectativa salarial</label><input type="text" name="salaryExpectation" value={editableCandidate.salaryExpectation || ''} onChange={handleInputChange} className="mt-1 block w-full input"/></div>
                                             </div>
-                                            <div><label className="block text-sm font-medium text-gray-700">Summary</label><textarea name="description" rows={3} value={editableCandidate.description || ''} onChange={handleInputChange} className="mt-1 block w-full input" /></div>
+                                            <div><label className="block text-sm font-medium text-gray-700">Resumen</label><textarea name="description" rows={3} value={editableCandidate.description || ''} onChange={handleInputChange} className="mt-1 block w-full input" /></div>
                                         </div>
                                     </>
                                 ) : (
                                     <>
                                         {/* View Details */}
                                         <div className="p-4 bg-gray-50 rounded-lg border">
-                                            <h3 className="font-semibold text-gray-700 mb-3">Contact & Personal Info</h3>
+                                            <h3 className="font-semibold text-gray-700 mb-3">Contacto e información personal</h3>
                                                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                                                <DetailItem icon={Mail} label="Email" value={currentCandidate.email} href={`mailto:${currentCandidate.email}`} />
+                                                <DetailItem icon={Mail} label="Correo" value={currentCandidate.email} href={`mailto:${currentCandidate.email}`} />
                                                 <div className="flex flex-col">
                                                     <div className="flex items-start text-sm">
                                                         <Phone className="w-4 h-4 mr-3 mt-0.5 text-gray-400 flex-shrink-0" />
                                                         <div className="flex-1">
-                                                            <span className="font-medium text-gray-700">Phone: </span>
-                                                            <span className="text-gray-600">{currentCandidate.phone || 'N/A'}</span>
+                                                            <span className="font-medium text-gray-700">Teléfono: </span>
+                                                            <span className="text-gray-600">{currentCandidate.phone || 'N/D'}</span>
                                                         </div>
                                                     </div>
                                                     {currentCandidate.phone && (
@@ -407,17 +407,17 @@ export const CandidateDetailsModal: React.FC<{ candidate: Candidate, onClose: ()
                                                     )}
                                                 </div>
                                                 <DetailItem icon={Linkedin} label="LinkedIn" value={currentCandidate.linkedinUrl} href={currentCandidate.linkedinUrl} />
-                                                <DetailItem icon={Calendar} label="Age" value={currentCandidate.age} />
+                                                <DetailItem icon={Calendar} label="Edad" value={currentCandidate.age} />
                                                 <DetailItem icon={Info} label="DNI" value={currentCandidate.dni} />
-                                                <DetailItem icon={Briefcase} label="Source" value={currentCandidate.source} />
-                                                <DetailItem icon={MapPin} label="Address" value={currentCandidate.address} />
-                                                <DetailItem icon={DollarSign} label="Salary Expectation" value={currentCandidate.salaryExpectation ? `${state.settings?.currencySymbol || ''}${currentCandidate.salaryExpectation.replace(/[$\€£S/]/g, '').trim()}` : 'N/A'} />
+                                                <DetailItem icon={Briefcase} label="Fuente" value={currentCandidate.source} />
+                                                <DetailItem icon={MapPin} label="Dirección" value={currentCandidate.address} />
+                                                <DetailItem icon={DollarSign} label="Expectativa salarial" value={currentCandidate.salaryExpectation ? `${state.settings?.currencySymbol || ''}${currentCandidate.salaryExpectation.replace(/[$\€£S/]/g, '').trim()}` : 'N/D'} />
                                                     <DetailItem icon={Calendar} label="Fecha de contratación" value={currentCandidate.hireDate ? new Date(currentCandidate.hireDate).toLocaleDateString('es-ES') : undefined} />
                                             </div>
                                         </div>
                                         {currentCandidate.description && (
                                             <div>
-                                                <h3 className="font-semibold text-gray-700 mb-2">Summary</h3>
+                                                <h3 className="font-semibold text-gray-700 mb-2">Resumen</h3>
                                                 <p className="text-sm text-gray-600 whitespace-pre-wrap">{currentCandidate.description}</p>
                                             </div>
                                         )}
@@ -425,21 +425,21 @@ export const CandidateDetailsModal: React.FC<{ candidate: Candidate, onClose: ()
                                 )}
                                 
                                 <div className="flex flex-col h-full max-w-full">
-                                    <h3 className="font-semibold text-gray-700 mb-2">Attachments</h3>
+                                    <h3 className="font-semibold text-gray-700 mb-2">Adjuntos</h3>
                                     <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
                                         {currentCandidate.attachments.map(att => (
                                             <div key={att.id} className="flex items-center justify-between p-2 rounded-md border bg-white hover:bg-gray-50">
                                                 <div className="flex items-center overflow-hidden"><FileText className="w-5 h-5 mr-3 text-gray-500 flex-shrink-0" /><p className="text-sm font-medium text-gray-800 truncate">{att.name}</p></div>
                                                 <div className="flex items-center space-x-1">
-                                                    <button onClick={() => setPreviewFile(att)} className="p-1 rounded-md hover:bg-gray-200" title="Preview"><Eye className="w-4 h-4 text-gray-600" /></button>
-                                                    <a href={att.url} download={att.name} className="p-1 rounded-md hover:bg-gray-200" title="Download"><Download className="w-4 h-4 text-gray-600" /></a>
-                                                    <button onClick={() => handleDeleteAttachment(att.id)} className="p-1 rounded-md hover:bg-red-100" title="Delete"><Trash2 className="w-4 h-4 text-red-500" /></button>
+                                                    <button onClick={() => setPreviewFile(att)} className="p-1 rounded-md hover:bg-gray-200" title="Previsualizar"><Eye className="w-4 h-4 text-gray-600" /></button>
+                                                    <a href={att.url} download={att.name} className="p-1 rounded-md hover:bg-gray-200" title="Descargar"><Download className="w-4 h-4 text-gray-600" /></a>
+                                                    <button onClick={() => handleDeleteAttachment(att.id)} className="p-1 rounded-md hover:bg-red-100" title="Eliminar"><Trash2 className="w-4 h-4 text-red-500" /></button>
                                                 </div>
                                             </div>
                                         ))}
                                     </div>
                                     <input type="file" ref={attachmentInputRef} onChange={handleAttachmentUpload} className="hidden" />
-                                    <button type="button" onClick={() => attachmentInputRef.current?.click()} className="mt-2 flex items-center text-sm font-medium text-primary-600 hover:text-primary-800"><Upload className="w-4 h-4 mr-1" /> Upload Document</button>
+                                    <button type="button" onClick={() => attachmentInputRef.current?.click()} className="mt-2 flex items-center text-sm font-medium text-primary-600 hover:text-primary-800"><Upload className="w-4 h-4 mr-1" /> Subir documento</button>
                                 </div>
                             </div>
                             {/* Right Column - Preview */}
@@ -453,9 +453,9 @@ export const CandidateDetailsModal: React.FC<{ candidate: Candidate, onClose: ()
                                     ) : (
                                         <div className="text-center">
                                             <FileText className="w-16 h-16 mx-auto text-gray-400" />
-                                            <p className="mt-2 text-gray-600">No preview available for this file type.</p>
+                                            <p className="mt-2 text-gray-600">No hay vista previa disponible para este tipo de archivo.</p>
                                             <a href={previewFile.url} download={previewFile.name} className="mt-4 inline-flex items-center px-4 py-2 bg-primary-600 text-white rounded-lg">
-                                                <Download className="w-4 h-4 mr-2" /> Download "{previewFile.name}"
+                                                <Download className="w-4 h-4 mr-2" /> Descargar "{previewFile.name}"
                                             </a>
                                         </div>
                                     )}
@@ -463,7 +463,7 @@ export const CandidateDetailsModal: React.FC<{ candidate: Candidate, onClose: ()
                                 ) : (
                                     <div className="text-center text-gray-500">
                                         <Eye className="w-12 h-12 mx-auto mb-2" />
-                                        <p>Select a file to preview</p>
+                                        <p>Selecciona un archivo para previsualizar</p>
                                     </div>
                                 )}
                             </div>
@@ -473,18 +473,18 @@ export const CandidateDetailsModal: React.FC<{ candidate: Candidate, onClose: ()
                         <div className="p-6">
                              <ul className="border rounded-lg overflow-hidden">
                                 <li className="p-3 bg-gray-50 font-medium text-sm grid grid-cols-3">
-                                    <span>Stage</span>
-                                    <span className="text-center">Moved By</span>
-                                    <span className="text-right">Date</span>
+                                    <span>Etapa</span>
+                                    <span className="text-center">Movido por</span>
+                                    <span className="text-right">Fecha</span>
                                 </li>
                                 {initialCandidate.history.length > 0 ? initialCandidate.history.slice().reverse().map((h, index) => (
                                     <li key={index} className="p-3 border-t grid grid-cols-3 items-center">
-                                        <p className="font-medium text-gray-800">{process.stages.find(s => s.id === h.stageId)?.name || 'Unknown'}</p>
+                                        <p className="font-medium text-gray-800">{process.stages.find(s => s.id === h.stageId)?.name || 'Desconocido'}</p>
                                         <p className="text-sm text-gray-500 text-center">{h.movedBy}</p>
                                         <p className="text-sm text-gray-500 text-right">{new Date(h.movedAt).toLocaleString()}</p>
                                     </li>
                                 )) : (
-                                    <li className="p-6 text-center text-gray-500">No history found.</li>
+                                    <li className="p-6 text-center text-gray-500">No hay historial.</li>
                                 )}
                              </ul>
                         </div>
@@ -492,9 +492,9 @@ export const CandidateDetailsModal: React.FC<{ candidate: Candidate, onClose: ()
                     {activeTab === 'schedule' && (
                         <div className="p-6">
                             <div className="flex justify-between items-center mb-4">
-                                <h3 className="text-lg font-semibold text-gray-800">Scheduled Interviews</h3>
+                                <h3 className="text-lg font-semibold text-gray-800">Entrevistas programadas</h3>
                                 <button onClick={() => openScheduler()} className="flex items-center px-3 py-1.5 bg-primary-600 text-white rounded-md shadow-sm hover:bg-primary-700 text-sm">
-                                    <Calendar className="w-4 h-4 mr-2" /> Schedule New
+                                    <Calendar className="w-4 h-4 mr-2" /> Programar nueva
                                 </button>
                             </div>
                             <div className="border rounded-lg overflow-hidden">
@@ -504,7 +504,7 @@ export const CandidateDetailsModal: React.FC<{ candidate: Candidate, onClose: ()
                                             <li key={event.id} className="p-3 border-b last:border-b-0 grid grid-cols-4 items-center gap-4">
                                                 <div>
                                                     <p className="font-medium text-gray-900">{event.title}</p>
-                                                    <p className="text-xs text-gray-500">with {state.users.find(u => u.id === event.interviewerId)?.name || 'Unknown'}</p>
+                                                    <p className="text-xs text-gray-500">con {state.users.find(u => u.id === event.interviewerId)?.name || 'Desconocido'}</p>
                                                 </div>
                                                 <p className="text-sm text-gray-600">{event.start.toLocaleString()}</p>
                                                 <p className="text-sm text-gray-600 italic truncate">{event.notes}</p>
@@ -516,7 +516,7 @@ export const CandidateDetailsModal: React.FC<{ candidate: Candidate, onClose: ()
                                         ))}
                                     </ul>
                                 ) : (
-                                    <div className="p-8 text-center text-gray-500">No interviews scheduled for this candidate.</div>
+                                    <div className="p-8 text-center text-gray-500">No hay entrevistas programadas para este candidato.</div>
                                 )}
                             </div>
                         </div>
@@ -605,8 +605,8 @@ export const CandidateDetailsModal: React.FC<{ candidate: Candidate, onClose: ()
                 </main>
                 {isEditing && (
                     <footer className="p-4 bg-gray-50 border-t flex justify-end space-x-3 flex-shrink-0">
-                        <button type="button" onClick={handleCancelEdit} className="px-4 py-2 bg-white border border-gray-300 rounded-md shadow-sm text-sm font-medium">Cancel</button>
-                        <button type="button" onClick={handleSaveChanges} className="px-4 py-2 bg-primary-600 text-white rounded-md shadow-sm text-sm font-medium">Save Changes</button>
+                        <button type="button" onClick={handleCancelEdit} className="px-4 py-2 bg-white border border-gray-300 rounded-md shadow-sm text-sm font-medium">Cancelar</button>
+                        <button type="button" onClick={handleSaveChanges} className="px-4 py-2 bg-primary-600 text-white rounded-md shadow-sm text-sm font-medium">Guardar cambios</button>
                     </footer>
                 )}
             </div>

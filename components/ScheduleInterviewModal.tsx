@@ -104,7 +104,7 @@ export const ScheduleInterviewModal: React.FC<ScheduleInterviewModalProps> = ({ 
         e.preventDefault();
         
         if (!candidateId || !interviewerId) {
-            alert("Please select a candidate and an interviewer.");
+            alert("Selecciona un candidato y un entrevistador.");
             return;
         }
 
@@ -112,7 +112,7 @@ export const ScheduleInterviewModal: React.FC<ScheduleInterviewModalProps> = ({ 
         const endDateTime = new Date(`${date}T${endTime}`);
         
         if (startDateTime >= endDateTime) {
-            alert("End time must be after start time.");
+            alert("La hora de fin debe ser posterior a la hora de inicio.");
             return;
         }
 
@@ -139,46 +139,46 @@ export const ScheduleInterviewModal: React.FC<ScheduleInterviewModalProps> = ({ 
             <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg">
                 <form onSubmit={handleSubmit}>
                     <div className="p-6 border-b flex justify-between items-center">
-                        <h2 className="text-2xl font-bold text-gray-800">{event ? 'Edit Interview' : 'Schedule Interview'}</h2>
+                        <h2 className="text-2xl font-bold text-gray-800">{event ? 'Editar entrevista' : 'Programar entrevista'}</h2>
                         <button type="button" onClick={onClose} className="p-2 rounded-full hover:bg-gray-100">
                             <X className="w-6 h-6 text-gray-600" />
                         </button>
                     </div>
                     <div className="p-6 space-y-4 max-h-[70vh] overflow-y-auto">
                         <div>
-                            <label htmlFor="candidateId" className="block text-sm font-medium text-gray-700 flex items-center"><Briefcase className="w-4 h-4 mr-2"/> Candidate</label>
+                            <label htmlFor="candidateId" className="block text-sm font-medium text-gray-700 flex items-center"><Briefcase className="w-4 h-4 mr-2"/> Candidato</label>
                             <select id="candidateId" value={candidateId} onChange={e => setCandidateId(e.target.value)} required disabled={!!defaultCandidateId} className="mt-1 block w-full input">
-                                <option value="" disabled>Select a candidate</option>
+                                <option value="" disabled>Selecciona un candidato</option>
                                 {state.candidates.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                             </select>
                         </div>
                          <div>
-                            <label htmlFor="interviewerId" className="block text-sm font-medium text-gray-700 flex items-center"><User className="w-4 h-4 mr-2"/> Interviewer</label>
+                            <label htmlFor="interviewerId" className="block text-sm font-medium text-gray-700 flex items-center"><User className="w-4 h-4 mr-2"/> Entrevistador</label>
                             <select id="interviewerId" value={interviewerId} onChange={e => setInterviewerId(e.target.value)} required className="mt-1 block w-full input">
-                                <option value="" disabled>Select an interviewer</option>
+                                <option value="" disabled>Selecciona un entrevistador</option>
                                 {state.users.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
                             </select>
                         </div>
                          <div>
-                            <label htmlFor="title" className="block text-sm font-medium text-gray-700">Title</label>
+                            <label htmlFor="title" className="block text-sm font-medium text-gray-700">Título</label>
                             <input type="text" id="title" value={title} onChange={e => setTitle(e.target.value)} required className="mt-1 block w-full input"/>
                         </div>
                         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                             <div className="md:col-span-1">
-                                <label htmlFor="date" className="block text-sm font-medium text-gray-700 flex items-center"><Calendar className="w-4 h-4 mr-2"/> Date</label>
+                                <label htmlFor="date" className="block text-sm font-medium text-gray-700 flex items-center"><Calendar className="w-4 h-4 mr-2"/> Fecha</label>
                                 <input type="date" id="date" value={date} onChange={e => setDate(e.target.value)} required className="mt-1 block w-full input"/>
                             </div>
                              <div className="md:col-span-1">
-                                <label htmlFor="startTime" className="block text-sm font-medium text-gray-700 flex items-center"><Clock className="w-4 h-4 mr-2"/> Start Time</label>
+                                <label htmlFor="startTime" className="block text-sm font-medium text-gray-700 flex items-center"><Clock className="w-4 h-4 mr-2"/> Hora inicio</label>
                                 <input type="time" id="startTime" value={startTime} onChange={e => setStartTime(e.target.value)} required className="mt-1 block w-full input"/>
                             </div>
                              <div className="md:col-span-1">
-                                <label htmlFor="endTime" className="block text-sm font-medium text-gray-700 flex items-center"><Clock className="w-4 h-4 mr-2"/> End Time</label>
+                                <label htmlFor="endTime" className="block text-sm font-medium text-gray-700 flex items-center"><Clock className="w-4 h-4 mr-2"/> Hora fin</label>
                                 <input type="time" id="endTime" value={endTime} onChange={e => setEndTime(e.target.value)} required className="mt-1 block w-full input"/>
                             </div>
                         </div>
                         <div>
-                            <label htmlFor="notes" className="block text-sm font-medium text-gray-700 flex items-center"><FileText className="w-4 h-4 mr-2"/> Notes</label>
+                            <label htmlFor="notes" className="block text-sm font-medium text-gray-700 flex items-center"><FileText className="w-4 h-4 mr-2"/> Notas</label>
                             <textarea id="notes" value={notes} onChange={e => setNotes(e.target.value)} rows={3} className="mt-1 block w-full input" />
                         </div>
                         
@@ -266,9 +266,9 @@ export const ScheduleInterviewModal: React.FC<ScheduleInterviewModalProps> = ({ 
                             </div>
                         )}
                     </div>
-                     <div className="p-6 bg-gray-50 rounded-b-xl flex justify-end space-x-3">
-                        <button type="button" onClick={onClose} className="btn-secondary">Cancel</button>
-                        <button type="submit" className="btn-primary">{event ? 'Save Changes' : 'Schedule'}</button>
+                    <div className="p-6 bg-gray-50 rounded-b-xl flex justify-end space-x-3">
+                        <button type="button" onClick={onClose} className="btn-secondary">Cancelar</button>
+                        <button type="submit" className="btn-primary">{event ? 'Guardar cambios' : 'Programar'}</button>
                     </div>
                 </form>
             </div>

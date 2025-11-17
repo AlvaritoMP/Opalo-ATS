@@ -23,10 +23,10 @@ export const Users: React.FC = () => {
     
     const handleDelete = (userId: string) => {
         if (userId === state.currentUser?.id) {
-            alert("You cannot delete your own account.");
+            alert("No puedes eliminar tu propia cuenta.");
             return;
         }
-        if (window.confirm("Are you sure you want to delete this user?")) {
+        if (window.confirm("¿Seguro que deseas eliminar este usuario?")) {
             actions.deleteUser(userId);
         }
     };
@@ -69,14 +69,18 @@ export const Users: React.FC = () => {
                         {state.users.map(user => (
                             <tr key={user.id} className="bg-white border-b hover:bg-gray-50">
                                 <th scope="row" className="px-6 py-4 font-medium text-gray-900 whitespace-nowrap">
-                                    {user.avatarUrl ? (
-                                        <div className="flex items-center space-x-3">
-                                            <img src={user.avatarUrl} alt={user.name} className="w-9 h-9 rounded-full object-cover" />
-                                            <span>{user.name}</span>
+                                    <div className="flex items-center space-x-3">
+                                        <div className="w-9 h-9 rounded-full bg-gray-200 overflow-hidden flex items-center justify-center">
+                                            {user.avatarUrl ? (
+                                                <img src={user.avatarUrl} alt={user.name} className="w-full h-full object-cover" />
+                                            ) : (
+                                                <span className="text-gray-600 text-xs font-semibold">
+                                                    {user.name.split(' ').slice(0,2).map(p => p.charAt(0)).join('').toUpperCase()}
+                                                </span>
+                                            )}
                                         </div>
-                                    ) : (
-                                        user.name
-                                    )}
+                                        <span>{user.name}</span>
+                                    </div>
                                 </th>
                                 <td className="px-6 py-4">{user.email}</td>
                                 <td className="px-6 py-4">

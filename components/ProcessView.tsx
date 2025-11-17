@@ -4,6 +4,7 @@ import { CandidateCard } from './CandidateCard';
 import { Plus, Edit, Briefcase, DollarSign, BarChart, Clock, Paperclip, X, FileText, ClipboardList, Tag, Users } from 'lucide-react';
 import { AddCandidateModal } from './AddCandidateModal';
 import { ProcessEditorModal } from './ProcessEditorModal';
+import { BulkLetterModal } from './BulkLetterModal';
 import { Attachment, UserRole, ProcessStatus } from '../types';
 
 interface ProcessViewProps {
@@ -13,14 +14,14 @@ interface ProcessViewProps {
 const ProcessAttachmentsModal: React.FC<{ attachments: Attachment[]; onClose: () => void }> = ({ attachments, onClose }) => (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
         <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg">
-            <div className="p-6 border-b flex justify-between items-center"><h2 className="text-xl font-bold text-gray-800">Process Attachments</h2><button onClick={onClose} className="p-2 rounded-full hover:bg-gray-100"><X /></button></div>
+            <div className="p-6 border-b flex justify-between items-center"><h2 className="text-xl font-bold text-gray-800">Documentos del proceso</h2><button onClick={onClose} className="p-2 rounded-full hover:bg-gray-100"><X /></button></div>
             <div className="p-6 max-h-[60vh] overflow-y-auto">
                 {attachments.length > 0 ? attachments.map(att => (
                     <a href={att.url} target="_blank" rel="noopener noreferrer" key={att.id} className="flex items-center p-2 rounded-md hover:bg-gray-100">
                         <FileText className="w-5 h-5 mr-3 text-gray-500"/>
                         <span className="text-sm font-medium text-primary-600">{att.name}</span>
                     </a>
-                )) : <p className="text-sm text-gray-500 text-center">No documents attached to this process.</p>}
+                )) : <p className="text-sm text-gray-500 text-center">No hay documentos adjuntos para este proceso.</p>}
             </div>
         </div>
     </div>
@@ -32,6 +33,7 @@ export const ProcessView: React.FC<ProcessViewProps> = ({ processId }) => {
     const [isAddCandidateOpen, setIsAddCandidateOpen] = useState(false);
     const [isProcessEditorOpen, setIsProcessEditorOpen] = useState(false);
     const [isAttachmentsModalOpen, setIsAttachmentsModalOpen] = useState(false);
+    const [isBulkLetterOpen, setIsBulkLetterOpen] = useState(false);
     const [selectedCandidates, setSelectedCandidates] = useState<string[]>([]);
     const dragPayload = React.useRef<{ candidateId: string; isBulk: boolean } | null>(null);
 
@@ -91,7 +93,7 @@ export const ProcessView: React.FC<ProcessViewProps> = ({ processId }) => {
         e.currentTarget.classList.remove('bg-primary-50');
     };
 
-    if (!process) return <div className="p-8 text-center">Process not found.</div>;
+    if (!process) return <div className="p-8 text-center">Proceso no encontrado.</div>;
     
     const statusLabels: Record<ProcessStatus, string> = {
         en_proceso: 'En Proceso',
@@ -126,6 +128,11 @@ export const ProcessView: React.FC<ProcessViewProps> = ({ processId }) => {
                      </div>
                      {canManageProcess && (
                         <div className="flex items-center space-x-3">
+                            {selectedCandidates.length > 0 && (
+                                <button onClick={() => setIsBulkLetterOpen(true)} className="flex items-center px-4 py-2 bg-white border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 hover:bg-gray-50">
+                                    <FileText className="w-4 h-4 mr-2"/> Emitir cartas ({selectedCandidates.length})
+                                </button>
+                            )}
                             <button onClick={() => setIsAttachmentsModalOpen(true)} className="flex items-center px-4 py-2 bg-white border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50" disabled={!process.attachments?.length}>
                             <Paperclip className="w-4 h-4 mr-2"/> Ver documentos ({process.attachments?.length || 0})
                             </button>
@@ -180,6 +187,7 @@ export const ProcessView: React.FC<ProcessViewProps> = ({ processId }) => {
             {isAddCandidateOpen && <AddCandidateModal process={process} onClose={() => setIsAddCandidateOpen(false)} />}
             {isProcessEditorOpen && <ProcessEditorModal process={process} onClose={() => setIsProcessEditorOpen(false)} />}
             {isAttachmentsModalOpen && <ProcessAttachmentsModal attachments={process.attachments} onClose={() => setIsAttachmentsModalOpen(false)} />}
+            {isBulkLetterOpen && <BulkLetterModal candidateIds={selectedCandidates} onClose={() => setIsBulkLetterOpen(false)} />}
         </div>
     );
 };

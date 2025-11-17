@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { useAppState } from '../App';
 import { User, UserRole } from '../types';
 import { X } from 'lucide-react';
@@ -16,6 +16,19 @@ export const UserEditorModal: React.FC<UserEditorModalProps> = ({ user, onClose 
     const [password, setPassword] = useState('');
     const [confirmPassword, setConfirmPassword] = useState('');
     const [avatarUrl, setAvatarUrl] = useState(user?.avatarUrl || '');
+    const avatarInputRef = useRef<HTMLInputElement>(null);
+
+    const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+        if (!file.type.startsWith('image/')) return;
+        const reader = new FileReader();
+        reader.onload = () => {
+            const dataUrl = reader.result as string;
+            setAvatarUrl(dataUrl);
+        };
+        reader.readAsDataURL(file);
+    };
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -61,13 +74,26 @@ export const UserEditorModal: React.FC<UserEditorModalProps> = ({ user, onClose 
                         </button>
                     </div>
                     <div className="p-6 space-y-4">
-                        <div>
-                            <label className="block text-sm font-medium text-gray-700">Foto de perfil (URL)</label>
+                        <div className="space-y-2">
+                            <label className="block text-sm font-medium text-gray-700">Foto de perfil</label>
+                            <div className="flex items-center space-x-3">
+                                <div className="w-14 h-14 rounded-full bg-gray-200 overflow-hidden flex items-center justify-center">
+                                    {avatarUrl ? (
+                                        <img src={avatarUrl} alt={name || 'Avatar'} className="w-full h-full object-cover" />
+                                    ) : (
+                                        <span className="text-gray-500 text-sm">Sin foto</span>
+                                    )}
+                                </div>
+                                <div className="flex items-center gap-2">
+                                    <button type="button" onClick={() => avatarInputRef.current?.click()} className="px-3 py-2 text-sm bg-white border border-gray-300 rounded-md shadow-sm hover:bg-gray-50">Subir foto</button>
+                                    <input type="file" accept="image/*" ref={avatarInputRef} onChange={handleAvatarUpload} className="hidden" />
+                                </div>
+                            </div>
                             <input
                                 type="url"
                                 value={avatarUrl}
                                 onChange={e => setAvatarUrl(e.target.value)}
-                                placeholder="https://..."
+                                placeholder="o pega aquí la URL https://..."
                                 className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm"
                             />
                         </div>
