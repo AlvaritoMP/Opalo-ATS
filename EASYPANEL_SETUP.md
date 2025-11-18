@@ -55,9 +55,11 @@ Después del rebuild, verifica:
 
 He creado estos archivos para facilitar el despliegue:
 
-- `nixpacks.toml`: Configuración para usar Node 20 y Caddy
+- `nixpacks.toml`: Configuración para usar Node 20 (Caddy se instala automáticamente)
 - `Caddyfile`: Configuración del servidor web
 - `package.json`: Actualizado con `engines` para requerir Node 20
+
+**Nota importante**: No incluyas `caddy` en `nixPkgs` porque Nixpacks lo instala automáticamente cuando detecta el `Caddyfile`. Incluirlo manualmente causa conflictos.
 
 ## Si Aún No Funciona
 

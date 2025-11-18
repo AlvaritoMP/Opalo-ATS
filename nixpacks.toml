@@ -1,5 +1,6 @@
 [phases.setup]
-nixPkgs = ["nodejs_20", "npm-10_x", "caddy"]
+nixPkgs = ["nodejs_20", "npm-10_x"]
+# Caddy se instala automáticamente cuando Nixpacks detecta el Caddyfile
 
 [phases.install]
 cmds = ["npm ci"]
