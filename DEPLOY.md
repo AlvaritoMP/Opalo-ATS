@@ -41,9 +41,20 @@ git push
 
 ### 2. Configurar Variables de Entorno en EasyPanel
 
-En el panel de EasyPanel, configura las siguientes variables de entorno:
+En el panel de EasyPanel, ve a la sección **"Environment Variables"** o **"Variables de Entorno"** y configura:
 
-- `GEMINI_API_KEY`: Tu clave API de Gemini (obtener en https://aistudio.google.com/apikey)
+**Variables requeridas:**
+
+1. **`VITE_SUPABASE_URL`**: URL de tu proyecto Supabase
+   - Valor: `https://afhiiplxqtodqxvmswor.supabase.co`
+
+2. **`VITE_SUPABASE_ANON_KEY`**: Clave anónima de Supabase
+   - Valor: `eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFmaGlpcGx4cXRvZHF4dm1zd29yIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjI4Njg4MTYsImV4cCI6MjA3ODQ0NDgxNn0.r9YmrHHajLsd5YHUkPnmD7UazpvmsW0TfqC5jy0_3ZU`
+
+3. **`GEMINI_API_KEY`** (opcional): Tu clave API de Gemini para funcionalidades de IA
+   - Obtener en: https://aistudio.google.com/apikey
+
+**Nota importante:** Las variables que empiezan con `VITE_` son necesarias porque Vite las inyecta en el código durante el build. Asegúrate de configurarlas ANTES de hacer el build.
 
 ### 3. Crear Nueva Aplicación en EasyPanel
 
