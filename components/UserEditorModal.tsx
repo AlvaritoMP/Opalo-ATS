@@ -1,7 +1,7 @@
 import React, { useRef, useState } from 'react';
 import { useAppState } from '../App';
-import { User, UserRole, Permission, PermissionCategory } from '../types';
-import { X, ChevronDown, ChevronRight, Shield } from 'lucide-react';
+import { User, UserRole, Permission, PermissionCategory, Section } from '../types';
+import { X, ChevronDown, ChevronRight, Shield, Eye } from 'lucide-react';
 
 interface UserEditorModalProps {
     user: User | null;
@@ -103,6 +103,29 @@ const DEFAULT_ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     ]
 };
 
+// Secciones visibles por defecto según rol
+const DEFAULT_ROLE_SECTIONS: Record<UserRole, Section[]> = {
+    admin: ['dashboard', 'processes', 'archived', 'candidates', 'forms', 'letters', 'calendar', 'reports', 'compare', 'bulk-import', 'users', 'settings'],
+    recruiter: ['dashboard', 'processes', 'archived', 'candidates', 'forms', 'letters', 'calendar', 'reports', 'compare', 'bulk-import'],
+    client: ['dashboard', 'processes', 'candidates', 'calendar', 'reports', 'compare'],
+    viewer: ['dashboard', 'processes', 'candidates', 'calendar', 'reports']
+};
+
+const SECTION_LABELS: Record<Section, string> = {
+    'dashboard': 'Panel',
+    'processes': 'Procesos',
+    'archived': 'Archivados',
+    'candidates': 'Candidatos',
+    'forms': 'Formularios',
+    'letters': 'Cartas',
+    'calendar': 'Calendario',
+    'reports': 'Reportes',
+    'compare': 'Comparador',
+    'bulk-import': 'Importación Masiva',
+    'users': 'Usuarios',
+    'settings': 'Configuración'
+};
+
 const PERMISSION_LABELS: Record<Permission, string> = {
     'processes.view': 'Ver procesos',
     'processes.create': 'Crear procesos',
@@ -145,15 +168,28 @@ export const UserEditorModal: React.FC<UserEditorModalProps> = ({ user, onClose 
     const [avatarUrl, setAvatarUrl] = useState(user?.avatarUrl || '');
     const [useCustomPermissions, setUseCustomPermissions] = useState(!!user?.permissions);
     const [permissions, setPermissions] = useState<Permission[]>(user?.permissions || DEFAULT_ROLE_PERMISSIONS[user?.role || 'viewer']);
+    const [useCustomSections, setUseCustomSections] = useState(!!user?.visibleSections);
+    const [visibleSections, setVisibleSections] = useState<Section[]>(user?.visibleSections || DEFAULT_ROLE_SECTIONS[user?.role || 'viewer']);
     const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set(['processes', 'candidates']));
     const avatarInputRef = useRef<HTMLInputElement>(null);
 
-    // Actualizar permisos cuando cambia el rol (si no hay permisos personalizados)
+    // Actualizar permisos y secciones cuando cambia el rol (si no hay personalización)
     const handleRoleChange = (newRole: UserRole) => {
         setRole(newRole);
         if (!useCustomPermissions) {
             setPermissions(DEFAULT_ROLE_PERMISSIONS[newRole]);
         }
+        if (!useCustomSections) {
+            setVisibleSections(DEFAULT_ROLE_SECTIONS[newRole]);
+        }
+    };
+
+    const toggleSection = (section: Section) => {
+        if (!useCustomSections) return;
+        const newSections = visibleSections.includes(section)
+            ? visibleSections.filter(s => s !== section)
+            : [...visibleSections, section];
+        setVisibleSections(newSections);
     };
 
     const toggleCategory = (categoryId: string) => {
@@ -219,7 +255,8 @@ export const UserEditorModal: React.FC<UserEditorModalProps> = ({ user, onClose 
             email, 
             role, 
             avatarUrl,
-            permissions: useCustomPermissions ? permissions : undefined
+            permissions: useCustomPermissions ? permissions : undefined,
+            visibleSections: useCustomSections ? visibleSections : undefined
         };
 
         if (password) {
@@ -420,6 +457,61 @@ export const UserEditorModal: React.FC<UserEditorModalProps> = ({ user, onClose 
                                 <div className="text-sm text-gray-600 bg-blue-50 border border-blue-200 rounded-lg p-3">
                                     <p>Se están usando los permisos por defecto del rol <strong>{role}</strong>.</p>
                                     <p className="mt-1 text-xs">Activa "Personalizar permisos" para ajustar permisos individuales.</p>
+                                </div>
+                            )}
+                        </div>
+                        
+                        {/* Sección de Visibilidad de Secciones */}
+                        <div className="border-t pt-4 mt-4">
+                            <div className="flex items-center justify-between mb-3">
+                                <div className="flex items-center gap-2">
+                                    <Eye className="w-5 h-5 text-gray-600" />
+                                    <label className="text-sm font-medium text-gray-700">Secciones Visibles</label>
+                                </div>
+                                <label className="flex items-center gap-2 text-sm">
+                                    <input
+                                        type="checkbox"
+                                        checked={useCustomSections}
+                                        onChange={e => {
+                                            const useCustom = e.target.checked;
+                                            setUseCustomSections(useCustom);
+                                            if (!useCustom) {
+                                                setVisibleSections(DEFAULT_ROLE_SECTIONS[role]);
+                                            }
+                                        }}
+                                        className="rounded"
+                                    />
+                                    Personalizar secciones
+                                </label>
+                            </div>
+                            
+                            {useCustomSections ? (
+                                <div className="space-y-2 border rounded-lg p-3 bg-gray-50">
+                                    <p className="text-xs text-gray-600 mb-2">Selecciona las secciones que este usuario puede ver en el menú:</p>
+                                    <div className="grid grid-cols-2 gap-2">
+                                        {(Object.keys(SECTION_LABELS) as Section[]).map(section => (
+                                            <label 
+                                                key={section} 
+                                                className="flex items-center gap-2 p-2 hover:bg-white rounded cursor-pointer border border-gray-200"
+                                            >
+                                                <input
+                                                    type="checkbox"
+                                                    checked={visibleSections.includes(section)}
+                                                    onChange={() => toggleSection(section)}
+                                                    className="rounded"
+                                                />
+                                                <span className="text-sm text-gray-700">{SECTION_LABELS[section]}</span>
+                                            </label>
+                                        ))}
+                                    </div>
+                                    <p className="text-xs text-gray-500 mt-2">
+                                        {visibleSections.length} de {Object.keys(SECTION_LABELS).length} secciones visibles
+                                    </p>
+                                </div>
+                            ) : (
+                                <div className="text-sm text-gray-600 bg-blue-50 border border-blue-200 rounded-lg p-3">
+                                    <p>Se están usando las secciones por defecto del rol <strong>{role}</strong>.</p>
+                                    <p className="mt-1 text-xs">Activa "Personalizar secciones" para controlar qué secciones puede ver este usuario.</p>
                                 </div>
                             )}
                         </div>

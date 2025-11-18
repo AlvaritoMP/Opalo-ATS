@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useMemo } from 'react';
 import { initialProcesses, initialCandidates, initialUsers, initialSettings, initialFormIntegrations, initialInterviewEvents } from './lib/data';
-import { Process, Candidate, User, AppSettings, FormIntegration, InterviewEvent, CandidateHistory, Application, PostIt, Comment } from './types';
+import { Process, Candidate, User, AppSettings, FormIntegration, InterviewEvent, CandidateHistory, Application, PostIt, Comment, Section, UserRole } from './types';
 import { getSettings, saveSettings as saveSettingsToStorage } from './lib/settings';
 import { Dashboard } from './components/Dashboard';
 import { ProcessList } from './components/ProcessList';
@@ -212,6 +212,23 @@ const LoginPage: React.FC = () => {
 };
 
 // --- Sidebar Components (defined in App.tsx to avoid creating new files) ---
+
+// Helper para obtener las secciones visibles de un usuario
+const getVisibleSections = (user: User | null): Section[] => {
+    if (!user) return [];
+    if (user.visibleSections && user.visibleSections.length > 0) {
+        return user.visibleSections;
+    }
+    // Secciones por defecto según rol
+    const defaultSections: Record<UserRole, Section[]> = {
+        admin: ['dashboard', 'processes', 'archived', 'candidates', 'forms', 'letters', 'calendar', 'reports', 'compare', 'bulk-import', 'users', 'settings'],
+        recruiter: ['dashboard', 'processes', 'archived', 'candidates', 'forms', 'letters', 'calendar', 'reports', 'compare', 'bulk-import'],
+        client: ['dashboard', 'processes', 'candidates', 'calendar', 'reports', 'compare'],
+        viewer: ['dashboard', 'processes', 'candidates', 'calendar', 'reports']
+    };
+    return defaultSections[user.role] || [];
+};
+
 const NavItem: React.FC<{
     icon: React.ElementType,
     label: string,
@@ -242,6 +259,9 @@ const Sidebar: React.FC = () => {
     const [isCollapsed, setIsCollapsed] = React.useState(false);
     
     if (!state.currentUser) return null;
+    
+    const visibleSections = getVisibleSections(state.currentUser);
+    const canSeeSection = (section: Section) => visibleSections.includes(section);
 
     return (
         <div className={`flex flex-col bg-white border-r transition-all duration-300 ${isCollapsed ? 'w-20' : 'w-64'}`}>
@@ -257,21 +277,21 @@ const Sidebar: React.FC = () => {
                 </button>
             </div>
             <nav className="flex-1 p-4 space-y-2 overflow-y-auto">
-                <NavItem icon={LayoutDashboard} label={getLabel('sidebar_dashboard', 'Panel')} view="dashboard" currentView={state.view.type} setView={actions.setView} isCollapsed={isCollapsed} />
-                <NavItem icon={Briefcase} label={getLabel('sidebar_processes', 'Procesos')} view="processes" currentView={state.view.type} setView={actions.setView} isCollapsed={isCollapsed} />
-                <NavItem icon={Archive} label={getLabel('sidebar_archived', 'Archivados')} view="archived" currentView={state.view.type} setView={actions.setView} isCollapsed={isCollapsed} />
-                <NavItem icon={UsersIcon} label={getLabel('menu_candidates', 'Candidatos')} view="candidates" currentView={state.view.type} setView={actions.setView} isCollapsed={isCollapsed} />
-                <NavItem icon={FileText} label={getLabel('sidebar_forms', 'Formularios')} view="forms" currentView={state.view.type} setView={actions.setView} isCollapsed={isCollapsed} />
-                <NavItem icon={FileText} label={getLabel('sidebar_letters', 'Cartas')} view="letters" currentView={state.view.type} setView={actions.setView} isCollapsed={isCollapsed} />
-                <NavItem icon={Calendar} label={getLabel('sidebar_calendar', 'Calendario')} view="calendar" currentView={state.view.type} setView={actions.setView} isCollapsed={isCollapsed} />
-                <NavItem icon={BarChart2} label={getLabel('sidebar_reports', 'Reportes')} view="reports" currentView={state.view.type} setView={actions.setView} isCollapsed={isCollapsed} />
-                <NavItem icon={BarChart2} label={getLabel('sidebar_compare', 'Comparador')} view="compare" currentView={state.view.type} setView={actions.setView} isCollapsed={isCollapsed} />
-                <NavItem icon={FileUp} label={getLabel('sidebar_bulk_import', 'Importación Masiva')} view="bulk-import" currentView={state.view.type} setView={actions.setView} isCollapsed={isCollapsed} />
+                {canSeeSection('dashboard') && <NavItem icon={LayoutDashboard} label={getLabel('sidebar_dashboard', 'Panel')} view="dashboard" currentView={state.view.type} setView={actions.setView} isCollapsed={isCollapsed} />}
+                {canSeeSection('processes') && <NavItem icon={Briefcase} label={getLabel('sidebar_processes', 'Procesos')} view="processes" currentView={state.view.type} setView={actions.setView} isCollapsed={isCollapsed} />}
+                {canSeeSection('archived') && <NavItem icon={Archive} label={getLabel('sidebar_archived', 'Archivados')} view="archived" currentView={state.view.type} setView={actions.setView} isCollapsed={isCollapsed} />}
+                {canSeeSection('candidates') && <NavItem icon={UsersIcon} label={getLabel('menu_candidates', 'Candidatos')} view="candidates" currentView={state.view.type} setView={actions.setView} isCollapsed={isCollapsed} />}
+                {canSeeSection('forms') && <NavItem icon={FileText} label={getLabel('sidebar_forms', 'Formularios')} view="forms" currentView={state.view.type} setView={actions.setView} isCollapsed={isCollapsed} />}
+                {canSeeSection('letters') && <NavItem icon={FileText} label={getLabel('sidebar_letters', 'Cartas')} view="letters" currentView={state.view.type} setView={actions.setView} isCollapsed={isCollapsed} />}
+                {canSeeSection('calendar') && <NavItem icon={Calendar} label={getLabel('sidebar_calendar', 'Calendario')} view="calendar" currentView={state.view.type} setView={actions.setView} isCollapsed={isCollapsed} />}
+                {canSeeSection('reports') && <NavItem icon={BarChart2} label={getLabel('sidebar_reports', 'Reportes')} view="reports" currentView={state.view.type} setView={actions.setView} isCollapsed={isCollapsed} />}
+                {canSeeSection('compare') && <NavItem icon={BarChart2} label={getLabel('sidebar_compare', 'Comparador')} view="compare" currentView={state.view.type} setView={actions.setView} isCollapsed={isCollapsed} />}
+                {canSeeSection('bulk-import') && <NavItem icon={FileUp} label={getLabel('sidebar_bulk_import', 'Importación Masiva')} view="bulk-import" currentView={state.view.type} setView={actions.setView} isCollapsed={isCollapsed} />}
             </nav>
             <div className="p-2 border-t space-y-2">
                  <div className="p-2">
-                    <NavItem icon={UsersIcon} label={getLabel('sidebar_users', 'Usuarios')} view="users" currentView={state.view.type} setView={actions.setView} isCollapsed={isCollapsed} />
-                    <NavItem icon={SettingsIcon} label={getLabel('sidebar_settings', 'Configuración')} view="settings" currentView={state.view.type} setView={actions.setView} isCollapsed={isCollapsed} />
+                    {canSeeSection('users') && <NavItem icon={UsersIcon} label={getLabel('sidebar_users', 'Usuarios')} view="users" currentView={state.view.type} setView={actions.setView} isCollapsed={isCollapsed} />}
+                    {canSeeSection('settings') && <NavItem icon={SettingsIcon} label={getLabel('sidebar_settings', 'Configuración')} view="settings" currentView={state.view.type} setView={actions.setView} isCollapsed={isCollapsed} />}
                 </div>
                  <div className="p-2 border-t">
                     <div className="flex items-center">
@@ -558,6 +578,33 @@ const App: React.FC = () => {
     };
     
     const renderView = () => {
+        // Verificar si el usuario tiene acceso a la sección actual
+        if (state.currentUser) {
+            const visibleSections = getVisibleSections(state.currentUser);
+            const viewSectionMap: Record<string, Section> = {
+                'dashboard': 'dashboard',
+                'processes': 'processes',
+                'process-view': 'processes',
+                'archived': 'archived',
+                'candidates': 'candidates',
+                'forms': 'forms',
+                'letters': 'letters',
+                'calendar': 'calendar',
+                'reports': 'reports',
+                'compare': 'compare',
+                'users': 'users',
+                'settings': 'settings',
+                'bulk-import': 'bulk-import'
+            };
+            
+            const requiredSection = viewSectionMap[state.view.type];
+            if (requiredSection && !visibleSections.includes(requiredSection)) {
+                // Redirigir al dashboard si no tiene acceso
+                actions.setView('dashboard');
+                return <Dashboard />;
+            }
+        }
+        
         switch (state.view.type) {
             case 'dashboard': return <Dashboard />;
             case 'processes': return <ProcessList />;

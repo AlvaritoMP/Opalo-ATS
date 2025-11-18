@@ -121,6 +121,20 @@ export interface PermissionCategory {
     permissions: Permission[];
 }
 
+export type Section = 
+    | 'dashboard' 
+    | 'processes' 
+    | 'archived' 
+    | 'candidates' 
+    | 'forms' 
+    | 'letters' 
+    | 'calendar' 
+    | 'reports' 
+    | 'compare' 
+    | 'bulk-import' 
+    | 'users' 
+    | 'settings';
+
 export interface User {
     id: string;
     name: string;
@@ -129,6 +143,7 @@ export interface User {
     password?: string;
     avatarUrl?: string;
     permissions?: Permission[]; // Permisos personalizados (sobrescribe los del rol)
+    visibleSections?: Section[]; // Secciones visibles en el menú (si no se define, usa las del rol por defecto)
 }
 
 // Basic definitions for unused types to satisfy compiler
