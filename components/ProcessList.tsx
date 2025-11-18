@@ -37,21 +37,33 @@ const ProcessCard: React.FC<{
                 {canEdit && (
                     <div className="absolute top-2 right-2">
                         <div className="relative">
-                            <button onClick={() => setDropdownOpen(!dropdownOpen)} onBlur={() => setTimeout(() => setDropdownOpen(false), 100)} className="p-2 rounded-full bg-black/30 text-white hover:bg-black/50">
+                            <button 
+                                onClick={(e) => { 
+                                    e.stopPropagation(); 
+                                    setDropdownOpen(!dropdownOpen); 
+                                }} 
+                                onBlur={(e) => {
+                                    // Solo cerrar si el foco no se mueve a un elemento dentro del dropdown
+                                    if (!e.currentTarget.parentElement?.contains(e.relatedTarget as Node)) {
+                                        setTimeout(() => setDropdownOpen(false), 150);
+                                    }
+                                }} 
+                                className="p-2 rounded-full bg-black/30 text-white hover:bg-black/50"
+                            >
                                 <MoreVertical className="w-5 h-5" />
                             </button>
                             {dropdownOpen && (
                                 <div className="origin-top-right absolute right-0 mt-2 w-48 rounded-md shadow-lg bg-white ring-1 ring-black ring-opacity-5 z-10">
                                     <div className="py-1">
-                        <a href="#" onClick={(e) => { e.preventDefault(); onView(); }} className="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
+                        <button onClick={(e) => { e.preventDefault(); e.stopPropagation(); setDropdownOpen(false); onView(); }} className="w-full text-left flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
                                             <Eye className="w-4 h-4 mr-3" /> Ver Tablero
-                                        </a>
-                        <a href="#" onClick={(e) => { e.preventDefault(); onEdit(); }} className="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
+                                        </button>
+                        <button onClick={(e) => { e.preventDefault(); e.stopPropagation(); setDropdownOpen(false); onEdit(); }} className="w-full text-left flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
                                             <Edit className="w-4 h-4 mr-3" /> Editar
-                                        </a>
-                        <a href="#" onClick={(e) => { e.preventDefault(); onDelete(); }} className="flex items-center px-4 py-2 text-sm text-red-600 hover:bg-red-50">
+                                        </button>
+                        <button onClick={(e) => { e.preventDefault(); e.stopPropagation(); setDropdownOpen(false); onDelete(); }} className="w-full text-left flex items-center px-4 py-2 text-sm text-red-600 hover:bg-red-50">
                                             <Trash2 className="w-4 h-4 mr-3" /> Eliminar
-                                        </a>
+                                        </button>
                                     </div>
                                 </div>
                             )}

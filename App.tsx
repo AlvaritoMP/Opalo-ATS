@@ -2,6 +2,7 @@ import React, { createContext, useContext, useState, useEffect, useMemo } from '
 import { initialProcesses, initialCandidates, initialUsers, initialSettings, initialFormIntegrations, initialInterviewEvents } from './lib/data';
 import { Process, Candidate, User, AppSettings, FormIntegration, InterviewEvent, CandidateHistory, Application, PostIt, Comment, Section, UserRole } from './types';
 import { getSettings, saveSettings as saveSettingsToStorage } from './lib/settings';
+import { usersApi, processesApi, candidatesApi, postItsApi, commentsApi, interviewsApi, settingsApi, setCurrentUser } from './lib/api/index';
 import { Dashboard } from './components/Dashboard';
 import { ProcessList } from './components/ProcessList';
 import { ProcessView } from './components/ProcessView';
@@ -330,37 +331,117 @@ const App: React.FC = () => {
     });
 
     useEffect(() => {
-        const loadedSettings = getSettings();
-        const initialData = {
-            processes: initialProcesses,
-            candidates: initialCandidates,
-            users: initialUsers,
-            applications: [],
-            settings: loadedSettings || initialSettings,
-            formIntegrations: initialFormIntegrations,
-            interviewEvents: initialInterviewEvents,
+        const loadData = async () => {
+            try {
+                console.log('Loading data from Supabase...');
+                
+                // Cargar datos de Supabase con timeouts y mejor manejo de errores
+                const loadWithFallback = async <T,>(
+                    apiCall: () => Promise<T>,
+                    fallback: T,
+                    name: string
+                ): Promise<T> => {
+                    try {
+                        const result = await Promise.race([
+                            apiCall(),
+                            new Promise<T>((_, reject) => 
+                                setTimeout(() => reject(new Error('Timeout')), 5000)
+                            )
+                        ]);
+                        console.log(`✓ Loaded ${name} from Supabase`);
+                        return result;
+                    } catch (error) {
+                        console.warn(`⚠ Failed to load ${name} from Supabase, using fallback:`, error);
+                        return fallback;
+                    }
+                };
+
+                const [processes, candidates, users, interviewEvents, settings] = await Promise.all([
+                    loadWithFallback(() => processesApi.getAll(), initialProcesses, 'processes'),
+                    loadWithFallback(() => candidatesApi.getAll(), initialCandidates, 'candidates'),
+                    loadWithFallback(() => usersApi.getAll(), initialUsers, 'users'),
+                    loadWithFallback(() => interviewsApi.getAll(), initialInterviewEvents, 'interviewEvents'),
+                    loadWithFallback(() => settingsApi.get(), getSettings() || initialSettings, 'settings'),
+                ]);
+
+                const sessionUserId = localStorage.getItem('ats_pro_user');
+                let currentUser: User | null = null;
+                
+                if (sessionUserId) {
+                    try {
+                        currentUser = await usersApi.getById(sessionUserId);
+                        if (currentUser) {
+                            await setCurrentUser(currentUser.id).catch(() => {
+                                // No crítico si falla
+                            });
+                        }
+                    } catch (error) {
+                        // Buscar en los usuarios cargados
+                        currentUser = users.find(u => u.id === sessionUserId) || null;
+                    }
+                }
+
+                console.log('✓ Data loaded successfully');
+                setState({
+                    processes,
+                    candidates,
+                    users,
+                    applications: [],
+                    settings,
+                    formIntegrations: initialFormIntegrations, // TODO: Implementar API
+                    interviewEvents,
+                    currentUser,
+                    view: { type: 'dashboard' },
+                    loading: false,
+                });
+            } catch (error) {
+                console.error('Error loading data:', error);
+                // Fallback a datos locales
+                const loadedSettings = getSettings();
+                const sessionUserId = localStorage.getItem('ats_pro_user');
+                const currentUser = sessionUserId ? initialUsers.find(u => u.id === sessionUserId) || null : null;
+                
+                console.log('Using local fallback data');
+                setState({
+                    processes: initialProcesses,
+                    candidates: initialCandidates,
+                    users: initialUsers,
+                    applications: [],
+                    settings: loadedSettings || initialSettings,
+                    formIntegrations: initialFormIntegrations,
+                    interviewEvents: initialInterviewEvents,
+                    currentUser,
+                    view: { type: 'dashboard' },
+                    loading: false,
+                });
+            }
         };
 
-        const sessionUserId = localStorage.getItem('ats_pro_user');
-        const currentUser = sessionUserId ? initialUsers.find(u => u.id === sessionUserId) || null : null;
-
-        setState({
-            ...initialData,
-            currentUser,
-            view: { type: 'dashboard' },
-            loading: false,
-        });
+        loadData();
     }, []);
 
     const actions: AppActions = useMemo(() => ({
         login: async (email, password) => {
-            const user = state.users.find(u => u.email.toLowerCase() === email.toLowerCase());
-            if (user && user.password === password) {
-                localStorage.setItem('ats_pro_user', user.id);
-                setState(s => ({ ...s, currentUser: user }));
-                return true;
+            try {
+                const user = await usersApi.login(email, password);
+                if (user) {
+                    localStorage.setItem('ats_pro_user', user.id);
+                    await setCurrentUser(user.id);
+                    setState(s => ({ ...s, currentUser: user }));
+                    return true;
+                }
+                return false;
+            } catch (error) {
+                console.error('Login error:', error);
+                // Fallback a búsqueda local
+                const user = state.users.find(u => u.email.toLowerCase() === email.toLowerCase());
+                if (user && user.password === password) {
+                    localStorage.setItem('ats_pro_user', user.id);
+                    setState(s => ({ ...s, currentUser: user }));
+                    return true;
+                }
+                return false;
             }
-            return false;
         },
         logout: () => {
             localStorage.removeItem('ats_pro_user');
@@ -368,54 +449,101 @@ const App: React.FC = () => {
         },
         setView: (type, payload) => setState(s => ({ ...s, view: { type, payload } })),
         saveSettings: async (settings) => {
-            saveSettingsToStorage(settings);
-            setState(s => ({ ...s, settings }));
+            try {
+                await settingsApi.update(settings);
+                saveSettingsToStorage(settings); // Backup local
+                setState(s => ({ ...s, settings }));
+            } catch (error) {
+                console.error('Error saving settings:', error);
+                saveSettingsToStorage(settings);
+                setState(s => ({ ...s, settings }));
+            }
         },
         addProcess: async (processData) => {
-            const newProcess: Process = { ...processData, id: `proc-${Date.now()}`, attachments: processData.attachments || [] };
-            setState(s => ({ ...s, processes: [...s.processes, newProcess] }));
+            try {
+                const newProcess = await processesApi.create(processData, state.currentUser?.id);
+                setState(s => ({ ...s, processes: [...s.processes, newProcess] }));
+            } catch (error) {
+                console.error('Error adding process:', error);
+                const newProcess: Process = { ...processData, id: `proc-${Date.now()}`, attachments: processData.attachments || [] };
+                setState(s => ({ ...s, processes: [...s.processes, newProcess] }));
+            }
         },
         updateProcess: async (processData) => {
-            setState(s => ({ ...s, processes: s.processes.map(p => p.id === processData.id ? processData : p) }));
+            try {
+                const updated = await processesApi.update(processData.id, processData);
+                setState(s => ({ ...s, processes: s.processes.map(p => p.id === processData.id ? updated : p) }));
+            } catch (error) {
+                console.error('Error updating process:', error);
+                setState(s => ({ ...s, processes: s.processes.map(p => p.id === processData.id ? processData : p) }));
+            }
         },
         deleteProcess: async (processId) => {
-            setState(s => ({
-                ...s,
-                processes: s.processes.filter(p => p.id !== processId),
-                candidates: s.candidates.filter(c => c.processId !== processId),
-            }));
+            try {
+                await processesApi.delete(processId);
+                setState(s => ({
+                    ...s,
+                    processes: s.processes.filter(p => p.id !== processId),
+                    candidates: s.candidates.filter(c => c.processId !== processId),
+                }));
+            } catch (error) {
+                console.error('Error deleting process:', error);
+                setState(s => ({
+                    ...s,
+                    processes: s.processes.filter(p => p.id !== processId),
+                    candidates: s.candidates.filter(c => c.processId !== processId),
+                }));
+            }
         },
         addCandidate: async (candidateData) => {
-            const newCandidate: Candidate = {
-                ...candidateData,
-                id: `cand-${Date.now()}`,
-                history: [{
-                    stageId: candidateData.stageId,
-                    movedAt: new Date().toISOString(),
-                    movedBy: state.currentUser?.name || 'System',
-                }],
-                archived: false,
-            };
-            setState(s => ({ ...s, candidates: [...s.candidates, newCandidate] }));
-        },
-        updateCandidate: async (candidateData, movedBy) => {
-            setState(s => {
-                const oldCandidate = s.candidates.find(c => c.id === candidateData.id);
-                let newHistory: CandidateHistory[] = oldCandidate ? [...oldCandidate.history] : [];
-
-                if (oldCandidate && oldCandidate.stageId !== candidateData.stageId) {
-                    newHistory.push({
+            try {
+                const newCandidate = await candidatesApi.create(candidateData, state.currentUser?.id);
+                setState(s => ({ ...s, candidates: [...s.candidates, newCandidate] }));
+            } catch (error) {
+                console.error('Error adding candidate:', error);
+                const newCandidate: Candidate = {
+                    ...candidateData,
+                    id: `cand-${Date.now()}`,
+                    history: [{
                         stageId: candidateData.stageId,
                         movedAt: new Date().toISOString(),
-                        movedBy: movedBy || state.currentUser?.name || 'System',
-                    });
-                }
-                const updatedCandidate = { ...candidateData, history: newHistory };
-                return { ...s, candidates: s.candidates.map(c => c.id === candidateData.id ? updatedCandidate : c) };
-            });
+                        movedBy: state.currentUser?.id || 'System',
+                    }],
+                    archived: false,
+                };
+                setState(s => ({ ...s, candidates: [...s.candidates, newCandidate] }));
+            }
+        },
+        updateCandidate: async (candidateData, movedBy) => {
+            try {
+                const updated = await candidatesApi.update(candidateData.id, candidateData, movedBy || state.currentUser?.id);
+                setState(s => ({ ...s, candidates: s.candidates.map(c => c.id === candidateData.id ? updated : c) }));
+            } catch (error) {
+                console.error('Error updating candidate:', error);
+                setState(s => {
+                    const oldCandidate = s.candidates.find(c => c.id === candidateData.id);
+                    let newHistory: CandidateHistory[] = oldCandidate ? [...oldCandidate.history] : [];
+
+                    if (oldCandidate && oldCandidate.stageId !== candidateData.stageId) {
+                        newHistory.push({
+                            stageId: candidateData.stageId,
+                            movedAt: new Date().toISOString(),
+                            movedBy: movedBy || state.currentUser?.id || 'System',
+                        });
+                    }
+                    const updatedCandidate = { ...candidateData, history: newHistory };
+                    return { ...s, candidates: s.candidates.map(c => c.id === candidateData.id ? updatedCandidate : c) };
+                });
+            }
         },
         deleteCandidate: async (candidateId) => {
-            setState(s => ({ ...s, candidates: s.candidates.filter(c => c.id !== candidateId) }));
+            try {
+                await candidatesApi.delete(candidateId);
+                setState(s => ({ ...s, candidates: s.candidates.filter(c => c.id !== candidateId) }));
+            } catch (error) {
+                console.error('Error deleting candidate:', error);
+                setState(s => ({ ...s, candidates: s.candidates.filter(c => c.id !== candidateId) }));
+            }
         },
         moveCandidateToProcess: async (candidateId, targetProcessId) => {
             setState(s => {
@@ -473,14 +601,39 @@ const App: React.FC = () => {
             });
         },
         addUser: async (userData) => {
-            const newUser: User = { ...userData, id: `user-${Date.now()}` };
-            setState(s => ({ ...s, users: [...s.users, newUser] }));
+            try {
+                const newUser = await usersApi.create(userData);
+                setState(s => ({ ...s, users: [...s.users, newUser] }));
+            } catch (error) {
+                console.error('Error adding user:', error);
+                const newUser: User = { ...userData, id: `user-${Date.now()}` };
+                setState(s => ({ ...s, users: [...s.users, newUser] }));
+            }
         },
         updateUser: async (userData) => {
-            setState(s => ({ ...s, users: s.users.map(u => u.id === userData.id ? userData : u) }));
+            try {
+                const updated = await usersApi.update(userData.id, userData);
+                setState(s => ({ ...s, users: s.users.map(u => u.id === userData.id ? updated : u) }));
+            } catch (error) {
+                console.error('Error updating user:', error);
+                setState(s => ({ ...s, users: s.users.map(u => u.id === userData.id ? userData : u) }));
+            }
         },
         deleteUser: async (userId) => {
-            setState(s => ({ ...s, users: s.users.filter(u => u.id !== userId) }));
+            try {
+                console.log('Deleting user:', userId);
+                await usersApi.delete(userId);
+                console.log('User deleted successfully from Supabase');
+                // Actualizar estado local
+                setState(s => ({ ...s, users: s.users.filter(u => u.id !== userId) }));
+            } catch (error) {
+                console.error('Error deleting user from Supabase:', error);
+                // Aún así, actualizar el estado local para que la UI se actualice
+                // El usuario verá que desapareció, aunque no se haya eliminado en la BD
+                setState(s => ({ ...s, users: s.users.filter(u => u.id !== userId) }));
+                // Mostrar mensaje de error al usuario
+                alert('Error al eliminar el usuario. Por favor, verifica la consola para más detalles.');
+            }
         },
         addFormIntegration: async (integrationData) => {
             const newIntegration: FormIntegration = {
@@ -494,82 +647,142 @@ const App: React.FC = () => {
             setState(s => ({ ...s, formIntegrations: s.formIntegrations.filter(fi => fi.id !== integrationId) }));
         },
         addInterviewEvent: async (eventData) => {
-            const newEvent: InterviewEvent = { ...eventData, id: `evt-${Date.now()}` };
-            setState(s => ({ ...s, interviewEvents: [...s.interviewEvents, newEvent] }));
+            try {
+                const newEvent = await interviewsApi.create(eventData, state.currentUser?.id);
+                setState(s => ({ ...s, interviewEvents: [...s.interviewEvents, newEvent] }));
+            } catch (error) {
+                console.error('Error adding interview event:', error);
+                const newEvent: InterviewEvent = { ...eventData, id: `evt-${Date.now()}` };
+                setState(s => ({ ...s, interviewEvents: [...s.interviewEvents, newEvent] }));
+            }
         },
         updateInterviewEvent: async (eventData) => {
-            setState(s => ({ ...s, interviewEvents: s.interviewEvents.map(e => e.id === eventData.id ? eventData : e) }));
+            try {
+                const updated = await interviewsApi.update(eventData.id, eventData);
+                setState(s => ({ ...s, interviewEvents: s.interviewEvents.map(e => e.id === eventData.id ? updated : e) }));
+            } catch (error) {
+                console.error('Error updating interview event:', error);
+                setState(s => ({ ...s, interviewEvents: s.interviewEvents.map(e => e.id === eventData.id ? eventData : e) }));
+            }
         },
         deleteInterviewEvent: async (eventId) => {
-            setState(s => ({ ...s, interviewEvents: s.interviewEvents.filter(e => e.id !== eventId) }));
+            try {
+                await interviewsApi.delete(eventId);
+                setState(s => ({ ...s, interviewEvents: s.interviewEvents.filter(e => e.id !== eventId) }));
+            } catch (error) {
+                console.error('Error deleting interview event:', error);
+                setState(s => ({ ...s, interviewEvents: s.interviewEvents.filter(e => e.id !== eventId) }));
+            }
         },
         addPostIt: async (candidateId, postItData) => {
-            setState(s => {
-                const candidate = s.candidates.find(c => c.id === candidateId);
-                if (!candidate) return s;
-                
-                const newPostIt: PostIt = {
-                    ...postItData,
-                    id: `postit-${Date.now()}`,
-                    createdAt: new Date().toISOString(),
-                };
-                
-                const updatedPostIts = [...(candidate.postIts || []), newPostIt];
-                const updatedCandidate = { ...candidate, postIts: updatedPostIts };
-                
-                return { ...s, candidates: s.candidates.map(c => c.id === candidateId ? updatedCandidate : c) };
-            });
+            try {
+                const newPostIt = await postItsApi.create(candidateId, postItData);
+                setState(s => {
+                    const candidate = s.candidates.find(c => c.id === candidateId);
+                    if (!candidate) return s;
+                    const updatedPostIts = [...(candidate.postIts || []), newPostIt];
+                    const updatedCandidate = { ...candidate, postIts: updatedPostIts };
+                    return { ...s, candidates: s.candidates.map(c => c.id === candidateId ? updatedCandidate : c) };
+                });
+            } catch (error) {
+                console.error('Error adding post-it:', error);
+                setState(s => {
+                    const candidate = s.candidates.find(c => c.id === candidateId);
+                    if (!candidate) return s;
+                    const newPostIt: PostIt = { ...postItData, id: `postit-${Date.now()}`, createdAt: new Date().toISOString() };
+                    const updatedPostIts = [...(candidate.postIts || []), newPostIt];
+                    const updatedCandidate = { ...candidate, postIts: updatedPostIts };
+                    return { ...s, candidates: s.candidates.map(c => c.id === candidateId ? updatedCandidate : c) };
+                });
+            }
         },
         deletePostIt: async (candidateId, postItId) => {
-            setState(s => {
-                const candidate = s.candidates.find(c => c.id === candidateId);
-                if (!candidate) return s;
-                
-                const updatedPostIts = (candidate.postIts || []).filter(p => p.id !== postItId);
-                const updatedCandidate = { ...candidate, postIts: updatedPostIts };
-                
-                return { ...s, candidates: s.candidates.map(c => c.id === candidateId ? updatedCandidate : c) };
-            });
+            try {
+                await postItsApi.delete(postItId);
+                setState(s => {
+                    const candidate = s.candidates.find(c => c.id === candidateId);
+                    if (!candidate) return s;
+                    const updatedPostIts = (candidate.postIts || []).filter(p => p.id !== postItId);
+                    const updatedCandidate = { ...candidate, postIts: updatedPostIts };
+                    return { ...s, candidates: s.candidates.map(c => c.id === candidateId ? updatedCandidate : c) };
+                });
+            } catch (error) {
+                console.error('Error deleting post-it:', error);
+                setState(s => {
+                    const candidate = s.candidates.find(c => c.id === candidateId);
+                    if (!candidate) return s;
+                    const updatedPostIts = (candidate.postIts || []).filter(p => p.id !== postItId);
+                    const updatedCandidate = { ...candidate, postIts: updatedPostIts };
+                    return { ...s, candidates: s.candidates.map(c => c.id === candidateId ? updatedCandidate : c) };
+                });
+            }
         },
         addComment: async (candidateId, commentData) => {
-            setState(s => {
-                const candidate = s.candidates.find(c => c.id === candidateId);
-                if (!candidate) return s;
-                
-                const newComment: Comment = {
-                    ...commentData,
-                    id: `comment-${Date.now()}`,
-                    createdAt: new Date().toISOString(),
-                };
-                
-                const updatedComments = [...(candidate.comments || []), newComment];
-                const updatedCandidate = { ...candidate, comments: updatedComments };
-                
-                return { ...s, candidates: s.candidates.map(c => c.id === candidateId ? updatedCandidate : c) };
-            });
+            try {
+                const newComment = await commentsApi.create(candidateId, commentData);
+                setState(s => {
+                    const candidate = s.candidates.find(c => c.id === candidateId);
+                    if (!candidate) return s;
+                    const updatedComments = [...(candidate.comments || []), newComment];
+                    const updatedCandidate = { ...candidate, comments: updatedComments };
+                    return { ...s, candidates: s.candidates.map(c => c.id === candidateId ? updatedCandidate : c) };
+                });
+            } catch (error) {
+                console.error('Error adding comment:', error);
+                setState(s => {
+                    const candidate = s.candidates.find(c => c.id === candidateId);
+                    if (!candidate) return s;
+                    const newComment: Comment = { ...commentData, id: `comment-${Date.now()}`, createdAt: new Date().toISOString() };
+                    const updatedComments = [...(candidate.comments || []), newComment];
+                    const updatedCandidate = { ...candidate, comments: updatedComments };
+                    return { ...s, candidates: s.candidates.map(c => c.id === candidateId ? updatedCandidate : c) };
+                });
+            }
         },
         deleteComment: async (candidateId, commentId) => {
-            setState(s => {
-                const candidate = s.candidates.find(c => c.id === candidateId);
-                if (!candidate) return s;
-                
-                const updatedComments = (candidate.comments || []).filter(c => c.id !== commentId);
-                const updatedCandidate = { ...candidate, comments: updatedComments };
-                
-                return { ...s, candidates: s.candidates.map(c => c.id === candidateId ? updatedCandidate : c) };
-            });
+            try {
+                await commentsApi.delete(commentId);
+                setState(s => {
+                    const candidate = s.candidates.find(c => c.id === candidateId);
+                    if (!candidate) return s;
+                    const updatedComments = (candidate.comments || []).filter(c => c.id !== commentId);
+                    const updatedCandidate = { ...candidate, comments: updatedComments };
+                    return { ...s, candidates: s.candidates.map(c => c.id === candidateId ? updatedCandidate : c) };
+                });
+            } catch (error) {
+                console.error('Error deleting comment:', error);
+                setState(s => {
+                    const candidate = s.candidates.find(c => c.id === candidateId);
+                    if (!candidate) return s;
+                    const updatedComments = (candidate.comments || []).filter(c => c.id !== commentId);
+                    const updatedCandidate = { ...candidate, comments: updatedComments };
+                    return { ...s, candidates: s.candidates.map(c => c.id === candidateId ? updatedCandidate : c) };
+                });
+            }
         },
         archiveCandidate: async (candidateId) => {
-            setState(s => ({
-                ...s,
-                candidates: s.candidates.map(c => c.id === candidateId ? { ...c, archived: true, archivedAt: new Date().toISOString() } : c)
-            }));
+            try {
+                const updated = await candidatesApi.archive(candidateId);
+                setState(s => ({ ...s, candidates: s.candidates.map(c => c.id === candidateId ? updated : c) }));
+            } catch (error) {
+                console.error('Error archiving candidate:', error);
+                setState(s => ({
+                    ...s,
+                    candidates: s.candidates.map(c => c.id === candidateId ? { ...c, archived: true, archivedAt: new Date().toISOString() } : c)
+                }));
+            }
         },
         restoreCandidate: async (candidateId) => {
-            setState(s => ({
-                ...s,
-                candidates: s.candidates.map(c => c.id === candidateId ? { ...c, archived: false, archivedAt: undefined } : c)
-            }));
+            try {
+                const updated = await candidatesApi.restore(candidateId);
+                setState(s => ({ ...s, candidates: s.candidates.map(c => c.id === candidateId ? updated : c) }));
+            } catch (error) {
+                console.error('Error restoring candidate:', error);
+                setState(s => ({
+                    ...s,
+                    candidates: s.candidates.map(c => c.id === candidateId ? { ...c, archived: false, archivedAt: undefined } : c)
+                }));
+            }
         },
     }), [state.currentUser, state.users]);
 
