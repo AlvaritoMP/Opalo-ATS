@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useAppState } from '../App';
 import { User, UserRole } from '../types';
 import { UserEditorModal } from './UserEditorModal';
-import { UserPlus, Edit, Trash2 } from 'lucide-react';
+import { UserPlus, Edit, Trash2, Shield } from 'lucide-react';
 
 export const Users: React.FC = () => {
     const { state, actions, getLabel } = useAppState();
@@ -62,6 +62,7 @@ export const Users: React.FC = () => {
                             <th scope="col" className="px-6 py-3">Usuario</th>
                             <th scope="col" className="px-6 py-3">Email</th>
                             <th scope="col" className="px-6 py-3">Rol</th>
+                            <th scope="col" className="px-6 py-3">Permisos</th>
                             <th scope="col" className="px-6 py-3"><span className="sr-only">Acciones</span></th>
                         </tr>
                     </thead>
@@ -87,6 +88,16 @@ export const Users: React.FC = () => {
                                     <span className={`px-2 py-1 text-xs font-medium rounded-full capitalize ${getRoleBadgeColor(user.role)}`}>
                                         {user.role}
                                     </span>
+                                </td>
+                                <td className="px-6 py-4">
+                                    {user.permissions && user.permissions.length > 0 ? (
+                                        <div className="flex items-center gap-1 text-xs text-blue-600" title={`${user.permissions.length} permisos personalizados`}>
+                                            <Shield className="w-4 h-4" />
+                                            <span>Personalizados ({user.permissions.length})</span>
+                                        </div>
+                                    ) : (
+                                        <span className="text-xs text-gray-500">Por defecto</span>
+                                    )}
                                 </td>
                                 <td className="px-6 py-4 text-right">
                                     {isAdmin && (

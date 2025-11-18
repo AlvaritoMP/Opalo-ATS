@@ -93,6 +93,34 @@ export interface Candidate {
 
 export type UserRole = 'admin' | 'recruiter' | 'client' | 'viewer';
 
+// Sistema de permisos por categorías
+export type Permission = 
+    // Procesos
+    | 'processes.view' | 'processes.create' | 'processes.edit' | 'processes.delete'
+    // Candidatos
+    | 'candidates.view' | 'candidates.create' | 'candidates.edit' | 'candidates.delete' | 'candidates.archive' | 'candidates.export'
+    // Calendario
+    | 'calendar.view' | 'calendar.create' | 'calendar.edit' | 'calendar.delete'
+    // Reportes
+    | 'reports.view' | 'reports.export'
+    // Usuarios
+    | 'users.view' | 'users.create' | 'users.edit' | 'users.delete'
+    // Configuración
+    | 'settings.view' | 'settings.edit'
+    // Cartas/Documentos
+    | 'letters.view' | 'letters.create' | 'letters.download'
+    // Comparador
+    | 'comparator.view' | 'comparator.export'
+    // Formularios
+    | 'forms.view' | 'forms.edit';
+
+export interface PermissionCategory {
+    id: string;
+    name: string;
+    description?: string;
+    permissions: Permission[];
+}
+
 export interface User {
     id: string;
     name: string;
@@ -100,6 +128,7 @@ export interface User {
     role: UserRole;
     password?: string;
     avatarUrl?: string;
+    permissions?: Permission[]; // Permisos personalizados (sobrescribe los del rol)
 }
 
 // Basic definitions for unused types to satisfy compiler
