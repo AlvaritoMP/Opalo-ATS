@@ -258,7 +258,8 @@ export const ProcessEditorModal: React.FC<ProcessEditorModalProps> = ({ process,
                                     Carpeta de Google Drive
                                 </h3>
                                 <p className="text-xs text-gray-500 mb-3">
-                                    Selecciona o crea una carpeta en Google Drive donde se almacenarán los documentos de este proceso.
+                                    Selecciona o crea una carpeta en Google Drive donde se almacenarán los documentos de este proceso. 
+                                    <strong className="block mt-1 text-orange-600">Si no configuras una carpeta, los archivos se guardarán localmente (Base64) en lugar de Google Drive.</strong>
                                 </p>
                                 <div className="space-y-2">
                                     {googleDriveFolderId && googleDriveFolderName ? (

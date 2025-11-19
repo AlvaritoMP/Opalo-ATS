@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useAppState } from '../App';
 import { GoogleDriveConfig } from '../types';
 import { googleDriveService, GoogleDriveFolder } from '../lib/googleDrive';
-import { Cloud, CheckCircle, XCircle, Loader, Folder, RefreshCw, AlertCircle } from 'lucide-react';
+import { Cloud, CheckCircle, XCircle, Loader, Folder, RefreshCw, AlertCircle, Info } from 'lucide-react';
 
 interface GoogleDriveSettingsProps {
     config: GoogleDriveConfig | undefined;
@@ -442,6 +442,35 @@ export const GoogleDriveSettings: React.FC<GoogleDriveSettingsProps> = ({ config
                     >
                         ×
                     </button>
+                </div>
+            )}
+
+            {/* Información adicional y explicación */}
+            {config?.connected && (
+                <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                    <h4 className="text-sm font-semibold text-blue-900 mb-2 flex items-center">
+                        <Info className="w-4 h-4 mr-2" />
+                        ¿Cómo funciona el almacenamiento?
+                    </h4>
+                    <div className="text-sm text-blue-800 space-y-2">
+                        <p>
+                            <strong>Carpeta raíz:</strong> Todos los archivos se almacenan en la carpeta <strong>"ATS Pro"</strong> en tu Google Drive.
+                        </p>
+                        <p>
+                            <strong>Organización por proceso:</strong> Puedes configurar una carpeta específica para cada proceso de contratación. 
+                            Ve a <strong>Procesos → Editar Proceso</strong> y busca la sección "Carpeta de Google Drive".
+                        </p>
+                        <p>
+                            <strong>Dónde se suben los archivos:</strong>
+                        </p>
+                        <ul className="list-disc list-inside ml-2 space-y-1">
+                            <li>Si el proceso tiene una carpeta configurada → Los archivos se suben a esa carpeta</li>
+                            <li>Si el proceso NO tiene carpeta → Los archivos se suben directamente a "ATS Pro"</li>
+                        </ul>
+                        <p className="mt-2">
+                            <strong>Botón "Actualizar carpetas":</strong> Lista las carpetas disponibles dentro de "ATS Pro" para que puedas asignarlas a procesos.
+                        </p>
+                    </div>
                 </div>
             )}
 

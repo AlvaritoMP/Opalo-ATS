@@ -149,13 +149,21 @@ export const CandidateDetailsModal: React.FC<{ candidate: Candidate, onClose: ()
                 // Usar URL de visualización de Google Drive
                 attachmentUrl = googleDriveService.getFileViewUrl(uploadedFile.id);
                 attachmentId = uploadedFile.id;
+                console.log(`✅ Archivo subido a Google Drive: ${process.googleDriveFolderName || 'Carpeta del proceso'} - ${uploadedFile.name}`);
             } catch (error: any) {
                 console.error('Error subiendo a Google Drive, usando almacenamiento local:', error);
+                alert(`Error al subir a Google Drive: ${error.message}. El archivo se guardará localmente.`);
                 // Fallback a Base64 si falla Google Drive
                 attachmentUrl = await fileToBase64(file);
             }
         } else {
             // Usar Base64 si Google Drive no está configurado
+            if (isGoogleDriveConnected && !hasGoogleDriveFolder) {
+                console.warn('⚠️ Google Drive está conectado pero el proceso no tiene carpeta configurada. El archivo se guardará localmente.');
+                alert('⚠️ Google Drive está conectado pero este proceso no tiene una carpeta configurada. El archivo se guardará localmente. Ve a Procesos → Editar Proceso para configurar una carpeta de Google Drive.');
+            } else if (!isGoogleDriveConnected) {
+                console.log('ℹ️ Google Drive no está conectado. El archivo se guardará localmente (Base64).');
+            }
             attachmentUrl = await fileToBase64(file);
         }
 
@@ -499,7 +507,38 @@ export const CandidateDetailsModal: React.FC<{ candidate: Candidate, onClose: ()
                                         ))}
                                     </div>
                                     <input type="file" ref={attachmentInputRef} onChange={handleAttachmentUpload} className="hidden" />
-                                    <button type="button" onClick={() => attachmentInputRef.current?.click()} className="mt-2 flex items-center text-sm font-medium text-primary-600 hover:text-primary-800"><Upload className="w-4 h-4 mr-1" /> Subir documento</button>
+                                    <div className="mt-2 space-y-2">
+                                        <button type="button" onClick={() => attachmentInputRef.current?.click()} className="flex items-center text-sm font-medium text-primary-600 hover:text-primary-800"><Upload className="w-4 h-4 mr-1" /> Subir documento</button>
+                                        {(() => {
+                                            const googleDriveConfig = state.settings?.googleDrive;
+                                            const isGoogleDriveConnected = googleDriveConfig?.connected && googleDriveConfig?.accessToken;
+                                            const currentProcess = state.processes.find(p => p.id === currentCandidate.processId);
+                                            const hasGoogleDriveFolder = currentProcess?.googleDriveFolderId;
+                                            
+                                            if (isGoogleDriveConnected && hasGoogleDriveFolder) {
+                                                return (
+                                                    <p className="text-xs text-green-600 flex items-center">
+                                                        <Info className="w-3 h-3 mr-1" />
+                                                        Los archivos se subirán a Google Drive: <strong>{currentProcess?.googleDriveFolderName || 'Carpeta del proceso'}</strong>
+                                                    </p>
+                                                );
+                                            } else if (isGoogleDriveConnected && !hasGoogleDriveFolder) {
+                                                return (
+                                                    <p className="text-xs text-orange-600 flex items-center">
+                                                        <Info className="w-3 h-3 mr-1" />
+                                                        ⚠️ Google Drive está conectado pero este proceso no tiene carpeta configurada. Los archivos se guardarán localmente. Ve a <strong>Procesos → Editar Proceso</strong> para configurar una carpeta.
+                                                    </p>
+                                                );
+                                            } else {
+                                                return (
+                                                    <p className="text-xs text-gray-500 flex items-center">
+                                                        <Info className="w-3 h-3 mr-1" />
+                                                        Los archivos se guardarán localmente (Base64). Conecta Google Drive en <strong>Configuración</strong> para usar almacenamiento en la nube.
+                                                    </p>
+                                                );
+                                            }
+                                        })()}
+                                    </div>
                                 </div>
                             </div>
                             {/* Right Column - Preview */}
