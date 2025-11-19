@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useAppState } from '../App';
 import { AppSettings } from '../types';
 import { Save, Database, HardDrive, Globe, Brush, Type } from 'lucide-react';
+import { GoogleDriveSettings } from './GoogleDriveSettings';
 
 const fileToBase64 = (file: File): Promise<string> => {
     return new Promise((resolve, reject) => {
@@ -250,26 +251,22 @@ export const Settings: React.FC = () => {
                 </div>
                 {/* File Storage Settings */}
                 <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
-                    <h2 className="text-xl font-semibold mb-1 flex items-center"><HardDrive className="mr-2"/> File Storage</h2>
-                    <p className="text-sm text-gray-500 mb-6">Connect to a cloud storage provider for candidate attachments.</p>
-                    <div className="flex items-center justify-between p-4 bg-gray-50 rounded-lg border">
-                        <div>
-                            <p className="font-medium">Google Drive</p>
-                            <span className={`text-sm ${settings.fileStorage.connected ? 'text-green-600' : 'text-gray-500'}`}>
-                                {settings.fileStorage.connected ? 'Connected' : 'Not Connected'}
-                            </span>
-                        </div>
-                        <button
-                            onClick={handleFileStorageToggle}
-                            className={`px-4 py-2 text-sm font-medium rounded-md shadow-sm ${
-                                settings.fileStorage.connected
-                                ? 'bg-red-100 text-red-700 hover:bg-red-200'
-                                : 'bg-white border border-gray-300 text-gray-700 hover:bg-gray-50'
-                            }`}
-                        >
-                           {settings.fileStorage.connected ? 'Disconnect' : 'Connect with Google Drive'}
-                        </button>
-                    </div>
+                    <h2 className="text-xl font-semibold mb-1 flex items-center"><HardDrive className="mr-2"/> Almacenamiento de Archivos</h2>
+                    <p className="text-sm text-gray-500 mb-6">Conecta Google Drive para almacenar documentos de candidatos y procesos.</p>
+                    <GoogleDriveSettings
+                        config={settings.googleDrive}
+                        onConfigChange={(googleDriveConfig) => {
+                            setSettings({
+                                ...settings,
+                                googleDrive: googleDriveConfig,
+                                fileStorage: {
+                                    ...settings.fileStorage,
+                                    connected: googleDriveConfig.connected,
+                                    provider: googleDriveConfig.connected ? 'google-drive' : settings.fileStorage.provider,
+                                },
+                            });
+                        }}
+                    />
                 </div>
             </div>
             <style>{`.input { padding: 0.5rem 0.75rem; border: 1px solid #D1D5DB; border-radius: 0.375rem; box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05); }`}</style>

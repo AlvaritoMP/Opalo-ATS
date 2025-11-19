@@ -5,7 +5,7 @@ import { Plus, Edit, Briefcase, DollarSign, BarChart, Clock, Paperclip, X, FileT
 import { AddCandidateModal } from './AddCandidateModal';
 import { ProcessEditorModal } from './ProcessEditorModal';
 import { BulkLetterModal } from './BulkLetterModal';
-import { Attachment, UserRole, ProcessStatus } from '../types';
+import { Attachment, UserRole, ProcessStatus, Candidate } from '../types';
 
 interface ProcessViewProps {
     processId: string;

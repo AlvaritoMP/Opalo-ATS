@@ -1,7 +1,8 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { useAppState } from '../App';
 import { Process, Stage, Attachment, ProcessStatus, DocumentCategory } from '../types';
-import { X, Plus, Trash2, GripVertical, Paperclip, Upload, FileText, CheckSquare } from 'lucide-react';
+import { X, Plus, Trash2, GripVertical, Paperclip, Upload, FileText, CheckSquare, Folder, Cloud } from 'lucide-react';
+import { googleDriveService, GoogleDriveFolder } from '../lib/googleDrive';
 
 interface ProcessEditorModalProps {
     process: Process | null;
@@ -33,6 +34,13 @@ export const ProcessEditorModal: React.FC<ProcessEditorModalProps> = ({ process,
     const [status, setStatus] = useState<ProcessStatus>(process?.status || 'en_proceso');
     const [vacancies, setVacancies] = useState<number>(process?.vacancies || 1);
     const [documentCategories, setDocumentCategories] = useState<DocumentCategory[]>(process?.documentCategories || []);
+    const [googleDriveFolderId, setGoogleDriveFolderId] = useState<string | undefined>(process?.googleDriveFolderId);
+    const [googleDriveFolderName, setGoogleDriveFolderName] = useState<string | undefined>(process?.googleDriveFolderName);
+    const [availableFolders, setAvailableFolders] = useState<GoogleDriveFolder[]>([]);
+    const [isLoadingFolders, setIsLoadingFolders] = useState(false);
+    const [showFolderSelector, setShowFolderSelector] = useState(false);
+    const [newFolderName, setNewFolderName] = useState('');
+    const [isCreatingFolder, setIsCreatingFolder] = useState(false);
     const flyerInputRef = useRef<HTMLInputElement>(null);
     const attachmentInputRef = useRef<HTMLInputElement>(null);
 
@@ -40,6 +48,59 @@ export const ProcessEditorModal: React.FC<ProcessEditorModalProps> = ({ process,
         en_proceso: 'En Proceso',
         standby: 'Stand By',
         terminado: 'Terminado',
+    };
+
+    const googleDriveConfig = state.settings?.googleDrive;
+    const isGoogleDriveConnected = googleDriveConfig?.connected && googleDriveConfig?.accessToken;
+
+    useEffect(() => {
+        if (isGoogleDriveConnected && googleDriveConfig) {
+            googleDriveService.initialize(googleDriveConfig);
+            loadFolders();
+        }
+    }, [isGoogleDriveConnected]);
+
+    const loadFolders = async () => {
+        if (!isGoogleDriveConnected || !googleDriveConfig) return;
+        
+        setIsLoadingFolders(true);
+        try {
+            const rootFolderId = googleDriveConfig.rootFolderId;
+            const folders = await googleDriveService.listFolders(rootFolderId);
+            setAvailableFolders(folders);
+        } catch (error: any) {
+            console.error('Error cargando carpetas:', error);
+            alert('Error al cargar carpetas de Google Drive: ' + error.message);
+        } finally {
+            setIsLoadingFolders(false);
+        }
+    };
+
+    const handleCreateFolder = async () => {
+        if (!newFolderName.trim() || !isGoogleDriveConnected || !googleDriveConfig) return;
+
+        setIsCreatingFolder(true);
+        try {
+            googleDriveService.initialize(googleDriveConfig);
+            const rootFolderId = googleDriveConfig.rootFolderId;
+            const folder = await googleDriveService.createFolder(newFolderName.trim(), rootFolderId);
+            setGoogleDriveFolderId(folder.id);
+            setGoogleDriveFolderName(folder.name);
+            setNewFolderName('');
+            setShowFolderSelector(false);
+            await loadFolders(); // Recargar lista
+        } catch (error: any) {
+            console.error('Error creando carpeta:', error);
+            alert('Error al crear carpeta: ' + error.message);
+        } finally {
+            setIsCreatingFolder(false);
+        }
+    };
+
+    const handleSelectFolder = (folder: GoogleDriveFolder) => {
+        setGoogleDriveFolderId(folder.id);
+        setGoogleDriveFolderName(folder.name);
+        setShowFolderSelector(false);
     };
 
     const handleStageNameChange = (id: string, name: string) => {
@@ -143,7 +204,9 @@ export const ProcessEditorModal: React.FC<ProcessEditorModalProps> = ({ process,
             attachments, 
             status, 
             vacancies,
-            documentCategories: finalCategories.length > 0 ? finalCategories : undefined
+            documentCategories: finalCategories.length > 0 ? finalCategories : undefined,
+            googleDriveFolderId: googleDriveFolderId || undefined,
+            googleDriveFolderName: googleDriveFolderName || undefined,
         };
 
         if (process) await actions.updateProcess({ ...process, ...processData });
@@ -186,6 +249,104 @@ export const ProcessEditorModal: React.FC<ProcessEditorModalProps> = ({ process,
                             </div>
                         </div>
                         <div><label className="block text-sm font-medium text-gray-700">Descripción</label><textarea rows={2} value={description} onChange={e => setDescription(e.target.value)} className="mt-1 block w-full input" /></div>
+                        
+                        {/* Google Drive Folder */}
+                        {isGoogleDriveConnected && (
+                            <div className="border-t pt-4">
+                                <h3 className="text-sm font-medium text-gray-700 mb-2 flex items-center">
+                                    <Cloud className="w-4 h-4 mr-2" />
+                                    Carpeta de Google Drive
+                                </h3>
+                                <p className="text-xs text-gray-500 mb-3">
+                                    Selecciona o crea una carpeta en Google Drive donde se almacenarán los documentos de este proceso.
+                                </p>
+                                <div className="space-y-2">
+                                    {googleDriveFolderId && googleDriveFolderName ? (
+                                        <div className="flex items-center justify-between p-3 bg-green-50 border border-green-200 rounded-md">
+                                            <div className="flex items-center space-x-2">
+                                                <Folder className="w-5 h-5 text-green-600" />
+                                                <div>
+                                                    <p className="text-sm font-medium text-green-900">{googleDriveFolderName}</p>
+                                                    <p className="text-xs text-green-700">Carpeta configurada</p>
+                                                </div>
+                                            </div>
+                                            <button
+                                                type="button"
+                                                onClick={() => {
+                                                    setGoogleDriveFolderId(undefined);
+                                                    setGoogleDriveFolderName(undefined);
+                                                }}
+                                                className="text-sm text-red-600 hover:text-red-800"
+                                            >
+                                                Cambiar
+                                            </button>
+                                        </div>
+                                    ) : (
+                                        <div className="space-y-2">
+                                            <button
+                                                type="button"
+                                                onClick={() => setShowFolderSelector(!showFolderSelector)}
+                                                className="w-full flex items-center justify-center px-4 py-2 border border-gray-300 rounded-md bg-white text-sm font-medium text-gray-700 hover:bg-gray-50"
+                                            >
+                                                <Folder className="w-4 h-4 mr-2" />
+                                                {showFolderSelector ? 'Ocultar carpetas' : 'Seleccionar carpeta'}
+                                            </button>
+                                            
+                                            {showFolderSelector && (
+                                                <div className="border rounded-lg p-3 bg-gray-50 max-h-64 overflow-y-auto">
+                                                    {isLoadingFolders ? (
+                                                        <p className="text-sm text-gray-500 text-center py-4">Cargando carpetas...</p>
+                                                    ) : availableFolders.length > 0 ? (
+                                                        <div className="space-y-2">
+                                                            {availableFolders.map((folder) => (
+                                                                <button
+                                                                    key={folder.id}
+                                                                    type="button"
+                                                                    onClick={() => handleSelectFolder(folder)}
+                                                                    className="w-full flex items-center space-x-2 p-2 bg-white border border-gray-200 rounded-md hover:bg-blue-50 text-left"
+                                                                >
+                                                                    <Folder className="w-4 h-4 text-gray-500" />
+                                                                    <span className="text-sm text-gray-700">{folder.name}</span>
+                                                                </button>
+                                                            ))}
+                                                        </div>
+                                                    ) : (
+                                                        <p className="text-sm text-gray-500 text-center py-4">No hay carpetas disponibles</p>
+                                                    )}
+                                                    
+                                                    <div className="mt-3 pt-3 border-t">
+                                                        <p className="text-xs text-gray-600 mb-2">O crea una nueva carpeta:</p>
+                                                        <div className="flex space-x-2">
+                                                            <input
+                                                                type="text"
+                                                                value={newFolderName}
+                                                                onChange={(e) => setNewFolderName(e.target.value)}
+                                                                placeholder="Nombre de la carpeta"
+                                                                className="flex-1 input text-sm"
+                                                                onKeyPress={(e) => {
+                                                                    if (e.key === 'Enter') {
+                                                                        e.preventDefault();
+                                                                        handleCreateFolder();
+                                                                    }
+                                                                }}
+                                                            />
+                                                            <button
+                                                                type="button"
+                                                                onClick={handleCreateFolder}
+                                                                disabled={!newFolderName.trim() || isCreatingFolder}
+                                                                className="px-3 py-1.5 bg-primary-600 text-white rounded-md text-sm font-medium hover:bg-primary-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                                                            >
+                                                                {isCreatingFolder ? 'Creando...' : 'Crear'}
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            )}
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        )}
                         
                         {/* Flyer */}
                         <div>

@@ -1,5 +1,9 @@
 # Guía de Despliegue en EasyPanel
 
+> **📌 Para integración con Google Drive**: Ver `DEPLOY_GOOGLE_DRIVE.md` para instrucciones completas.
+
+# Guía de Despliegue en EasyPanel
+
 Esta guía te ayudará a desplegar tu aplicación ATS Pro en producción usando EasyPanel.
 
 ## ⚠️ IMPORTANTE: Antes de Desplegar

@@ -3,6 +3,7 @@ import { initialProcesses, initialCandidates, initialUsers, initialSettings, ini
 import { Process, Candidate, User, AppSettings, FormIntegration, InterviewEvent, CandidateHistory, Application, PostIt, Comment, Section, UserRole } from './types';
 import { getSettings, saveSettings as saveSettingsToStorage } from './lib/settings';
 import { usersApi, processesApi, candidatesApi, postItsApi, commentsApi, interviewsApi, settingsApi, setCurrentUser } from './lib/api/index';
+import { googleDriveService } from './lib/googleDrive';
 import { Dashboard } from './components/Dashboard';
 import { ProcessList } from './components/ProcessList';
 import { ProcessView } from './components/ProcessView';
@@ -382,6 +383,12 @@ const App: React.FC = () => {
                 }
 
                 console.log('✓ Data loaded successfully');
+                
+                // Inicializar Google Drive si está configurado
+                if (settings?.googleDrive?.connected && settings.googleDrive.accessToken) {
+                    googleDriveService.initialize(settings.googleDrive);
+                }
+                
                 setState({
                     processes,
                     candidates,
@@ -451,6 +458,15 @@ const App: React.FC = () => {
         saveSettings: async (settings) => {
             try {
                 await settingsApi.update(settings);
+                
+                // Inicializar Google Drive si está configurado
+                if (settings?.googleDrive?.connected && settings.googleDrive.accessToken) {
+                    googleDriveService.initialize(settings.googleDrive);
+                } else {
+                    // Limpiar si se desconectó
+                    googleDriveService.setTokens('', '');
+                }
+                
                 saveSettingsToStorage(settings); // Backup local
                 setState(s => ({ ...s, settings }));
             } catch (error) {

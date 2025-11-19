@@ -125,11 +125,44 @@ export const CandidateDetailsModal: React.FC<{ candidate: Candidate, onClose: ()
     };
     
     const uploadFileWithCategory = async (file: File, categoryId: string) => {
-        const dataUrl = await fileToBase64(file);
+        const googleDriveConfig = state.settings?.googleDrive;
+        const isGoogleDriveConnected = googleDriveConfig?.connected && googleDriveConfig?.accessToken;
+        const process = state.processes.find(p => p.id === editableCandidate.processId);
+        const hasGoogleDriveFolder = process?.googleDriveFolderId;
+
+        let attachmentUrl: string;
+        let attachmentId: string = `att-c-${Date.now()}`;
+
+        // Si Google Drive está conectado y el proceso tiene carpeta configurada, subir a Google Drive
+        if (isGoogleDriveConnected && hasGoogleDriveFolder && googleDriveConfig) {
+            try {
+                const { googleDriveService } = await import('../lib/googleDrive');
+                googleDriveService.initialize(googleDriveConfig);
+                
+                // Subir archivo a Google Drive
+                const uploadedFile = await googleDriveService.uploadFile(
+                    file,
+                    process.googleDriveFolderId,
+                    `${editableCandidate.name || 'candidato'}_${file.name}`
+                );
+                
+                // Usar URL de visualización de Google Drive
+                attachmentUrl = googleDriveService.getFileViewUrl(uploadedFile.id);
+                attachmentId = uploadedFile.id;
+            } catch (error: any) {
+                console.error('Error subiendo a Google Drive, usando almacenamiento local:', error);
+                // Fallback a Base64 si falla Google Drive
+                attachmentUrl = await fileToBase64(file);
+            }
+        } else {
+            // Usar Base64 si Google Drive no está configurado
+            attachmentUrl = await fileToBase64(file);
+        }
+
         const newAttachment: Attachment = {
-            id: `att-c-${Date.now()}`,
+            id: attachmentId,
             name: file.name,
-            url: dataUrl,
+            url: attachmentUrl,
             type: file.type,
             size: file.size,
             category: categoryId || undefined,

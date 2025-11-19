@@ -41,6 +41,8 @@ export interface Process {
     status: ProcessStatus;
     vacancies: number;
     documentCategories?: DocumentCategory[]; // Categorías de documentos definidas para este proceso
+    googleDriveFolderId?: string; // ID de la carpeta de Google Drive para este proceso
+    googleDriveFolderName?: string; // Nombre de la carpeta (para mostrar)
 }
 
 export interface CandidateHistory {
@@ -158,6 +160,16 @@ export interface Application {
     processId: string;
 }
 
+export interface GoogleDriveConfig {
+    connected: boolean;
+    accessToken?: string;
+    refreshToken?: string;
+    tokenExpiry?: string;
+    userEmail?: string;
+    userName?: string;
+    rootFolderId?: string; // Carpeta raíz "ATS Pro" en Google Drive
+}
+
 export interface AppSettings {
     database: {
         apiUrl: string;
@@ -167,6 +179,7 @@ export interface AppSettings {
         provider: string;
         connected: boolean;
     };
+    googleDrive?: GoogleDriveConfig;
     currencySymbol: string;
     appName: string;
     logoUrl: string;
