@@ -55,25 +55,31 @@ export const GoogleDriveSettings: React.FC<GoogleDriveSettingsProps> = ({ config
             if (event.origin !== window.location.origin) return;
 
             if (event.data.type === 'GOOGLE_DRIVE_AUTH_SUCCESS') {
-                const { accessToken, refreshToken, userInfo, rootFolderId } = event.data;
+                const { accessToken, refreshToken, userInfo, rootFolderId, tokenExpiry } = event.data;
                 
                 const newConfig: GoogleDriveConfig = {
                     connected: true,
                     accessToken,
                     refreshToken: refreshToken || config?.refreshToken,
-                    tokenExpiry: event.data.tokenExpiry ? new Date(Date.now() + parseInt(event.data.tokenExpiry) * 1000).toISOString() : config?.tokenExpiry,
+                    tokenExpiry: tokenExpiry ? new Date(Date.now() + parseInt(tokenExpiry) * 1000).toISOString() : config?.tokenExpiry,
                     userEmail: userInfo?.email || config?.userEmail,
                     userName: userInfo?.name || config?.userName,
                     rootFolderId: rootFolderId || config?.rootFolderId,
                 };
 
                 googleDriveService.setTokens(accessToken, refreshToken || '');
-                onConfigChange(newConfig);
+                
+                // onConfigChange guardará automáticamente en Supabase
+                await onConfigChange(newConfig);
+                
                 setSuccess('Conectado exitosamente a Google Drive');
                 setIsConnecting(false);
                 
                 // Cargar carpetas después de conectar
-                setTimeout(() => loadFolders(), 1000);
+                setTimeout(() => {
+                    // Actualizar config local para que loadFolders use los nuevos datos
+                    loadFolders();
+                }, 1000);
             }
         };
 
@@ -84,30 +90,35 @@ export const GoogleDriveSettings: React.FC<GoogleDriveSettingsProps> = ({ config
         const driveConnected = urlParams.get('drive_connected');
         const accessToken = urlParams.get('access_token');
         if (driveConnected === 'true' && accessToken && !window.opener) {
-            const refreshToken = urlParams.get('refresh_token');
-            const tokenExpiry = urlParams.get('expires_in');
-            const userEmail = urlParams.get('user_email');
-            const userName = urlParams.get('user_name');
-            const rootFolderId = urlParams.get('root_folder_id');
+            (async () => {
+                const refreshToken = urlParams.get('refresh_token');
+                const tokenExpiry = urlParams.get('expires_in');
+                const userEmail = urlParams.get('user_email');
+                const userName = urlParams.get('user_name');
+                const rootFolderId = urlParams.get('root_folder_id');
 
-            const newConfig: GoogleDriveConfig = {
-                connected: true,
-                accessToken: accessToken,
-                refreshToken: refreshToken || config?.refreshToken,
-                tokenExpiry: tokenExpiry ? new Date(Date.now() + parseInt(tokenExpiry) * 1000).toISOString() : config?.tokenExpiry,
-                userEmail: userEmail || config?.userEmail,
-                userName: userName || config?.userName,
-                rootFolderId: rootFolderId || config?.rootFolderId,
-            };
-            googleDriveService.setTokens(accessToken, refreshToken || '');
-            onConfigChange(newConfig);
-            setSuccess('Conectado exitosamente a Google Drive');
-            
-            // Limpiar URL
-            window.history.replaceState({}, document.title, window.location.pathname);
-            
-            // Cargar carpetas después de conectar
-            setTimeout(() => loadFolders(), 1000);
+                const newConfig: GoogleDriveConfig = {
+                    connected: true,
+                    accessToken: accessToken,
+                    refreshToken: refreshToken || config?.refreshToken,
+                    tokenExpiry: tokenExpiry ? new Date(Date.now() + parseInt(tokenExpiry) * 1000).toISOString() : config?.tokenExpiry,
+                    userEmail: userEmail || config?.userEmail,
+                    userName: userName || config?.userName,
+                    rootFolderId: rootFolderId || config?.rootFolderId,
+                };
+                googleDriveService.setTokens(accessToken, refreshToken || '');
+                
+                // onConfigChange guardará automáticamente en Supabase
+                await onConfigChange(newConfig);
+                
+                setSuccess('Conectado exitosamente a Google Drive');
+                
+                // Limpiar URL
+                window.history.replaceState({}, document.title, window.location.pathname);
+                
+                // Cargar carpetas después de conectar
+                setTimeout(() => loadFolders(), 1000);
+            })();
         }
 
         if (config?.connected && config.accessToken) {
