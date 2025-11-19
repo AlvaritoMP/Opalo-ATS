@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useAppState } from '../App';
 import { GoogleDriveConfig } from '../types';
 import { googleDriveService, GoogleDriveFolder } from '../lib/googleDrive';
-import { Cloud, CheckCircle, XCircle, Loader, Folder, RefreshCw, AlertCircle, Info } from 'lucide-react';
+import { Cloud, CheckCircle, XCircle, Loader, Folder, RefreshCw, AlertCircle, Info, Search, ChevronLeft } from 'lucide-react';
 
 interface GoogleDriveSettingsProps {
     config: GoogleDriveConfig | undefined;
@@ -19,6 +19,9 @@ export const GoogleDriveSettings: React.FC<GoogleDriveSettingsProps> = ({ config
     const [showRootFolderSelector, setShowRootFolderSelector] = useState(false);
     const [availableRootFolders, setAvailableRootFolders] = useState<GoogleDriveFolder[]>([]);
     const [isLoadingRootFolders, setIsLoadingRootFolders] = useState(false);
+    const [searchQuery, setSearchQuery] = useState('');
+    const [isSearching, setIsSearching] = useState(false);
+    const [searchResults, setSearchResults] = useState<GoogleDriveFolder[]>([]);
 
     useEffect(() => {
         // Si estamos en un popup (window.opener existe), leer parámetros y enviarlos a la ventana principal
@@ -393,6 +396,40 @@ export const GoogleDriveSettings: React.FC<GoogleDriveSettingsProps> = ({ config
         }
     };
 
+    const handleSearchFolders = async () => {
+        if (!config?.connected || !config.accessToken || !searchQuery.trim()) {
+            setSearchResults([]);
+            return;
+        }
+
+        setIsSearching(true);
+        setError(null);
+        try {
+            googleDriveService.initialize(config);
+            const results = await googleDriveService.searchFolders(searchQuery.trim());
+            setSearchResults(results);
+        } catch (err: any) {
+            console.error('Error buscando carpetas:', err);
+            setError(err.message || 'Error al buscar carpetas en Google Drive');
+        } finally {
+            setIsSearching(false);
+        }
+    };
+
+    // Buscar automáticamente cuando el usuario escribe (con debounce)
+    useEffect(() => {
+        if (!searchQuery.trim()) {
+            setSearchResults([]);
+            return;
+        }
+
+        const timeoutId = setTimeout(() => {
+            handleSearchFolders();
+        }, 500); // Esperar 500ms después de que el usuario deje de escribir
+
+        return () => clearTimeout(timeoutId);
+    }, [searchQuery]);
+
     return (
         <div className="space-y-4">
             {/* Estado de conexión */}
@@ -533,39 +570,104 @@ export const GoogleDriveSettings: React.FC<GoogleDriveSettingsProps> = ({ config
                     </div>
                     {showRootFolderSelector && (
                         <div className="mt-3 p-3 bg-white rounded-md border border-blue-200">
-                            <p className="text-xs text-blue-900 mb-2">Selecciona una carpeta raíz diferente:</p>
-                            {isLoadingRootFolders ? (
-                                <p className="text-xs text-gray-500">Cargando carpetas...</p>
-                            ) : (
-                                <div className="space-y-2 max-h-32 overflow-y-auto">
-                                    {availableRootFolders.map((folder) => (
-                                        <button
-                                            key={folder.id}
-                                            onClick={async () => {
-                                                try {
-                                                    const newConfig = {
-                                                        ...config!,
-                                                        rootFolderId: folder.id,
-                                                        rootFolderName: folder.name,
-                                                    };
-                                                    await onConfigChange(newConfig);
-                                                    setShowRootFolderSelector(false);
-                                                    setSuccess(`Carpeta raíz cambiada a: ${folder.name}`);
-                                                } catch (error: any) {
-                                                    setError('Error al cambiar carpeta raíz: ' + error.message);
-                                                }
-                                            }}
-                                            className={`w-full text-left p-2 rounded text-xs ${
-                                                config?.rootFolderId === folder.id
-                                                    ? 'bg-blue-100 border border-blue-300'
-                                                    : 'bg-gray-50 hover:bg-gray-100 border border-gray-200'
-                                            }`}
-                                        >
-                                            <Folder className="w-3 h-3 inline mr-1" />
-                                            {folder.name}
-                                        </button>
-                                    ))}
+                            <p className="text-xs text-blue-900 mb-3 font-medium">Selecciona cualquier carpeta de Google Drive:</p>
+                            
+                            {/* Buscador */}
+                            <div className="mb-3">
+                                <div className="relative">
+                                    <Search className="absolute left-2 top-2.5 w-4 h-4 text-gray-400" />
+                                    <input
+                                        type="text"
+                                        value={searchQuery}
+                                        onChange={(e) => setSearchQuery(e.target.value)}
+                                        placeholder="Buscar carpeta por nombre..."
+                                        className="w-full pl-8 pr-3 py-2 text-xs border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                    />
                                 </div>
+                                {searchQuery.trim() && (
+                                    <p className="text-xs text-gray-500 mt-1">
+                                        {isSearching ? 'Buscando...' : searchResults.length > 0 ? `${searchResults.length} carpeta(s) encontrada(s)` : 'No se encontraron carpetas'}
+                                    </p>
+                                )}
+                            </div>
+
+                            {/* Resultados de búsqueda o carpetas raíz */}
+                            {searchQuery.trim() ? (
+                                // Mostrar resultados de búsqueda
+                                isSearching ? (
+                                    <p className="text-xs text-gray-500 text-center py-4">Buscando carpetas...</p>
+                                ) : searchResults.length > 0 ? (
+                                    <div className="space-y-2 max-h-64 overflow-y-auto">
+                                        {searchResults.map((folder) => (
+                                            <button
+                                                key={folder.id}
+                                                onClick={async () => {
+                                                    try {
+                                                        const newConfig = {
+                                                            ...config!,
+                                                            rootFolderId: folder.id,
+                                                            rootFolderName: folder.name,
+                                                        };
+                                                        await onConfigChange(newConfig);
+                                                        setShowRootFolderSelector(false);
+                                                        setSearchQuery('');
+                                                        setSearchResults([]);
+                                                        setSuccess(`Carpeta raíz cambiada a: ${folder.name}`);
+                                                    } catch (error: any) {
+                                                        setError('Error al cambiar carpeta raíz: ' + error.message);
+                                                    }
+                                                }}
+                                                className={`w-full text-left p-2 rounded text-xs ${
+                                                    config?.rootFolderId === folder.id
+                                                        ? 'bg-blue-100 border border-blue-300'
+                                                        : 'bg-gray-50 hover:bg-gray-100 border border-gray-200'
+                                                }`}
+                                            >
+                                                <Folder className="w-3 h-3 inline mr-1" />
+                                                {folder.name}
+                                            </button>
+                                        ))}
+                                    </div>
+                                ) : (
+                                    <p className="text-xs text-gray-500 text-center py-4">No se encontraron carpetas con ese nombre</p>
+                                )
+                            ) : (
+                                // Mostrar carpetas raíz cuando no hay búsqueda
+                                isLoadingRootFolders ? (
+                                    <p className="text-xs text-gray-500 text-center py-4">Cargando carpetas raíz...</p>
+                                ) : availableRootFolders.length > 0 ? (
+                                    <div className="space-y-2 max-h-64 overflow-y-auto">
+                                        {availableRootFolders.map((folder) => (
+                                            <button
+                                                key={folder.id}
+                                                onClick={async () => {
+                                                    try {
+                                                        const newConfig = {
+                                                            ...config!,
+                                                            rootFolderId: folder.id,
+                                                            rootFolderName: folder.name,
+                                                        };
+                                                        await onConfigChange(newConfig);
+                                                        setShowRootFolderSelector(false);
+                                                        setSuccess(`Carpeta raíz cambiada a: ${folder.name}`);
+                                                    } catch (error: any) {
+                                                        setError('Error al cambiar carpeta raíz: ' + error.message);
+                                                    }
+                                                }}
+                                                className={`w-full text-left p-2 rounded text-xs ${
+                                                    config?.rootFolderId === folder.id
+                                                        ? 'bg-blue-100 border border-blue-300'
+                                                        : 'bg-gray-50 hover:bg-gray-100 border border-gray-200'
+                                                }`}
+                                            >
+                                                <Folder className="w-3 h-3 inline mr-1" />
+                                                {folder.name}
+                                            </button>
+                                        ))}
+                                    </div>
+                                ) : (
+                                    <p className="text-xs text-gray-500 text-center py-4">No hay carpetas en la raíz. Usa el buscador para encontrar carpetas.</p>
+                                )
                             )}
                         </div>
                     )}

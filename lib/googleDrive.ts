@@ -272,6 +272,72 @@ class GoogleDriveService {
         }
     }
 
+    // Buscar carpetas por nombre (en todo Google Drive)
+    async searchFolders(searchQuery: string): Promise<GoogleDriveFolder[]> {
+        if (!this.accessToken) {
+            throw new Error('No hay conexión con Google Drive');
+        }
+
+        try {
+            // Buscar carpetas que contengan el término de búsqueda
+            const query = `name contains '${searchQuery}' and mimeType='application/vnd.google-apps.folder' and trashed=false`;
+            const response = await fetch(
+                `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(query)}&fields=files(id,name,mimeType,parents)&pageSize=50`,
+                {
+                    headers: {
+                        'Authorization': `Bearer ${this.accessToken}`,
+                    },
+                }
+            );
+
+            if (!response.ok) {
+                if (response.status === 401) {
+                    await this.refreshAccessToken();
+                    return this.searchFolders(searchQuery);
+                }
+                throw new Error(`Error al buscar carpetas: ${response.statusText}`);
+            }
+
+            const data = await response.json();
+            return data.files || [];
+        } catch (error) {
+            console.error('Error buscando carpetas:', error);
+            throw error;
+        }
+    }
+
+    // Obtener información de una carpeta por ID (incluyendo nombre y padres)
+    async getFolderInfo(folderId: string): Promise<GoogleDriveFolder & { fullPath?: string }> {
+        if (!this.accessToken) {
+            throw new Error('No hay conexión con Google Drive');
+        }
+
+        try {
+            const response = await fetch(
+                `https://www.googleapis.com/drive/v3/files/${folderId}?fields=id,name,mimeType,parents`,
+                {
+                    headers: {
+                        'Authorization': `Bearer ${this.accessToken}`,
+                    },
+                }
+            );
+
+            if (!response.ok) {
+                if (response.status === 401) {
+                    await this.refreshAccessToken();
+                    return this.getFolderInfo(folderId);
+                }
+                throw new Error(`Error al obtener información de carpeta: ${response.statusText}`);
+            }
+
+            const folder = await response.json();
+            return folder as GoogleDriveFolder;
+        } catch (error) {
+            console.error('Error obteniendo información de carpeta:', error);
+            throw error;
+        }
+    }
+
     // Refrescar token de acceso
     private async refreshAccessToken(): Promise<void> {
         if (!this.refreshToken) {
