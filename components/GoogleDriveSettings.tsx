@@ -178,9 +178,22 @@ export const GoogleDriveSettings: React.FC<GoogleDriveSettingsProps> = ({ config
         const messageListener = (event: MessageEvent) => {
             console.log('📨 Mensaje recibido:', event.origin, event.data);
             
-            // Verificar que el mensaje viene del mismo origen
-            if (event.origin !== window.location.origin) {
-                console.log('⚠️ Origen no coincide:', event.origin, 'vs', window.location.origin);
+            // Verificar que el mensaje viene del mismo origen O del backend (el popup puede enviar desde el backend)
+            const frontendOrigin = window.location.origin;
+            const backendOrigin = frontendOrigin.replace(/^https?:\/\/([^.]+)\./, 'https://opalo-ats-backend.');
+            const allowedOrigins = [frontendOrigin, backendOrigin];
+            
+            // También permitir cualquier origen de easypanel.host para desarrollo
+            const isAllowedOrigin = allowedOrigins.includes(event.origin) || 
+                                   event.origin.includes('easypanel.host');
+            
+            if (!isAllowedOrigin) {
+                console.log('⚠️ Origen no permitido:', event.origin, 'vs', frontendOrigin);
+                return;
+            }
+            
+            // Ignorar mensajes que no son de Google Drive OAuth
+            if (!event.data || event.data?.target === 'metamask-inpage' || event.data?.type !== 'GOOGLE_DRIVE_AUTH_SUCCESS') {
                 return;
             }
 
