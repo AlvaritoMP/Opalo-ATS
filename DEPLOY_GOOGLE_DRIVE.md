@@ -287,19 +287,35 @@ Deberías ver:
 
 ### Paso 4.1: Actualizar Variable de Entorno del Frontend
 
-1. Ve a tu aplicación frontend en Easypanel
-2. Ve a **"Environment Variables"**
-3. Agrega o actualiza:
+**⚠️ CRÍTICO**: Esta variable es necesaria para que el frontend sepa a dónde conectarse.
+
+1. Ve a tu aplicación **frontend** en Easypanel
+2. Ve a **"Environment Variables"** o **"Variables de Entorno"**
+3. **Agrega esta variable** (si no existe):
    ```
-   VITE_API_URL=https://tu-dominio-backend.com
+   VITE_API_URL=https://tu-backend-url.easypanel.host
    ```
-   (Reemplaza con la URL real de tu backend)
+   
+   **Ejemplo:**
+   ```
+   VITE_API_URL=https://backend-abc123.easypanel.host
+   ```
+   
+   **⚠️ IMPORTANTE**: 
+   - Reemplaza `tu-backend-url.easypanel.host` con la URL **REAL** de tu backend (la que obtuviste en el Paso 3.4)
+   - NO incluyas `/api` al final, solo la URL base
+   - Debe ser `https://` (no `http://`)
+   - Esta es la URL del **backend Node.js**, NO de Supabase
 
 ### Paso 4.2: Hacer Rebuild del Frontend
 
+**⚠️ OBLIGATORIO**: Después de agregar `VITE_API_URL`, debes hacer **rebuild** porque Vite inyecta estas variables durante el build:
+
 1. En Easypanel, ve a tu aplicación frontend
 2. Haz clic en **"Redeploy"** o **"Rebuild"**
-3. Espera a que termine el build
+3. Espera a que termine el build (puede tomar varios minutos)
+
+**Sin este paso, el frontend seguirá usando `localhost:5000`**
 
 ---
 
