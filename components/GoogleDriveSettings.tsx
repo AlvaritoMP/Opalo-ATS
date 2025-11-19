@@ -20,6 +20,7 @@ export const GoogleDriveSettings: React.FC<GoogleDriveSettingsProps> = ({ config
     useEffect(() => {
         // Si estamos en un popup (window.opener existe), leer parámetros y enviarlos a la ventana principal
         if (window.opener) {
+            console.log('🔵 Popup detectado, leyendo parámetros de URL...');
             const urlParams = new URLSearchParams(window.location.search);
             const driveConnected = urlParams.get('drive_connected');
             const accessToken = urlParams.get('access_token');
@@ -29,9 +30,15 @@ export const GoogleDriveSettings: React.FC<GoogleDriveSettingsProps> = ({ config
             const userName = urlParams.get('user_name');
             const rootFolderId = urlParams.get('root_folder_id');
 
+            console.log('📋 Parámetros encontrados:', {
+                driveConnected,
+                hasAccessToken: !!accessToken,
+                hasRefreshToken: !!refreshToken,
+                userEmail,
+            });
+
             if (driveConnected === 'true' && accessToken) {
-                // Enviar datos a la ventana principal (mismo origen, no hay problemas de CORS)
-                window.opener.postMessage({
+                const messageData = {
                     type: 'GOOGLE_DRIVE_AUTH_SUCCESS',
                     accessToken,
                     refreshToken,
@@ -41,11 +48,22 @@ export const GoogleDriveSettings: React.FC<GoogleDriveSettingsProps> = ({ config
                         name: userName,
                     },
                     rootFolderId,
-                }, window.location.origin);
+                };
                 
-                // Cerrar el popup
-                window.close();
+                console.log('📤 Enviando mensaje a ventana principal:', messageData);
+                console.log('📍 Origen:', window.location.origin);
+                
+                // Enviar datos a la ventana principal (mismo origen, no hay problemas de CORS)
+                window.opener.postMessage(messageData, window.location.origin);
+                
+                // Esperar un poco antes de cerrar para asegurar que el mensaje se envíe
+                setTimeout(() => {
+                    console.log('🔴 Cerrando popup...');
+                    window.close();
+                }, 500);
                 return;
+            } else {
+                console.log('⚠️ Parámetros incompletos o inválidos');
             }
         }
 
@@ -152,10 +170,68 @@ export const GoogleDriveSettings: React.FC<GoogleDriveSettingsProps> = ({ config
     const handleConnect = () => {
         setIsConnecting(true);
         setError(null);
+        setSuccess(null);
+        
+        console.log('🔵 Iniciando conexión con Google Drive...');
+        
+        // Registrar listener ANTES de abrir el popup
+        const messageListener = (event: MessageEvent) => {
+            console.log('📨 Mensaje recibido:', event.origin, event.data);
+            
+            // Verificar que el mensaje viene del mismo origen
+            if (event.origin !== window.location.origin) {
+                console.log('⚠️ Origen no coincide:', event.origin, 'vs', window.location.origin);
+                return;
+            }
+
+            if (event.data.type === 'GOOGLE_DRIVE_AUTH_SUCCESS') {
+                console.log('✅ Mensaje de éxito recibido:', event.data);
+                (async () => {
+                    try {
+                        const { accessToken, refreshToken, userInfo, rootFolderId, tokenExpiry } = event.data;
+                        
+                        const newConfig: GoogleDriveConfig = {
+                            connected: true,
+                            accessToken,
+                            refreshToken: refreshToken || config?.refreshToken,
+                            tokenExpiry: tokenExpiry ? new Date(Date.now() + parseInt(tokenExpiry) * 1000).toISOString() : config?.tokenExpiry,
+                            userEmail: userInfo?.email || config?.userEmail,
+                            userName: userInfo?.name || config?.userName,
+                            rootFolderId: rootFolderId || config?.rootFolderId,
+                        };
+
+                        console.log('💾 Guardando configuración:', { connected: newConfig.connected, hasToken: !!newConfig.accessToken });
+                        googleDriveService.setTokens(accessToken, refreshToken || '');
+                        
+                        // onConfigChange guardará automáticamente en Supabase
+                        await onConfigChange(newConfig);
+                        
+                        console.log('✅ Configuración guardada exitosamente');
+                        setSuccess('Conectado exitosamente a Google Drive');
+                        setIsConnecting(false);
+                        
+                        // Cargar carpetas después de conectar
+                        setTimeout(() => {
+                            loadFolders();
+                        }, 1000);
+                    } catch (error) {
+                        console.error('❌ Error procesando mensaje:', error);
+                        setError('Error al procesar la conexión: ' + (error as Error).message);
+                        setIsConnecting(false);
+                    }
+                })();
+                
+                // Remover listener después de procesar
+                window.removeEventListener('message', messageListener);
+            }
+        };
+
+        window.addEventListener('message', messageListener);
+        console.log('👂 Listener de mensajes registrado');
         
         // Redirigir al backend para OAuth
-        // En producción, esto debe ser una URL del backend
         const authUrl = googleDriveService.getAuthUrl();
+        console.log('🔗 URL de autenticación:', authUrl);
         
         // Abrir ventana de OAuth
         const width = 600;
@@ -169,11 +245,22 @@ export const GoogleDriveSettings: React.FC<GoogleDriveSettingsProps> = ({ config
             `width=${width},height=${height},left=${left},top=${top}`
         );
 
+        if (!popup) {
+            setError('No se pudo abrir la ventana de autenticación. Verifica que los popups no estén bloqueados.');
+            setIsConnecting(false);
+            window.removeEventListener('message', messageListener);
+            return;
+        }
+
         // Verificar si el popup se cerró
         const checkClosed = setInterval(() => {
             if (popup?.closed) {
                 clearInterval(checkClosed);
-                setIsConnecting(false);
+                console.log('🔴 Popup cerrado');
+                window.removeEventListener('message', messageListener);
+                if (isConnecting) {
+                    setIsConnecting(false);
+                }
             }
         }, 1000);
     };
