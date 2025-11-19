@@ -457,18 +457,20 @@ const App: React.FC = () => {
         setView: (type, payload) => setState(s => ({ ...s, view: { type, payload } })),
         saveSettings: async (settings) => {
             try {
-                await settingsApi.update(settings);
+                // Actualizar en Supabase y obtener los settings actualizados
+                const updatedSettings = await settingsApi.update(settings);
                 
                 // Inicializar Google Drive si está configurado
-                if (settings?.googleDrive?.connected && settings.googleDrive.accessToken) {
-                    googleDriveService.initialize(settings.googleDrive);
+                if (updatedSettings?.googleDrive?.connected && updatedSettings.googleDrive.accessToken) {
+                    googleDriveService.initialize(updatedSettings.googleDrive);
                 } else {
                     // Limpiar si se desconectó
                     googleDriveService.setTokens('', '');
                 }
                 
-                saveSettingsToStorage(settings); // Backup local
-                setState(s => ({ ...s, settings }));
+                saveSettingsToStorage(updatedSettings); // Backup local
+                setState(s => ({ ...s, settings: updatedSettings }));
+                console.log('✅ Settings actualizados en el estado:', updatedSettings.googleDrive);
             } catch (error) {
                 console.error('Error saving settings:', error);
                 saveSettingsToStorage(settings);
