@@ -255,8 +255,8 @@ export const Settings: React.FC = () => {
                     <p className="text-sm text-gray-500 mb-6">Conecta Google Drive para almacenar documentos de candidatos y procesos.</p>
                     <GoogleDriveSettings
                         config={settings.googleDrive}
-                        onConfigChange={(googleDriveConfig) => {
-                            setSettings({
+                        onConfigChange={async (googleDriveConfig) => {
+                            const updatedSettings = {
                                 ...settings,
                                 googleDrive: googleDriveConfig,
                                 fileStorage: {
@@ -264,7 +264,19 @@ export const Settings: React.FC = () => {
                                     connected: googleDriveConfig.connected,
                                     provider: googleDriveConfig.connected ? 'google-drive' : settings.fileStorage.provider,
                                 },
-                            });
+                            };
+                            setSettings(updatedSettings);
+                            
+                            // Guardar automáticamente cuando se conecta/desconecta Google Drive
+                            setIsSaving(true);
+                            try {
+                                await actions.saveSettings(updatedSettings);
+                                console.log('Configuración de Google Drive guardada exitosamente');
+                            } catch (error) {
+                                console.error('Error guardando configuración de Google Drive:', error);
+                            } finally {
+                                setIsSaving(false);
+                            }
                         }}
                     />
                 </div>
