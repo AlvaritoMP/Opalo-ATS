@@ -252,17 +252,32 @@ export const GoogleDriveSettings: React.FC<GoogleDriveSettingsProps> = ({ config
             return;
         }
 
-        // Verificar si el popup se cerró
-        const checkClosed = setInterval(() => {
+        // Verificar si el popup se redirigió al frontend (con los parámetros de OAuth)
+        const checkRedirect = setInterval(() => {
+            try {
+                // Intentar acceder a la URL del popup para ver si se redirigió al frontend
+                if (popup?.location) {
+                    const popupUrl = popup.location.href;
+                    if (popupUrl.includes(window.location.origin) && popupUrl.includes('drive_connected=true')) {
+                        clearInterval(checkRedirect);
+                        console.log('✅ Popup redirigido al frontend con parámetros');
+                        // El useEffect del popup manejará el envío del mensaje
+                    }
+                }
+            } catch (e) {
+                // Error de cross-origin es normal, el popup aún está en Google o backend
+            }
+            
+            // Si el popup se cerró
             if (popup?.closed) {
-                clearInterval(checkClosed);
+                clearInterval(checkRedirect);
                 console.log('🔴 Popup cerrado');
                 window.removeEventListener('message', messageListener);
                 if (isConnecting) {
                     setIsConnecting(false);
                 }
             }
-        }, 1000);
+        }, 500);
     };
 
     const handleDisconnect = () => {
