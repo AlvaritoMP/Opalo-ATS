@@ -19,7 +19,7 @@ export const GoogleDriveSettings: React.FC<GoogleDriveSettingsProps> = ({ config
 
     useEffect(() => {
         // Si estamos en un popup (window.opener existe), leer parámetros y enviarlos a la ventana principal
-        if (window.opener) {
+        if (window.opener && !window.opener.closed) {
             console.log('🔵 Popup detectado, leyendo parámetros de URL...');
             const urlParams = new URLSearchParams(window.location.search);
             const driveConnected = urlParams.get('drive_connected');
@@ -53,14 +53,29 @@ export const GoogleDriveSettings: React.FC<GoogleDriveSettingsProps> = ({ config
                 console.log('📤 Enviando mensaje a ventana principal:', messageData);
                 console.log('📍 Origen:', window.location.origin);
                 
-                // Enviar datos a la ventana principal (mismo origen, no hay problemas de CORS)
-                window.opener.postMessage(messageData, window.location.origin);
-                
-                // Esperar un poco antes de cerrar para asegurar que el mensaje se envíe
-                setTimeout(() => {
-                    console.log('🔴 Cerrando popup...');
-                    window.close();
-                }, 500);
+                try {
+                    // Intentar enviar mensaje primero
+                    window.opener.postMessage(messageData, window.location.origin);
+                    console.log('✅ Mensaje enviado, cerrando popup en 500ms...');
+                    
+                    // También redirigir la ventana principal como fallback
+                    const redirectUrl = new URL(window.location.href);
+                    redirectUrl.pathname = '/settings';
+                    window.opener.location.href = redirectUrl.toString();
+                    
+                    // Esperar un poco antes de cerrar para asegurar que el mensaje se envíe
+                    setTimeout(() => {
+                        console.log('🔴 Cerrando popup...');
+                        window.close();
+                    }, 500);
+                } catch (error) {
+                    console.error('❌ Error enviando mensaje, redirigiendo ventana principal:', error);
+                    // Si falla el mensaje, redirigir la ventana principal directamente
+                    const redirectUrl = new URL(window.location.href);
+                    redirectUrl.pathname = '/settings';
+                    window.opener.location.href = redirectUrl.toString();
+                    setTimeout(() => window.close(), 1000);
+                }
                 return;
             } else {
                 console.log('⚠️ Parámetros incompletos o inválidos');
