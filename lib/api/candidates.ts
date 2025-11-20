@@ -207,6 +207,29 @@ export const candidatesApi = {
             });
         }
 
+        // Guardar attachments si existen
+        if (candidateData.attachments && candidateData.attachments.length > 0) {
+            const attachmentsToInsert = candidateData.attachments.map(att => ({
+                id: att.id,
+                candidate_id: data.id,
+                name: att.name,
+                url: att.url,
+                type: att.type,
+                size: att.size,
+                category: att.category || null,
+                uploaded_at: att.uploadedAt || new Date().toISOString(),
+                comment_id: null,
+            }));
+
+            const { error: attError } = await supabase
+                .from('attachments')
+                .insert(attachmentsToInsert);
+
+            if (attError) {
+                console.error('Error guardando attachments al crear candidato:', attError);
+            }
+        }
+
         return await this.getById(data.id) as Candidate;
     },
 
@@ -232,6 +255,52 @@ export const candidatesApi = {
                 moved_at: new Date().toISOString(),
                 moved_by: movedBy || null,
             });
+        }
+
+        // Sincronizar attachments: guardar en la tabla attachments
+        if (candidateData.attachments !== undefined) {
+            // Obtener attachments actuales de la BD
+            const { data: currentAttachments } = await supabase
+                .from('attachments')
+                .select('id')
+                .eq('candidate_id', id)
+                .is('comment_id', null);
+
+            const currentAttachmentIds = new Set((currentAttachments || []).map(a => a.id));
+            const newAttachmentIds = new Set(candidateData.attachments.map(a => a.id));
+
+            // Eliminar attachments que ya no están en la lista
+            const toDelete = Array.from(currentAttachmentIds).filter(id => !newAttachmentIds.has(id));
+            if (toDelete.length > 0) {
+                await supabase
+                    .from('attachments')
+                    .delete()
+                    .in('id', toDelete);
+            }
+
+            // Insertar o actualizar attachments
+            for (const attachment of candidateData.attachments) {
+                const attachmentData = {
+                    id: attachment.id,
+                    candidate_id: id,
+                    name: attachment.name,
+                    url: attachment.url,
+                    type: attachment.type,
+                    size: attachment.size,
+                    category: attachment.category || null,
+                    uploaded_at: attachment.uploadedAt || new Date().toISOString(),
+                    comment_id: null, // Attachments de candidato no tienen comment_id
+                };
+
+                // Usar upsert para insertar o actualizar
+                const { error: attError } = await supabase
+                    .from('attachments')
+                    .upsert(attachmentData, { onConflict: 'id' });
+
+                if (attError) {
+                    console.error('Error guardando attachment:', attError);
+                }
+            }
         }
 
         return await this.getById(id) as Candidate;

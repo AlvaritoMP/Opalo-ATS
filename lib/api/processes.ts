@@ -28,6 +28,8 @@ function dbToProcess(dbProcess: any, stages: any[] = [], documentCategories: any
             description: dc.description,
             required: dc.required || false,
         })) : undefined,
+        googleDriveFolderId: dbProcess.google_drive_folder_id,
+        googleDriveFolderName: dbProcess.google_drive_folder_name,
     };
 }
 
@@ -45,6 +47,8 @@ function processToDb(process: Partial<Process>): any {
     if (process.endDate !== undefined) dbProcess.end_date = process.endDate;
     if (process.status !== undefined) dbProcess.status = process.status;
     if (process.vacancies !== undefined) dbProcess.vacancies = process.vacancies;
+    if (process.googleDriveFolderId !== undefined) dbProcess.google_drive_folder_id = process.googleDriveFolderId;
+    if (process.googleDriveFolderName !== undefined) dbProcess.google_drive_folder_name = process.googleDriveFolderName;
     return dbProcess;
 }
 
