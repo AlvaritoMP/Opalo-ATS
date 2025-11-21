@@ -212,8 +212,82 @@ export const processesApi = {
 
     // Eliminar proceso
     async delete(id: string): Promise<void> {
-        // Primero eliminar las relaciones dependientes
-        // Eliminar stages
+        // IMPORTANTE: Orden de eliminación para respetar foreign keys
+        // 1. Primero eliminar candidatos (que referencian stages y process)
+        const { data: candidates } = await supabase
+            .from('candidates')
+            .select('id')
+            .eq('process_id', id);
+        
+        if (candidates && candidates.length > 0) {
+            const candidateIds = candidates.map(c => c.id);
+            
+            // Eliminar relaciones de candidatos primero
+            // Eliminar attachments de candidatos
+            const { error: candidateAttachmentsError } = await supabase
+                .from('attachments')
+                .delete()
+                .in('candidate_id', candidateIds);
+            
+            if (candidateAttachmentsError) {
+                console.warn('Error eliminando attachments de candidatos:', candidateAttachmentsError);
+            }
+            
+            // Eliminar post-its de candidatos
+            const { error: postItsError } = await supabase
+                .from('post_its')
+                .delete()
+                .in('candidate_id', candidateIds);
+            
+            if (postItsError) {
+                console.warn('Error eliminando post-its:', postItsError);
+            }
+            
+            // Eliminar comentarios de candidatos
+            const { error: commentsError } = await supabase
+                .from('comments')
+                .delete()
+                .in('candidate_id', candidateIds);
+            
+            if (commentsError) {
+                console.warn('Error eliminando comentarios:', commentsError);
+            }
+            
+            // Eliminar historial de candidatos
+            const { error: historyError } = await supabase
+                .from('candidate_history')
+                .delete()
+                .in('candidate_id', candidateIds);
+            
+            if (historyError) {
+                console.warn('Error eliminando historial:', historyError);
+            }
+            
+            // Eliminar eventos de entrevistas
+            const { error: interviewsError } = await supabase
+                .from('interview_events')
+                .delete()
+                .in('candidate_id', candidateIds);
+            
+            if (interviewsError) {
+                console.warn('Error eliminando entrevistas:', interviewsError);
+            }
+            
+            // Ahora eliminar los candidatos
+            const { error: candidatesError } = await supabase
+                .from('candidates')
+                .delete()
+                .eq('process_id', id);
+            
+            if (candidatesError) {
+                console.error('Error eliminando candidatos:', candidatesError);
+                throw new Error(`Error al eliminar candidatos del proceso: ${candidatesError.message}`);
+            }
+            
+            console.log(`✅ ${candidates.length} candidatos eliminados`);
+        }
+        
+        // 2. Eliminar stages (ahora que no hay candidatos que las referencien)
         const { error: stagesError } = await supabase
             .from('stages')
             .delete()
@@ -224,7 +298,7 @@ export const processesApi = {
             throw new Error(`Error al eliminar etapas del proceso: ${stagesError.message}`);
         }
         
-        // Eliminar document_categories
+        // 3. Eliminar document_categories
         const { error: categoriesError } = await supabase
             .from('document_categories')
             .delete()
@@ -235,18 +309,28 @@ export const processesApi = {
             throw new Error(`Error al eliminar categorías del proceso: ${categoriesError.message}`);
         }
         
-        // Eliminar attachments del proceso
+        // 4. Eliminar attachments del proceso (que no son de candidatos)
         const { error: attachmentsError } = await supabase
             .from('attachments')
             .delete()
             .eq('process_id', id);
         
         if (attachmentsError) {
-            console.error('Error eliminando attachments:', attachmentsError);
+            console.warn('Error eliminando attachments del proceso:', attachmentsError);
             // No lanzar error, continuar con la eliminación
         }
         
-        // Finalmente eliminar el proceso
+        // 5. Eliminar form_integrations
+        const { error: formsError } = await supabase
+            .from('form_integrations')
+            .delete()
+            .eq('process_id', id);
+        
+        if (formsError) {
+            console.warn('Error eliminando integraciones de formularios:', formsError);
+        }
+        
+        // 6. Finalmente eliminar el proceso
         const { error, data } = await supabase
             .from('processes')
             .delete()

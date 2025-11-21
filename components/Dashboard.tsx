@@ -53,7 +53,13 @@ export const Dashboard: React.FC = () => {
     const [dateFilter, setDateFilter] = useState<{ start: string; end: string }>({ start: '', end: '' });
 
     const filteredCandidates = useMemo(() => {
+        const userRole = state.currentUser?.role;
+        const isClientOrViewer = userRole === 'client' || userRole === 'viewer';
+        
         return allCandidates.filter(candidate => {
+            // Filtrar por visibilidad según el rol
+            if (isClientOrViewer && !candidate.visibleToClients) return false;
+            
             const processMatch = processFilter === 'all' || candidate.processId === processFilter;
             
             const applicationDate = new Date(candidate.history[0]?.movedAt);
@@ -66,7 +72,7 @@ export const Dashboard: React.FC = () => {
 
             return processMatch && dateMatch;
         });
-    }, [allCandidates, processFilter, dateFilter]);
+    }, [allCandidates, processFilter, dateFilter, state.currentUser?.role]);
 
     const totalCandidates = filteredCandidates.length;
     const totalProcesses = processes.length; // This stat is not filtered

@@ -556,6 +556,49 @@ export const CandidateDetailsModal: React.FC<{ candidate: Candidate, onClose: ()
                                     <>
                                         {/* Edit Form */}
                                         <div className="space-y-4">
+                                            {/* Selector de Etapa */}
+                                            {processStages.length > 0 && (
+                                                <div>
+                                                    <label className="block text-sm font-medium text-gray-700 mb-2">Etapa actual</label>
+                                                    <select 
+                                                        name="stageId" 
+                                                        value={editableCandidate.stageId} 
+                                                        onChange={handleInputChange}
+                                                        className="mt-1 block w-full input"
+                                                    >
+                                                        {processStages.map((stage) => (
+                                                            <option key={stage.id} value={stage.id}>
+                                                                {stage.name}
+                                                            </option>
+                                                        ))}
+                                                    </select>
+                                                    <p className="mt-1 text-xs text-gray-500">
+                                                        También puedes arrastrar el candidato entre etapas en el tablero del proceso.
+                                                    </p>
+                                                </div>
+                                            )}
+                                            
+                                            {/* Toggle de Visibilidad para Clientes/Viewers */}
+                                            {canEdit && (
+                                                <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg border border-gray-200">
+                                                    <div>
+                                                        <label className="block text-sm font-medium text-gray-700">Visible para clientes/viewers</label>
+                                                        <p className="text-xs text-gray-500 mt-1">
+                                                            Si está activado, los usuarios tipo cliente y viewer podrán ver este candidato.
+                                                        </p>
+                                                    </div>
+                                                    <label className="relative inline-flex items-center cursor-pointer">
+                                                        <input
+                                                            type="checkbox"
+                                                            checked={editableCandidate.visibleToClients || false}
+                                                            onChange={(e) => setEditableCandidate(prev => ({ ...prev, visibleToClients: e.target.checked }))}
+                                                            className="sr-only peer"
+                                                        />
+                                                        <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-primary-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary-600"></div>
+                                                    </label>
+                                                </div>
+                                            )}
+                                            
                                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                                 <div><label className="block text-sm font-medium text-gray-700">Nombre completo</label><input type="text" name="name" value={editableCandidate.name} onChange={handleInputChange} className="mt-1 block w-full input"/></div>
                                                 <div><label className="block text-sm font-medium text-gray-700">Correo</label><input type="email" name="email" value={editableCandidate.email} onChange={handleInputChange} className="mt-1 block w-full input"/></div>

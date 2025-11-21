@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useAppState } from '../App';
 import { CandidateCard } from './CandidateCard';
-import { Plus, Edit, Briefcase, DollarSign, BarChart, Clock, Paperclip, X, FileText, ClipboardList, Tag, Users } from 'lucide-react';
+import { Plus, Edit, Briefcase, DollarSign, BarChart, Clock, Paperclip, X, FileText, ClipboardList, Tag, Users, ArrowLeft } from 'lucide-react';
 import { AddCandidateModal } from './AddCandidateModal';
 import { ProcessEditorModal } from './ProcessEditorModal';
 import { BulkLetterModal } from './BulkLetterModal';
@@ -38,11 +38,21 @@ export const ProcessView: React.FC<ProcessViewProps> = ({ processId }) => {
     const dragPayload = React.useRef<{ candidateId: string; isBulk: boolean } | null>(null);
 
     const process = state.processes.find(p => p.id === processId);
-    const candidates = state.candidates.filter(c => c.processId === processId && !c.archived);
     
+    // Filtrar candidatos según el rol del usuario
+    // Admin y Recruiter ven todos los candidatos
+    // Client y Viewer solo ven candidatos con visibleToClients === true
     const userRole = state.currentUser?.role as UserRole;
     const canManageProcess = ['admin', 'recruiter'].includes(userRole);
     const canMoveCandidates = ['admin', 'recruiter', 'client'].includes(userRole);
+    const isClientOrViewer = ['client', 'viewer'].includes(userRole);
+    
+    const candidates = state.candidates.filter(c => {
+        if (c.processId !== processId || c.archived) return false;
+        // Si es cliente o viewer, solo mostrar candidatos visibles
+        if (isClientOrViewer && !c.visibleToClients) return false;
+        return true;
+    });
 
 
     const handleSelectCandidate = (candidateId: string) => {
@@ -174,6 +184,13 @@ export const ProcessView: React.FC<ProcessViewProps> = ({ processId }) => {
             <header className="p-4 border-b bg-white flex-shrink-0">
                 <div className="flex justify-between items-center mb-3">
                      <div className="flex items-center space-x-3">
+                        <button
+                            onClick={() => actions.setView('processes', null)}
+                            className="flex items-center justify-center p-2 rounded-md hover:bg-gray-100 text-gray-600 hover:text-gray-800 transition-colors"
+                            title="Volver a la lista de procesos"
+                        >
+                            <ArrowLeft className="w-5 h-5" />
+                        </button>
                         <h1 className="text-2xl font-bold text-gray-800">{process.title}</h1>
                         <span className={`px-3 py-1 rounded-full text-xs font-semibold ${statusColors[currentStatus]}`}>
                             {statusLabels[currentStatus]}

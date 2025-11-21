@@ -78,16 +78,22 @@ export const CandidateComparator: React.FC = () => {
     const processes = state.processes;
     const selectedCandidates = useMemo(() => candidates.filter(c => selectedIds.includes(c.id)), [candidates, selectedIds]);
     
+    const userRole = state.currentUser?.role;
+    const isClientOrViewer = userRole === 'client' || userRole === 'viewer';
+    
     const filteredCandidates = useMemo(() => {
         const q = candidateQuery.trim().toLowerCase();
-        return state.candidates.filter(c =>
-            !q ||
-            c.name.toLowerCase().includes(q) ||
-            c.email.toLowerCase().includes(q) ||
-            (c.phone || '').toLowerCase().includes(q) ||
-            (state.processes.find(p => p.id === c.processId)?.title || '').toLowerCase().includes(q)
-        );
-    }, [state.candidates, state.processes, candidateQuery]);
+        return state.candidates.filter(c => {
+            // Filtrar por visibilidad según el rol
+            if (isClientOrViewer && !c.visibleToClients) return false;
+            
+            return !q ||
+                c.name.toLowerCase().includes(q) ||
+                c.email.toLowerCase().includes(q) ||
+                (c.phone || '').toLowerCase().includes(q) ||
+                (state.processes.find(p => p.id === c.processId)?.title || '').toLowerCase().includes(q);
+        });
+    }, [state.candidates, state.processes, candidateQuery, isClientOrViewer]);
 
     // Función para obtener el valor de un campo de datos
     const getFieldValue = (candidate: Candidate, field: DataField): any => {

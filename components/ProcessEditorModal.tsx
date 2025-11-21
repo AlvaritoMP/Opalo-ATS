@@ -243,9 +243,19 @@ export const ProcessEditorModal: React.FC<ProcessEditorModalProps> = ({ process,
             googleDriveFolderName: googleDriveFolderName || undefined,
         };
 
-        if (process) await actions.updateProcess({ ...process, ...processData });
-        else await actions.addProcess(processData);
-        onClose();
+        try {
+            if (process) {
+                await actions.updateProcess({ ...process, ...processData });
+            } else {
+                await actions.addProcess(processData);
+            }
+            // Recargar procesos después de guardar para que otros usuarios vean los cambios
+            await actions.reloadProcesses();
+            onClose();
+        } catch (error: any) {
+            console.error('Error guardando proceso:', error);
+            alert(`Error al guardar el proceso: ${error.message || 'No se pudo guardar el proceso.'}`);
+        }
     };
 
     return (

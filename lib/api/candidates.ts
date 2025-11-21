@@ -103,6 +103,7 @@ async function dbToCandidate(dbCandidate: any): Promise<Candidate> {
         hireDate: dbCandidate.hire_date,
         googleDriveFolderId: dbCandidate.google_drive_folder_id,
         googleDriveFolderName: dbCandidate.google_drive_folder_name,
+        visibleToClients: dbCandidate.visible_to_clients ?? false,
     };
 }
 
@@ -127,6 +128,7 @@ function candidateToDb(candidate: Partial<Candidate>): any {
     if (candidate.hireDate !== undefined) dbCandidate.hire_date = candidate.hireDate;
     if (candidate.googleDriveFolderId !== undefined) dbCandidate.google_drive_folder_id = candidate.googleDriveFolderId;
     if (candidate.googleDriveFolderName !== undefined) dbCandidate.google_drive_folder_name = candidate.googleDriveFolderName;
+    if (candidate.visibleToClients !== undefined) dbCandidate.visible_to_clients = candidate.visibleToClients;
     return dbCandidate;
 }
 

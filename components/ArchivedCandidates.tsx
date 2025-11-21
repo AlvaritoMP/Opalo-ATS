@@ -8,7 +8,15 @@ export const ArchivedCandidates: React.FC = () => {
     const { state, actions } = useAppState();
     const [selectedCandidate, setSelectedCandidate] = useState<Candidate | null>(null);
 
-    const archivedCandidates = state.candidates.filter(c => c.archived);
+    const userRole = state.currentUser?.role;
+    const isClientOrViewer = userRole === 'client' || userRole === 'viewer';
+    
+    const archivedCandidates = state.candidates.filter(c => {
+        if (!c.archived) return false;
+        // Filtrar por visibilidad según el rol
+        if (isClientOrViewer && !c.visibleToClients) return false;
+        return true;
+    });
 
     const getProcessTitle = (processId: string) => {
         return state.processes.find(p => p.id === processId)?.title || 'Proceso no disponible';

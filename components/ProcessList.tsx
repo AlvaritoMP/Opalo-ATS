@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAppState } from '../App';
-import { Plus, MoreVertical, Eye, Edit, Trash2, Users } from 'lucide-react';
+import { Plus, MoreVertical, Eye, Edit, Trash2, Users, RefreshCw } from 'lucide-react';
 import { ProcessEditorModal } from './ProcessEditorModal';
 import { Process, UserRole, ProcessStatus } from '../types';
 
@@ -123,8 +123,32 @@ export const ProcessList: React.FC = () => {
     const [isEditorOpen, setIsEditorOpen] = useState(false);
     const [editingProcess, setEditingProcess] = useState<Process | null>(null);
     const [statusFilter, setStatusFilter] = useState<ProcessStatus | 'all'>('all');
+    const [isReloading, setIsReloading] = useState(false);
     
     const canManageProcesses = ['admin', 'recruiter'].includes(state.currentUser?.role as UserRole);
+    
+    // Recarga automática cada 30 segundos
+    useEffect(() => {
+        const interval = setInterval(() => {
+            actions.reloadProcesses().catch(error => {
+                console.error('Error en recarga automática:', error);
+            });
+        }, 30000); // 30 segundos
+        
+        return () => clearInterval(interval);
+    }, [actions]);
+    
+    const handleReload = async () => {
+        setIsReloading(true);
+        try {
+            await actions.reloadProcesses();
+        } catch (error: any) {
+            console.error('Error al recargar:', error);
+            alert(`Error al recargar procesos: ${error.message || 'No se pudieron recargar los procesos.'}`);
+        } finally {
+            setIsReloading(false);
+        }
+    };
 
     const handleEdit = (process: Process) => {
         setEditingProcess(process);
@@ -160,14 +184,25 @@ export const ProcessList: React.FC = () => {
         <div className="p-8">
             <div className="flex justify-between items-center mb-8">
                 <h1 className="text-3xl font-bold text-gray-800">{getLabel('sidebar_processes', 'Procesos de contratación')}</h1>
-                {canManageProcesses && (
+                <div className="flex items-center gap-3">
                     <button
-                        onClick={handleAddNew}
-                        className="flex items-center px-4 py-2 bg-primary-600 text-white rounded-lg shadow-sm hover:bg-primary-700"
+                        onClick={handleReload}
+                        disabled={isReloading}
+                        className="flex items-center px-4 py-2 bg-gray-100 text-gray-700 rounded-lg shadow-sm hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                        title="Recargar procesos"
                     >
-                        <Plus className="w-5 h-5 mr-2" /> Nuevo proceso
+                        <RefreshCw className={`w-5 h-5 mr-2 ${isReloading ? 'animate-spin' : ''}`} /> 
+                        {isReloading ? 'Recargando...' : 'Recargar'}
                     </button>
-                )}
+                    {canManageProcesses && (
+                        <button
+                            onClick={handleAddNew}
+                            className="flex items-center px-4 py-2 bg-primary-600 text-white rounded-lg shadow-sm hover:bg-primary-700"
+                        >
+                            <Plus className="w-5 h-5 mr-2" /> Nuevo proceso
+                        </button>
+                    )}
+                </div>
             </div>
             <div className="flex flex-wrap items-center gap-2 mb-6">
                 {statusFilters.map(filter => (
@@ -187,7 +222,15 @@ export const ProcessList: React.FC = () => {
                         key={process.id}
                         process={process}
                         canEdit={canManageProcesses}
-                        candidateCount={state.candidates.filter(c => c.processId === process.id && !c.archived).length}
+                        candidateCount={(() => {
+                            const userRole = state.currentUser?.role;
+                            const isClientOrViewer = userRole === 'client' || userRole === 'viewer';
+                            return state.candidates.filter(c => {
+                                if (c.processId !== process.id || c.archived) return false;
+                                if (isClientOrViewer && !c.visibleToClients) return false;
+                                return true;
+                            }).length;
+                        })()}
                         onView={() => actions.setView('process-view', process.id)}
                         onEdit={() => handleEdit(process)}
                         onDelete={() => handleDelete(process.id)}

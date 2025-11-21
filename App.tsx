@@ -32,15 +32,17 @@ interface AppState {
     interviewEvents: InterviewEvent[];
     currentUser: User | null;
     view: { type: string; payload?: any };
+    lastViewedProcessId: string | null; // ID del último proceso visto
     loading: boolean;
 }
 
 interface AppActions {
     login: (email: string, password: string) => Promise<boolean>;
     logout: () => void;
-    addProcess: (processData: Omit<Process, 'id'>) => Promise<void>;
+    addProcess: (processData: Omit<Process, 'id'>) => Promise<Process>;
     updateProcess: (processData: Process) => Promise<void>;
     deleteProcess: (processId: string) => Promise<void>;
+    reloadProcesses: () => Promise<void>;
     addCandidate: (candidateData: Omit<Candidate, 'id' | 'history'>) => Promise<void>;
     updateCandidate: (candidateData: Candidate, movedBy?: string) => Promise<void>;
     deleteCandidate: (candidateId: string) => Promise<void>;
@@ -328,6 +330,7 @@ const App: React.FC = () => {
         interviewEvents: [],
         currentUser: null,
         view: { type: 'dashboard' },
+        lastViewedProcessId: null,
         loading: true,
     });
 
@@ -399,6 +402,7 @@ const App: React.FC = () => {
                     interviewEvents,
                     currentUser,
                     view: { type: 'dashboard' },
+                    lastViewedProcessId: null,
                     loading: false,
                 });
             } catch (error) {
@@ -419,6 +423,7 @@ const App: React.FC = () => {
                     interviewEvents: initialInterviewEvents,
                     currentUser,
                     view: { type: 'dashboard' },
+                    lastViewedProcessId: null,
                     loading: false,
                 });
             }
@@ -452,9 +457,36 @@ const App: React.FC = () => {
         },
         logout: () => {
             localStorage.removeItem('ats_pro_user');
-            setState(s => ({ ...s, currentUser: null, view: { type: 'dashboard' } }));
+            setState(s => ({ ...s, currentUser: null, view: { type: 'dashboard' }, lastViewedProcessId: null }));
         },
-        setView: (type, payload) => setState(s => ({ ...s, view: { type, payload } })),
+        setView: (type, payload) => {
+            setState(s => {
+                // Si se está navegando a un proceso específico, guardar como último proceso visto
+                if (type === 'process-view' && payload) {
+                    return { ...s, view: { type, payload }, lastViewedProcessId: payload };
+                }
+                // Si se está navegando a la lista de procesos explícitamente (payload es null o undefined)
+                // limpiar el último proceso visto y mostrar la lista
+                if (type === 'processes' && (payload === null || payload === undefined)) {
+                    return { ...s, view: { type, payload: undefined }, lastViewedProcessId: null };
+                }
+                // Si se está navegando a la lista de procesos desde el sidebar (sin payload explícito)
+                // y hay un último proceso visto, ir directamente a ese proceso
+                if (type === 'processes' && s.lastViewedProcessId) {
+                    // Verificar que el proceso aún existe
+                    const processExists = s.processes.some(p => p.id === s.lastViewedProcessId);
+                    if (processExists) {
+                        return { ...s, view: { type: 'process-view', payload: s.lastViewedProcessId } };
+                    }
+                }
+                // Si se está navegando a la lista de procesos sin último proceso visto o proceso eliminado
+                if (type === 'processes') {
+                    return { ...s, view: { type, payload: undefined }, lastViewedProcessId: null };
+                }
+                // Para cualquier otra navegación, mantener el último proceso visto
+                return { ...s, view: { type, payload } };
+            });
+        },
         saveSettings: async (settings) => {
             try {
                 // Actualizar en Supabase y obtener los settings actualizados
@@ -510,12 +542,18 @@ const App: React.FC = () => {
                     googleDriveFolderName: folderName,
                 };
                 
+                // Crear proceso en la base de datos
                 const newProcess = await processesApi.create(processDataWithFolder, state.currentUser?.id);
+                console.log('✅ Proceso creado en la base de datos:', newProcess.id);
+                
+                // Actualizar estado local
                 setState(s => ({ ...s, processes: [...s.processes, newProcess] }));
-            } catch (error) {
+                
+                return newProcess;
+            } catch (error: any) {
                 console.error('Error adding process:', error);
-                const newProcess: Process = { ...processData, id: `proc-${Date.now()}`, attachments: processData.attachments || [] };
-                setState(s => ({ ...s, processes: [...s.processes, newProcess] }));
+                // NO crear proceso local si falla en BD
+                throw new Error(`Error al crear proceso: ${error.message || 'No se pudo crear el proceso en la base de datos.'}`);
             }
         },
         updateProcess: async (processData) => {
@@ -532,7 +570,11 @@ const App: React.FC = () => {
                 // Obtener el proceso antes de eliminarlo para acceder a la carpeta de Google Drive
                 const processToDelete = state.processes.find(p => p.id === processId);
                 
-                // Eliminar carpeta de Google Drive si existe
+                // Eliminar en la base de datos PRIMERO (esto también eliminará candidatos y relaciones)
+                await processesApi.delete(processId);
+                console.log(`✅ Proceso eliminado de la base de datos: ${processId}`);
+                
+                // Eliminar carpeta de Google Drive si existe (después de eliminar en BD)
                 if (processToDelete?.googleDriveFolderId) {
                     const googleDriveConfig = state.settings?.googleDrive;
                     const isGoogleDriveConnected = googleDriveConfig?.connected && googleDriveConfig?.accessToken;
@@ -545,14 +587,11 @@ const App: React.FC = () => {
                             console.log(`✅ Carpeta eliminada de Google Drive: ${processToDelete.googleDriveFolderName}`);
                         } catch (error: any) {
                             console.error('Error eliminando carpeta de Google Drive:', error);
-                            // Continuar con la eliminación del proceso aunque falle la eliminación de la carpeta
+                            // No lanzar error, la carpeta puede no existir o ya estar eliminada
+                            // La eliminación del proceso ya fue exitosa
                         }
                     }
                 }
-                
-                // Eliminar en la base de datos PRIMERO
-                await processesApi.delete(processId);
-                console.log(`✅ Proceso eliminado de la base de datos: ${processId}`);
                 
                 // Solo actualizar el estado local si la eliminación en BD fue exitosa
                 setState(s => ({

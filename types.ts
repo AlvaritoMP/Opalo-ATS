@@ -93,6 +93,7 @@ export interface Candidate {
     hireDate?: string;
     googleDriveFolderId?: string; // Carpeta del candidato en Google Drive (dentro de la carpeta del proceso)
     googleDriveFolderName?: string; // Nombre de la carpeta del candidato
+    visibleToClients?: boolean; // Si es visible para usuarios tipo cliente/viewer
 }
 
 export type UserRole = 'admin' | 'recruiter' | 'client' | 'viewer';

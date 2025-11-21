@@ -17,9 +17,15 @@ export const Candidates: React.FC = () => {
         return p?.stages || [];
     }, [processId, state.processes]);
 
+    const userRole = state.currentUser?.role;
+    const isClientOrViewer = userRole === 'client' || userRole === 'viewer';
+    
     const lower = query.trim().toLowerCase();
     const results = useMemo(() => {
         return state.candidates.filter(c => {
+            // Filtrar por visibilidad según el rol
+            if (isClientOrViewer && !c.visibleToClients) return false;
+            
             const matchesText =
                 !lower ||
                 c.name.toLowerCase().includes(lower) ||
@@ -33,7 +39,7 @@ export const Candidates: React.FC = () => {
             const matchesStage = stageId === 'all' || c.stageId === stageId;
             return matchesText && matchesProcess && matchesStage;
         });
-    }, [state.candidates, state.processes, lower, processId, stageId]);
+    }, [state.candidates, state.processes, lower, processId, stageId, isClientOrViewer]);
 
     return (
         <div className="p-8">
