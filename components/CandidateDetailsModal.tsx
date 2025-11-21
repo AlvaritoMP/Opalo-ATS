@@ -117,6 +117,22 @@ export const CandidateDetailsModal: React.FC<{ candidate: Candidate, onClose: ()
         setIsEditing(false);
     };
     
+    // Handler para cambiar la etapa directamente (sin modo edición)
+    const handleStageChange = async (e: React.ChangeEvent<HTMLSelectElement>) => {
+        const newStageId = e.target.value;
+        const updatedCandidate = { ...currentCandidate, stageId: newStageId };
+        setEditableCandidate(updatedCandidate);
+        await actions.updateCandidate(updatedCandidate, state.currentUser?.name);
+    };
+    
+    // Handler para cambiar la visibilidad directamente (sin modo edición)
+    const handleVisibilityToggle = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const newVisibility = e.target.checked;
+        const updatedCandidate = { ...currentCandidate, visibleToClients: newVisibility };
+        setEditableCandidate(updatedCandidate);
+        await actions.updateCandidate(updatedCandidate, state.currentUser?.name);
+    };
+    
     const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
         if (file && file.type.startsWith('image/')) {
@@ -556,49 +572,6 @@ export const CandidateDetailsModal: React.FC<{ candidate: Candidate, onClose: ()
                                     <>
                                         {/* Edit Form */}
                                         <div className="space-y-4">
-                                            {/* Selector de Etapa */}
-                                            {processStages.length > 0 && (
-                                                <div>
-                                                    <label className="block text-sm font-medium text-gray-700 mb-2">Etapa actual</label>
-                                                    <select 
-                                                        name="stageId" 
-                                                        value={editableCandidate.stageId} 
-                                                        onChange={handleInputChange}
-                                                        className="mt-1 block w-full input"
-                                                    >
-                                                        {processStages.map((stage) => (
-                                                            <option key={stage.id} value={stage.id}>
-                                                                {stage.name}
-                                                            </option>
-                                                        ))}
-                                                    </select>
-                                                    <p className="mt-1 text-xs text-gray-500">
-                                                        También puedes arrastrar el candidato entre etapas en el tablero del proceso.
-                                                    </p>
-                                                </div>
-                                            )}
-                                            
-                                            {/* Toggle de Visibilidad para Clientes/Viewers */}
-                                            {canEdit && (
-                                                <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg border border-gray-200">
-                                                    <div>
-                                                        <label className="block text-sm font-medium text-gray-700">Visible para clientes/viewers</label>
-                                                        <p className="text-xs text-gray-500 mt-1">
-                                                            Si está activado, los usuarios tipo cliente y viewer podrán ver este candidato.
-                                                        </p>
-                                                    </div>
-                                                    <label className="relative inline-flex items-center cursor-pointer">
-                                                        <input
-                                                            type="checkbox"
-                                                            checked={editableCandidate.visibleToClients || false}
-                                                            onChange={(e) => setEditableCandidate(prev => ({ ...prev, visibleToClients: e.target.checked }))}
-                                                            className="sr-only peer"
-                                                        />
-                                                        <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-primary-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary-600"></div>
-                                                    </label>
-                                                </div>
-                                            )}
-                                            
                                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                                 <div><label className="block text-sm font-medium text-gray-700">Nombre completo</label><input type="text" name="name" value={editableCandidate.name} onChange={handleInputChange} className="mt-1 block w-full input"/></div>
                                                 <div><label className="block text-sm font-medium text-gray-700">Correo</label><input type="email" name="email" value={editableCandidate.email} onChange={handleInputChange} className="mt-1 block w-full input"/></div>
@@ -638,6 +611,55 @@ export const CandidateDetailsModal: React.FC<{ candidate: Candidate, onClose: ()
                                 ) : (
                                     <>
                                         {/* View Details */}
+                                        {/* Selector de Etapa y Toggle de Visibilidad - Siempre visible para admin/recruiter */}
+                                        {canEdit && (
+                                            <div className="space-y-4 mb-6">
+                                                {/* Selector de Etapa */}
+                                                {processStages.length > 0 && (
+                                                    <div className="p-4 bg-blue-50 rounded-lg border border-blue-200">
+                                                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                                                            Etapa actual
+                                                        </label>
+                                                        <select 
+                                                            value={currentCandidate.stageId} 
+                                                            onChange={handleStageChange}
+                                                            className="mt-1 block w-full input bg-white"
+                                                        >
+                                                            {processStages.map((stage) => (
+                                                                <option key={stage.id} value={stage.id}>
+                                                                    {stage.name}
+                                                                </option>
+                                                            ))}
+                                                        </select>
+                                                        <p className="mt-2 text-xs text-gray-600">
+                                                            También puedes arrastrar el candidato entre etapas en el tablero del proceso.
+                                                        </p>
+                                                    </div>
+                                                )}
+                                                
+                                                {/* Toggle de Visibilidad para Clientes/Viewers */}
+                                                <div className="flex items-center justify-between p-4 bg-gray-50 rounded-lg border border-gray-200">
+                                                    <div>
+                                                        <label className="block text-sm font-medium text-gray-700">
+                                                            Visible para clientes/viewers
+                                                        </label>
+                                                        <p className="text-xs text-gray-500 mt-1">
+                                                            Si está activado, los usuarios tipo cliente y viewer podrán ver este candidato.
+                                                        </p>
+                                                    </div>
+                                                    <label className="relative inline-flex items-center cursor-pointer">
+                                                        <input
+                                                            type="checkbox"
+                                                            checked={currentCandidate.visibleToClients || false}
+                                                            onChange={handleVisibilityToggle}
+                                                            className="sr-only peer"
+                                                        />
+                                                        <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-primary-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary-600"></div>
+                                                    </label>
+                                                </div>
+                                            </div>
+                                        )}
+                                        
                                         <div className="p-4 bg-gray-50 rounded-lg border">
                                             <h3 className="font-semibold text-gray-700 mb-3">Contacto e información personal</h3>
                                                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">

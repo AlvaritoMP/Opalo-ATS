@@ -463,27 +463,35 @@ const App: React.FC = () => {
             setState(s => {
                 // Si se está navegando a un proceso específico, guardar como último proceso visto
                 if (type === 'process-view' && payload) {
+                    console.log('📌 Guardando último proceso visto:', payload);
                     return { ...s, view: { type, payload }, lastViewedProcessId: payload };
                 }
-                // Si se está navegando a la lista de procesos explícitamente (payload es null o undefined)
-                // limpiar el último proceso visto y mostrar la lista
-                if (type === 'processes' && (payload === null || payload === undefined)) {
-                    return { ...s, view: { type, payload: undefined }, lastViewedProcessId: null };
-                }
-                // Si se está navegando a la lista de procesos desde el sidebar (sin payload explícito)
-                // y hay un último proceso visto, ir directamente a ese proceso
-                if (type === 'processes' && s.lastViewedProcessId) {
-                    // Verificar que el proceso aún existe
-                    const processExists = s.processes.some(p => p.id === s.lastViewedProcessId);
-                    if (processExists) {
-                        return { ...s, view: { type: 'process-view', payload: s.lastViewedProcessId } };
-                    }
-                }
-                // Si se está navegando a la lista de procesos sin último proceso visto o proceso eliminado
+                // Si se está navegando a la lista de procesos
                 if (type === 'processes') {
-                    return { ...s, view: { type, payload: undefined }, lastViewedProcessId: null };
+                    // Si payload es explícitamente null, limpiar y mostrar lista (botón retroceso)
+                    if (payload === null) {
+                        console.log('🔙 Limpiando último proceso visto (botón retroceso)');
+                        return { ...s, view: { type, payload: undefined }, lastViewedProcessId: null };
+                    }
+                    // Si hay un último proceso visto (navegación desde sidebar o cualquier otra)
+                    // ir directamente a ese proceso, a menos que payload sea explícitamente null
+                    if (s.lastViewedProcessId) {
+                        // Verificar que el proceso aún existe
+                        const processExists = s.processes.some(p => p.id === s.lastViewedProcessId);
+                        if (processExists) {
+                            console.log('🔄 Navegando al último proceso visto:', s.lastViewedProcessId);
+                            return { ...s, view: { type: 'process-view', payload: s.lastViewedProcessId } };
+                        } else {
+                            console.log('⚠️ Último proceso visto ya no existe, limpiando');
+                            return { ...s, view: { type, payload: undefined }, lastViewedProcessId: null };
+                        }
+                    }
+                    // Si no hay último proceso visto, mostrar lista
+                    console.log('📋 Mostrando lista de procesos (sin último proceso visto)');
+                    return { ...s, view: { type, payload: undefined } };
                 }
                 // Para cualquier otra navegación, mantener el último proceso visto
+                console.log('📍 Navegando a:', type, '(manteniendo último proceso visto:', s.lastViewedProcessId, ')');
                 return { ...s, view: { type, payload } };
             });
         },
@@ -965,7 +973,13 @@ const App: React.FC = () => {
         switch (state.view.type) {
             case 'dashboard': return <Dashboard />;
             case 'processes': return <ProcessList />;
-            case 'process-view': return <ProcessView processId={state.view.payload} />;
+            case 'process-view': 
+                if (!state.view.payload) {
+                    // Si no hay payload, redirigir a lista de procesos
+                    actions.setView('processes', null);
+                    return <ProcessList />;
+                }
+                return <ProcessView processId={state.view.payload} />;
             case 'reports': return <ReportsView />;
             case 'forms': return <Forms />;
             case 'letters': return <Letters />;
