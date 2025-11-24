@@ -200,6 +200,8 @@ export const ProcessEditorModal: React.FC<ProcessEditorModalProps> = ({ process,
         const file = e.target.files?.[0];
         if (!file) return;
 
+        const loadingToastId = actions.showToast(`Subiendo ${file.name}...`, 'loading', 0);
+
         const googleDriveConfig = state.settings?.googleDrive;
         const isGoogleDriveConnected = googleDriveConfig?.connected && googleDriveConfig?.accessToken;
         const hasGoogleDriveFolder = googleDriveFolderId;
@@ -225,7 +227,8 @@ export const ProcessEditorModal: React.FC<ProcessEditorModalProps> = ({ process,
                 console.log(`✅ Archivo del proceso subido a Google Drive: ${googleDriveFolderName || 'Carpeta del proceso'} - ${uploadedFile.name}`);
             } catch (error: any) {
                 console.error('Error subiendo a Google Drive, usando almacenamiento local:', error);
-                alert(`Error al subir a Google Drive: ${error.message}. El archivo se guardará localmente.`);
+                actions.hideToast(loadingToastId);
+                actions.showToast(`Error al subir a Google Drive: ${error.message}. Guardando localmente...`, 'error', 5000);
                 // Fallback a Base64 si falla Google Drive
                 attachmentUrl = await fileToBase64(file);
             }
@@ -258,9 +261,12 @@ export const ProcessEditorModal: React.FC<ProcessEditorModalProps> = ({ process,
                 
                 setAttachments(prev => [...prev, newAttachment]);
                 console.log('✅ Attachment guardado en la base de datos:', savedAttachment.id);
+                actions.hideToast(loadingToastId);
+                actions.showToast(`Documento "${file.name}" guardado exitosamente`, 'success');
             } catch (error: any) {
                 console.error('Error guardando attachment en la base de datos:', error);
-                alert(`Error al guardar el documento: ${error.message || 'No se pudo guardar el documento en la base de datos.'}`);
+                actions.hideToast(loadingToastId);
+                actions.showToast(`Error al guardar el documento: ${error.message || 'No se pudo guardar el documento en la base de datos.'}`, 'error', 5000);
                 // No agregar al estado local si falla el guardado en BD
                 return;
             }
@@ -276,20 +282,29 @@ export const ProcessEditorModal: React.FC<ProcessEditorModalProps> = ({ process,
             };
             setAttachments(prev => [...prev, newAttachment]);
             console.log('📝 Attachment agregado al estado local (se guardará al crear el proceso)');
+            actions.hideToast(loadingToastId);
+            actions.showToast(`Documento "${file.name}" agregado (se guardará al crear el proceso)`, 'info');
         }
     };
 
     const handleDeleteAttachment = async (id: string) => {
+        const attachment = attachments.find(att => att.id === id);
+        const attachmentName = attachment?.name || 'documento';
+        
         // Si estamos editando un proceso existente (no duplicado), eliminar de la base de datos también
         const isExistingProcess = process && process.id && !process.id.startsWith('temp-') && state.processes.some(p => p.id === process.id);
         if (isExistingProcess) {
+            const loadingToastId = actions.showToast(`Eliminando ${attachmentName}...`, 'loading', 0);
             try {
                 const { attachmentsApi } = await import('../lib/api');
                 await attachmentsApi.delete(id);
                 console.log('✅ Attachment eliminado de la base de datos:', id);
+                actions.hideToast(loadingToastId);
+                actions.showToast(`Documento "${attachmentName}" eliminado exitosamente`, 'success');
             } catch (error: any) {
                 console.error('Error eliminando attachment de la base de datos:', error);
-                alert(`Error al eliminar el documento: ${error.message || 'No se pudo eliminar el documento de la base de datos.'}`);
+                actions.hideToast(loadingToastId);
+                actions.showToast(`Error al eliminar el documento: ${error.message || 'No se pudo eliminar el documento de la base de datos.'}`, 'error', 5000);
                 return; // No eliminar del estado local si falla en BD
             }
         }

@@ -17,6 +17,7 @@ import { BulkImportView } from './components/BulkImportView';
 import { Spinner } from './components/Spinner';
 import { ArchivedCandidates } from './components/ArchivedCandidates';
 import { Letters } from './components/Letters';
+import { ToastContainer } from './components/Toast';
 import { LayoutDashboard, Briefcase, FileText, Settings as SettingsIcon, Users as UsersIcon, ChevronsLeft, ChevronsRight, BarChart2, Calendar, FileUp, LogOut, X, Archive } from 'lucide-react';
 import { CandidateComparator } from './components/CandidateComparator';
 
@@ -34,6 +35,7 @@ interface AppState {
     view: { type: string; payload?: any };
     lastViewedProcessId: string | null; // ID del último proceso visto
     loading: boolean;
+    toasts: Array<{ id: string; message: string; type: 'success' | 'error' | 'loading' | 'info'; duration?: number }>;
 }
 
 interface AppActions {
@@ -332,6 +334,7 @@ const App: React.FC = () => {
         view: { type: 'dashboard' },
         lastViewedProcessId: null,
         loading: true,
+        toasts: [],
     });
 
     useEffect(() => {
@@ -534,6 +537,7 @@ const App: React.FC = () => {
             }
         },
         addProcess: async (processData) => {
+            const loadingToastId = actions.showToast('Creando proceso...', 'loading', 0);
             try {
                 // Si Google Drive está conectado, crear carpeta automáticamente
                 let folderId = processData.googleDriveFolderId;
@@ -544,6 +548,8 @@ const App: React.FC = () => {
                 
                 if (isGoogleDriveConnected && googleDriveConfig && !folderId) {
                     try {
+                        actions.hideToast(loadingToastId);
+                        const folderToastId = actions.showToast('Creando carpeta en Google Drive...', 'loading', 0);
                         const { googleDriveService } = await import('./lib/googleDrive');
                         googleDriveService.initialize(googleDriveConfig);
                         
@@ -554,6 +560,9 @@ const App: React.FC = () => {
                         folderId = folder.id;
                         folderName = folder.name;
                         console.log(`✅ Carpeta creada automáticamente en Google Drive: ${folderName}`);
+                        actions.hideToast(folderToastId);
+                        const savingToastId = actions.showToast('Guardando proceso...', 'loading', 0);
+                        actions.hideToast(savingToastId);
                     } catch (error: any) {
                         console.error('Error creando carpeta automáticamente:', error);
                         // Continuar sin carpeta si falla
@@ -573,27 +582,37 @@ const App: React.FC = () => {
                 // Actualizar estado local
                 setState(s => ({ ...s, processes: [...s.processes, newProcess] }));
                 
+                actions.hideToast(loadingToastId);
+                actions.showToast('Proceso creado exitosamente', 'success');
+                
                 return newProcess;
             } catch (error: any) {
                 console.error('Error adding process:', error);
+                actions.hideToast(loadingToastId);
                 // Verificar si es un error de permisos
                 const errorMessage = error.message || 'No se pudo crear el proceso en la base de datos.';
                 const isPermissionError = error.code === '42501' || error.code === 'PGRST301' || errorMessage.toLowerCase().includes('permission') || errorMessage.toLowerCase().includes('permiso');
                 
                 if (isPermissionError) {
+                    actions.showToast('Error de permisos: No tienes permisos para crear procesos', 'error', 5000);
                     throw new Error(`Error de permisos: No tienes permisos para crear procesos. Verifica tu rol de usuario. (${errorMessage})`);
                 }
                 
+                actions.showToast(`Error al crear proceso: ${errorMessage}`, 'error', 5000);
                 // NO crear proceso local si falla en BD
                 throw new Error(`Error al crear proceso: ${errorMessage}`);
             }
         },
         updateProcess: async (processData) => {
+            const loadingToastId = actions.showToast('Guardando cambios del proceso...', 'loading', 0);
             try {
                 const updated = await processesApi.update(processData.id, processData);
                 setState(s => ({ ...s, processes: s.processes.map(p => p.id === processData.id ? updated : p) }));
+                actions.hideToast(loadingToastId);
+                actions.showToast('Proceso actualizado exitosamente', 'success');
             } catch (error: any) {
                 console.error('Error updating process:', error);
+                actions.hideToast(loadingToastId);
                 // Actualizar estado local como fallback
                 setState(s => ({ ...s, processes: s.processes.map(p => p.id === processData.id ? processData : p) }));
                 // Lanzar el error para que el componente pueda manejarlo
@@ -601,9 +620,11 @@ const App: React.FC = () => {
                 const isPermissionError = error.code === '42501' || error.code === 'PGRST301' || errorMessage.toLowerCase().includes('permission') || errorMessage.toLowerCase().includes('permiso');
                 
                 if (isPermissionError) {
+                    actions.showToast('Error de permisos: No tienes permisos para actualizar procesos', 'error', 5000);
                     throw new Error(`Error de permisos: No tienes permisos para actualizar procesos. Verifica tu rol de usuario. (${errorMessage})`);
                 }
                 
+                actions.showToast(`Error al actualizar proceso: ${errorMessage}`, 'error', 5000);
                 throw new Error(`Error al actualizar proceso: ${errorMessage}`);
             }
         },
@@ -660,6 +681,7 @@ const App: React.FC = () => {
             }
         },
         addCandidate: async (candidateData) => {
+            const loadingToastId = actions.showToast('Creando candidato...', 'loading', 0);
             try {
                 // Si Google Drive está conectado y el proceso tiene carpeta, crear carpeta del candidato
                 let folderId = candidateData.googleDriveFolderId;
@@ -672,6 +694,8 @@ const App: React.FC = () => {
                 
                 if (isGoogleDriveConnected && googleDriveConfig && processHasFolder && !folderId) {
                     try {
+                        actions.hideToast(loadingToastId);
+                        const folderToastId = actions.showToast('Creando carpeta en Google Drive...', 'loading', 0);
                         const { googleDriveService } = await import('./lib/googleDrive');
                         googleDriveService.initialize(googleDriveConfig);
                         
@@ -681,6 +705,9 @@ const App: React.FC = () => {
                         folderId = folder.id;
                         folderName = folder.name;
                         console.log(`✅ Carpeta del candidato creada automáticamente en Google Drive: ${folderName} (dentro de ${process.googleDriveFolderName})`);
+                        actions.hideToast(folderToastId);
+                        const savingToastId = actions.showToast('Guardando candidato...', 'loading', 0);
+                        actions.hideToast(savingToastId);
                     } catch (error: any) {
                         console.error('Error creando carpeta del candidato automáticamente:', error);
                         // Continuar sin carpeta si falla
@@ -695,8 +722,12 @@ const App: React.FC = () => {
                 
                 const newCandidate = await candidatesApi.create(candidateDataWithFolder, state.currentUser?.id);
                 setState(s => ({ ...s, candidates: [...s.candidates, newCandidate] }));
+                actions.hideToast(loadingToastId);
+                actions.showToast('Candidato creado exitosamente', 'success');
             } catch (error) {
                 console.error('Error adding candidate:', error);
+                actions.hideToast(loadingToastId);
+                actions.showToast('Error al crear candidato', 'error', 5000);
                 const newCandidate: Candidate = {
                     ...candidateData,
                     id: `cand-${Date.now()}`,
@@ -711,11 +742,16 @@ const App: React.FC = () => {
             }
         },
         updateCandidate: async (candidateData, movedBy) => {
+            const loadingToastId = actions.showToast('Guardando cambios del candidato...', 'loading', 0);
             try {
                 const updated = await candidatesApi.update(candidateData.id, candidateData, movedBy || state.currentUser?.id);
                 setState(s => ({ ...s, candidates: s.candidates.map(c => c.id === candidateData.id ? updated : c) }));
+                actions.hideToast(loadingToastId);
+                actions.showToast('Candidato actualizado exitosamente', 'success');
             } catch (error) {
                 console.error('Error updating candidate:', error);
+                actions.hideToast(loadingToastId);
+                actions.showToast('Error al actualizar candidato', 'error', 5000);
                 setState(s => {
                     const oldCandidate = s.candidates.find(c => c.id === candidateData.id);
                     let newHistory: CandidateHistory[] = oldCandidate ? [...oldCandidate.history] : [];
@@ -980,6 +1016,20 @@ const App: React.FC = () => {
                 }));
             }
         },
+        showToast: (message: string, type: 'success' | 'error' | 'loading' | 'info', duration?: number) => {
+            const id = `toast-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+            setState(s => ({
+                ...s,
+                toasts: [...s.toasts, { id, message, type, duration }]
+            }));
+            return id;
+        },
+        hideToast: (id: string) => {
+            setState(s => ({
+                ...s,
+                toasts: s.toasts.filter(t => t.id !== id)
+            }));
+        },
     }), [state.currentUser, state.users]);
 
     const getLabel = (key: string, fallback: string): string => {
@@ -1059,6 +1109,7 @@ const App: React.FC = () => {
                 <div className="flex-1 flex flex-col overflow-y-auto min-h-0">
                     {renderView()}
                 </div>
+                <ToastContainer toasts={state.toasts} onClose={(id) => actions.hideToast(id)} />
             </div>
         </AppContext.Provider>
     );
