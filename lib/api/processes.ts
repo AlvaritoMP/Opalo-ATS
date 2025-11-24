@@ -123,13 +123,59 @@ export const processesApi = {
         const dbData = processToDb(processData);
         if (createdBy) dbData.created_by = createdBy;
 
+        // Separar flyer_position del resto de los datos para manejarlo por separado
+        // ya que la columna puede no existir en la BD
+        const { flyer_position, ...restDbData } = dbData;
+        
+        // Crear proceso sin flyer_position primero
         const { data: process, error } = await supabase
             .from('processes')
-            .insert(dbData)
+            .insert(restDbData)
             .select()
             .single();
         
         if (error) throw error;
+        
+        // Intentar actualizar flyer_position por separado si existe
+        // Si la columna no existe, simplemente ignoramos el error
+        if (flyer_position !== undefined && process) {
+            try {
+                const { error: positionError } = await supabase
+                    .from('processes')
+                    .update({ flyer_position })
+                    .eq('id', process.id);
+                
+                if (positionError) {
+                    // Si el error es porque la columna no existe, solo loguear y continuar
+                    const isColumnError = positionError.message?.includes('flyer_position') || 
+                                         positionError.message?.includes('column') || 
+                                         positionError.message?.includes('schema cache') ||
+                                         positionError.code === '42703'; // PostgreSQL error code for undefined column
+                    
+                    if (isColumnError) {
+                        console.warn('⚠️ La columna flyer_position no existe en la base de datos.');
+                        console.warn('📝 Para habilitar esta funcionalidad, ejecuta el script SQL: MIGRATION_ADD_FLYER_POSITION.sql');
+                        console.warn('💡 La posición se aplicará visualmente pero no se guardará hasta agregar la columna.');
+                    } else {
+                        // Si es otro error, lanzarlo
+                        throw positionError;
+                    }
+                }
+            } catch (err: any) {
+                // Si falla por cualquier razón relacionada con la columna, solo loguear
+                const isColumnError = err.message?.includes('flyer_position') || 
+                                     err.message?.includes('column') || 
+                                     err.message?.includes('schema cache') ||
+                                     err.code === '42703';
+                
+                if (isColumnError) {
+                    console.warn('⚠️ No se pudo guardar flyer_position. La columna puede no existir en la base de datos.');
+                    console.warn('📝 Ejecuta el script SQL: MIGRATION_ADD_FLYER_POSITION.sql para habilitar esta funcionalidad.');
+                } else {
+                    throw err;
+                }
+            }
+        }
 
         // Crear stages
         if (processData.stages && processData.stages.length > 0) {
@@ -198,12 +244,59 @@ export const processesApi = {
     // Actualizar proceso
     async update(id: string, processData: Partial<Process>): Promise<Process> {
         const dbData = processToDb(processData);
+        
+        // Separar flyer_position del resto de los datos para manejarlo por separado
+        // ya que la columna puede no existir en la BD
+        const { flyer_position, ...restDbData } = dbData;
+        
+        // Actualizar primero los campos principales
         const { error } = await supabase
             .from('processes')
-            .update(dbData)
+            .update(restDbData)
             .eq('id', id);
         
         if (error) throw error;
+        
+        // Intentar actualizar flyer_position por separado si existe
+        // Si la columna no existe, simplemente ignoramos el error
+        if (flyer_position !== undefined) {
+            try {
+                const { error: positionError } = await supabase
+                    .from('processes')
+                    .update({ flyer_position })
+                    .eq('id', id);
+                
+                if (positionError) {
+                    // Si el error es porque la columna no existe, solo loguear y continuar
+                    const isColumnError = positionError.message?.includes('flyer_position') || 
+                                         positionError.message?.includes('column') || 
+                                         positionError.message?.includes('schema cache') ||
+                                         positionError.code === '42703'; // PostgreSQL error code for undefined column
+                    
+                    if (isColumnError) {
+                        console.warn('⚠️ La columna flyer_position no existe en la base de datos.');
+                        console.warn('📝 Para habilitar esta funcionalidad, ejecuta el script SQL: MIGRATION_ADD_FLYER_POSITION.sql');
+                        console.warn('💡 La posición se aplicará visualmente pero no se guardará hasta agregar la columna.');
+                    } else {
+                        // Si es otro error, lanzarlo
+                        throw positionError;
+                    }
+                }
+            } catch (err: any) {
+                // Si falla por cualquier razón relacionada con la columna, solo loguear
+                const isColumnError = err.message?.includes('flyer_position') || 
+                                     err.message?.includes('column') || 
+                                     err.message?.includes('schema cache') ||
+                                     err.code === '42703';
+                
+                if (isColumnError) {
+                    console.warn('⚠️ No se pudo guardar flyer_position. La columna puede no existir en la base de datos.');
+                    console.warn('📝 Ejecuta el script SQL: MIGRATION_ADD_FLYER_POSITION.sql para habilitar esta funcionalidad.');
+                } else {
+                    throw err;
+                }
+            }
+        }
 
         // Actualizar stages si se proporcionan
         if (processData.stages) {
