@@ -1,8 +1,8 @@
 import { supabase } from '../supabase';
-import { Process, Stage, DocumentCategory } from '../../types';
+import { Process, Stage, DocumentCategory, Attachment } from '../../types';
 
 // Convertir de DB a tipo de aplicación
-function dbToProcess(dbProcess: any, stages: any[] = [], documentCategories: any[] = []): Process {
+function dbToProcess(dbProcess: any, stages: any[] = [], documentCategories: any[] = [], attachments: any[] = []): Process {
     return {
         id: dbProcess.id,
         title: dbProcess.title,
@@ -16,7 +16,15 @@ function dbToProcess(dbProcess: any, stages: any[] = [], documentCategories: any
         experienceLevel: dbProcess.experience_level,
         seniority: dbProcess.seniority,
         flyerUrl: dbProcess.flyer_url,
-        attachments: [], // Se cargan por separado
+        attachments: attachments.map(att => ({
+            id: att.id,
+            name: att.name,
+            url: att.url,
+            type: att.type,
+            size: att.size,
+            category: att.category,
+            uploadedAt: att.uploaded_at,
+        })),
         serviceOrderCode: dbProcess.service_order_code,
         startDate: dbProcess.start_date,
         endDate: dbProcess.end_date,
@@ -63,18 +71,20 @@ export const processesApi = {
         if (error) throw error;
         if (!processes) return [];
 
-        // Obtener stages y categorías para cada proceso
+        // Obtener stages, categorías y attachments para cada proceso
         const processesWithRelations = await Promise.all(
             processes.map(async (process) => {
-                const [stages, categories] = await Promise.all([
+                const [stages, categories, attachments] = await Promise.all([
                     supabase.from('stages').select('*').eq('process_id', process.id).order('order_index'),
                     supabase.from('document_categories').select('*').eq('process_id', process.id),
+                    supabase.from('attachments').select('*').eq('process_id', process.id).is('candidate_id', null),
                 ]);
 
                 return dbToProcess(
                     process,
                     stages.data || [],
-                    categories.data || []
+                    categories.data || [],
+                    attachments.data || []
                 );
             })
         );
@@ -97,12 +107,13 @@ export const processesApi = {
 
         if (!process) return null;
 
-        const [stages, categories] = await Promise.all([
+        const [stages, categories, attachments] = await Promise.all([
             supabase.from('stages').select('*').eq('process_id', id).order('order_index'),
             supabase.from('document_categories').select('*').eq('process_id', id),
+            supabase.from('attachments').select('*').eq('process_id', id).is('candidate_id', null),
         ]);
 
-        return dbToProcess(process, stages.data || [], categories.data || []);
+        return dbToProcess(process, stages.data || [], categories.data || [], attachments.data || []);
     },
 
     // Crear proceso con sus stages y categorías
@@ -148,6 +159,35 @@ export const processesApi = {
                 .insert(categoriesToInsert);
             
             if (categoriesError) throw categoriesError;
+        }
+
+        // Crear attachments del proceso si se proporcionan
+        // Filtrar attachments temporales (los que tienen IDs que empiezan con "temp-")
+        if (processData.attachments && processData.attachments.length > 0) {
+            const attachmentsToInsert = processData.attachments
+                .filter(att => att.id.startsWith('temp-') || !att.id) // Solo los temporales o sin ID
+                .map(att => ({
+                    process_id: process.id,
+                    name: att.name,
+                    url: att.url,
+                    type: att.type,
+                    size: att.size,
+                    category: att.category || null,
+                    candidate_id: null, // Estos son attachments del proceso, no de candidatos
+                }));
+
+            if (attachmentsToInsert.length > 0) {
+                const { error: attachmentsError } = await supabase
+                    .from('attachments')
+                    .insert(attachmentsToInsert);
+                
+                if (attachmentsError) {
+                    console.error('Error guardando attachments del proceso:', attachmentsError);
+                    // No lanzar error crítico, pero loguear para debugging
+                } else {
+                    console.log(`✅ ${attachmentsToInsert.length} attachment(s) guardado(s) para el proceso nuevo`);
+                }
+            }
         }
 
         return await this.getById(process.id) as Process;
@@ -205,6 +245,43 @@ export const processesApi = {
                 
                 if (categoriesError) throw categoriesError;
             }
+        }
+
+        // Actualizar attachments si se proporcionan
+        // NOTA: Los attachments ahora se guardan inmediatamente cuando se suben,
+        // así que aquí solo sincronizamos la lista (eliminar los que ya no están)
+        if (processData.attachments !== undefined) {
+            // Obtener attachments existentes del proceso (solo los que no son de candidatos)
+            const { data: existingAttachments } = await supabase
+                .from('attachments')
+                .select('id')
+                .eq('process_id', id)
+                .is('candidate_id', null);
+            
+            if (existingAttachments) {
+                const currentAttachmentIds = new Set(processData.attachments.map(att => att.id).filter(Boolean));
+                const attachmentsToDelete = existingAttachments
+                    .map(a => a.id)
+                    .filter(existingId => !currentAttachmentIds.has(existingId));
+                
+                // Eliminar attachments que ya no están en la lista
+                if (attachmentsToDelete.length > 0) {
+                    const { error: deleteError } = await supabase
+                        .from('attachments')
+                        .delete()
+                        .in('id', attachmentsToDelete);
+                    
+                    if (deleteError) {
+                        console.warn('Error eliminando attachments antiguos:', deleteError);
+                        // No lanzar error, continuar
+                    } else {
+                        console.log(`✅ ${attachmentsToDelete.length} attachment(s) eliminado(s) del proceso`);
+                    }
+                }
+            }
+            
+            // Los attachments nuevos ya se guardaron inmediatamente cuando se subieron,
+            // así que no necesitamos insertarlos aquí
         }
 
         return await this.getById(id) as Process;

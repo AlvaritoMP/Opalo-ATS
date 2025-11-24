@@ -174,7 +174,7 @@ export const ProcessEditorModal: React.FC<ProcessEditorModalProps> = ({ process,
         const hasGoogleDriveFolder = googleDriveFolderId;
 
         let attachmentUrl: string;
-        let attachmentId: string = `att-p-${Date.now()}`;
+        let googleDriveFileId: string | undefined;
 
         // Si Google Drive está conectado y hay carpeta configurada, subir a Google Drive
         if (isGoogleDriveConnected && hasGoogleDriveFolder && googleDriveConfig) {
@@ -190,7 +190,7 @@ export const ProcessEditorModal: React.FC<ProcessEditorModalProps> = ({ process,
                 
                 // Usar URL de visualización de Google Drive
                 attachmentUrl = googleDriveService.getFileViewUrl(uploadedFile.id);
-                attachmentId = uploadedFile.id;
+                googleDriveFileId = uploadedFile.id;
                 console.log(`✅ Archivo del proceso subido a Google Drive: ${googleDriveFolderName || 'Carpeta del proceso'} - ${uploadedFile.name}`);
             } catch (error: any) {
                 console.error('Error subiendo a Google Drive, usando almacenamiento local:', error);
@@ -203,18 +203,63 @@ export const ProcessEditorModal: React.FC<ProcessEditorModalProps> = ({ process,
             attachmentUrl = await fileToBase64(file);
         }
 
-        const newAttachment: Attachment = {
-            id: attachmentId,
-            name: file.name,
-            url: attachmentUrl,
-            type: file.type,
-            size: file.size,
-            uploadedAt: new Date().toISOString(),
-        };
-        setAttachments(prev => [...prev, newAttachment]);
+        // Si estamos editando un proceso existente, guardar attachment inmediatamente en la BD
+        if (process) {
+            try {
+                const { attachmentsApi } = await import('../lib/api');
+                const savedAttachment = await attachmentsApi.create({
+                    name: file.name,
+                    url: attachmentUrl,
+                    type: file.type,
+                    size: file.size,
+                    processId: process.id,
+                } as any, state.currentUser?.id);
+
+                const newAttachment: Attachment = {
+                    id: savedAttachment.id,
+                    name: savedAttachment.name,
+                    url: savedAttachment.url,
+                    type: savedAttachment.type,
+                    size: savedAttachment.size,
+                    uploadedAt: savedAttachment.uploadedAt,
+                };
+                
+                setAttachments(prev => [...prev, newAttachment]);
+                console.log('✅ Attachment guardado en la base de datos:', savedAttachment.id);
+            } catch (error: any) {
+                console.error('Error guardando attachment en la base de datos:', error);
+                alert(`Error al guardar el documento: ${error.message || 'No se pudo guardar el documento en la base de datos.'}`);
+                // No agregar al estado local si falla el guardado en BD
+                return;
+            }
+        } else {
+            // Para procesos nuevos, solo agregar al estado local (se guardará cuando se cree el proceso)
+            const newAttachment: Attachment = {
+                id: `temp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+                name: file.name,
+                url: attachmentUrl,
+                type: file.type,
+                size: file.size,
+                uploadedAt: new Date().toISOString(),
+            };
+            setAttachments(prev => [...prev, newAttachment]);
+            console.log('📝 Attachment agregado al estado local (se guardará al crear el proceso)');
+        }
     };
 
-    const handleDeleteAttachment = (id: string) => {
+    const handleDeleteAttachment = async (id: string) => {
+        // Si estamos editando un proceso, eliminar de la base de datos también
+        if (process) {
+            try {
+                const { attachmentsApi } = await import('../lib/api');
+                await attachmentsApi.delete(id);
+                console.log('✅ Attachment eliminado de la base de datos:', id);
+            } catch (error: any) {
+                console.error('Error eliminando attachment de la base de datos:', error);
+                alert(`Error al eliminar el documento: ${error.message || 'No se pudo eliminar el documento de la base de datos.'}`);
+                return; // No eliminar del estado local si falla en BD
+            }
+        }
         setAttachments(prev => prev.filter(att => att.id !== id));
     };
 
@@ -250,11 +295,29 @@ export const ProcessEditorModal: React.FC<ProcessEditorModalProps> = ({ process,
                 await actions.addProcess(processData);
             }
             // Recargar procesos después de guardar para que otros usuarios vean los cambios
-            await actions.reloadProcesses();
+            // Si reloadProcesses falla, no mostrar error al usuario ya que el proceso ya se guardó
+            if (actions.reloadProcesses && typeof actions.reloadProcesses === 'function') {
+                try {
+                    await actions.reloadProcesses();
+                } catch (reloadError: any) {
+                    console.warn('Error al recargar procesos (no crítico):', reloadError);
+                    // No mostrar error al usuario, el proceso ya se guardó correctamente
+                }
+            } else {
+                console.warn('reloadProcesses no está disponible, omitiendo recarga');
+            }
             onClose();
         } catch (error: any) {
             console.error('Error guardando proceso:', error);
-            alert(`Error al guardar el proceso: ${error.message || 'No se pudo guardar el proceso.'}`);
+            // No mostrar el error de reloadProcesses como error de guardado
+            const errorMessage = error.message || 'No se pudo guardar el proceso.';
+            if (!errorMessage.includes('reloadProcesses')) {
+                alert(`Error al guardar el proceso: ${errorMessage}`);
+            } else {
+                // Si el error es de reloadProcesses, solo loguear y cerrar
+                console.warn('Error en reloadProcesses (no crítico):', error);
+                onClose();
+            }
         }
     };
 

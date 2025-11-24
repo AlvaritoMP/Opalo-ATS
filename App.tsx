@@ -560,17 +560,45 @@ const App: React.FC = () => {
                 return newProcess;
             } catch (error: any) {
                 console.error('Error adding process:', error);
+                // Verificar si es un error de permisos
+                const errorMessage = error.message || 'No se pudo crear el proceso en la base de datos.';
+                const isPermissionError = error.code === '42501' || error.code === 'PGRST301' || errorMessage.toLowerCase().includes('permission') || errorMessage.toLowerCase().includes('permiso');
+                
+                if (isPermissionError) {
+                    throw new Error(`Error de permisos: No tienes permisos para crear procesos. Verifica tu rol de usuario. (${errorMessage})`);
+                }
+                
                 // NO crear proceso local si falla en BD
-                throw new Error(`Error al crear proceso: ${error.message || 'No se pudo crear el proceso en la base de datos.'}`);
+                throw new Error(`Error al crear proceso: ${errorMessage}`);
             }
         },
         updateProcess: async (processData) => {
             try {
                 const updated = await processesApi.update(processData.id, processData);
                 setState(s => ({ ...s, processes: s.processes.map(p => p.id === processData.id ? updated : p) }));
-            } catch (error) {
+            } catch (error: any) {
                 console.error('Error updating process:', error);
+                // Actualizar estado local como fallback
                 setState(s => ({ ...s, processes: s.processes.map(p => p.id === processData.id ? processData : p) }));
+                // Lanzar el error para que el componente pueda manejarlo
+                const errorMessage = error.message || 'No se pudo actualizar el proceso en la base de datos.';
+                const isPermissionError = error.code === '42501' || error.code === 'PGRST301' || errorMessage.toLowerCase().includes('permission') || errorMessage.toLowerCase().includes('permiso');
+                
+                if (isPermissionError) {
+                    throw new Error(`Error de permisos: No tienes permisos para actualizar procesos. Verifica tu rol de usuario. (${errorMessage})`);
+                }
+                
+                throw new Error(`Error al actualizar proceso: ${errorMessage}`);
+            }
+        },
+        reloadProcesses: async () => {
+            try {
+                const processes = await processesApi.getAll();
+                setState(s => ({ ...s, processes }));
+            } catch (error: any) {
+                console.error('Error reloading processes:', error);
+                // No lanzar error, solo loguear para no interrumpir el flujo
+                // El error puede ser por permisos o problemas de conexión
             }
         },
         deleteProcess: async (processId) => {
