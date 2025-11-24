@@ -58,6 +58,7 @@ export const AddCandidateModal: React.FC<AddCandidateModalProps> = ({ process, o
             dni,
             linkedinUrl,
             address,
+            applicationStartedDate: new Date().toISOString(), // Set automatically when candidate is created
         });
         onClose();
     };

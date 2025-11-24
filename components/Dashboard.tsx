@@ -128,6 +128,120 @@ export const Dashboard: React.FC = () => {
             .slice(0, 4);
     }, [interviewEvents]);
 
+    // Indicadores de Eficiencia
+    const timeToHire = useMemo(() => {
+        const hiredCandidatesWithDates = filteredCandidates
+            .filter(c => {
+                const process = processes.find(p => p.id === c.processId);
+                if (!process || !process.stages || process.stages.length === 0) return false;
+                const lastStageId = process.stages[process.stages.length - 1]?.id;
+                return c.stageId === lastStageId && (c.offerAcceptedDate || c.hireDate);
+            })
+            .map(c => {
+                const process = processes.find(p => p.id === c.processId);
+                const publishedDate = process?.publishedDate || process?.startDate;
+                const acceptedDate = c.offerAcceptedDate || c.hireDate;
+                
+                if (!publishedDate || !acceptedDate) return null;
+                
+                const published = new Date(publishedDate);
+                const accepted = new Date(acceptedDate);
+                const days = Math.ceil((accepted.getTime() - published.getTime()) / (1000 * 60 * 60 * 24));
+                return days >= 0 ? days : null;
+            })
+            .filter((days): days is number => days !== null);
+        
+        if (hiredCandidatesWithDates.length === 0) return null;
+        const average = hiredCandidatesWithDates.reduce((sum, days) => sum + days, 0) / hiredCandidatesWithDates.length;
+        return Math.round(average * 10) / 10; // Redondear a 1 decimal
+    }, [filteredCandidates, processes]);
+
+    const timeToFill = useMemo(() => {
+        const filledProcesses = processes
+            .filter(p => {
+                if (!p.needIdentifiedDate) return false;
+                const processCandidates = filteredCandidates.filter(c => c.processId === p.id);
+                if (!p.stages || p.stages.length === 0) return false;
+                const lastStageId = p.stages[p.stages.length - 1]?.id;
+                const hiredCount = processCandidates.filter(c => c.stageId === lastStageId).length;
+                return hiredCount >= p.vacancies;
+            })
+            .map(p => {
+                const processCandidates = filteredCandidates.filter(c => c.processId === p.id);
+                if (!p.stages || p.stages.length === 0) return null;
+                const lastStageId = p.stages[p.stages.length - 1]?.id;
+                const lastHired = processCandidates
+                    .filter(c => c.stageId === lastStageId)
+                    .sort((a, b) => {
+                        const dateA = a.offerAcceptedDate || a.hireDate || '';
+                        const dateB = b.offerAcceptedDate || b.hireDate || '';
+                        return dateB.localeCompare(dateA);
+                    })[0];
+                
+                if (!lastHired || !p.needIdentifiedDate) return null;
+                
+                const needDate = new Date(p.needIdentifiedDate);
+                const fillDate = new Date(lastHired.offerAcceptedDate || lastHired.hireDate || '');
+                const days = Math.ceil((fillDate.getTime() - needDate.getTime()) / (1000 * 60 * 60 * 24));
+                return days >= 0 ? days : null;
+            })
+            .filter((days): days is number => days !== null);
+        
+        if (filledProcesses.length === 0) return null;
+        const average = filledProcesses.reduce((sum, days) => sum + days, 0) / filledProcesses.length;
+        return Math.round(average * 10) / 10;
+    }, [filteredCandidates, processes]);
+
+    const stageDuration = useMemo(() => {
+        const stageDurations: { [stageId: string]: number[] } = {};
+        
+        filteredCandidates.forEach(candidate => {
+            if (!candidate.history || candidate.history.length < 2) return;
+            
+            for (let i = 1; i < candidate.history.length; i++) {
+                const prevStage = candidate.history[i - 1];
+                const currentStage = candidate.history[i];
+                
+                const prevDate = new Date(prevStage.movedAt);
+                const currentDate = new Date(currentStage.movedAt);
+                const days = Math.ceil((currentDate.getTime() - prevDate.getTime()) / (1000 * 60 * 60 * 24));
+                
+                if (days >= 0) {
+                    if (!stageDurations[prevStage.stageId]) {
+                        stageDurations[prevStage.stageId] = [];
+                    }
+                    stageDurations[prevStage.stageId].push(days);
+                }
+            }
+        });
+        
+        const averages: { stageName: string; averageDays: number }[] = [];
+        processes.forEach(process => {
+            if (!process.stages) return;
+            process.stages.forEach(stage => {
+                const durations = stageDurations[stage.id];
+                if (durations && durations.length > 0) {
+                    const average = durations.reduce((sum, days) => sum + days, 0) / durations.length;
+                    averages.push({
+                        stageName: stage.name,
+                        averageDays: Math.round(average * 10) / 10
+                    });
+                }
+            });
+        });
+        
+        return averages;
+    }, [filteredCandidates, processes]);
+
+    const applicationCompletionRate = useMemo(() => {
+        const started = filteredCandidates.filter(c => c.applicationStartedDate).length;
+        const completed = filteredCandidates.filter(c => c.applicationCompletedDate).length;
+        
+        if (started === 0) return null;
+        const rate = (completed / started) * 100;
+        return Math.round(rate * 10) / 10;
+    }, [filteredCandidates]);
+
 
 
 
@@ -179,6 +293,56 @@ export const Dashboard: React.FC = () => {
                 <StatCard icon={Users} title="Candidatos filtrados" value={totalCandidates} color="bg-green-500" />
                 <StatCard icon={FileText} title="Aplicaciones totales" value={totalApplications} color="bg-purple-500" />
                 <StatCard icon={CheckCircle} title="Contratados filtrados" value={hiredCandidates} color="bg-teal-500" />
+            </div>
+
+            {/* Indicadores de Eficiencia */}
+            <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm mb-8">
+                <h2 className="text-xl font-semibold text-gray-800 mb-4">Indicadores de Eficiencia</h2>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                    <div className="p-4 bg-blue-50 rounded-lg border border-blue-200">
+                        <h3 className="text-sm font-medium text-blue-800 mb-1">Time to Hire</h3>
+                        <p className="text-2xl font-bold text-blue-900">
+                            {timeToHire !== null ? `${timeToHire} días` : 'N/D'}
+                        </p>
+                        <p className="text-xs text-blue-600 mt-1">Promedio desde publicación hasta aceptación</p>
+                    </div>
+                    <div className="p-4 bg-green-50 rounded-lg border border-green-200">
+                        <h3 className="text-sm font-medium text-green-800 mb-1">Time to Fill</h3>
+                        <p className="text-2xl font-bold text-green-900">
+                            {timeToFill !== null ? `${timeToFill} días` : 'N/D'}
+                        </p>
+                        <p className="text-xs text-green-600 mt-1">Promedio desde necesidad hasta llenado</p>
+                    </div>
+                    <div className="p-4 bg-purple-50 rounded-lg border border-purple-200">
+                        <h3 className="text-sm font-medium text-purple-800 mb-1">Tasa de Finalización</h3>
+                        <p className="text-2xl font-bold text-purple-900">
+                            {applicationCompletionRate !== null ? `${applicationCompletionRate}%` : 'N/D'}
+                        </p>
+                        <p className="text-xs text-purple-600 mt-1">% de solicitudes completadas</p>
+                    </div>
+                    <div className="p-4 bg-orange-50 rounded-lg border border-orange-200">
+                        <h3 className="text-sm font-medium text-orange-800 mb-1">Etapas con datos</h3>
+                        <p className="text-2xl font-bold text-orange-900">
+                            {stageDuration.length}
+                        </p>
+                        <p className="text-xs text-orange-600 mt-1">Etapas con duración calculada</p>
+                    </div>
+                </div>
+                
+                {/* Duración por Etapa */}
+                {stageDuration.length > 0 && (
+                    <div className="mt-6">
+                        <h3 className="text-lg font-semibold text-gray-800 mb-3">Duración Promedio por Etapa</h3>
+                        <div className="space-y-2">
+                            {stageDuration.map((stage, index) => (
+                                <div key={index} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                                    <span className="font-medium text-gray-700">{stage.stageName}</span>
+                                    <span className="text-lg font-bold text-gray-900">{stage.averageDays} días</span>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                )}
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 mb-8">

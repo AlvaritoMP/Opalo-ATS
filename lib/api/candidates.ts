@@ -104,6 +104,9 @@ async function dbToCandidate(dbCandidate: any): Promise<Candidate> {
         googleDriveFolderId: dbCandidate.google_drive_folder_id,
         googleDriveFolderName: dbCandidate.google_drive_folder_name,
         visibleToClients: dbCandidate.visible_to_clients ?? false,
+        offerAcceptedDate: dbCandidate.offer_accepted_date,
+        applicationStartedDate: dbCandidate.application_started_date,
+        applicationCompletedDate: dbCandidate.application_completed_date,
     };
 }
 
@@ -129,6 +132,9 @@ function candidateToDb(candidate: Partial<Candidate>): any {
     if (candidate.googleDriveFolderId !== undefined) dbCandidate.google_drive_folder_id = candidate.googleDriveFolderId;
     if (candidate.googleDriveFolderName !== undefined) dbCandidate.google_drive_folder_name = candidate.googleDriveFolderName;
     if (candidate.visibleToClients !== undefined) dbCandidate.visible_to_clients = candidate.visibleToClients;
+    if (candidate.offerAcceptedDate !== undefined) dbCandidate.offer_accepted_date = candidate.offerAcceptedDate;
+    if (candidate.applicationStartedDate !== undefined) dbCandidate.application_started_date = candidate.applicationStartedDate;
+    if (candidate.applicationCompletedDate !== undefined) dbCandidate.application_completed_date = candidate.applicationCompletedDate;
     return dbCandidate;
 }
 
@@ -190,6 +196,10 @@ export const candidatesApi = {
     async create(candidateData: Omit<Candidate, 'id' | 'history'>, createdBy?: string): Promise<Candidate> {
         const dbData = candidateToDb(candidateData);
         if (createdBy) dbData.created_by = createdBy;
+        // Set application_started_date if not provided
+        if (!dbData.application_started_date) {
+            dbData.application_started_date = new Date().toISOString();
+        }
 
         const { data, error } = await supabase
             .from('candidates')

@@ -710,6 +710,9 @@ export const CandidateDetailsModal: React.FC<{ candidate: Candidate, onClose: ()
                                                 <DetailItem icon={MapPin} label="Dirección" value={currentCandidate.address} />
                                                 <DetailItem icon={DollarSign} label="Expectativa salarial" value={currentCandidate.salaryExpectation ? `${state.settings?.currencySymbol || ''}${currentCandidate.salaryExpectation.replace(/[$\€£S/]/g, '').trim()}` : 'N/D'} />
                                                     <DetailItem icon={Calendar} label="Fecha de contratación" value={currentCandidate.hireDate ? new Date(currentCandidate.hireDate).toLocaleDateString('es-ES') : undefined} />
+                                                    <DetailItem icon={Calendar} label="Fecha de aceptación de oferta" value={currentCandidate.offerAcceptedDate ? new Date(currentCandidate.offerAcceptedDate).toLocaleDateString('es-ES') : undefined} />
+                                                    <DetailItem icon={Calendar} label="Fecha de inicio de solicitud" value={currentCandidate.applicationStartedDate ? new Date(currentCandidate.applicationStartedDate).toLocaleDateString('es-ES') : undefined} />
+                                                    <DetailItem icon={Calendar} label="Fecha de finalización de solicitud" value={currentCandidate.applicationCompletedDate ? new Date(currentCandidate.applicationCompletedDate).toLocaleDateString('es-ES') : undefined} />
                                             </div>
                                         </div>
                                         {currentCandidate.description && (

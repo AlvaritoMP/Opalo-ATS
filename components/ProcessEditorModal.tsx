@@ -28,6 +28,8 @@ export const ProcessEditorModal: React.FC<ProcessEditorModalProps> = ({ process,
     const [seniority, setSeniority] = useState(process?.seniority || '');
     const [startDate, setStartDate] = useState(process?.startDate || '');
     const [endDate, setEndDate] = useState(process?.endDate || '');
+    const [publishedDate, setPublishedDate] = useState(process?.publishedDate || '');
+    const [needIdentifiedDate, setNeedIdentifiedDate] = useState(process?.needIdentifiedDate || '');
     const [flyerUrl, setFlyerUrl] = useState(process?.flyerUrl || '');
     const [flyerPosition, setFlyerPosition] = useState<string>(process?.flyerPosition || 'center center');
     const [showFlyerEditor, setShowFlyerEditor] = useState(false);
@@ -327,6 +329,8 @@ export const ProcessEditorModal: React.FC<ProcessEditorModalProps> = ({ process,
             seniority, 
             startDate, 
             endDate, 
+            publishedDate: publishedDate || undefined,
+            needIdentifiedDate: needIdentifiedDate || undefined,
             flyerUrl,
             flyerPosition: flyerPosition || undefined,
             attachments, 

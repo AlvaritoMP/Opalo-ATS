@@ -44,6 +44,8 @@ export interface Process {
     documentCategories?: DocumentCategory[]; // Categorías de documentos definidas para este proceso
     googleDriveFolderId?: string; // ID de la carpeta de Google Drive para este proceso
     googleDriveFolderName?: string; // Nombre de la carpeta (para mostrar)
+    publishedDate?: string; // Fecha de publicación de la oferta (para Time to Hire)
+    needIdentifiedDate?: string; // Fecha de identificación de necesidad (para Time to Fill)
 }
 
 export interface CandidateHistory {
@@ -95,6 +97,9 @@ export interface Candidate {
     googleDriveFolderId?: string; // Carpeta del candidato en Google Drive (dentro de la carpeta del proceso)
     googleDriveFolderName?: string; // Nombre de la carpeta del candidato
     visibleToClients?: boolean; // Si es visible para usuarios tipo cliente/viewer
+    offerAcceptedDate?: string; // Fecha de aceptación de oferta (para Time to Hire)
+    applicationStartedDate?: string; // Fecha de inicio de solicitud (para Application Completion Rate)
+    applicationCompletedDate?: string; // Fecha de finalización de solicitud (para Application Completion Rate)
 }
 
 export type UserRole = 'admin' | 'recruiter' | 'client' | 'viewer';
