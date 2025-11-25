@@ -195,9 +195,9 @@ class GoogleDriveService {
         return `https://drive.google.com/uc?export=download&id=${fileId}`;
     }
 
-    // Obtener URL de visualización de un archivo
+    // Obtener URL de visualización de un archivo (usa /preview para mejor compatibilidad con iframes)
     getFileViewUrl(fileId: string): string {
-        return `https://drive.google.com/file/d/${fileId}/view`;
+        return `https://drive.google.com/file/d/${fileId}/preview`;
     }
 
     // Eliminar archivo de Google Drive

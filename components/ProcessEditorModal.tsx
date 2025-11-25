@@ -46,6 +46,8 @@ export const ProcessEditorModal: React.FC<ProcessEditorModalProps> = ({ process,
     const [showFolderSelector, setShowFolderSelector] = useState(false);
     const [newFolderName, setNewFolderName] = useState('');
     const [isCreatingFolder, setIsCreatingFolder] = useState(false);
+    const [isUploadingAttachment, setIsUploadingAttachment] = useState(false);
+    const [uploadingFileName, setUploadingFileName] = useState<string | null>(null);
     const flyerInputRef = useRef<HTMLInputElement>(null);
     const attachmentInputRef = useRef<HTMLInputElement>(null);
 
@@ -201,7 +203,31 @@ export const ProcessEditorModal: React.FC<ProcessEditorModalProps> = ({ process,
     const handleAttachmentUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
         if (!file) return;
-
+        
+        // Prevenir duplicados: verificar si ya existe un archivo con el mismo nombre
+        const existingAttachment = attachments.find(
+            att => att.name.toLowerCase() === file.name.toLowerCase()
+        );
+        if (existingAttachment) {
+            const confirmOverwrite = window.confirm(
+                `Ya existe un documento con el nombre "${file.name}". ¿Deseas reemplazarlo?`
+            );
+            if (!confirmOverwrite) {
+                if (e.target) e.target.value = '';
+                return;
+            }
+        }
+        
+        // Prevenir múltiples uploads simultáneos
+        if (isUploadingAttachment) {
+            actions.showToast('Ya hay un archivo subiéndose. Por favor espera...', 'info', 3000);
+            if (e.target) e.target.value = '';
+            return;
+        }
+        
+        // Mostrar indicador de carga INMEDIATAMENTE
+        setIsUploadingAttachment(true);
+        setUploadingFileName(file.name);
         const loadingToastId = actions.showToast(`Subiendo ${file.name}...`, 'loading', 0);
 
         const googleDriveConfig = state.settings?.googleDrive;
@@ -223,8 +249,9 @@ export const ProcessEditorModal: React.FC<ProcessEditorModalProps> = ({ process,
                     `proceso_${title || 'sin_titulo'}_${file.name}`
                 );
                 
-                // Usar URL de visualización de Google Drive
-                attachmentUrl = googleDriveService.getFileViewUrl(uploadedFile.id);
+                // Usar webViewLink si está disponible (mejor para preview), sino usar preview URL
+                attachmentUrl = uploadedFile.webViewLink || 
+                    `https://drive.google.com/file/d/${uploadedFile.id}/preview`;
                 googleDriveFileId = uploadedFile.id;
                 console.log(`✅ Archivo del proceso subido a Google Drive: ${googleDriveFolderName || 'Carpeta del proceso'} - ${uploadedFile.name}`);
             } catch (error: any) {
@@ -264,11 +291,23 @@ export const ProcessEditorModal: React.FC<ProcessEditorModalProps> = ({ process,
                 setAttachments(prev => [...prev, newAttachment]);
                 console.log('✅ Attachment guardado en la base de datos:', savedAttachment.id);
                 actions.hideToast(loadingToastId);
-                actions.showToast(`Documento "${file.name}" guardado exitosamente`, 'success');
+                actions.showToast(`Documento "${file.name}" guardado exitosamente`, 'success', 3000);
+                
+                // Recargar procesos para sincronización
+                if (actions.reloadProcesses && typeof actions.reloadProcesses === 'function') {
+                    try {
+                        await actions.reloadProcesses();
+                    } catch (reloadError) {
+                        console.warn('Error recargando procesos (no crítico):', reloadError);
+                    }
+                }
             } catch (error: any) {
                 console.error('Error guardando attachment en la base de datos:', error);
                 actions.hideToast(loadingToastId);
                 actions.showToast(`Error al guardar el documento: ${error.message || 'No se pudo guardar el documento en la base de datos.'}`, 'error', 5000);
+                setIsUploadingAttachment(false);
+                setUploadingFileName(null);
+                if (e.target) e.target.value = '';
                 // No agregar al estado local si falla el guardado en BD
                 return;
             }
@@ -285,6 +324,7 @@ export const ProcessEditorModal: React.FC<ProcessEditorModalProps> = ({ process,
             setAttachments(prev => [...prev, newAttachment]);
             console.log('📝 Attachment agregado al estado local (se guardará al crear el proceso)');
             actions.hideToast(loadingToastId);
+            actions.showToast(`Documento "${file.name}" agregado (se guardará al crear el proceso)`, 'success', 3000);
             actions.showToast(`Documento "${file.name}" agregado (se guardará al crear el proceso)`, 'info');
         }
     };
@@ -657,7 +697,19 @@ export const ProcessEditorModal: React.FC<ProcessEditorModalProps> = ({ process,
                             </div>
                             <input type="file" ref={attachmentInputRef} onChange={handleAttachmentUpload} className="hidden" />
                             <div className="mt-2 space-y-1">
-                                <button type="button" onClick={() => attachmentInputRef.current?.click()} className="flex items-center text-sm font-medium text-primary-600 hover:text-primary-800"><Upload className="w-4 h-4 mr-1" /> Subir documento</button>
+                                <button 
+                                    type="button" 
+                                    onClick={() => attachmentInputRef.current?.click()} 
+                                    disabled={isUploadingAttachment}
+                                    className={`flex items-center text-sm font-medium ${
+                                        isUploadingAttachment 
+                                            ? 'text-gray-400 cursor-not-allowed' 
+                                            : 'text-primary-600 hover:text-primary-800'
+                                    }`}
+                                >
+                                    <Upload className="w-4 h-4 mr-1" /> 
+                                    {isUploadingAttachment ? `Subiendo ${uploadingFileName}...` : 'Subir documento'}
+                                </button>
                                 {(() => {
                                     const googleDriveConfig = state.settings?.googleDrive;
                                     const isGoogleDriveConnected = googleDriveConfig?.connected && googleDriveConfig?.accessToken;

@@ -76,6 +76,8 @@ export const CandidateDetailsModal: React.FC<{ candidate: Candidate, onClose: ()
     const [pendingFile, setPendingFile] = useState<File | null>(null);
     const [showCategoryModal, setShowCategoryModal] = useState(false);
     const [selectedCategory, setSelectedCategory] = useState<string>('');
+    const [isUploading, setIsUploading] = useState(false);
+    const [uploadingFileName, setUploadingFileName] = useState<string | null>(null);
 
     const avatarInputRef = useRef<HTMLInputElement>(null);
     const attachmentInputRef = useRef<HTMLInputElement>(null);
@@ -153,26 +155,54 @@ export const CandidateDetailsModal: React.FC<{ candidate: Candidate, onClose: ()
     
     const handleAttachmentUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
-        if (file) {
-            // Si hay categorías definidas, mostrar modal para seleccionar categoría
-            if (process?.documentCategories && process.documentCategories.length > 0) {
-                setPendingFile(file);
-                setShowCategoryModal(true);
-            } else {
-                // Si no hay categorías, subir sin categoría
-                await uploadFileWithCategory(file, '');
+        if (!file) return;
+        
+        // Prevenir duplicados: verificar si ya existe un archivo con el mismo nombre
+        const existingAttachment = editableCandidate.attachments?.find(
+            att => att.name.toLowerCase() === file.name.toLowerCase()
+        );
+        if (existingAttachment) {
+            const confirmOverwrite = window.confirm(
+                `Ya existe un documento con el nombre "${file.name}". ¿Deseas reemplazarlo?`
+            );
+            if (!confirmOverwrite) {
+                // Limpiar el input para permitir seleccionar el mismo archivo de nuevo
+                if (e.target) e.target.value = '';
+                return;
             }
+        }
+        
+        // Prevenir múltiples uploads simultáneos
+        if (isUploading) {
+            actions.showToast('Ya hay un archivo subiéndose. Por favor espera...', 'info', 3000);
+            if (e.target) e.target.value = '';
+            return;
+        }
+        
+        // Si hay categorías definidas, mostrar modal para seleccionar categoría
+        if (process?.documentCategories && process.documentCategories.length > 0) {
+            setPendingFile(file);
+            setShowCategoryModal(true);
+        } else {
+            // Si no hay categorías, subir sin categoría
+            await uploadFileWithCategory(file, '');
         }
     };
     
     const uploadFileWithCategory = async (file: File, categoryId: string) => {
-        const googleDriveConfig = state.settings?.googleDrive;
-        const isGoogleDriveConnected = googleDriveConfig?.connected && googleDriveConfig?.accessToken;
-        const process = state.processes.find(p => p.id === editableCandidate.processId);
-        const processHasFolder = process?.googleDriveFolderId;
+        // Mostrar indicador de carga INMEDIATAMENTE
+        setIsUploading(true);
+        setUploadingFileName(file.name);
+        const loadingToastId = actions.showToast(`Subiendo ${file.name}...`, 'loading', 0);
         
-        // Si Google Drive está conectado, DEBE usarse (no hay fallback a local)
-        if (isGoogleDriveConnected && googleDriveConfig) {
+        try {
+            const googleDriveConfig = state.settings?.googleDrive;
+            const isGoogleDriveConnected = googleDriveConfig?.connected && googleDriveConfig?.accessToken;
+            const process = state.processes.find(p => p.id === editableCandidate.processId);
+            const processHasFolder = process?.googleDriveFolderId;
+            
+            // Si Google Drive está conectado, DEBE usarse (no hay fallback a local)
+            if (isGoogleDriveConnected && googleDriveConfig) {
             if (!processHasFolder) {
                 alert('⚠️ Google Drive está conectado pero este proceso no tiene una carpeta configurada. Ve a Procesos → Editar Proceso para configurar una carpeta de Google Drive.');
                 setPendingFile(null);
@@ -221,7 +251,9 @@ export const CandidateDetailsModal: React.FC<{ candidate: Candidate, onClose: ()
                 // Crear attachment con URL de visualización de Google Drive
                 // Generar un UUID para el attachment (la tabla requiere UUID, no el ID de Google Drive)
                 const attachmentId = `att-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-                const attachmentUrl = googleDriveService.getFileViewUrl(uploadedFile.id);
+                // Usar webViewLink si está disponible (mejor para preview), sino usar preview URL
+                const attachmentUrl = uploadedFile.webViewLink || 
+                    `https://drive.google.com/file/d/${uploadedFile.id}/preview`;
                 // Guardar el ID de Google Drive en la URL para poder eliminarlo después
                 const newAttachment: Attachment = {
                     id: attachmentId,
@@ -250,6 +282,10 @@ export const CandidateDetailsModal: React.FC<{ candidate: Candidate, onClose: ()
                 // Luego actualizar en la base de datos
                 await actions.updateCandidate(updatedCandidate, state.currentUser?.name);
                 
+                // Ocultar toast de loading y mostrar éxito
+                actions.hideToast(loadingToastId);
+                actions.showToast(`Documento "${file.name}" guardado exitosamente`, 'success', 3000);
+                
                 console.log(`✅ Archivo subido a Google Drive: ${finalFolderName} - ${uploadedFile.name}`);
                 console.log(`✅ Attachment guardado:`, newAttachment);
                 console.log(`✅ Candidato actualizado con ${updatedCandidate.attachments.length} attachments`);
@@ -259,25 +295,19 @@ export const CandidateDetailsModal: React.FC<{ candidate: Candidate, onClose: ()
                     setPreviewFile(newAttachment);
                 }
                 
-                // Forzar actualización del estado local después de un breve delay para asegurar que la BD se actualizó
-                setTimeout(async () => {
+                // Recargar candidatos para sincronización
+                if (actions.reloadCandidates && typeof actions.reloadCandidates === 'function') {
                     try {
-                        const { candidatesApi } = await import('../lib/api/candidates');
-                        const refreshedCandidate = await candidatesApi.getById(editableCandidate.id);
-                        if (refreshedCandidate) {
-                            setEditableCandidate(refreshedCandidate);
-                            // Actualizar también el estado global
-                            await actions.updateCandidate(refreshedCandidate, state.currentUser?.name);
-                            console.log(`✅ Candidato refrescado desde BD con ${refreshedCandidate.attachments.length} attachments`);
-                        }
-                    } catch (error) {
-                        console.error('Error refrescando candidato:', error);
+                        await actions.reloadCandidates();
+                    } catch (reloadError) {
+                        console.warn('Error recargando candidatos (no crítico):', reloadError);
                     }
-                }, 500);
+                }
                 
             } catch (error: any) {
                 console.error('Error subiendo a Google Drive:', error);
-                alert(`Error al subir a Google Drive: ${error.message}. Por favor, intenta nuevamente.`);
+                actions.hideToast(loadingToastId);
+                actions.showToast(`Error al subir: ${error.message}`, 'error', 5000);
                 setPendingFile(null);
                 setShowCategoryModal(false);
                 setSelectedCategory('');
@@ -305,15 +335,35 @@ export const CandidateDetailsModal: React.FC<{ candidate: Candidate, onClose: ()
             setEditableCandidate(updatedCandidate);
             await actions.updateCandidate(updatedCandidate, state.currentUser?.name);
             
+            // Ocultar toast de loading y mostrar éxito
+            actions.hideToast(loadingToastId);
+            actions.showToast(`Documento "${file.name}" guardado exitosamente`, 'success', 3000);
+            
             // Actualizar preview si no hay uno seleccionado
             if (!previewFile) {
                 setPreviewFile(newAttachment);
+            }
+            
+            // Recargar candidatos para sincronización
+            if (actions.reloadCandidates && typeof actions.reloadCandidates === 'function') {
+                try {
+                    await actions.reloadCandidates();
+                } catch (reloadError) {
+                    console.warn('Error recargando candidatos (no crítico):', reloadError);
+                }
             }
         }
         
         setPendingFile(null);
         setShowCategoryModal(false);
         setSelectedCategory('');
+        setIsUploading(false);
+        setUploadingFileName(null);
+        
+        // Limpiar el input para permitir seleccionar el mismo archivo de nuevo
+        if (attachmentInputRef.current) {
+            attachmentInputRef.current.value = '';
+        }
     };
     
     const handleConfirmCategory = async () => {
@@ -767,7 +817,19 @@ export const CandidateDetailsModal: React.FC<{ candidate: Candidate, onClose: ()
                                     </div>
                                     <input type="file" ref={attachmentInputRef} onChange={handleAttachmentUpload} className="hidden" />
                                     <div className="mt-2 space-y-2">
-                                        <button type="button" onClick={() => attachmentInputRef.current?.click()} className="flex items-center text-sm font-medium text-primary-600 hover:text-primary-800"><Upload className="w-4 h-4 mr-1" /> Subir documento</button>
+                                        <button 
+                                            type="button" 
+                                            onClick={() => attachmentInputRef.current?.click()} 
+                                            disabled={isUploading}
+                                            className={`flex items-center text-sm font-medium ${
+                                                isUploading 
+                                                    ? 'text-gray-400 cursor-not-allowed' 
+                                                    : 'text-primary-600 hover:text-primary-800'
+                                            }`}
+                                        >
+                                            <Upload className="w-4 h-4 mr-1" /> 
+                                            {isUploading ? `Subiendo ${uploadingFileName}...` : 'Subir documento'}
+                                        </button>
                                         {(() => {
                                             const googleDriveConfig = state.settings?.googleDrive;
                                             const isGoogleDriveConnected = googleDriveConfig?.connected && googleDriveConfig?.accessToken;
@@ -816,7 +878,10 @@ export const CandidateDetailsModal: React.FC<{ candidate: Candidate, onClose: ()
                                         <img src={previewFile.url} alt={previewFile.name} className="w-full h-full object-contain" />
                                     ) : previewFile.type === 'application/pdf' || previewFile.url.includes('drive.google.com') ? (
                                         <iframe 
-                                            src={previewFile.url} 
+                                            src={previewFile.url.includes('drive.google.com') 
+                                                ? previewFile.url.replace('/view', '/preview').replace('/file/d/', '/file/d/')
+                                                : previewFile.url
+                                            } 
                                             title={previewFile.name} 
                                             className="w-full h-full border-0 rounded-lg bg-white"
                                             allow="fullscreen"
