@@ -453,6 +453,23 @@ const App: React.FC = () => {
         loadData();
     }, []);
 
+    // Helper functions para toasts (deben estar fuera de actions para evitar dependencias circulares)
+    const showToastHelper = (message: string, type: 'success' | 'error' | 'loading' | 'info', duration?: number) => {
+        const id = `toast-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+        setState(s => ({
+            ...s,
+            toasts: [...s.toasts, { id, message, type, duration }]
+        }));
+        return id;
+    };
+
+    const hideToastHelper = (id: string) => {
+        setState(s => ({
+            ...s,
+            toasts: s.toasts.filter(t => t.id !== id)
+        }));
+    };
+
     const actions: AppActions = useMemo(() => ({
         login: async (email, password) => {
             try {
@@ -539,7 +556,7 @@ const App: React.FC = () => {
             }
         },
         addProcess: async (processData) => {
-            const loadingToastId = actions.showToast('Creando proceso...', 'loading', 0);
+            const loadingToastId = showToastHelper('Creando proceso...', 'loading', 0);
             try {
                 // Si Google Drive está conectado, crear carpeta automáticamente
                 let folderId = processData.googleDriveFolderId;
@@ -562,9 +579,9 @@ const App: React.FC = () => {
                         folderId = folder.id;
                         folderName = folder.name;
                         console.log(`✅ Carpeta creada automáticamente en Google Drive: ${folderName}`);
-                        actions.hideToast(folderToastId);
-                        const savingToastId = actions.showToast('Guardando proceso...', 'loading', 0);
-                        actions.hideToast(savingToastId);
+                        hideToastHelper(folderToastId);
+                        const savingToastId = showToastHelper('Guardando proceso...', 'loading', 0);
+                        hideToastHelper(savingToastId);
                     } catch (error: any) {
                         console.error('Error creando carpeta automáticamente:', error);
                         // Continuar sin carpeta si falla
@@ -584,21 +601,21 @@ const App: React.FC = () => {
                 // Actualizar estado local
                 setState(s => ({ ...s, processes: [...s.processes, newProcess] }));
                 
-                actions.hideToast(loadingToastId);
-                actions.showToast('Proceso creado exitosamente', 'success');
+                hideToastHelper(loadingToastId);
+                showToastHelper('Proceso creado exitosamente', 'success');
                 
                 return newProcess;
             } catch (error: any) {
                 console.error('Error adding process:', error);
-                actions.hideToast(loadingToastId);
+                hideToastHelper(loadingToastId);
                 // Verificar si es un error de permisos
                 const errorMessage = error.message || 'No se pudo crear el proceso en la base de datos.';
                 const isPermissionError = error.code === '42501' || error.code === 'PGRST301' || errorMessage.toLowerCase().includes('permission') || errorMessage.toLowerCase().includes('permiso');
                 
                 if (isPermissionError) {
-                    actions.showToast('Error de permisos: No tienes permisos para crear procesos. Verifica tu rol de usuario.', 'error', 7000);
+                    showToastHelper('Error de permisos: No tienes permisos para crear procesos. Verifica tu rol de usuario.', 'error', 7000);
                 } else {
-                    actions.showToast(`Error al crear proceso: ${errorMessage}`, 'error', 7000);
+                    showToastHelper(`Error al crear proceso: ${errorMessage}`, 'error', 7000);
                 }
                 
                 // NO crear proceso local si falla en BD - esto causa que aparezca pero no se guarde
@@ -607,24 +624,24 @@ const App: React.FC = () => {
             }
         },
         updateProcess: async (processData) => {
-            const loadingToastId = actions.showToast('Guardando cambios del proceso...', 'loading', 0);
+            const loadingToastId = showToastHelper('Guardando cambios del proceso...', 'loading', 0);
             try {
                 const updated = await processesApi.update(processData.id, processData);
                 setState(s => ({ ...s, processes: s.processes.map(p => p.id === processData.id ? updated : p) }));
-                actions.hideToast(loadingToastId);
-                actions.showToast('Proceso actualizado exitosamente', 'success');
+                hideToastHelper(loadingToastId);
+                showToastHelper('Proceso actualizado exitosamente', 'success');
             } catch (error: any) {
                 console.error('Error updating process:', error);
-                actions.hideToast(loadingToastId);
+                hideToastHelper(loadingToastId);
                 
                 // Verificar si es un error de permisos
                 const errorMessage = error.message || 'No se pudo actualizar el proceso en la base de datos.';
                 const isPermissionError = error.code === '42501' || error.code === 'PGRST301' || errorMessage.toLowerCase().includes('permission') || errorMessage.toLowerCase().includes('permiso');
                 
                 if (isPermissionError) {
-                    actions.showToast('Error de permisos: No tienes permisos para actualizar procesos. Verifica tu rol de usuario.', 'error', 7000);
+                    showToastHelper('Error de permisos: No tienes permisos para actualizar procesos. Verifica tu rol de usuario.', 'error', 7000);
                 } else {
-                    actions.showToast(`Error al actualizar proceso: ${errorMessage}`, 'error', 7000);
+                    showToastHelper(`Error al actualizar proceso: ${errorMessage}`, 'error', 7000);
                 }
                 
                 // NO actualizar estado local si falla en BD - esto causa que parezca guardado pero no se guarde
@@ -685,7 +702,7 @@ const App: React.FC = () => {
             }
         },
         addCandidate: async (candidateData) => {
-            const loadingToastId = actions.showToast('Creando candidato...', 'loading', 0);
+            const loadingToastId = showToastHelper('Creando candidato...', 'loading', 0);
             try {
                 // Si Google Drive está conectado y el proceso tiene carpeta, crear carpeta del candidato
                 let folderId = candidateData.googleDriveFolderId;
@@ -709,9 +726,9 @@ const App: React.FC = () => {
                         folderId = folder.id;
                         folderName = folder.name;
                         console.log(`✅ Carpeta del candidato creada automáticamente en Google Drive: ${folderName} (dentro de ${process.googleDriveFolderName})`);
-                        actions.hideToast(folderToastId);
-                        const savingToastId = actions.showToast('Guardando candidato...', 'loading', 0);
-                        actions.hideToast(savingToastId);
+                        hideToastHelper(folderToastId);
+                        const savingToastId = showToastHelper('Guardando candidato...', 'loading', 0);
+                        hideToastHelper(savingToastId);
                     } catch (error: any) {
                         console.error('Error creando carpeta del candidato automáticamente:', error);
                         // Continuar sin carpeta si falla
@@ -746,28 +763,28 @@ const App: React.FC = () => {
                         });
                     } else {
                         // Si no se puede recargar, usar el que se creó
-                        setState(s => ({ ...s, candidates: [...s.candidates, newCandidate] }));
+                setState(s => ({ ...s, candidates: [...s.candidates, newCandidate] }));
                     }
                 } catch (reloadError) {
                     console.warn('Error recargando candidato después de crear, usando el retornado:', reloadError);
                     // Si falla la recarga, usar el candidato retornado
-                    setState(s => ({ ...s, candidates: [...s.candidates, newCandidate] }));
+                setState(s => ({ ...s, candidates: [...s.candidates, newCandidate] }));
                 }
                 
-                actions.hideToast(loadingToastId);
-                actions.showToast('Candidato creado exitosamente', 'success');
+                hideToastHelper(loadingToastId);
+                showToastHelper('Candidato creado exitosamente', 'success');
             } catch (error: any) {
                 console.error('Error adding candidate:', error);
-                actions.hideToast(loadingToastId);
+                hideToastHelper(loadingToastId);
                 
                 // Verificar si es un error de permisos
                 const errorMessage = error.message || 'No se pudo crear el candidato en la base de datos.';
                 const isPermissionError = error.code === '42501' || error.code === 'PGRST301' || errorMessage.toLowerCase().includes('permission') || errorMessage.toLowerCase().includes('permiso');
                 
                 if (isPermissionError) {
-                    actions.showToast('Error de permisos: No tienes permisos para crear candidatos. Verifica tu rol de usuario.', 'error', 7000);
+                    showToastHelper('Error de permisos: No tienes permisos para crear candidatos. Verifica tu rol de usuario.', 'error', 7000);
                 } else {
-                    actions.showToast(`Error al crear candidato: ${errorMessage}`, 'error', 7000);
+                    showToastHelper(`Error al crear candidato: ${errorMessage}`, 'error', 7000);
                 }
                 
                 // NO crear candidato local si falla en BD - esto causa que aparezca pero no se guarde
@@ -776,24 +793,24 @@ const App: React.FC = () => {
             }
         },
         updateCandidate: async (candidateData, movedBy) => {
-            const loadingToastId = actions.showToast('Guardando cambios del candidato...', 'loading', 0);
+            const loadingToastId = showToastHelper('Guardando cambios del candidato...', 'loading', 0);
             try {
                 const updated = await candidatesApi.update(candidateData.id, candidateData, movedBy || state.currentUser?.id);
                 setState(s => ({ ...s, candidates: s.candidates.map(c => c.id === candidateData.id ? updated : c) }));
-                actions.hideToast(loadingToastId);
-                actions.showToast('Candidato actualizado exitosamente', 'success');
+                hideToastHelper(loadingToastId);
+                showToastHelper('Candidato actualizado exitosamente', 'success');
             } catch (error: any) {
                 console.error('Error updating candidate:', error);
-                actions.hideToast(loadingToastId);
+                hideToastHelper(loadingToastId);
                 
                 // Verificar si es un error de permisos
                 const errorMessage = error.message || 'No se pudo actualizar el candidato en la base de datos.';
                 const isPermissionError = error.code === '42501' || error.code === 'PGRST301' || errorMessage.toLowerCase().includes('permission') || errorMessage.toLowerCase().includes('permiso');
                 
                 if (isPermissionError) {
-                    actions.showToast('Error de permisos: No tienes permisos para actualizar candidatos. Verifica tu rol de usuario.', 'error', 7000);
+                    showToastHelper('Error de permisos: No tienes permisos para actualizar candidatos. Verifica tu rol de usuario.', 'error', 7000);
                 } else {
-                    actions.showToast(`Error al actualizar candidato: ${errorMessage}`, 'error', 7000);
+                    showToastHelper(`Error al actualizar candidato: ${errorMessage}`, 'error', 7000);
                 }
                 
                 // NO actualizar estado local si falla en BD - esto causa que parezca guardado pero no se guarde
@@ -812,9 +829,9 @@ const App: React.FC = () => {
                 const isPermissionError = error.code === '42501' || error.code === 'PGRST301' || errorMessage.toLowerCase().includes('permission') || errorMessage.toLowerCase().includes('permiso');
                 
                 if (isPermissionError) {
-                    actions.showToast('Error de permisos: No tienes permisos para eliminar candidatos. Verifica tu rol de usuario.', 'error', 7000);
+                    showToastHelper('Error de permisos: No tienes permisos para eliminar candidatos. Verifica tu rol de usuario.', 'error', 7000);
                 } else {
-                    actions.showToast(`Error al eliminar candidato: ${errorMessage}`, 'error', 7000);
+                    showToastHelper(`Error al eliminar candidato: ${errorMessage}`, 'error', 7000);
                 }
                 
                 // NO eliminar del estado local si falla en BD - esto causa que parezca eliminado pero no se eliminó
@@ -829,7 +846,7 @@ const App: React.FC = () => {
                 throw new Error('Candidato o proceso no encontrado, o el proceso no tiene etapas');
             }
 
-            const firstStageId = targetProcess.stages[0].id;
+                const firstStageId = targetProcess.stages[0].id;
             const movedBy = state.currentUser?.id || 'System';
 
             try {
@@ -844,7 +861,7 @@ const App: React.FC = () => {
             } catch (error: any) {
                 console.error('Error moving candidate to process:', error);
                 const errorMessage = error.message || 'No se pudo mover el candidato al proceso.';
-                actions.showToast(`Error al mover candidato: ${errorMessage}`, 'error', 7000);
+                showToastHelper(`Error al mover candidato: ${errorMessage}`, 'error', 7000);
                 throw error;
             }
         },
@@ -856,7 +873,7 @@ const App: React.FC = () => {
                 throw new Error('Candidato o proceso no encontrado, o el proceso no tiene etapas');
             }
 
-            const firstStageId = targetProcess.stages[0].id;
+                const firstStageId = targetProcess.stages[0].id;
 
             try {
                 // Crear nuevo candidato en la base de datos usando addCandidate
@@ -870,7 +887,7 @@ const App: React.FC = () => {
             } catch (error: any) {
                 console.error('Error duplicating candidate to process:', error);
                 const errorMessage = error.message || 'No se pudo duplicar el candidato al proceso.';
-                actions.showToast(`Error al duplicar candidato: ${errorMessage}`, 'error', 7000);
+                showToastHelper(`Error al duplicar candidato: ${errorMessage}`, 'error', 7000);
                 throw error;
             }
         },
@@ -1044,9 +1061,9 @@ const App: React.FC = () => {
                 const isPermissionError = error.code === '42501' || error.code === 'PGRST301' || errorMessage.toLowerCase().includes('permission') || errorMessage.toLowerCase().includes('permiso');
                 
                 if (isPermissionError) {
-                    actions.showToast('Error de permisos: No tienes permisos para archivar candidatos. Verifica tu rol de usuario.', 'error', 7000);
+                    showToastHelper('Error de permisos: No tienes permisos para archivar candidatos. Verifica tu rol de usuario.', 'error', 7000);
                 } else {
-                    actions.showToast(`Error al archivar candidato: ${errorMessage}`, 'error', 7000);
+                    showToastHelper(`Error al archivar candidato: ${errorMessage}`, 'error', 7000);
                 }
                 
                 // NO actualizar estado local si falla en BD
@@ -1063,9 +1080,9 @@ const App: React.FC = () => {
                 const isPermissionError = error.code === '42501' || error.code === 'PGRST301' || errorMessage.toLowerCase().includes('permission') || errorMessage.toLowerCase().includes('permiso');
                 
                 if (isPermissionError) {
-                    actions.showToast('Error de permisos: No tienes permisos para restaurar candidatos. Verifica tu rol de usuario.', 'error', 7000);
+                    showToastHelper('Error de permisos: No tienes permisos para restaurar candidatos. Verifica tu rol de usuario.', 'error', 7000);
                 } else {
-                    actions.showToast(`Error al restaurar candidato: ${errorMessage}`, 'error', 7000);
+                    showToastHelper(`Error al restaurar candidato: ${errorMessage}`, 'error', 7000);
                 }
                 
                 // NO actualizar estado local si falla en BD
@@ -1073,18 +1090,10 @@ const App: React.FC = () => {
             }
         },
         showToast: (message: string, type: 'success' | 'error' | 'loading' | 'info', duration?: number) => {
-            const id = `toast-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-            setState(s => ({
-                ...s,
-                toasts: [...s.toasts, { id, message, type, duration }]
-            }));
-            return id;
+            return showToastHelper(message, type, duration);
         },
         hideToast: (id: string) => {
-            setState(s => ({
-                ...s,
-                toasts: s.toasts.filter(t => t.id !== id)
-            }));
+            hideToastHelper(id);
         },
     }), [state.currentUser, state.users]);
 
