@@ -304,10 +304,44 @@ export const processesApi = {
 
         // Actualizar stages si se proporcionan
         if (processData.stages) {
-            // Eliminar stages existentes
-            await supabase.from('stages').delete().eq('process_id', id);
+            // Primero, eliminar stages existentes y verificar que se completó
+            const { error: deleteError, data: deletedData } = await supabase
+                .from('stages')
+                .delete()
+                .eq('process_id', id)
+                .select();
             
-            // Insertar nuevos stages
+            if (deleteError) {
+                console.error('Error eliminando stages existentes:', deleteError);
+                throw deleteError;
+            }
+            
+            // Verificar que no queden stages antes de insertar (evita conflictos de restricción única)
+            // Hacer una consulta para asegurar que la eliminación se completó
+            let retries = 0;
+            const maxRetries = 5;
+            while (retries < maxRetries) {
+                const { data: remainingStages } = await supabase
+                    .from('stages')
+                    .select('id')
+                    .eq('process_id', id)
+                    .limit(1);
+                
+                if (!remainingStages || remainingStages.length === 0) {
+                    // La eliminación se completó, podemos proceder
+                    break;
+                }
+                
+                // Esperar un poco antes de reintentar
+                await new Promise(resolve => setTimeout(resolve, 50));
+                retries++;
+            }
+            
+            if (retries >= maxRetries) {
+                console.warn('⚠️ Aún hay stages existentes después de la eliminación, pero procediendo con la inserción');
+            }
+            
+            // Insertar nuevos stages solo si hay etapas para insertar
             if (processData.stages.length > 0) {
                 const stagesToInsert = processData.stages.map((stage, index) => ({
                     process_id: id,
@@ -320,7 +354,26 @@ export const processesApi = {
                     .from('stages')
                     .insert(stagesToInsert);
                 
-                if (stagesError) throw stagesError;
+                if (stagesError) {
+                    console.error('Error insertando nuevos stages:', stagesError);
+                    // Si el error es de clave duplicada, intentar eliminar nuevamente y reinsertar
+                    if (stagesError.message?.includes('duplicate key') || stagesError.code === '23505') {
+                        console.log('🔄 Reintentando eliminación de stages debido a clave duplicada...');
+                        await supabase.from('stages').delete().eq('process_id', id);
+                        await new Promise(resolve => setTimeout(resolve, 200));
+                        
+                        const { error: retryError } = await supabase
+                            .from('stages')
+                            .insert(stagesToInsert);
+                        
+                        if (retryError) {
+                            console.error('Error en reintento de inserción de stages:', retryError);
+                            throw retryError;
+                        }
+                    } else {
+                        throw stagesError;
+                    }
+                }
             }
         }
 
