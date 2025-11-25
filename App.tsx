@@ -725,7 +725,35 @@ const App: React.FC = () => {
                 };
                 
                 const newCandidate = await candidatesApi.create(candidateDataWithFolder, state.currentUser?.id);
-                setState(s => ({ ...s, candidates: [...s.candidates, newCandidate] }));
+                
+                // Recargar el candidato desde la BD para asegurar que tiene todos los datos (attachments, history, etc.)
+                try {
+                    const reloadedCandidate = await candidatesApi.getById(newCandidate.id);
+                    if (reloadedCandidate) {
+                        // Actualizar estado con el candidato completo recargado desde la BD
+                        setState(s => {
+                            // Verificar si ya existe (por si acaso)
+                            const existingIndex = s.candidates.findIndex(c => c.id === reloadedCandidate.id);
+                            if (existingIndex >= 0) {
+                                // Reemplazar el existente
+                                const updated = [...s.candidates];
+                                updated[existingIndex] = reloadedCandidate;
+                                return { ...s, candidates: updated };
+                            } else {
+                                // Agregar nuevo
+                                return { ...s, candidates: [...s.candidates, reloadedCandidate] };
+                            }
+                        });
+                    } else {
+                        // Si no se puede recargar, usar el que se creó
+                        setState(s => ({ ...s, candidates: [...s.candidates, newCandidate] }));
+                    }
+                } catch (reloadError) {
+                    console.warn('Error recargando candidato después de crear, usando el retornado:', reloadError);
+                    // Si falla la recarga, usar el candidato retornado
+                    setState(s => ({ ...s, candidates: [...s.candidates, newCandidate] }));
+                }
+                
                 actions.hideToast(loadingToastId);
                 actions.showToast('Candidato creado exitosamente', 'success');
             } catch (error: any) {

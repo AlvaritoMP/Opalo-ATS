@@ -61,6 +61,17 @@ export const AddCandidateModal: React.FC<AddCandidateModalProps> = ({ process, o
                 address,
                 applicationStartedDate: new Date().toISOString(), // Set automatically when candidate is created
             });
+            
+            // Recargar candidatos del proceso para asegurar sincronización
+            if (actions.reloadCandidates && typeof actions.reloadCandidates === 'function') {
+                try {
+                    await actions.reloadCandidates();
+                } catch (reloadError: any) {
+                    console.warn('Error al recargar candidatos después de crear (no crítico):', reloadError);
+                    // No mostrar error al usuario, el candidato ya se creó
+                }
+            }
+            
             // Solo cerrar el modal si la creación fue exitosa
             onClose();
         } catch (error: any) {
