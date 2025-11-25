@@ -363,13 +363,18 @@ export const ProcessEditorModal: React.FC<ProcessEditorModalProps> = ({ process,
             } else {
                 console.warn('reloadProcesses no está disponible, omitiendo recarga');
             }
+            // Solo cerrar el modal si la creación/actualización fue exitosa
             onClose();
         } catch (error: any) {
             console.error('Error guardando proceso:', error);
+            // El error ya fue manejado y mostrado en addProcess/updateProcess
+            // No cerrar el modal para que el usuario pueda corregir y reintentar
+            // No mostrar alert adicional, el toast ya mostró el error
             // No mostrar el error de reloadProcesses como error de guardado
             const errorMessage = error.message || 'No se pudo guardar el proceso.';
-            if (!errorMessage.includes('reloadProcesses')) {
-                alert(`Error al guardar el proceso: ${errorMessage}`);
+            if (!errorMessage.includes('reloadProcesses') && !errorMessage.includes('Error de permisos')) {
+                // Solo mostrar alert si no es un error de permisos (ya se mostró en toast)
+                // y no es un error de reloadProcesses
             } else {
                 // Si el error es de reloadProcesses, solo loguear y cerrar
                 console.warn('Error en reloadProcesses (no crítico):', error);

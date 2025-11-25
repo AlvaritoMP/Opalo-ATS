@@ -596,13 +596,14 @@ const App: React.FC = () => {
                 const isPermissionError = error.code === '42501' || error.code === 'PGRST301' || errorMessage.toLowerCase().includes('permission') || errorMessage.toLowerCase().includes('permiso');
                 
                 if (isPermissionError) {
-                    actions.showToast('Error de permisos: No tienes permisos para crear procesos', 'error', 5000);
-                    throw new Error(`Error de permisos: No tienes permisos para crear procesos. Verifica tu rol de usuario. (${errorMessage})`);
+                    actions.showToast('Error de permisos: No tienes permisos para crear procesos. Verifica tu rol de usuario.', 'error', 7000);
+                } else {
+                    actions.showToast(`Error al crear proceso: ${errorMessage}`, 'error', 7000);
                 }
                 
-                actions.showToast(`Error al crear proceso: ${errorMessage}`, 'error', 5000);
-                // NO crear proceso local si falla en BD
-                throw new Error(`Error al crear proceso: ${errorMessage}`);
+                // NO crear proceso local si falla en BD - esto causa que aparezca pero no se guarde
+                // Re-lanzar el error para que el componente pueda manejarlo
+                throw error;
             }
         },
         updateProcess: async (processData) => {
@@ -615,19 +616,20 @@ const App: React.FC = () => {
             } catch (error: any) {
                 console.error('Error updating process:', error);
                 actions.hideToast(loadingToastId);
-                // Actualizar estado local como fallback
-                setState(s => ({ ...s, processes: s.processes.map(p => p.id === processData.id ? processData : p) }));
-                // Lanzar el error para que el componente pueda manejarlo
+                
+                // Verificar si es un error de permisos
                 const errorMessage = error.message || 'No se pudo actualizar el proceso en la base de datos.';
                 const isPermissionError = error.code === '42501' || error.code === 'PGRST301' || errorMessage.toLowerCase().includes('permission') || errorMessage.toLowerCase().includes('permiso');
                 
                 if (isPermissionError) {
-                    actions.showToast('Error de permisos: No tienes permisos para actualizar procesos', 'error', 5000);
-                    throw new Error(`Error de permisos: No tienes permisos para actualizar procesos. Verifica tu rol de usuario. (${errorMessage})`);
+                    actions.showToast('Error de permisos: No tienes permisos para actualizar procesos. Verifica tu rol de usuario.', 'error', 7000);
+                } else {
+                    actions.showToast(`Error al actualizar proceso: ${errorMessage}`, 'error', 7000);
                 }
                 
-                actions.showToast(`Error al actualizar proceso: ${errorMessage}`, 'error', 5000);
-                throw new Error(`Error al actualizar proceso: ${errorMessage}`);
+                // NO actualizar estado local si falla en BD - esto causa que parezca guardado pero no se guarde
+                // Re-lanzar el error para que el componente pueda manejarlo
+                throw error;
             }
         },
         reloadProcesses: async () => {
@@ -752,89 +754,97 @@ const App: React.FC = () => {
                 setState(s => ({ ...s, candidates: s.candidates.map(c => c.id === candidateData.id ? updated : c) }));
                 actions.hideToast(loadingToastId);
                 actions.showToast('Candidato actualizado exitosamente', 'success');
-            } catch (error) {
+            } catch (error: any) {
                 console.error('Error updating candidate:', error);
                 actions.hideToast(loadingToastId);
-                actions.showToast('Error al actualizar candidato', 'error', 5000);
-                setState(s => {
-                    const oldCandidate = s.candidates.find(c => c.id === candidateData.id);
-                    let newHistory: CandidateHistory[] = oldCandidate ? [...oldCandidate.history] : [];
-
-                    if (oldCandidate && oldCandidate.stageId !== candidateData.stageId) {
-                        newHistory.push({
-                            stageId: candidateData.stageId,
-                            movedAt: new Date().toISOString(),
-                            movedBy: movedBy || state.currentUser?.id || 'System',
-                        });
-                    }
-                    const updatedCandidate = { ...candidateData, history: newHistory };
-                    return { ...s, candidates: s.candidates.map(c => c.id === candidateData.id ? updatedCandidate : c) };
-                });
+                
+                // Verificar si es un error de permisos
+                const errorMessage = error.message || 'No se pudo actualizar el candidato en la base de datos.';
+                const isPermissionError = error.code === '42501' || error.code === 'PGRST301' || errorMessage.toLowerCase().includes('permission') || errorMessage.toLowerCase().includes('permiso');
+                
+                if (isPermissionError) {
+                    actions.showToast('Error de permisos: No tienes permisos para actualizar candidatos. Verifica tu rol de usuario.', 'error', 7000);
+                } else {
+                    actions.showToast(`Error al actualizar candidato: ${errorMessage}`, 'error', 7000);
+                }
+                
+                // NO actualizar estado local si falla en BD - esto causa que parezca guardado pero no se guarde
+                // Re-lanzar el error para que el componente pueda manejarlo
+                throw error;
             }
         },
         deleteCandidate: async (candidateId) => {
             try {
                 await candidatesApi.delete(candidateId);
                 setState(s => ({ ...s, candidates: s.candidates.filter(c => c.id !== candidateId) }));
-            } catch (error) {
+            } catch (error: any) {
                 console.error('Error deleting candidate:', error);
-                setState(s => ({ ...s, candidates: s.candidates.filter(c => c.id !== candidateId) }));
+                // Verificar si es un error de permisos
+                const errorMessage = error.message || 'No se pudo eliminar el candidato de la base de datos.';
+                const isPermissionError = error.code === '42501' || error.code === 'PGRST301' || errorMessage.toLowerCase().includes('permission') || errorMessage.toLowerCase().includes('permiso');
+                
+                if (isPermissionError) {
+                    actions.showToast('Error de permisos: No tienes permisos para eliminar candidatos. Verifica tu rol de usuario.', 'error', 7000);
+                } else {
+                    actions.showToast(`Error al eliminar candidato: ${errorMessage}`, 'error', 7000);
+                }
+                
+                // NO eliminar del estado local si falla en BD - esto causa que parezca eliminado pero no se eliminó
+                throw error;
             }
         },
         moveCandidateToProcess: async (candidateId, targetProcessId) => {
-            setState(s => {
-                const candidate = s.candidates.find(c => c.id === candidateId);
-                const targetProcess = s.processes.find(p => p.id === targetProcessId);
+            const candidate = state.candidates.find(c => c.id === candidateId);
+            const targetProcess = state.processes.find(p => p.id === targetProcessId);
 
-                if (!candidate || !targetProcess || !targetProcess.stages.length) return s;
+            if (!candidate || !targetProcess || !targetProcess.stages.length) {
+                throw new Error('Candidato o proceso no encontrado, o el proceso no tiene etapas');
+            }
 
-                const firstStageId = targetProcess.stages[0].id;
-                const movedBy = s.currentUser?.name || 'System';
-                
-                const updatedHistory = [
-                    ...candidate.history,
-                    {
-                        stageId: firstStageId,
-                        movedAt: new Date().toISOString(),
-                        movedBy: `Moved from ${s.processes.find(p => p.id === candidate.processId)?.title || 'previous process'} by ${movedBy}`
-                    }
-                ];
+            const firstStageId = targetProcess.stages[0].id;
+            const movedBy = state.currentUser?.id || 'System';
 
+            try {
+                // Actualizar en la base de datos usando updateCandidate
                 const updatedCandidate: Candidate = {
                     ...candidate,
                     processId: targetProcessId,
                     stageId: firstStageId,
-                    history: updatedHistory
                 };
 
-                return { ...s, candidates: s.candidates.map(c => c.id === candidateId ? updatedCandidate : c) };
-            });
+                await actions.updateCandidate(updatedCandidate, movedBy);
+            } catch (error: any) {
+                console.error('Error moving candidate to process:', error);
+                const errorMessage = error.message || 'No se pudo mover el candidato al proceso.';
+                actions.showToast(`Error al mover candidato: ${errorMessage}`, 'error', 7000);
+                throw error;
+            }
         },
         duplicateCandidateToProcess: async (candidateId, targetProcessId) => {
-            setState(s => {
-                const originalCandidate = s.candidates.find(c => c.id === candidateId);
-                const targetProcess = s.processes.find(p => p.id === targetProcessId);
+            const originalCandidate = state.candidates.find(c => c.id === candidateId);
+            const targetProcess = state.processes.find(p => p.id === targetProcessId);
 
-                if (!originalCandidate || !targetProcess || !targetProcess.stages.length) return s;
+            if (!originalCandidate || !targetProcess || !targetProcess.stages.length) {
+                throw new Error('Candidato o proceso no encontrado, o el proceso no tiene etapas');
+            }
 
-                const firstStageId = targetProcess.stages[0].id;
-                const movedBy = s.currentUser?.name || 'System';
+            const firstStageId = targetProcess.stages[0].id;
 
-                const newCandidate: Candidate = {
-                    ...originalCandidate,
-                    id: `cand-${Date.now()}`,
+            try {
+                // Crear nuevo candidato en la base de datos usando addCandidate
+                const { id, history, ...candidateData } = originalCandidate;
+                await actions.addCandidate({
+                    ...candidateData,
                     processId: targetProcessId,
                     stageId: firstStageId,
-                    history: [{
-                        stageId: firstStageId,
-                        movedAt: new Date().toISOString(),
-                        movedBy: `Duplicated from ${s.processes.find(p => p.id === originalCandidate.processId)?.title || 'another process'} by ${movedBy}`
-                    }],
                     archived: false,
-                };
-                
-                return { ...s, candidates: [...s.candidates, newCandidate] };
-            });
+                });
+            } catch (error: any) {
+                console.error('Error duplicating candidate to process:', error);
+                const errorMessage = error.message || 'No se pudo duplicar el candidato al proceso.';
+                actions.showToast(`Error al duplicar candidato: ${errorMessage}`, 'error', 7000);
+                throw error;
+            }
         },
         addUser: async (userData) => {
             try {
@@ -1000,24 +1010,38 @@ const App: React.FC = () => {
             try {
                 const updated = await candidatesApi.archive(candidateId);
                 setState(s => ({ ...s, candidates: s.candidates.map(c => c.id === candidateId ? updated : c) }));
-            } catch (error) {
+            } catch (error: any) {
                 console.error('Error archiving candidate:', error);
-                setState(s => ({
-                    ...s,
-                    candidates: s.candidates.map(c => c.id === candidateId ? { ...c, archived: true, archivedAt: new Date().toISOString() } : c)
-                }));
+                const errorMessage = error.message || 'No se pudo archivar el candidato.';
+                const isPermissionError = error.code === '42501' || error.code === 'PGRST301' || errorMessage.toLowerCase().includes('permission') || errorMessage.toLowerCase().includes('permiso');
+                
+                if (isPermissionError) {
+                    actions.showToast('Error de permisos: No tienes permisos para archivar candidatos. Verifica tu rol de usuario.', 'error', 7000);
+                } else {
+                    actions.showToast(`Error al archivar candidato: ${errorMessage}`, 'error', 7000);
+                }
+                
+                // NO actualizar estado local si falla en BD
+                throw error;
             }
         },
         restoreCandidate: async (candidateId) => {
             try {
                 const updated = await candidatesApi.restore(candidateId);
                 setState(s => ({ ...s, candidates: s.candidates.map(c => c.id === candidateId ? updated : c) }));
-            } catch (error) {
+            } catch (error: any) {
                 console.error('Error restoring candidate:', error);
-                setState(s => ({
-                    ...s,
-                    candidates: s.candidates.map(c => c.id === candidateId ? { ...c, archived: false, archivedAt: undefined } : c)
-                }));
+                const errorMessage = error.message || 'No se pudo restaurar el candidato.';
+                const isPermissionError = error.code === '42501' || error.code === 'PGRST301' || errorMessage.toLowerCase().includes('permission') || errorMessage.toLowerCase().includes('permiso');
+                
+                if (isPermissionError) {
+                    actions.showToast('Error de permisos: No tienes permisos para restaurar candidatos. Verifica tu rol de usuario.', 'error', 7000);
+                } else {
+                    actions.showToast(`Error al restaurar candidato: ${errorMessage}`, 'error', 7000);
+                }
+                
+                // NO actualizar estado local si falla en BD
+                throw error;
             }
         },
         showToast: (message: string, type: 'success' | 'error' | 'loading' | 'info', duration?: number) => {
