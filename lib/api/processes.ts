@@ -304,75 +304,147 @@ export const processesApi = {
 
         // Actualizar stages si se proporcionan
         if (processData.stages) {
-            // Primero, eliminar stages existentes y verificar que se completó
-            const { error: deleteError, data: deletedData } = await supabase
+            // Obtener stages existentes de la base de datos
+            const { data: existingStages, error: fetchError } = await supabase
                 .from('stages')
-                .delete()
+                .select('id, name, order_index, required_documents')
                 .eq('process_id', id)
-                .select();
+                .order('order_index');
             
-            if (deleteError) {
-                console.error('Error eliminando stages existentes:', deleteError);
-                throw deleteError;
+            if (fetchError) {
+                console.error('Error obteniendo stages existentes:', fetchError);
+                throw fetchError;
             }
             
-            // Verificar que no queden stages antes de insertar (evita conflictos de restricción única)
-            // Hacer una consulta para asegurar que la eliminación se completó
-            let retries = 0;
-            const maxRetries = 5;
-            while (retries < maxRetries) {
-                const { data: remainingStages } = await supabase
-                    .from('stages')
-                    .select('id')
-                    .eq('process_id', id)
-                    .limit(1);
-                
-                if (!remainingStages || remainingStages.length === 0) {
-                    // La eliminación se completó, podemos proceder
-                    break;
+            const existingStagesMap = new Map((existingStages || []).map(s => [s.id, s]));
+            const newStagesMap = new Map(processData.stages.map((s, index) => [s.id, { ...s, order_index: index }]));
+            
+            // Separar stages en: actualizar, insertar, y eliminar
+            const stagesToUpdate: Array<{ id: string; name: string; order_index: number; required_documents: any }> = [];
+            const stagesToInsert: Array<{ process_id: string; name: string; order_index: number; required_documents: any }> = [];
+            const stagesToDelete: string[] = [];
+            
+            // Identificar qué hacer con cada stage existente
+            existingStagesMap.forEach((existingStage, stageId) => {
+                const newStage = newStagesMap.get(stageId);
+                if (newStage) {
+                    // Stage existe en ambos, actualizar si cambió
+                    if (newStage.name !== existingStage.name || 
+                        JSON.stringify(newStage.requiredDocuments || []) !== JSON.stringify(existingStage.required_documents || [])) {
+                        stagesToUpdate.push({
+                            id: stageId,
+                            name: newStage.name,
+                            order_index: newStage.order_index,
+                            required_documents: newStage.requiredDocuments || null,
+                        });
+                    } else if (newStage.order_index !== existingStage.order_index) {
+                        // Solo cambió el orden
+                        stagesToUpdate.push({
+                            id: stageId,
+                            name: existingStage.name,
+                            order_index: newStage.order_index,
+                            required_documents: existingStage.required_documents,
+                        });
+                    }
+                } else {
+                    // Stage ya no está en la lista nueva, marcar para eliminar
+                    stagesToDelete.push(stageId);
                 }
+            });
+            
+            // Identificar stages nuevos (que no tienen ID o tienen ID temporal)
+            processData.stages.forEach((stage, index) => {
+                // Si el ID empieza con "new-" o "temp-" o no existe en la BD, es nuevo
+                // También verificar que no esté ya en stagesToUpdate para evitar duplicados
+                const isInUpdateList = stagesToUpdate.some(s => s.id === stage.id);
+                if ((!stage.id || stage.id.startsWith('new-') || stage.id.startsWith('temp-') || !existingStagesMap.has(stage.id)) && !isInUpdateList) {
+                    stagesToInsert.push({
+                        process_id: id,
+                        name: stage.name,
+                        order_index: index,
+                        required_documents: stage.requiredDocuments || null,
+                    });
+                }
+            });
+            
+            // Primero, actualizar todos los order_index a valores temporales negativos para evitar conflictos
+            // Esto asegura que no haya conflictos de clave única durante la actualización
+            const tempOrderUpdates = stagesToUpdate.map(stage => ({
+                id: stage.id,
+                temp_order: -1000 - stagesToUpdate.indexOf(stage) // Valores temporales únicos
+            }));
+            
+            for (const tempUpdate of tempOrderUpdates) {
+                const { error: tempError } = await supabase
+                    .from('stages')
+                    .update({ order_index: tempUpdate.temp_order })
+                    .eq('id', tempUpdate.id);
                 
-                // Esperar un poco antes de reintentar
-                await new Promise(resolve => setTimeout(resolve, 50));
-                retries++;
+                if (tempError) {
+                    console.error(`Error actualizando order_index temporal para stage ${tempUpdate.id}:`, tempError);
+                    throw tempError;
+                }
             }
             
-            if (retries >= maxRetries) {
-                console.warn('⚠️ Aún hay stages existentes después de la eliminación, pero procediendo con la inserción');
+            // Ahora actualizar stages existentes con los valores finales
+            for (const stage of stagesToUpdate) {
+                const { error: updateError } = await supabase
+                    .from('stages')
+                    .update({
+                        name: stage.name,
+                        order_index: stage.order_index,
+                        required_documents: stage.required_documents,
+                    })
+                    .eq('id', stage.id);
+                
+                if (updateError) {
+                    console.error(`Error actualizando stage ${stage.id}:`, updateError);
+                    throw updateError;
+                }
             }
             
-            // Insertar nuevos stages solo si hay etapas para insertar
-            if (processData.stages.length > 0) {
-                const stagesToInsert = processData.stages.map((stage, index) => ({
-                    process_id: id,
-                    name: stage.name,
-                    order_index: index,
-                    required_documents: stage.requiredDocuments || null,
-                }));
-
-                const { error: stagesError } = await supabase
+            // Insertar nuevos stages
+            if (stagesToInsert.length > 0) {
+                const { error: insertError } = await supabase
                     .from('stages')
                     .insert(stagesToInsert);
                 
-                if (stagesError) {
-                    console.error('Error insertando nuevos stages:', stagesError);
-                    // Si el error es de clave duplicada, intentar eliminar nuevamente y reinsertar
-                    if (stagesError.message?.includes('duplicate key') || stagesError.code === '23505') {
-                        console.log('🔄 Reintentando eliminación de stages debido a clave duplicada...');
-                        await supabase.from('stages').delete().eq('process_id', id);
-                        await new Promise(resolve => setTimeout(resolve, 200));
-                        
-                        const { error: retryError } = await supabase
-                            .from('stages')
-                            .insert(stagesToInsert);
-                        
-                        if (retryError) {
-                            console.error('Error en reintento de inserción de stages:', retryError);
-                            throw retryError;
-                        }
-                    } else {
-                        throw stagesError;
+                if (insertError) {
+                    console.error('Error insertando nuevos stages:', insertError);
+                    throw insertError;
+                }
+            }
+            
+            // Eliminar stages que ya no están en la lista nueva
+            // IMPORTANTE: Solo eliminar si no tienen referencias en candidate_history
+            // Si tienen referencias, no podemos eliminarlos (violaría foreign key constraint)
+            for (const stageId of stagesToDelete) {
+                // Verificar si hay referencias en candidate_history
+                const { data: historyRefs, error: checkError } = await supabase
+                    .from('candidate_history')
+                    .select('id')
+                    .eq('stage_id', stageId)
+                    .limit(1);
+                
+                if (checkError) {
+                    console.warn(`Error verificando referencias para stage ${stageId}:`, checkError);
+                    // No eliminar si no podemos verificar
+                    continue;
+                }
+                
+                if (!historyRefs || historyRefs.length === 0) {
+                    // No hay referencias, podemos eliminar
+                    const { error: deleteError } = await supabase
+                        .from('stages')
+                        .delete()
+                        .eq('id', stageId);
+                    
+                    if (deleteError) {
+                        console.warn(`Error eliminando stage ${stageId}:`, deleteError);
+                        // No lanzar error, solo loguear (puede tener referencias que no detectamos)
                     }
+                } else {
+                    console.log(`⚠️ No se puede eliminar stage ${stageId} porque tiene referencias en candidate_history`);
                 }
             }
         }
