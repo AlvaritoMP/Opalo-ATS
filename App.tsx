@@ -726,21 +726,23 @@ const App: React.FC = () => {
                 setState(s => ({ ...s, candidates: [...s.candidates, newCandidate] }));
                 actions.hideToast(loadingToastId);
                 actions.showToast('Candidato creado exitosamente', 'success');
-            } catch (error) {
+            } catch (error: any) {
                 console.error('Error adding candidate:', error);
                 actions.hideToast(loadingToastId);
-                actions.showToast('Error al crear candidato', 'error', 5000);
-                const newCandidate: Candidate = {
-                    ...candidateData,
-                    id: `cand-${Date.now()}`,
-                    history: [{
-                        stageId: candidateData.stageId,
-                        movedAt: new Date().toISOString(),
-                        movedBy: state.currentUser?.id || 'System',
-                    }],
-                    archived: false,
-                };
-                setState(s => ({ ...s, candidates: [...s.candidates, newCandidate] }));
+                
+                // Verificar si es un error de permisos
+                const errorMessage = error.message || 'No se pudo crear el candidato en la base de datos.';
+                const isPermissionError = error.code === '42501' || error.code === 'PGRST301' || errorMessage.toLowerCase().includes('permission') || errorMessage.toLowerCase().includes('permiso');
+                
+                if (isPermissionError) {
+                    actions.showToast('Error de permisos: No tienes permisos para crear candidatos. Verifica tu rol de usuario.', 'error', 7000);
+                } else {
+                    actions.showToast(`Error al crear candidato: ${errorMessage}`, 'error', 7000);
+                }
+                
+                // NO crear candidato local si falla en BD - esto causa que aparezca pero no se guarde
+                // Re-lanzar el error para que el componente pueda manejarlo si es necesario
+                throw error;
             }
         },
         updateCandidate: async (candidateData, movedBy) => {

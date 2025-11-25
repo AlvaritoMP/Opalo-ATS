@@ -43,24 +43,31 @@ export const AddCandidateModal: React.FC<AddCandidateModalProps> = ({ process, o
             return;
         }
 
-        await actions.addCandidate({
-            name,
-            email,
-            phone,
-            avatarUrl,
-            description,
-            processId: process.id,
-            stageId: firstStageId,
-            attachments,
-            source,
-            salaryExpectation,
-            age: age === '' ? undefined : age,
-            dni,
-            linkedinUrl,
-            address,
-            applicationStartedDate: new Date().toISOString(), // Set automatically when candidate is created
-        });
-        onClose();
+        try {
+            await actions.addCandidate({
+                name,
+                email,
+                phone,
+                avatarUrl,
+                description,
+                processId: process.id,
+                stageId: firstStageId,
+                attachments,
+                source,
+                salaryExpectation,
+                age: age === '' ? undefined : age,
+                dni,
+                linkedinUrl,
+                address,
+                applicationStartedDate: new Date().toISOString(), // Set automatically when candidate is created
+            });
+            // Solo cerrar el modal si la creación fue exitosa
+            onClose();
+        } catch (error: any) {
+            // El error ya fue manejado y mostrado en addCandidate
+            // No cerrar el modal para que el usuario pueda corregir y reintentar
+            console.error('Error en handleSubmit de AddCandidateModal:', error);
+        }
     };
 
     const handleAttachmentUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {

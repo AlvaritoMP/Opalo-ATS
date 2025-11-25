@@ -70,22 +70,27 @@ export const BulkImportView: React.FC = () => {
                 
                 for (const candidateData of parsedCandidates) {
                     if (candidateData.name && candidateData.email) {
-                        await actions.addCandidate({
-                            name: candidateData.name,
-                            email: candidateData.email,
-                            processId,
-                            stageId: firstStageId,
-                            attachments: [],
-                            phone: candidateData.phone,
-                            description: candidateData.description,
-                            source: candidateData.source,
-                            salaryExpectation: candidateData.salaryExpectation,
-                            age: candidateData.age,
-                            dni: candidateData.dni,
-                            linkedinUrl: candidateData.linkedinUrl,
-                            address: candidateData.address,
-                        });
-                        successCount++;
+                        try {
+                            await actions.addCandidate({
+                                name: candidateData.name,
+                                email: candidateData.email,
+                                processId,
+                                stageId: firstStageId,
+                                attachments: [],
+                                phone: candidateData.phone,
+                                description: candidateData.description,
+                                source: candidateData.source,
+                                salaryExpectation: candidateData.salaryExpectation,
+                                age: candidateData.age,
+                                dni: candidateData.dni,
+                                linkedinUrl: candidateData.linkedinUrl,
+                                address: candidateData.address,
+                            });
+                            successCount++;
+                        } catch (error) {
+                            console.error(`Error creando candidato ${candidateData.name}:`, error);
+                            // Continuar con el siguiente candidato
+                        }
                     }
                 }
                 setImportResult({ success: successCount, failed: parsedCandidates.length - successCount });
