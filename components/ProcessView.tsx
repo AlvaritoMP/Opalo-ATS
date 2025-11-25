@@ -95,7 +95,7 @@ export const ProcessView: React.FC<ProcessViewProps> = ({ processId }) => {
         return { valid: missingDocs.length === 0, missingDocs };
     };
 
-    const handleDrop = (e: React.DragEvent<HTMLDivElement>, stageId: string) => {
+    const handleDrop = async (e: React.DragEvent<HTMLDivElement>, stageId: string) => {
         if (!canMoveCandidates || !dragPayload.current) return;
         const { candidateId, isBulk } = dragPayload.current;
 
@@ -155,6 +155,14 @@ export const ProcessView: React.FC<ProcessViewProps> = ({ processId }) => {
                 }
                 try {
                     await actions.updateCandidate({ ...candidate, stageId }, movedBy);
+                    // Recargar candidatos después de mover para asegurar sincronización
+                    if (actions.reloadCandidates && typeof actions.reloadCandidates === 'function') {
+                        try {
+                            await actions.reloadCandidates();
+                        } catch (reloadError) {
+                            console.warn('Error recargando candidatos después de mover (no crítico):', reloadError);
+                        }
+                    }
                     // Recargar candidatos después de mover para asegurar sincronización
                     if (actions.reloadCandidates && typeof actions.reloadCandidates === 'function') {
                         try {
