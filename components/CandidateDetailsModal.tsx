@@ -190,7 +190,7 @@ export const CandidateDetailsModal: React.FC<{ candidate: Candidate, onClose: ()
     };
     
     const uploadFileWithCategory = async (file: File, categoryId: string) => {
-        // Mostrar indicador de carga INMEDIATAMENTE
+        // Mostrar indicador de carga INMEDIATAMIENTE
         setIsUploading(true);
         setUploadingFileName(file.name);
         const loadingToastId = actions.showToast(`Subiendo ${file.name}...`, 'loading', 0);
@@ -203,15 +203,21 @@ export const CandidateDetailsModal: React.FC<{ candidate: Candidate, onClose: ()
             
             // Si Google Drive está conectado, DEBE usarse (no hay fallback a local)
             if (isGoogleDriveConnected && googleDriveConfig) {
-            if (!processHasFolder) {
-                alert('⚠️ Google Drive está conectado pero este proceso no tiene una carpeta configurada. Ve a Procesos → Editar Proceso para configurar una carpeta de Google Drive.');
-                setPendingFile(null);
-                setShowCategoryModal(false);
-                setSelectedCategory('');
-                return;
-            }
+                if (!processHasFolder) {
+                    alert('⚠️ Google Drive está conectado pero este proceso no tiene una carpeta configurada. Ve a Procesos → Editar Proceso para configurar una carpeta de Google Drive.');
+                    actions.hideToast(loadingToastId);
+                    setIsUploading(false);
+                    setUploadingFileName(null);
+                    setPendingFile(null);
+                    setShowCategoryModal(false);
+                    setSelectedCategory('');
+                    if (attachmentInputRef.current) {
+                        attachmentInputRef.current.value = '';
+                    }
+                    return;
+                }
 
-            try {
+                try {
                 const { googleDriveService } = await import('../lib/googleDrive');
                 googleDriveService.initialize(googleDriveConfig);
                 
@@ -304,16 +310,21 @@ export const CandidateDetailsModal: React.FC<{ candidate: Candidate, onClose: ()
                     }
                 }
                 
-            } catch (error: any) {
-                console.error('Error subiendo a Google Drive:', error);
-                actions.hideToast(loadingToastId);
-                actions.showToast(`Error al subir: ${error.message}`, 'error', 5000);
-                setPendingFile(null);
-                setShowCategoryModal(false);
-                setSelectedCategory('');
-                return;
-            }
-        } else {
+                } catch (error: any) {
+                    console.error('Error subiendo a Google Drive:', error);
+                    actions.hideToast(loadingToastId);
+                    actions.showToast(`Error al subir: ${error.message}`, 'error', 5000);
+                    setIsUploading(false);
+                    setUploadingFileName(null);
+                    setPendingFile(null);
+                    setShowCategoryModal(false);
+                    setSelectedCategory('');
+                    if (attachmentInputRef.current) {
+                        attachmentInputRef.current.value = '';
+                    }
+                    return;
+                }
+            } else {
             // Solo usar Base64 si Google Drive NO está conectado
             const attachmentUrl = await fileToBase64(file);
             const attachmentId = `att-c-${Date.now()}`;
@@ -352,17 +363,21 @@ export const CandidateDetailsModal: React.FC<{ candidate: Candidate, onClose: ()
                     console.warn('Error recargando candidatos (no crítico):', reloadError);
                 }
             }
-        }
-        
-        setPendingFile(null);
-        setShowCategoryModal(false);
-        setSelectedCategory('');
-        setIsUploading(false);
-        setUploadingFileName(null);
-        
-        // Limpiar el input para permitir seleccionar el mismo archivo de nuevo
-        if (attachmentInputRef.current) {
-            attachmentInputRef.current.value = '';
+        } catch (error: any) {
+            console.error('Error en uploadFileWithCategory:', error);
+            actions.hideToast(loadingToastId);
+            actions.showToast(`Error al subir archivo: ${error.message || 'Error desconocido'}`, 'error', 5000);
+        } finally {
+            setIsUploading(false);
+            setUploadingFileName(null);
+            setPendingFile(null);
+            setShowCategoryModal(false);
+            setSelectedCategory('');
+            
+            // Limpiar el input para permitir seleccionar el mismo archivo de nuevo
+            if (attachmentInputRef.current) {
+                attachmentInputRef.current.value = '';
+            }
         }
     };
     
