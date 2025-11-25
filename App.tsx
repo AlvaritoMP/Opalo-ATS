@@ -337,29 +337,6 @@ const App: React.FC = () => {
         toasts: [],
     });
 
-    // Sincronización automática periódica (cada 30 segundos cuando la app está activa)
-    useEffect(() => {
-        if (!state.currentUser) return;
-        
-        const syncInterval = setInterval(async () => {
-            try {
-                // Solo recargar si la app está visible (no en background)
-                if (document.visibilityState === 'visible') {
-                    if (actions.reloadProcesses && typeof actions.reloadProcesses === 'function') {
-                        await actions.reloadProcesses();
-                    }
-                    if (actions.reloadCandidates && typeof actions.reloadCandidates === 'function') {
-                        await actions.reloadCandidates();
-                    }
-                }
-            } catch (error) {
-                console.warn('Error en sincronización automática (no crítico):', error);
-            }
-        }, 30000); // 30 segundos
-        
-        return () => clearInterval(syncInterval);
-    }, [state.currentUser, actions.reloadProcesses, actions.reloadCandidates]);
-
     useEffect(() => {
         const loadData = async () => {
             try {
@@ -659,7 +636,7 @@ const App: React.FC = () => {
                         setState(s => ({ ...s, processes: s.processes.map(p => p.id === processData.id ? reloadedProcess : p) }));
                     } else {
                         // Si no se puede recargar, usar el actualizado
-                        setState(s => ({ ...s, processes: s.processes.map(p => p.id === processData.id ? updated : p) }));
+                setState(s => ({ ...s, processes: s.processes.map(p => p.id === processData.id ? updated : p) }));
                     }
                 } catch (reloadError) {
                     console.warn('Error recargando proceso después de actualizar, usando el retornado:', reloadError);
@@ -1134,6 +1111,30 @@ const App: React.FC = () => {
             hideToastHelper(id);
         },
     }), [state.currentUser, state.users]);
+
+    // Sincronización automática periódica (cada 30 segundos cuando la app está activa)
+    // Debe estar después de la definición de actions
+    useEffect(() => {
+        if (!state.currentUser) return;
+        
+        const syncInterval = setInterval(async () => {
+            try {
+                // Solo recargar si la app está visible (no en background)
+                if (document.visibilityState === 'visible') {
+                    if (actions.reloadProcesses && typeof actions.reloadProcesses === 'function') {
+                        await actions.reloadProcesses();
+                    }
+                    if (actions.reloadCandidates && typeof actions.reloadCandidates === 'function') {
+                        await actions.reloadCandidates();
+                    }
+                }
+            } catch (error) {
+                console.warn('Error en sincronización automática (no crítico):', error);
+            }
+        }, 30000); // 30 segundos
+        
+        return () => clearInterval(syncInterval);
+    }, [state.currentUser, actions]);
 
     const getLabel = (key: string, fallback: string): string => {
         return state.settings?.customLabels?.[key] || fallback;
