@@ -325,42 +325,43 @@ export const CandidateDetailsModal: React.FC<{ candidate: Candidate, onClose: ()
                     return;
                 }
             } else {
-            // Solo usar Base64 si Google Drive NO está conectado
-            const attachmentUrl = await fileToBase64(file);
-            const attachmentId = `att-c-${Date.now()}`;
-            
-            const newAttachment: Attachment = {
-                id: attachmentId,
-                name: file.name,
-                url: attachmentUrl,
-                type: file.type,
-                size: file.size,
-                category: categoryId || undefined,
-                uploadedAt: new Date().toISOString(),
-            };
-            
-            const updatedCandidate = { 
-                ...editableCandidate, 
-                attachments: [...(editableCandidate.attachments || []), newAttachment] 
-            };
-            setEditableCandidate(updatedCandidate);
-            await actions.updateCandidate(updatedCandidate, state.currentUser?.name);
-            
-            // Ocultar toast de loading y mostrar éxito
-            actions.hideToast(loadingToastId);
-            actions.showToast(`Documento "${file.name}" guardado exitosamente`, 'success', 3000);
-            
-            // Actualizar preview si no hay uno seleccionado
-            if (!previewFile) {
-                setPreviewFile(newAttachment);
-            }
-            
-            // Recargar candidatos para sincronización
-            if (actions.reloadCandidates && typeof actions.reloadCandidates === 'function') {
-                try {
-                    await actions.reloadCandidates();
-                } catch (reloadError) {
-                    console.warn('Error recargando candidatos (no crítico):', reloadError);
+                // Solo usar Base64 si Google Drive NO está conectado
+                const attachmentUrl = await fileToBase64(file);
+                const attachmentId = `att-c-${Date.now()}`;
+                
+                const newAttachment: Attachment = {
+                    id: attachmentId,
+                    name: file.name,
+                    url: attachmentUrl,
+                    type: file.type,
+                    size: file.size,
+                    category: categoryId || undefined,
+                    uploadedAt: new Date().toISOString(),
+                };
+                
+                const updatedCandidate = { 
+                    ...editableCandidate, 
+                    attachments: [...(editableCandidate.attachments || []), newAttachment] 
+                };
+                setEditableCandidate(updatedCandidate);
+                await actions.updateCandidate(updatedCandidate, state.currentUser?.name);
+                
+                // Ocultar toast de loading y mostrar éxito
+                actions.hideToast(loadingToastId);
+                actions.showToast(`Documento "${file.name}" guardado exitosamente`, 'success', 3000);
+                
+                // Actualizar preview si no hay uno seleccionado
+                if (!previewFile) {
+                    setPreviewFile(newAttachment);
+                }
+                
+                // Recargar candidatos para sincronización
+                if (actions.reloadCandidates && typeof actions.reloadCandidates === 'function') {
+                    try {
+                        await actions.reloadCandidates();
+                    } catch (reloadError) {
+                        console.warn('Error recargando candidatos (no crítico):', reloadError);
+                    }
                 }
             }
         } catch (error: any) {
