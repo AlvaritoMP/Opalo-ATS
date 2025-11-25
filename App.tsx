@@ -67,6 +67,8 @@ interface AppActions {
     archiveCandidate: (candidateId: string) => Promise<void>;
     restoreCandidate: (candidateId: string) => Promise<void>;
     setView: (type: string, payload?: any) => void;
+    showToast: (message: string, type: 'success' | 'error' | 'loading' | 'info', duration?: number) => string;
+    hideToast: (id: string) => void;
 }
 
 interface AppContextType {
@@ -303,25 +305,25 @@ const Sidebar: React.FC = () => {
                 <div className="p-2 border-t">
                     <button
                         onClick={async () => {
-                            const refreshToastId = showToastHelper('Actualizando datos...', 'loading', 0);
+                            const refreshToastId = actions.showToast('Actualizando datos...', 'loading', 0);
                             try {
                                 await Promise.all([
                                     actions.reloadProcesses(),
                                     actions.reloadCandidates()
                                 ]);
-                                hideToastHelper(refreshToastId);
-                                showToastHelper('Datos actualizados', 'success', 2000);
+                                actions.hideToast(refreshToastId);
+                                actions.showToast('Datos actualizados', 'success', 2000);
                             } catch (error: any) {
-                                hideToastHelper(refreshToastId);
+                                actions.hideToast(refreshToastId);
                                 const errorMessage = error?.message || '';
                                 const isQuotaError = errorMessage.includes('quota') || 
                                                     errorMessage.includes('egress') || 
                                                     errorMessage.includes('limit') ||
                                                     errorMessage.includes('exceeded');
                                 if (isQuotaError) {
-                                    showToastHelper('⚠️ Límite de transferencia alcanzado. Intenta más tarde.', 'error', 5000);
+                                    actions.showToast('⚠️ Límite de transferencia alcanzado. Intenta más tarde.', 'error', 5000);
                                 } else {
-                                    showToastHelper('Error al actualizar. Intenta nuevamente.', 'error', 3000);
+                                    actions.showToast('Error al actualizar. Intenta nuevamente.', 'error', 3000);
                                 }
                             }
                         }}
