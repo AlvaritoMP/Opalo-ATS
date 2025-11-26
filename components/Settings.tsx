@@ -168,6 +168,89 @@ export const Settings: React.FC = () => {
                     </div>
                 </div>
 
+                {/* Candidate Sources Settings */}
+                <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
+                    <h2 className="text-xl font-semibold mb-1 flex items-center"><Type className="mr-2"/> Fuentes de Candidatos</h2>
+                    <p className="text-sm text-gray-500 mb-6">Configura las opciones disponibles para el campo "Fuente" cuando agregas o editas candidatos.</p>
+                    <div className="space-y-4">
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-2">Opciones de fuentes (una por línea)</label>
+                            <textarea
+                                rows={6}
+                                value={settings.candidateSources?.join('\n') || 'LinkedIn\nReferencia\nSitio web\nOtro'}
+                                onChange={e => {
+                                    const sources = e.target.value.split('\n').filter(s => s.trim() !== '');
+                                    setSettings({ ...settings, candidateSources: sources.length > 0 ? sources : ['Otro'] });
+                                }}
+                                className="mt-1 block w-full input font-mono"
+                                placeholder="LinkedIn&#10;Referencia&#10;Sitio web&#10;Otro"
+                            />
+                            <p className="mt-1 text-xs text-gray-500">Escribe una opción por línea. Puedes agregar, editar o eliminar opciones. Para eliminar una opción, simplemente bórrala de la lista.</p>
+                        </div>
+                    </div>
+                </div>
+
+                {/* Provinces and Districts Settings */}
+                <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
+                    <h2 className="text-xl font-semibold mb-1 flex items-center"><Type className="mr-2"/> Provincias y Distritos</h2>
+                    <p className="text-sm text-gray-500 mb-6">Configura las opciones disponibles para los campos "Provincia" y "Distrito" cuando agregas o editas candidatos. Los distritos están organizados por provincia.</p>
+                    <div className="space-y-6">
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-2">Provincias (una por línea)</label>
+                            <textarea
+                                rows={6}
+                                value={settings.provinces?.join('\n') || 'Lima\nArequipa\nCusco'}
+                                onChange={e => {
+                                    const provinces = e.target.value.split('\n').filter(s => s.trim() !== '');
+                                    // Limpiar distritos de provincias eliminadas
+                                    const currentDistricts = settings.districts || {};
+                                    const newDistricts: { [key: string]: string[] } = {};
+                                    provinces.forEach(prov => {
+                                        if (currentDistricts[prov]) {
+                                            newDistricts[prov] = currentDistricts[prov];
+                                        }
+                                    });
+                                    setSettings({ 
+                                        ...settings, 
+                                        provinces: provinces.length > 0 ? provinces : ['Lima'],
+                                        districts: newDistricts
+                                    });
+                                }}
+                                className="mt-1 block w-full input font-mono"
+                                placeholder="Lima&#10;Arequipa&#10;Cusco"
+                            />
+                            <p className="mt-1 text-xs text-gray-500">Escribe una provincia por línea. Los distritos de provincias eliminadas también se eliminarán.</p>
+                        </div>
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-2">Distritos por Provincia</label>
+                            <div className="space-y-3 max-h-96 overflow-y-auto">
+                                {(settings.provinces && settings.provinces.length > 0 ? settings.provinces : ['Lima']).map(province => (
+                                    <div key={province} className="p-3 border border-gray-200 rounded-md">
+                                        <label className="block text-sm font-medium text-gray-700 mb-1">{province}</label>
+                                        <textarea
+                                            rows={3}
+                                            value={(settings.districts?.[province] || []).join('\n')}
+                                            onChange={e => {
+                                                const districts = e.target.value.split('\n').filter(s => s.trim() !== '');
+                                                setSettings({ 
+                                                    ...settings, 
+                                                    districts: { 
+                                                        ...(settings.districts || {}), 
+                                                        [province]: districts.length > 0 ? districts : []
+                                                    }
+                                                });
+                                            }}
+                                            className="mt-1 block w-full input font-mono text-sm"
+                                            placeholder={`Distritos de ${province}...`}
+                                        />
+                                        <p className="mt-1 text-xs text-gray-500">Escribe un distrito por línea para {province}.</p>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
                 {/* UI Labels Settings */}
                 <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
                     <h2 className="text-xl font-semibold mb-1 flex items-center"><Type className="mr-2"/> UI Labels</h2>

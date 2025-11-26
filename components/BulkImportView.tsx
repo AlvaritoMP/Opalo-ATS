@@ -4,8 +4,9 @@ import React, { useState } from 'react';
 import { useAppState } from '../App';
 import { Upload, FileText, UserPlus } from 'lucide-react';
 import { Candidate } from '../types';
+import * as XLSX from 'xlsx';
 
-// Simple CSV parser placeholder
+// CSV parser
 const parseCSV = (csvText: string): Omit<Candidate, 'id' | 'history' | 'processId' | 'stageId' | 'attachments'>[] => {
     const lines = csvText.split('\n').filter(line => line.trim() !== '');
     if (lines.length < 2) return [];
@@ -26,6 +27,69 @@ const parseCSV = (csvText: string): Omit<Candidate, 'id' | 'history' | 'processI
         });
         candidates.push(candidate);
     }
+    return candidates;
+};
+
+// Excel parser
+const parseExcel = (data: ArrayBuffer): Omit<Candidate, 'id' | 'history' | 'processId' | 'stageId' | 'attachments'>[] => {
+    const workbook = XLSX.read(data, { type: 'array' });
+    const firstSheetName = workbook.SheetNames[0];
+    const worksheet = workbook.Sheets[firstSheetName];
+    const jsonData = XLSX.utils.sheet_to_json(worksheet, { defval: '' });
+    
+    const candidates: Omit<Candidate, 'id' | 'history' | 'processId' | 'stageId' | 'attachments'>[] = [];
+    
+    jsonData.forEach((row: any) => {
+        const candidate: any = {};
+        Object.keys(row).forEach(key => {
+            const normalizedKey = key.trim().toLowerCase();
+            const value = row[key];
+            
+            // Transform age to number
+            if (normalizedKey === 'age' && value !== '' && !isNaN(Number(value))) {
+                candidate['age'] = Number(value);
+            } else {
+                // Map normalized keys to actual candidate keys
+                const keyMapping: { [key: string]: string } = {
+                    'name': 'name',
+                    'nombre': 'name',
+                    'email': 'email',
+                    'correo': 'email',
+                    'phone': 'phone',
+                    'teléfono': 'phone',
+                    'telefono': 'phone',
+                    'description': 'description',
+                    'descripción': 'description',
+                    'descripcion': 'description',
+                    'source': 'source',
+                    'fuente': 'source',
+                    'salaryexpectation': 'salaryExpectation',
+                    'expectativa salarial': 'salaryExpectation',
+                    'expectativasalarial': 'salaryExpectation',
+                    'agreedsalary': 'agreedSalary',
+                    'salario acordado': 'agreedSalary',
+                    'salarioacordado': 'agreedSalary',
+                    'age': 'age',
+                    'edad': 'age',
+                    'dni': 'dni',
+                    'linkedinurl': 'linkedinUrl',
+                    'linkedin': 'linkedinUrl',
+                    'address': 'address',
+                    'dirección': 'address',
+                    'direccion': 'address',
+                    'province': 'province',
+                    'provincia': 'province',
+                    'district': 'district',
+                    'distrito': 'district'
+                };
+                
+                const mappedKey = keyMapping[normalizedKey] || key.trim();
+                candidate[mappedKey] = value === '' ? undefined : value;
+            }
+        });
+        candidates.push(candidate);
+    });
+    
     return candidates;
 };
 
@@ -59,13 +123,21 @@ export const BulkImportView: React.FC = () => {
             return;
         }
 
+        const fileExtension = file.name.split('.').pop()?.toLowerCase();
+        const isExcel = fileExtension === 'xlsx' || fileExtension === 'xls';
+        
         const reader = new FileReader();
         reader.onload = async (event) => {
-            const text = event.target?.result as string;
             // FIX: Moved `parsedCandidates` declaration out of the try block to widen its scope for the catch block.
             let parsedCandidates: Omit<Candidate, 'id' | 'history' | 'processId' | 'stageId' | 'attachments'>[] = [];
             try {
-                parsedCandidates = parseCSV(text);
+                if (isExcel) {
+                    const arrayBuffer = event.target?.result as ArrayBuffer;
+                    parsedCandidates = parseExcel(arrayBuffer);
+                } else {
+                    const text = event.target?.result as string;
+                    parsedCandidates = parseCSV(text);
+                }
                 let successCount = 0;
                 
                 for (const candidateData of parsedCandidates) {
@@ -81,10 +153,13 @@ export const BulkImportView: React.FC = () => {
                                 description: candidateData.description,
                                 source: candidateData.source,
                                 salaryExpectation: candidateData.salaryExpectation,
+                                agreedSalary: candidateData.agreedSalary,
                                 age: candidateData.age,
                                 dni: candidateData.dni,
                                 linkedinUrl: candidateData.linkedinUrl,
                                 address: candidateData.address,
+                                province: candidateData.province,
+                                district: candidateData.district,
                             });
                             successCount++;
                         } catch (error) {
@@ -95,15 +170,20 @@ export const BulkImportView: React.FC = () => {
                 }
                 setImportResult({ success: successCount, failed: parsedCandidates.length - successCount });
             } catch (error) {
-                console.error("Failed to parse or import CSV", error);
-                alert("Ocurrió un error durante la importación. Revisa la consola para más detalles.");
+                console.error("Failed to parse or import file", error);
+                alert(`Ocurrió un error durante la importación: ${error instanceof Error ? error.message : 'Error desconocido'}. Revisa la consola para más detalles.`);
                 setImportResult({ success: 0, failed: parsedCandidates.length });
             } finally {
                 setIsImporting(false);
                 setFile(null);
             }
         };
-        reader.readAsText(file);
+        
+        if (isExcel) {
+            reader.readAsArrayBuffer(file);
+        } else {
+            reader.readAsText(file);
+        }
     };
 
     return (
@@ -111,8 +191,14 @@ export const BulkImportView: React.FC = () => {
             <h1 className="text-3xl font-bold text-gray-800 mb-8">{getLabel('sidebar_bulk_import', 'Importación masiva de candidatos')}</h1>
             
             <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm max-w-2xl mx-auto">
-                 <h2 className="text-xl font-semibold text-gray-800 mb-2">Importar desde CSV</h2>
-                 <p className="text-sm text-gray-500 mb-6">Sube un archivo CSV con datos de candidatos. La primera fila debe contener encabezados como `name`, `email`, `phone`, etc.</p>
+                 <h2 className="text-xl font-semibold text-gray-800 mb-2">Importar desde CSV o Excel</h2>
+                 <p className="text-sm text-gray-500 mb-6">Sube un archivo CSV o Excel (.xlsx) con datos de candidatos. La primera fila debe contener encabezados. Campos requeridos: <strong>name</strong>, <strong>email</strong>. Campos opcionales: phone, description, source, salaryExpectation, agreedSalary, age, dni, linkedinUrl, address, province, district.</p>
+                 <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-md">
+                     <p className="text-xs text-blue-800 font-medium mb-1">📄 Archivos de plantilla disponibles:</p>
+                     <p className="text-xs text-blue-700">• <code className="bg-blue-100 px-1 rounded">lib/plantilla-importacion-candidatos.csv</code> - Plantilla CSV</p>
+                     <p className="text-xs text-blue-700">• <code className="bg-blue-100 px-1 rounded">lib/plantilla-importacion-candidatos.xlsx</code> - Plantilla Excel</p>
+                     <p className="text-xs text-blue-700">• Consulta <code className="bg-blue-100 px-1 rounded">lib/INSTRUCCIONES_IMPORTACION_MASIVA.md</code> para instrucciones completas</p>
+                 </div>
 
                 <div className="space-y-4">
                      <div>
@@ -130,7 +216,7 @@ export const BulkImportView: React.FC = () => {
                     </div>
 
                     <div>
-                         <label className="block text-sm font-medium text-gray-700">Archivo CSV</label>
+                         <label className="block text-sm font-medium text-gray-700">Archivo CSV o Excel</label>
                         <div className="mt-1 flex justify-center px-6 pt-5 pb-6 border-2 border-gray-300 border-dashed rounded-md">
                             <div className="space-y-1 text-center">
                                 {file ? (
@@ -145,11 +231,11 @@ export const BulkImportView: React.FC = () => {
                                         <div className="flex text-sm text-gray-600">
                                             <label htmlFor="file-upload" className="relative cursor-pointer bg-white rounded-md font-medium text-primary-600 hover:text-primary-500 focus-within:outline-none">
                                                 <span>Sube un archivo</span>
-                                                <input id="file-upload" name="file-upload" type="file" className="sr-only" accept=".csv" onChange={handleFileChange} />
+                                                <input id="file-upload" name="file-upload" type="file" className="sr-only" accept=".csv,.xlsx,.xls" onChange={handleFileChange} />
                                             </label>
                                             <p className="pl-1">o arrastra y suelta</p>
                                         </div>
-                                        <p className="text-xs text-gray-500">CSV de hasta 10MB</p>
+                                        <p className="text-xs text-gray-500">CSV o Excel (.xlsx, .xls) de hasta 10MB</p>
                                     </>
                                 )}
                             </div>

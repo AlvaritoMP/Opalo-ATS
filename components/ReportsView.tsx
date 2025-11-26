@@ -11,10 +11,13 @@ const candidateReportOptions: { key: keyof Candidate | 'process' | 'stage'; labe
     { key: 'stage', label: 'Etapa actual' },
     { key: 'source', label: 'Fuente' },
     { key: 'salaryExpectation', label: 'Expectativa salarial' },
+    { key: 'agreedSalary', label: 'Salario acordado' },
     { key: 'age', label: 'Edad' },
     { key: 'dni', label: 'DNI' },
     { key: 'linkedinUrl', label: 'LinkedIn' },
     { key: 'address', label: 'Dirección' },
+    { key: 'province', label: 'Provincia' },
+    { key: 'district', label: 'Distrito' },
 ];
 
 

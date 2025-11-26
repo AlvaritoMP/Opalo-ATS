@@ -6,6 +6,7 @@ import { ScheduleInterviewModal } from './ScheduleInterviewModal';
 import { ChangeProcessModal } from './ChangeProcessModal';
 import { CandidateCommentsModal } from './CandidateCommentsModal';
 import { DocumentChecklist } from './DocumentChecklist';
+import { SearchableSelect } from './SearchableSelect';
 import JSZip from 'jszip';
 import { saveAs } from 'file-saver';
 
@@ -107,6 +108,20 @@ export const CandidateDetailsModal: React.FC<{ candidate: Candidate, onClose: ()
             ...prev,
             [name]: e.target.type === 'number' && value !== '' ? parseInt(value, 10) : value
         }));
+    };
+
+    const handleProvinceChange = (newProvince: string) => {
+        const availableDistricts = state.settings?.districts?.[newProvince] || [];
+        setEditableCandidate(prev => {
+            // Resetear distrito si no está en la nueva provincia
+            const currentDistrict = prev.district || '';
+            const newDistrict = currentDistrict && availableDistricts.includes(currentDistrict) ? currentDistrict : '';
+            return {
+                ...prev,
+                province: newProvince,
+                district: newDistrict
+            };
+        });
     };
 
     const handleSaveChanges = async () => {
@@ -486,10 +501,13 @@ export const CandidateDetailsModal: React.FC<{ candidate: Candidate, onClose: ()
                 description: currentCandidate.description,
                 source: currentCandidate.source,
                 salaryExpectation: currentCandidate.salaryExpectation,
+                agreedSalary: currentCandidate.agreedSalary,
                 age: currentCandidate.age,
                 dni: currentCandidate.dni,
                 linkedinUrl: currentCandidate.linkedinUrl,
                 address: currentCandidate.address,
+                province: currentCandidate.province,
+                district: currentCandidate.district,
                 history: currentCandidate.history,
                 postIts: currentCandidate.postIts,
                 comments: currentCandidate.comments?.map(comment => ({
@@ -653,6 +671,37 @@ export const CandidateDetailsModal: React.FC<{ candidate: Candidate, onClose: ()
                                                 <div><label className="block text-sm font-medium text-gray-700">Edad</label><input type="number" name="age" value={editableCandidate.age || ''} onChange={handleInputChange} className="mt-1 block w-full input"/></div>
                                                 <div><label className="block text-sm font-medium text-gray-700">DNI</label><input type="text" name="dni" value={editableCandidate.dni || ''} onChange={handleInputChange} className="mt-1 block w-full input"/></div>
                                                 <div><label className="block text-sm font-medium text-gray-700">Dirección / ciudad</label><input type="text" name="address" value={editableCandidate.address || ''} onChange={handleInputChange} className="mt-1 block w-full input"/></div>
+                                            </div>
+                                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                                <div>
+                                                    <SearchableSelect
+                                                        label="Provincia"
+                                                        options={state.settings?.provinces && state.settings.provinces.length > 0 
+                                                            ? state.settings.provinces 
+                                                            : ['Lima', 'Arequipa', 'Cusco', 'La Libertad', 'Piura']}
+                                                        value={editableCandidate.province || ''}
+                                                        onChange={handleProvinceChange}
+                                                        placeholder="Seleccionar provincia"
+                                                        searchPlaceholder="Buscar provincia..."
+                                                        className="mt-1"
+                                                    />
+                                                </div>
+                                                <div>
+                                                    <SearchableSelect
+                                                        label="Distrito"
+                                                        options={editableCandidate.province && state.settings?.districts?.[editableCandidate.province] && state.settings.districts[editableCandidate.province].length > 0
+                                                            ? state.settings.districts[editableCandidate.province]
+                                                            : []}
+                                                        value={editableCandidate.district || ''}
+                                                        onChange={(value) => setEditableCandidate(prev => ({ ...prev, district: value }))}
+                                                        placeholder="Seleccionar distrito"
+                                                        searchPlaceholder="Buscar distrito..."
+                                                        disabled={!editableCandidate.province}
+                                                        className="mt-1"
+                                                    />
+                                                </div>
+                                            </div>
+                                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                                 <div>
                                                     <label className="block text-sm font-medium text-gray-700">Fecha de contratación</label>
                                                     <input
@@ -674,10 +723,16 @@ export const CandidateDetailsModal: React.FC<{ candidate: Candidate, onClose: ()
                                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                                 <div><label className="block text-sm font-medium text-gray-700">Fuente</label>
                                                     <select name="source" value={editableCandidate.source || ''} onChange={handleInputChange} className="mt-1 block w-full input">
-                                                        <option>LinkedIn</option><option>Referencia</option><option>Sitio web</option><option>Otro</option>
+                                                        {(state.settings?.candidateSources && state.settings.candidateSources.length > 0 
+                                                            ? state.settings.candidateSources 
+                                                            : ['LinkedIn', 'Referencia', 'Sitio web', 'Otro']
+                                                        ).map(opt => (
+                                                            <option key={opt} value={opt}>{opt}</option>
+                                                        ))}
                                                     </select>
                                                 </div>
                                                 <div><label className="block text-sm font-medium text-gray-700">Expectativa salarial</label><input type="text" name="salaryExpectation" value={editableCandidate.salaryExpectation || ''} onChange={handleInputChange} className="mt-1 block w-full input"/></div>
+                                                <div><label className="block text-sm font-medium text-gray-700">Salario acordado</label><input type="text" name="agreedSalary" value={editableCandidate.agreedSalary || ''} onChange={handleInputChange} className="mt-1 block w-full input"/></div>
                                             </div>
                                             <div><label className="block text-sm font-medium text-gray-700">Resumen</label><textarea name="description" rows={3} value={editableCandidate.description || ''} onChange={handleInputChange} className="mt-1 block w-full input" /></div>
                                         </div>
@@ -782,7 +837,10 @@ export const CandidateDetailsModal: React.FC<{ candidate: Candidate, onClose: ()
                                                 <DetailItem icon={Info} label="DNI" value={currentCandidate.dni} />
                                                 <DetailItem icon={Briefcase} label="Fuente" value={currentCandidate.source} />
                                                 <DetailItem icon={MapPin} label="Dirección" value={currentCandidate.address} />
+                                                <DetailItem icon={MapPin} label="Provincia" value={currentCandidate.province} />
+                                                <DetailItem icon={MapPin} label="Distrito" value={currentCandidate.district} />
                                                 <DetailItem icon={DollarSign} label="Expectativa salarial" value={currentCandidate.salaryExpectation ? `${state.settings?.currencySymbol || ''}${currentCandidate.salaryExpectation.replace(/[$\€£S/]/g, '').trim()}` : 'N/D'} />
+                                                <DetailItem icon={DollarSign} label="Salario acordado" value={currentCandidate.agreedSalary ? `${state.settings?.currencySymbol || ''}${currentCandidate.agreedSalary.replace(/[$\€£S/]/g, '').trim()}` : 'N/D'} />
                                                     <DetailItem icon={Calendar} label="Fecha de contratación" value={currentCandidate.hireDate ? new Date(currentCandidate.hireDate).toLocaleDateString('es-ES') : undefined} />
                                                     <DetailItem icon={Calendar} label="Fecha de aceptación de oferta" value={currentCandidate.offerAcceptedDate ? new Date(currentCandidate.offerAcceptedDate).toLocaleDateString('es-ES') : undefined} />
                                                     <DetailItem icon={Calendar} label="Fecha de inicio de solicitud" value={currentCandidate.applicationStartedDate ? new Date(currentCandidate.applicationStartedDate).toLocaleDateString('es-ES') : undefined} />

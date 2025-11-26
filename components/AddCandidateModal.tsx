@@ -2,6 +2,7 @@ import React, { useState, useRef } from 'react';
 import { useAppState } from '../App';
 import { Process, Attachment, Candidate } from '../types';
 import { X, Upload, FileText, Trash2, User } from 'lucide-react';
+import { SearchableSelect } from './SearchableSelect';
 
 interface AddCandidateModalProps {
     process: Process;
@@ -19,17 +20,26 @@ const fileToBase64 = (file: File): Promise<string> => {
 
 export const AddCandidateModal: React.FC<AddCandidateModalProps> = ({ process, onClose }) => {
     const { state, actions, getLabel } = useAppState();
+    const getDefaultSource = (): Candidate['source'] => {
+        const sources = state.settings?.candidateSources && state.settings.candidateSources.length > 0
+            ? state.settings.candidateSources
+            : ['LinkedIn', 'Referencia', 'Sitio web', 'Otro'];
+        return sources[0] || 'Otro';
+    };
     const [name, setName] = useState('');
     const [email, setEmail] = useState('');
     const [phone, setPhone] = useState('');
     const [avatarUrl, setAvatarUrl] = useState('');
     const [description, setDescription] = useState('');
-    const [source, setSource] = useState<Candidate['source']>('Other');
+    const [source, setSource] = useState<Candidate['source']>(getDefaultSource());
     const [salaryExpectation, setSalaryExpectation] = useState('');
+    const [agreedSalary, setAgreedSalary] = useState('');
     const [age, setAge] = useState<number | ''>('');
     const [dni, setDni] = useState('');
     const [linkedinUrl, setLinkedinUrl] = useState('');
     const [address, setAddress] = useState('');
+    const [province, setProvince] = useState<string>('');
+    const [district, setDistrict] = useState<string>('');
     const [attachments, setAttachments] = useState<Attachment[]>([]);
     
     const attachmentInputRef = useRef<HTMLInputElement>(null);
@@ -55,10 +65,13 @@ export const AddCandidateModal: React.FC<AddCandidateModalProps> = ({ process, o
                 attachments,
                 source,
                 salaryExpectation,
+                agreedSalary,
                 age: age === '' ? undefined : age,
                 dni,
                 linkedinUrl,
                 address,
+                province,
+                district,
                 applicationStartedDate: new Date().toISOString(), // Set automatically when candidate is created
             });
             
@@ -141,15 +154,52 @@ export const AddCandidateModal: React.FC<AddCandidateModalProps> = ({ process, o
                         <div><label className="block text-sm font-medium text-gray-700">Edad</label><input type="number" value={age} onChange={e => setAge(e.target.value === '' ? '' : parseInt(e.target.value, 10))} className="mt-1 block w-full input"/></div>
                         <div><label className="block text-sm font-medium text-gray-700">DNI</label><input type="text" value={dni} onChange={e => setDni(e.target.value)} className="mt-1 block w-full input"/></div>
                         <div><label className="block text-sm font-medium text-gray-700">Dirección / ciudad</label><input type="text" value={address} onChange={e => setAddress(e.target.value)} placeholder="Ej: Ciudad de México" className="mt-1 block w-full input"/></div>
+                        <div>
+                            <SearchableSelect
+                                label="Provincia"
+                                options={state.settings?.provinces && state.settings.provinces.length > 0 
+                                    ? state.settings.provinces 
+                                    : ['Lima', 'Arequipa', 'Cusco', 'La Libertad', 'Piura']}
+                                value={province}
+                                onChange={(newProvince) => {
+                                    setProvince(newProvince);
+                                    // Resetear distrito si no está en la nueva provincia
+                                    const availableDistricts = state.settings?.districts?.[newProvince] || [];
+                                    if (district && !availableDistricts.includes(district)) {
+                                        setDistrict('');
+                                    }
+                                }}
+                                placeholder="Seleccionar provincia"
+                                searchPlaceholder="Buscar provincia..."
+                                className="mt-1"
+                            />
+                        </div>
+                        <div>
+                            <SearchableSelect
+                                label="Distrito"
+                                options={province && state.settings?.districts?.[province] && state.settings.districts[province].length > 0
+                                    ? state.settings.districts[province]
+                                    : []}
+                                value={district}
+                                onChange={setDistrict}
+                                placeholder="Seleccionar distrito"
+                                searchPlaceholder="Buscar distrito..."
+                                disabled={!province}
+                                className="mt-1"
+                            />
+                        </div>
                         <div className="md:col-span-2"><label className="block text-sm font-medium text-gray-700">Expectativa salarial</label><input type="text" value={salaryExpectation} onChange={e => setSalaryExpectation(e.target.value)} placeholder={`${state.settings?.currencySymbol || '$'}100,000`} className="mt-1 block w-full input"/></div>
+                        <div className="md:col-span-2"><label className="block text-sm font-medium text-gray-700">Salario acordado</label><input type="text" value={agreedSalary} onChange={e => setAgreedSalary(e.target.value)} placeholder={`${state.settings?.currencySymbol || '$'}100,000`} className="mt-1 block w-full input"/></div>
                         <div className="md:col-span-2"><label className="block text-sm font-medium text-gray-700">URL de LinkedIn</label><input type="url" value={linkedinUrl} onChange={e => setLinkedinUrl(e.target.value)} placeholder="https://linkedin.com/in/..." className="mt-1 block w-full input"/></div>
                          <div>
                             <label className="block text-sm font-medium text-gray-700">Fuente</label>
                             <select value={source} onChange={e => setSource(e.target.value as Candidate['source'])} className="mt-1 block w-full input">
-                                <option>LinkedIn</option>
-                                <option>Referencia</option>
-                                <option>Sitio web</option>
-                                <option>Otro</option>
+                                {(state.settings?.candidateSources && state.settings.candidateSources.length > 0 
+                                    ? state.settings.candidateSources 
+                                    : ['LinkedIn', 'Referencia', 'Sitio web', 'Otro']
+                                ).map(opt => (
+                                    <option key={opt} value={opt}>{opt}</option>
+                                ))}
                             </select>
                         </div>
 

@@ -1,0 +1,5 @@
+name,email,phone,description,source,salaryExpectation,agreedSalary,age,dni,linkedinUrl,address,province,district
+Juan Pérez,juan.perez@email.com,987654321,Desarrollador Frontend con 5 años de experiencia,LinkedIn,$50000,$55000,30,12345678,https://linkedin.com/in/juanperez,Lima,LIMA,MIRAFLORES
+María González,maria.gonzalez@email.com,987654322,Ingeniera de Software especializada en React,Referencia,$60000,,28,87654321,https://linkedin.com/in/mariagonzalez,Arequipa,AREQUIPA,YANAHUARA
+Carlos Rodríguez,carlos.rodriguez@email.com,987654323,Diseñador UX/UI con experiencia en apps móviles,Sitio web,$45000,$48000,32,11223344,https://linkedin.com/in/carlosrodriguez,Cusco,CUSCO,CUSCO
+

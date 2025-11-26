@@ -1,18 +1,43 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useAppState } from '../App';
-import { Plus, MoreVertical, Eye, Edit, Trash2, Users, RefreshCw, Copy, Search, X } from 'lucide-react';
+import { Plus, MoreVertical, Eye, Edit, Trash2, Users, RefreshCw, Copy, Search, X, AlertTriangle } from 'lucide-react';
 import { ProcessEditorModal } from './ProcessEditorModal';
-import { Process, UserRole, ProcessStatus } from '../types';
+import { Process, UserRole, ProcessStatus, Candidate } from '../types';
+
+// Función utility para detectar si un proceso tiene candidatos en etapas críticas
+const hasCandidatesInCriticalStages = (process: Process, candidates: Candidate[]): { hasCritical: boolean; count: number; stageNames: string[] } => {
+    const criticalStageIds = process.stages.filter(stage => stage.isCritical).map(stage => stage.id);
+    if (criticalStageIds.length === 0) {
+        return { hasCritical: false, count: 0, stageNames: [] };
+    }
+    
+    const candidatesInCriticalStages = candidates.filter(c => {
+        if (c.processId !== process.id || c.archived) return false;
+        return criticalStageIds.includes(c.stageId);
+    });
+    
+    const stageNames = candidatesInCriticalStages.map(c => {
+        const stage = process.stages.find(s => s.id === c.stageId);
+        return stage?.name || '';
+    }).filter(Boolean);
+    
+    return {
+        hasCritical: candidatesInCriticalStages.length > 0,
+        count: candidatesInCriticalStages.length,
+        stageNames: [...new Set(stageNames)] // Eliminar duplicados
+    };
+};
 
 const ProcessCard: React.FC<{
     process: Process;
     candidateCount: number;
+    criticalInfo: { hasCritical: boolean; count: number; stageNames: string[] };
     onView: () => void;
     onEdit: () => void;
     onDelete: () => void;
     onDuplicate: () => void;
     canEdit: boolean;
-}> = ({ process, candidateCount, onView, onEdit, onDelete, onDuplicate, canEdit }) => {
+}> = ({ process, candidateCount, criticalInfo, onView, onEdit, onDelete, onDuplicate, canEdit }) => {
     const [dropdownOpen, setDropdownOpen] = useState(false);
     const { state } = useAppState();
 
@@ -29,7 +54,7 @@ const ProcessCard: React.FC<{
     };
 
     return (
-        <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden flex flex-col group">
+        <div className={`bg-white rounded-xl border-2 ${criticalInfo.hasCritical ? 'border-amber-400 shadow-lg shadow-amber-100' : 'border-gray-200 shadow-sm'} overflow-hidden flex flex-col group`}>
             <div 
                 className="h-40 bg-cover relative"
                 style={{ 
@@ -82,14 +107,34 @@ const ProcessCard: React.FC<{
                     return (
                         <div className="absolute bottom-4 left-4 right-4 flex items-center justify-between">
                             <h3 className="text-xl font-bold text-white">{process.title}</h3>
-                            <span className={`px-3 py-1 rounded-full text-xs font-semibold ${statusColors[currentStatus]}`}>
-                                {statusLabels[currentStatus]}
-                            </span>
+                            <div className="flex items-center gap-2">
+                                {criticalInfo.hasCritical && (
+                                    <div className="px-2 py-1 bg-amber-500 rounded-full flex items-center">
+                                        <AlertTriangle className="w-3 h-3 text-white" />
+                                    </div>
+                                )}
+                                <span className={`px-3 py-1 rounded-full text-xs font-semibold ${statusColors[currentStatus]}`}>
+                                    {statusLabels[currentStatus]}
+                                </span>
+                            </div>
                         </div>
                     );
                 })()}
             </div>
             <div className="p-4 flex-grow flex flex-col justify-between">
+                {criticalInfo.hasCritical && (
+                    <div className="mb-3 p-2.5 bg-amber-50 border border-amber-300 rounded-lg">
+                        <div className="flex items-start">
+                            <AlertTriangle className="w-5 h-5 text-amber-600 mr-2 flex-shrink-0 mt-0.5" />
+                            <div className="flex-1">
+                                <p className="text-xs font-bold text-amber-900">⚠️ Requiere Atención</p>
+                                <p className="text-xs text-amber-800 mt-1">
+                                    {criticalInfo.count} candidato{criticalInfo.count !== 1 ? 's' : ''} en etapa{criticalInfo.count !== 1 ? 's' : ''} crítica: <strong>{criticalInfo.stageNames.join(', ')}</strong>
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                )}
                 <p className="text-sm text-gray-600 mb-4 line-clamp-2">{process.description}</p>
                 <div>
                     {process.serviceOrderCode && (
@@ -310,26 +355,32 @@ export const ProcessList: React.FC = () => {
                 </div>
             ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-                {filteredProcesses.map(process => (
-                    <ProcessCard
-                        key={process.id}
-                        process={process}
-                        canEdit={canManageProcesses}
-                        candidateCount={(() => {
-                            const userRole = state.currentUser?.role;
-                            const isClientOrViewer = userRole === 'client' || userRole === 'viewer';
-                            return state.candidates.filter(c => {
-                                if (c.processId !== process.id || c.archived) return false;
-                                if (isClientOrViewer && !c.visibleToClients) return false;
-                                return true;
-                            }).length;
-                        })()}
-                        onView={() => actions.setView('process-view', process.id)}
-                        onEdit={() => handleEdit(process)}
-                        onDuplicate={() => handleDuplicate(process)}
-                        onDelete={() => handleDelete(process.id)}
-                    />
-                    ))}
+                {filteredProcesses.map(process => {
+                    const userRole = state.currentUser?.role;
+                    const isClientOrViewer = userRole === 'client' || userRole === 'viewer';
+                    
+                    const filteredCandidates = state.candidates.filter(c => {
+                        if (c.processId !== process.id || c.archived) return false;
+                        if (isClientOrViewer && !c.visibleToClients) return false;
+                        return true;
+                    });
+                    
+                    const criticalInfo = hasCandidatesInCriticalStages(process, filteredCandidates);
+                    
+                    return (
+                        <ProcessCard
+                            key={process.id}
+                            process={process}
+                            canEdit={canManageProcesses}
+                            candidateCount={filteredCandidates.length}
+                            criticalInfo={criticalInfo}
+                            onView={() => actions.setView('process-view', process.id)}
+                            onEdit={() => handleEdit(process)}
+                            onDuplicate={() => handleDuplicate(process)}
+                            onDelete={() => handleDelete(process.id)}
+                        />
+                    );
+                })}
                 </div>
             )}
             {isEditorOpen && <ProcessEditorModal process={editingProcess} onClose={() => setIsEditorOpen(false)} />}

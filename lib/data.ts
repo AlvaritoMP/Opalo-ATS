@@ -1,5 +1,6 @@
 // Populated `lib/data.ts` with initial seed data for processes, candidates, users, and settings. This provides default content for the application on first load and resolves module-related errors.
 import { Process, Candidate, User, Form, Application, AppSettings, FormIntegration, InterviewEvent } from '../types';
+import { getLocationData } from './locationData';
 
 export const initialProcesses: Process[] = [
     {
@@ -162,6 +163,8 @@ export const initialSettings: AppSettings = {
     appName: 'ATS Pro',
     logoUrl: '',
     customLabels: {},
+    candidateSources: ['LinkedIn', 'Referencia', 'Sitio web', 'Otro'], // Valores por defecto en español
+    ...getLocationData(), // Carga provincias y distritos desde locationData.ts
 };
 
 export const initialFormIntegrations: FormIntegration[] = [

@@ -122,6 +122,14 @@ export const ProcessEditorModal: React.FC<ProcessEditorModalProps> = ({ process,
         ));
     };
     
+    const handleStageCriticalChange = (stageId: string, isCritical: boolean) => {
+        setStages(stages.map(stage => 
+            stage.id === stageId 
+                ? { ...stage, isCritical: isCritical || undefined }
+                : stage
+        ));
+    };
+    
     const addDocumentCategory = () => {
         setDocumentCategories([...documentCategories, {
             id: `cat-${Date.now()}`,
@@ -822,32 +830,44 @@ export const ProcessEditorModal: React.FC<ProcessEditorModalProps> = ({ process,
                                                 <Trash2 className="w-5 h-5" />
                                             </button>
                                         </div>
-                                        {documentCategories.length > 0 && (
-                                            <div className="ml-7">
-                                                <label className="block text-xs font-medium text-gray-600 mb-1">
-                                                    Documentos requeridos para avanzar a esta etapa:
-                                                </label>
-                                                <div className="space-y-1">
-                                                    {documentCategories.map(cat => (
-                                                        <label key={cat.id} className="flex items-center text-sm text-gray-700">
-                                                            <input
-                                                                type="checkbox"
-                                                                checked={stage.requiredDocuments?.includes(cat.id) || false}
-                                                                onChange={(e) => {
-                                                                    const current = stage.requiredDocuments || [];
-                                                                    const updated = e.target.checked
-                                                                        ? [...current, cat.id]
-                                                                        : current.filter(id => id !== cat.id);
-                                                                    handleStageRequiredDocumentsChange(stage.id, updated);
-                                                                }}
-                                                                className="mr-2"
-                                                            />
-                                                            {cat.name}
-                                                        </label>
-                                                    ))}
+                                        <div className="ml-7 space-y-3">
+                                            <label className="flex items-center text-sm text-gray-700">
+                                                <input
+                                                    type="checkbox"
+                                                    checked={stage.isCritical || false}
+                                                    onChange={(e) => handleStageCriticalChange(stage.id, e.target.checked)}
+                                                    className="mr-2"
+                                                />
+                                                <span className="font-medium text-amber-700">Etapa Crítica</span>
+                                                <Info className="w-4 h-4 ml-2 text-gray-400" title="Las etapas críticas mostrarán una alerta en la lista de procesos cuando haya candidatos en esta etapa" />
+                                            </label>
+                                            {documentCategories.length > 0 && (
+                                                <div>
+                                                    <label className="block text-xs font-medium text-gray-600 mb-1">
+                                                        Documentos requeridos para avanzar a esta etapa:
+                                                    </label>
+                                                    <div className="space-y-1">
+                                                        {documentCategories.map(cat => (
+                                                            <label key={cat.id} className="flex items-center text-sm text-gray-700">
+                                                                <input
+                                                                    type="checkbox"
+                                                                    checked={stage.requiredDocuments?.includes(cat.id) || false}
+                                                                    onChange={(e) => {
+                                                                        const current = stage.requiredDocuments || [];
+                                                                        const updated = e.target.checked
+                                                                            ? [...current, cat.id]
+                                                                            : current.filter(id => id !== cat.id);
+                                                                        handleStageRequiredDocumentsChange(stage.id, updated);
+                                                                    }}
+                                                                    className="mr-2"
+                                                                />
+                                                                {cat.name}
+                                                            </label>
+                                                        ))}
+                                                    </div>
                                                 </div>
-                                            </div>
-                                        )}
+                                            )}
+                                        </div>
                                     </div>
                                 ))}
                             </div>

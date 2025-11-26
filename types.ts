@@ -4,6 +4,7 @@ export interface Stage {
     id: string;
     name: string;
     requiredDocuments?: string[]; // IDs de categorías de documentos requeridas para avanzar a esta etapa
+    isCritical?: boolean; // Indica si esta etapa es crítica y requiere atención
 }
 
 export interface Attachment {
@@ -54,7 +55,7 @@ export interface CandidateHistory {
     movedBy: string;
 }
 
-export type CandidateSource = 'LinkedIn' | 'Referral' | 'Website' | 'Other';
+export type CandidateSource = 'LinkedIn' | 'Referral' | 'Website' | 'Other' | string; // Permite strings personalizados desde configuración
 
 export interface PostIt {
     id: string;
@@ -85,10 +86,13 @@ export interface Candidate {
     attachments: Attachment[];
     source?: CandidateSource | string;
     salaryExpectation?: string;
+    agreedSalary?: string; // Salario acordado con el candidato
     age?: number;
     dni?: string;
     linkedinUrl?: string;
     address?: string;
+    province?: string; // Provincia del candidato
+    district?: string; // Distrito del candidato
     postIts?: PostIt[]; // Post-its para el board
     comments?: Comment[]; // Comentarios/chat sobre el candidato
     archived?: boolean;
@@ -202,6 +206,9 @@ export interface AppSettings {
         coverTitle?: string;
         footerText?: string;
     };
+    candidateSources?: string[]; // Opciones configurables para el campo "fuentes" de candidatos
+    provinces?: string[]; // Opciones configurables para el campo "provincia" de candidatos
+    districts?: { [province: string]: string[] }; // Opciones configurables para el campo "distrito" de candidatos, organizadas por provincia
 }
 
 export interface FormIntegration {
