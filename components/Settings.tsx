@@ -389,6 +389,7 @@ export const Settings: React.FC = () => {
                     </div>
                 )}
             </div>
+
             <style>{`.input { padding: 0.5rem 0.75rem; border: 1px solid #D1D5DB; border-radius: 0.375rem; box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05); }`}</style>
         </div>
     );

@@ -316,6 +316,25 @@ export const candidatesApi = {
         const current = await this.getById(id);
         if (!current) throw new Error('Candidate not found');
 
+        // Si el candidato tiene salario acordado pero no tiene salario en letras, generarlo automáticamente
+        // Esto se aplica tanto si se está actualizando el salario acordado como si ya existía
+        const agreedSalaryToUse = candidateData.agreedSalary !== undefined ? candidateData.agreedSalary : current.agreedSalary;
+        const currentSalaryInWords = candidateData.agreedSalaryInWords !== undefined ? candidateData.agreedSalaryInWords : current.agreedSalaryInWords;
+        
+        // Si tiene salario acordado pero no tiene salario en letras (o está vacío), generarlo automáticamente
+        if (agreedSalaryToUse && agreedSalaryToUse.trim() !== '') {
+            const needsGeneration = !currentSalaryInWords || currentSalaryInWords.trim() === '';
+            // También regenerar si se está actualizando el salario acordado
+            const isUpdatingSalary = candidateData.agreedSalary !== undefined && candidateData.agreedSalary !== current.agreedSalary;
+            
+            if (needsGeneration || isUpdatingSalary) {
+                const salarioEnLetras = convertirSalarioALetras(agreedSalaryToUse);
+                if (salarioEnLetras) {
+                    candidateData.agreedSalaryInWords = salarioEnLetras;
+                }
+            }
+        }
+
         const dbData = candidateToDb(candidateData);
         
         // Separar campos que pueden no existir en el esquema (province, district, critical_stage_reviewed_at, agreed_salary_in_words)
