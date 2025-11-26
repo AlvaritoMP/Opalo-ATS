@@ -1,5 +1,6 @@
 import { supabase } from '../supabase';
 import { Candidate, CandidateHistory, PostIt, Comment, Attachment } from '../../types';
+import { processesApi } from './processes';
 
 // Convertir de DB a tipo de aplicación
 async function dbToCandidate(dbCandidate: any): Promise<Candidate> {
@@ -110,6 +111,7 @@ async function dbToCandidate(dbCandidate: any): Promise<Candidate> {
         offerAcceptedDate: dbCandidate.offer_accepted_date,
         applicationStartedDate: dbCandidate.application_started_date,
         applicationCompletedDate: dbCandidate.application_completed_date,
+        criticalStageReviewedAt: dbCandidate.critical_stage_reviewed_at,
     };
 }
 
@@ -142,6 +144,7 @@ function candidateToDb(candidate: Partial<Candidate>): any {
     if (candidate.offerAcceptedDate !== undefined) dbCandidate.offer_accepted_date = candidate.offerAcceptedDate;
     if (candidate.applicationStartedDate !== undefined) dbCandidate.application_started_date = candidate.applicationStartedDate;
     if (candidate.applicationCompletedDate !== undefined) dbCandidate.application_completed_date = candidate.applicationCompletedDate;
+    if (candidate.criticalStageReviewedAt !== undefined) dbCandidate.critical_stage_reviewed_at = candidate.criticalStageReviewedAt || null;
     return dbCandidate;
 }
 
@@ -270,9 +273,9 @@ export const candidatesApi = {
 
         const dbData = candidateToDb(candidateData);
         
-        // Separar campos que pueden no existir en el esquema (province, district)
+        // Separar campos que pueden no existir en el esquema (province, district, critical_stage_reviewed_at)
         // Si las columnas no existen en la BD, se omiten de la actualización
-        const { province, district, ...standardFields } = dbData;
+        const { province, district, critical_stage_reviewed_at, ...standardFields } = dbData;
         
         // Primero intentar actualizar solo los campos estándar
         const { error: standardError } = await supabase
@@ -308,8 +311,35 @@ export const candidatesApi = {
                 }
             }
         }
+        
+        // Manejar critical_stage_reviewed_at por separado (la columna puede no existir aún)
+        if (critical_stage_reviewed_at !== undefined) {
+            try {
+                const { error: criticalError } = await supabase
+                    .from('candidates')
+                    .update({ critical_stage_reviewed_at })
+                    .eq('id', id);
+                
+                if (criticalError) {
+                    const errorMsg = criticalError.message || '';
+                    const isColumnError = errorMsg.includes('schema cache') || 
+                                         errorMsg.includes("Could not find") || 
+                                         errorMsg.includes("column") ||
+                                         criticalError.code === '42703';
+                    
+                    if (isColumnError) {
+                        console.warn('⚠️ La columna critical_stage_reviewed_at no existe en la base de datos. Ejecuta la migración SQL para habilitar esta funcionalidad.');
+                    } else {
+                        console.warn('Error actualizando critical_stage_reviewed_at:', criticalError);
+                    }
+                }
+            } catch (err: any) {
+                // Ignorar errores de columna faltante
+                console.warn('No se pudo actualizar critical_stage_reviewed_at');
+            }
+        }
 
-        // Si cambió el stage, agregar al historial
+        // Si cambió el stage, agregar al historial y verificar si es etapa crítica
         if (candidateData.stageId && candidateData.stageId !== current.stageId) {
             await supabase.from('candidate_history').insert({
                 candidate_id: id,
@@ -317,6 +347,44 @@ export const candidatesApi = {
                 moved_at: new Date().toISOString(),
                 moved_by: movedBy || null,
             });
+            
+            // Verificar si la nueva etapa es crítica para resetear criticalStageReviewedAt
+            try {
+                const process = await processesApi.getById(current.processId);
+                if (process) {
+                    const newStage = process.stages.find(s => s.id === candidateData.stageId);
+                    const isCriticalStage = newStage?.isCritical || false;
+                    
+                    // Si se mueve a una etapa crítica, resetear criticalStageReviewedAt
+                    // para que la alerta vuelva a aparecer
+                    if (isCriticalStage) {
+                        try {
+                            const { error: resetError } = await supabase
+                                .from('candidates')
+                                .update({ critical_stage_reviewed_at: null })
+                                .eq('id', id);
+                            
+                            if (resetError) {
+                                const errorMsg = resetError.message || '';
+                                const isColumnError = errorMsg.includes('schema cache') || 
+                                                     errorMsg.includes("Could not find") || 
+                                                     errorMsg.includes("column") ||
+                                                     resetError.code === '42703';
+                                
+                                if (!isColumnError) {
+                                    console.warn('Error reseteando criticalStageReviewedAt:', resetError);
+                                }
+                            }
+                        } catch (err) {
+                            // Ignorar si la columna no existe
+                            console.warn('No se pudo resetear criticalStageReviewedAt (columna puede no existir)');
+                        }
+                    }
+                }
+            } catch (error) {
+                // Si no se puede verificar, continuar sin resetear (no crítico)
+                console.warn('No se pudo verificar si la etapa es crítica:', error);
+            }
         }
 
         // Sincronizar attachments: guardar en la tabla attachments

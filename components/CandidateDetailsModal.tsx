@@ -52,6 +52,44 @@ export const CandidateDetailsModal: React.FC<{ candidate: Candidate, onClose: ()
     const [isEditing, setIsEditing] = useState(false);
     const [editableCandidate, setEditableCandidate] = useState<Candidate>(initialCandidate);
     
+    // Marcar como revisado cuando se abre el modal y el candidato está en etapa crítica
+    React.useEffect(() => {
+        const checkAndMarkAsReviewed = async () => {
+            const currentCandidate = state.candidates.find(c => c.id === initialCandidate.id);
+            if (!currentCandidate) return;
+            
+            // Solo marcar si no ha sido revisado antes
+            if (currentCandidate.criticalStageReviewedAt) return;
+            
+            const process = state.processes.find(p => p.id === currentCandidate.processId);
+            if (!process) return;
+            
+            const currentStage = process.stages.find(s => s.id === currentCandidate.stageId);
+            const isInCriticalStage = currentStage?.isCritical || false;
+            
+            // Si está en etapa crítica y no ha sido revisado aún, marcarlo como revisado
+            if (isInCriticalStage) {
+                try {
+                    await actions.updateCandidate({
+                        ...currentCandidate,
+                        criticalStageReviewedAt: new Date().toISOString()
+                    }, state.currentUser?.name);
+                } catch (error) {
+                    console.error('Error marcando candidato como revisado en etapa crítica:', error);
+                    // No bloquear la apertura del modal por este error
+                }
+            }
+        };
+        
+        // Ejecutar cuando se monta el componente (se abre el modal)
+        // Usar un pequeño delay para asegurar que el candidato esté actualizado
+        const timer = setTimeout(() => {
+            checkAndMarkAsReviewed();
+        }, 100);
+        
+        return () => clearTimeout(timer);
+    }, [initialCandidate.id]); // Solo cuando cambia el ID del candidato (nuevo modal)
+    
     // Actualizar editableCandidate cuando el candidato se actualiza en el estado
     React.useEffect(() => {
         const updatedCandidate = state.candidates.find(c => c.id === initialCandidate.id);

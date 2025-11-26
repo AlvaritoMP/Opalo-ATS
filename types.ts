@@ -104,6 +104,7 @@ export interface Candidate {
     offerAcceptedDate?: string; // Fecha de aceptación de oferta (para Time to Hire)
     applicationStartedDate?: string; // Fecha de inicio de solicitud (para Application Completion Rate)
     applicationCompletedDate?: string; // Fecha de finalización de solicitud (para Application Completion Rate)
+    criticalStageReviewedAt?: string; // Fecha en que un usuario revisó el candidato en etapa crítica (para ocultar alertas)
 }
 
 export type UserRole = 'admin' | 'recruiter' | 'client' | 'viewer';

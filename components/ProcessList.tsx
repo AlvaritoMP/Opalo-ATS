@@ -4,16 +4,19 @@ import { Plus, MoreVertical, Eye, Edit, Trash2, Users, RefreshCw, Copy, Search, 
 import { ProcessEditorModal } from './ProcessEditorModal';
 import { Process, UserRole, ProcessStatus, Candidate } from '../types';
 
-// Función utility para detectar si un proceso tiene candidatos en etapas críticas
+// Función utility para detectar si un proceso tiene candidatos en etapas críticas (no revisados)
 const hasCandidatesInCriticalStages = (process: Process, candidates: Candidate[]): { hasCritical: boolean; count: number; stageNames: string[] } => {
     const criticalStageIds = process.stages.filter(stage => stage.isCritical).map(stage => stage.id);
     if (criticalStageIds.length === 0) {
         return { hasCritical: false, count: 0, stageNames: [] };
     }
     
+    // Filtrar candidatos que están en etapas críticas y que NO han sido revisados
     const candidatesInCriticalStages = candidates.filter(c => {
         if (c.processId !== process.id || c.archived) return false;
-        return criticalStageIds.includes(c.stageId);
+        if (!criticalStageIds.includes(c.stageId)) return false;
+        // Solo incluir si NO ha sido revisado (criticalStageReviewedAt es null/undefined)
+        return !c.criticalStageReviewedAt;
     });
     
     const stageNames = candidatesInCriticalStages.map(c => {
