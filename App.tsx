@@ -469,13 +469,28 @@ const App: React.FC = () => {
 
                 // Para procesos, candidatos y usuarios, usar arrays vacíos si falla (no datos de prueba)
                 // Solo settings puede usar fallback porque puede venir de localStorage
-                const [processes, candidates, users, interviewEvents, settings] = await Promise.all([
+                // Cargar candidatos activos y descartados (aunque estén archivados) para el Dashboard
+                const [processes, activeCandidates, users, interviewEvents, settings] = await Promise.all([
                     loadWithEmptyFallback(() => processesApi.getAll(false), initialProcesses, 'processes', true), // false = no attachments por defecto
                     loadWithEmptyFallback(() => candidatesApi.getAll(false, true), initialCandidates, 'candidates', true), // false = no archived, true = include relations (post-its, comments, history)
                     loadWithEmptyFallback(() => usersApi.getAll(), initialUsers, 'users', true),
                     loadWithEmptyFallback(() => interviewsApi.getAll(), initialInterviewEvents, 'interviewEvents', true),
                     loadWithEmptyFallback(() => settingsApi.get(), getSettings() || initialSettings, 'settings', false),
                 ]);
+                
+                // Cargar candidatos descartados (aunque estén archivados) para el conteo del Dashboard
+                let discardedCandidates: Candidate[] = [];
+                try {
+                    const allArchived = await candidatesApi.getAll(true, true); // true = include archived
+                    discardedCandidates = allArchived.filter(c => c.discarded === true);
+                } catch (error) {
+                    console.warn('Error cargando candidatos descartados:', error);
+                }
+                
+                // Combinar candidatos activos y descartados, evitando duplicados
+                const activeIds = new Set(activeCandidates.map(c => c.id));
+                const newDiscarded = discardedCandidates.filter(c => !activeIds.has(c.id));
+                const candidates = [...activeCandidates, ...newDiscarded];
 
                 const sessionUserId = localStorage.getItem('ats_pro_user');
                 let currentUser: User | null = null;
@@ -1407,11 +1422,24 @@ const App: React.FC = () => {
                 const archivedCandidates = await candidatesApi.getAll(true, true); // true = include archived, true = include relations
                 // Agregar/actualizar candidatos archivados en el estado sin eliminar los no archivados
                 setState(s => {
-                    const existingIds = new Set(s.candidates.map(c => c.id));
-                    const newArchived = archivedCandidates.filter(c => !existingIds.has(c.id));
+                    const existingCandidatesMap = new Map(s.candidates.map(c => [c.id, c]));
+                    const updatedCandidates = [...s.candidates];
+                    
+                    // Actualizar candidatos existentes o agregar nuevos
+                    archivedCandidates.forEach(archivedCandidate => {
+                        const existingIndex = updatedCandidates.findIndex(c => c.id === archivedCandidate.id);
+                        if (existingIndex >= 0) {
+                            // Actualizar candidato existente (importante para mantener campos como discarded)
+                            updatedCandidates[existingIndex] = archivedCandidate;
+                        } else {
+                            // Agregar nuevo candidato archivado
+                            updatedCandidates.push(archivedCandidate);
+                        }
+                    });
+                    
                     return {
                         ...s,
-                        candidates: [...s.candidates, ...newArchived]
+                        candidates: updatedCandidates
                     };
                 });
             } catch (error: any) {
