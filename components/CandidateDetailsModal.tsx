@@ -52,6 +52,7 @@ export const CandidateDetailsModal: React.FC<{ candidate: Candidate, onClose: ()
     const { state, actions } = useAppState();
     const [isEditing, setIsEditing] = useState(false);
     const [editableCandidate, setEditableCandidate] = useState<Candidate>(initialCandidate);
+    const [isDiscardModalOpen, setIsDiscardModalOpen] = useState(false);
     
     // Marcar como revisado cuando se abre el modal y el candidato está en etapa crítica
     // SOLO si el usuario es cliente (client), no para admin/recruiter
