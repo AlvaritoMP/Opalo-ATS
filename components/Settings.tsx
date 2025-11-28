@@ -117,6 +117,45 @@ export const Settings: React.FC = () => {
                                 <input type="file" accept="image/*" ref={logoInputRef} onChange={handleLogoUpload} className="hidden" />
                             </div>
                         </div>
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700">POWERED BY Logo</label>
+                            <p className="text-xs text-gray-500 mb-2">Logo que se mostrará en el footer del sidebar con el texto "POWERED BY"</p>
+                            <div className="mt-1 flex items-center space-x-4">
+                                {settings.poweredByLogoUrl && <img src={settings.poweredByLogoUrl} alt="Powered By Logo preview" className="h-12 object-contain rounded-md bg-gray-100 p-1" />}
+                                <button 
+                                    type="button" 
+                                    onClick={() => {
+                                        const input = document.createElement('input');
+                                        input.type = 'file';
+                                        input.accept = 'image/*';
+                                        input.onchange = async (e) => {
+                                            const file = (e.target as HTMLInputElement).files?.[0];
+                                            if (file && file.type.startsWith('image/')) {
+                                                const dataUrl = await fileToBase64(file);
+                                                if (!settings) return;
+                                                setSettings({ ...settings, poweredByLogoUrl: dataUrl });
+                                            }
+                                        };
+                                        input.click();
+                                    }} 
+                                    className="px-3 py-2 bg-white border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 hover:bg-gray-50"
+                                >
+                                    {settings.poweredByLogoUrl ? 'Change POWERED BY Logo' : 'Upload POWERED BY Logo'}
+                                </button>
+                                {settings.poweredByLogoUrl && (
+                                    <button 
+                                        type="button"
+                                        onClick={() => {
+                                            if (!settings) return;
+                                            setSettings({ ...settings, poweredByLogoUrl: undefined });
+                                        }}
+                                        className="px-3 py-2 bg-red-50 border border-red-300 rounded-md shadow-sm text-sm font-medium text-red-700 hover:bg-red-100"
+                                    >
+                                        Remove
+                                    </button>
+                                )}
+                            </div>
+                        </div>
                     </div>
                 </div>
 

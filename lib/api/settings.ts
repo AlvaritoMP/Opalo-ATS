@@ -12,6 +12,7 @@ function dbToSettings(dbSettings: any): AppSettings {
         currencySymbol: dbSettings.currency_symbol || '$',
         appName: dbSettings.app_name || 'ATS Pro',
         logoUrl: dbSettings.logo_url || '',
+        poweredByLogoUrl: dbSettings.powered_by_logo_url || undefined,
         customLabels: dbSettings.custom_labels || {},
         dashboardLayout: dbSettings.dashboard_layout,
         templates: dbSettings.templates,
@@ -31,6 +32,7 @@ function settingsToDb(settings: Partial<AppSettings>): any {
     if (settings.currencySymbol !== undefined) dbSettings.currency_symbol = settings.currencySymbol;
     if (settings.appName !== undefined) dbSettings.app_name = settings.appName;
     if (settings.logoUrl !== undefined) dbSettings.logo_url = settings.logoUrl;
+    if (settings.poweredByLogoUrl !== undefined) dbSettings.powered_by_logo_url = settings.poweredByLogoUrl;
     if (settings.customLabels !== undefined) dbSettings.custom_labels = settings.customLabels;
     if (settings.dashboardLayout !== undefined) dbSettings.dashboard_layout = settings.dashboardLayout;
     if (settings.templates !== undefined) dbSettings.templates = settings.templates;

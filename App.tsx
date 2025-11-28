@@ -386,6 +386,29 @@ const Sidebar: React.FC = () => {
                         </button>
                     </div>
                 </div>
+                {/* POWERED BY Logo Section */}
+                {state.settings?.poweredByLogoUrl && (
+                    <div className="p-4 border-t bg-gray-50 dark:bg-gray-800">
+                        {!isCollapsed ? (
+                            <div className="flex flex-col items-center space-y-2">
+                                <p className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide font-medium">POWERED BY</p>
+                                <img 
+                                    src={state.settings.poweredByLogoUrl} 
+                                    alt="Powered By" 
+                                    className="h-8 object-contain max-w-full opacity-80 hover:opacity-100 transition-opacity"
+                                />
+                            </div>
+                        ) : (
+                            <div className="flex justify-center">
+                                <img 
+                                    src={state.settings.poweredByLogoUrl} 
+                                    alt="Powered By" 
+                                    className="h-6 object-contain opacity-80"
+                                />
+                            </div>
+                        )}
+                    </div>
+                )}
             </div>
         </div>
         </>

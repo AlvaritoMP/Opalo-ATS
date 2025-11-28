@@ -200,6 +200,7 @@ export interface AppSettings {
     currencySymbol: string;
     appName: string;
     logoUrl: string;
+    poweredByLogoUrl?: string; // Logo para mostrar en el footer del sidebar con "POWERED BY"
     customLabels: { [key: string]: string };
     dashboardLayout?: string[]; // orden de widgets del dashboard
     templates?: { id: string; name: string; docxBase64: string }[]; // plantillas DOCX guardadas

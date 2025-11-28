@@ -162,6 +162,7 @@ export const initialSettings: AppSettings = {
     currencySymbol: '$',
     appName: 'ATS Pro',
     logoUrl: '',
+    poweredByLogoUrl: undefined,
     customLabels: {},
     candidateSources: ['LinkedIn', 'Referencia', 'Sitio web', 'Otro'], // Valores por defecto en español
     ...getLocationData(), // Carga provincias y distritos desde locationData.ts
