@@ -587,6 +587,7 @@ export const candidatesApi = {
         
         // Separar campos que pueden no existir en el esquema (province, district, critical_stage_reviewed_at, agreed_salary_in_words)
         // Si las columnas no existen en la BD, se omiten de la actualización
+        // IMPORTANTE: discarded, discard_reason, discarded_at deben estar en standardFields para que se guarden
         const { province, district, critical_stage_reviewed_at, agreed_salary_in_words, ...standardFields } = dbData;
         
         // Primero intentar actualizar solo los campos estándar

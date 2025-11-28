@@ -830,8 +830,21 @@ const App: React.FC = () => {
         reloadCandidates: async () => {
             try {
                 // Cargar relaciones (post-its, comments, history) para que persistan después de recargar
-                const candidates = await candidatesApi.getAll(false, true); // false = no archived, true = include relations
-                setState(s => ({ ...s, candidates }));
+                const activeCandidates = await candidatesApi.getAll(false, true); // false = no archived, true = include relations
+                
+                // Preservar candidatos archivados existentes en el estado (incluyendo descartados)
+                setState(s => {
+                    const archivedCandidates = s.candidates.filter(c => c.archived === true);
+                    const activeIds = new Set(activeCandidates.map(c => c.id));
+                    
+                    // Mantener solo candidatos archivados que no están en los activos (para evitar duplicados)
+                    const preservedArchived = archivedCandidates.filter(c => !activeIds.has(c.id));
+                    
+                    return { 
+                        ...s, 
+                        candidates: [...activeCandidates, ...preservedArchived]
+                    };
+                });
                 
                 // Verificar y corregir carpetas de Google Drive si está conectado (en background, sin bloquear)
                 const googleDriveConfig = state.settings?.googleDrive;
@@ -1086,7 +1099,19 @@ const App: React.FC = () => {
                 }
                 
                 const updated = await candidatesApi.update(updatedCandidateData.id, updatedCandidateData, movedBy || state.currentUser?.id);
-                setState(s => ({ ...s, candidates: s.candidates.map(c => c.id === candidateData.id ? updated : c) }));
+                // Actualizar candidato en el estado, preservando si está archivado
+                setState(s => {
+                    const existingIndex = s.candidates.findIndex(c => c.id === candidateData.id);
+                    if (existingIndex >= 0) {
+                        // Reemplazar el candidato existente
+                        const updatedCandidates = [...s.candidates];
+                        updatedCandidates[existingIndex] = updated;
+                        return { ...s, candidates: updatedCandidates };
+                    } else {
+                        // Si no existe (puede ser un candidato archivado), agregarlo
+                        return { ...s, candidates: [...s.candidates, updated] };
+                    }
+                });
                 hideToastHelper(loadingToastId);
                 showToastHelper('Candidato actualizado exitosamente', 'success');
             } catch (error: any) {
@@ -1398,7 +1423,19 @@ const App: React.FC = () => {
                 };
 
                 const updated = await candidatesApi.update(candidateId, updatedCandidate, state.currentUser?.id);
-                setState(s => ({ ...s, candidates: s.candidates.map(c => c.id === candidateId ? updated : c) }));
+                // Actualizar candidato en el estado, asegurándose de que se mantenga aunque esté archivado
+                setState(s => {
+                    const existingIndex = s.candidates.findIndex(c => c.id === candidateId);
+                    if (existingIndex >= 0) {
+                        // Reemplazar el candidato existente con el actualizado (que incluye discarded y archived)
+                        const updatedCandidates = [...s.candidates];
+                        updatedCandidates[existingIndex] = updated;
+                        return { ...s, candidates: updatedCandidates };
+                    } else {
+                        // Si no existe (no debería pasar), agregarlo
+                        return { ...s, candidates: [...s.candidates, updated] };
+                    }
+                });
                 hideToastHelper(loadingToastId);
                 showToastHelper('Candidato descartado y archivado exitosamente', 'success', 3000);
             } catch (error: any) {
