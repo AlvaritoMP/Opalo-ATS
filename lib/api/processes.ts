@@ -68,6 +68,41 @@ function processToDb(process: Partial<Process>): any {
 }
 
 export const processesApi = {
+    // Obtener solo el conteo de attachments de un proceso (sin cargar los datos)
+    async getAttachmentsCount(processId: string): Promise<number> {
+        const { count, error } = await supabase
+            .from('attachments')
+            .select('*', { count: 'exact', head: true })
+            .eq('process_id', processId)
+            .is('candidate_id', null); // Solo attachments del proceso, no de candidatos
+        
+        if (error) throw error;
+        return count || 0;
+    },
+
+    // Cargar attachments de un proceso específico (lazy loading para reducir egress)
+    async getAttachments(processId: string): Promise<Attachment[]> {
+        const { data, error } = await supabase
+            .from('attachments')
+            .select('id, process_id, name, url, type, size, category, uploaded_at')
+            .eq('process_id', processId)
+            .is('candidate_id', null) // Solo attachments del proceso, no de candidatos
+            .order('uploaded_at', { ascending: false });
+        
+        if (error) throw error;
+        if (!data) return [];
+
+        return data.map(att => ({
+            id: att.id,
+            name: att.name,
+            url: att.url,
+            type: att.type,
+            size: att.size,
+            category: att.category,
+            uploadedAt: att.uploaded_at,
+        }));
+    },
+
     // Obtener todos los procesos con sus stages y categorías
     // OPTIMIZADO: Carga todas las relaciones en batch en lugar de N+1 queries
     // OPTIMIZADO EGRESS: Selecciona solo campos necesarios, attachments se cargan lazy

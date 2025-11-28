@@ -11,21 +11,79 @@ interface ProcessViewProps {
     processId: string;
 }
 
-const ProcessAttachmentsModal: React.FC<{ attachments: Attachment[]; onClose: () => void }> = ({ attachments, onClose }) => (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-        <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg">
-            <div className="p-6 border-b flex justify-between items-center"><h2 className="text-xl font-bold text-gray-800">Documentos del proceso</h2><button onClick={onClose} className="p-2 rounded-full hover:bg-gray-100"><X /></button></div>
-            <div className="p-6 max-h-[60vh] overflow-y-auto">
-                {attachments.length > 0 ? attachments.map(att => (
-                    <a href={att.url} target="_blank" rel="noopener noreferrer" key={att.id} className="flex items-center p-2 rounded-md hover:bg-gray-100">
-                        <FileText className="w-5 h-5 mr-3 text-gray-500"/>
-                        <span className="text-sm font-medium text-primary-600">{att.name}</span>
-                    </a>
-                )) : <p className="text-sm text-gray-500 text-center">No hay documentos adjuntos para este proceso.</p>}
+const ProcessAttachmentsModal: React.FC<{ 
+    processId: string; 
+    attachments: Attachment[]; 
+    onClose: () => void;
+    onLoadAttachments?: () => Promise<void>;
+}> = ({ processId, attachments, onClose, onLoadAttachments }) => {
+    const [isLoading, setIsLoading] = useState(false);
+    const [loadedAttachments, setLoadedAttachments] = useState<Attachment[]>(attachments);
+    const [hasLoaded, setHasLoaded] = useState(attachments.length > 0);
+
+    const handleLoadAttachments = async () => {
+        if (hasLoaded || isLoading) return;
+        setIsLoading(true);
+        try {
+            if (onLoadAttachments) {
+                await onLoadAttachments();
+            } else {
+                const { processesApi } = await import('../lib/api/processes');
+                const atts = await processesApi.getAttachments(processId);
+                setLoadedAttachments(atts);
+            }
+            setHasLoaded(true);
+        } catch (error) {
+            console.error('Error cargando attachments del proceso:', error);
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
+    // Cargar attachments automáticamente si no hay ninguno cargado
+    React.useEffect(() => {
+        if (!hasLoaded && loadedAttachments.length === 0) {
+            handleLoadAttachments();
+        }
+    }, []);
+
+    const displayAttachments = hasLoaded ? loadedAttachments : attachments;
+
+    return (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+            <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg">
+                <div className="p-6 border-b flex justify-between items-center">
+                    <h2 className="text-xl font-bold text-gray-800">Documentos del proceso</h2>
+                    <button onClick={onClose} className="p-2 rounded-full hover:bg-gray-100">
+                        <X />
+                    </button>
+                </div>
+                <div className="p-6 max-h-[60vh] overflow-y-auto">
+                    {isLoading ? (
+                        <div className="text-center py-8">
+                            <p className="text-sm text-gray-500">Cargando documentos...</p>
+                        </div>
+                    ) : displayAttachments.length > 0 ? (
+                        displayAttachments.map(att => (
+                            <a 
+                                href={att.url} 
+                                target="_blank" 
+                                rel="noopener noreferrer" 
+                                key={att.id} 
+                                className="flex items-center p-2 rounded-md hover:bg-gray-100"
+                            >
+                                <FileText className="w-5 h-5 mr-3 text-gray-500"/>
+                                <span className="text-sm font-medium text-primary-600">{att.name}</span>
+                            </a>
+                        ))
+                    ) : (
+                        <p className="text-sm text-gray-500 text-center">No hay documentos adjuntos para este proceso.</p>
+                    )}
+                </div>
             </div>
         </div>
-    </div>
-);
+    );
+};
 
 
 export const ProcessView: React.FC<ProcessViewProps> = ({ processId }) => {
@@ -35,9 +93,31 @@ export const ProcessView: React.FC<ProcessViewProps> = ({ processId }) => {
     const [isAttachmentsModalOpen, setIsAttachmentsModalOpen] = useState(false);
     const [isBulkLetterOpen, setIsBulkLetterOpen] = useState(false);
     const [selectedCandidates, setSelectedCandidates] = useState<string[]>([]);
+    const [attachmentsCount, setAttachmentsCount] = useState<number | null>(null);
+    const [processAttachments, setProcessAttachments] = useState<Attachment[]>([]);
+    const [isLoadingAttachments, setIsLoadingAttachments] = useState(false);
     const dragPayload = React.useRef<{ candidateId: string; isBulk: boolean } | null>(null);
 
     const process = state.processes.find(p => p.id === processId);
+
+    // Cargar conteo de attachments al montar el componente
+    React.useEffect(() => {
+        const loadAttachmentsCount = async () => {
+            if (!processId) return;
+            try {
+                const { processesApi } = await import('../lib/api/processes');
+                const count = await processesApi.getAttachmentsCount(processId);
+                setAttachmentsCount(count);
+            } catch (error) {
+                console.warn('Error cargando conteo de attachments del proceso:', error);
+                // Si falla, usar el conteo de attachments existentes si hay
+                if (process?.attachments && process.attachments.length > 0) {
+                    setAttachmentsCount(process.attachments.length);
+                }
+            }
+        };
+        loadAttachmentsCount();
+    }, [processId, process?.attachments?.length]);
     
     // Filtrar candidatos según el rol del usuario
     // Admin y Recruiter ven todos los candidatos
@@ -239,8 +319,29 @@ export const ProcessView: React.FC<ProcessViewProps> = ({ processId }) => {
                                     <FileText className="w-4 h-4 mr-1 md:mr-2"/> <span className="hidden sm:inline">Emitir cartas</span> <span className="sm:hidden">Cartas</span> ({selectedCandidates.length})
                                 </button>
                             )}
-                            <button onClick={() => setIsAttachmentsModalOpen(true)} className="flex items-center px-3 md:px-4 py-2 bg-white border border-gray-300 rounded-md shadow-sm text-xs md:text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 whitespace-nowrap" disabled={!process.attachments?.length}>
-                            <Paperclip className="w-4 h-4 mr-1 md:mr-2"/> <span className="hidden sm:inline">Ver documentos</span> ({process.attachments?.length || 0})
+                            <button 
+                                onClick={async () => {
+                                    setIsAttachmentsModalOpen(true);
+                                    // Cargar attachments si no están cargados
+                                    if (processAttachments.length === 0 && !isLoadingAttachments) {
+                                        setIsLoadingAttachments(true);
+                                        try {
+                                            const { processesApi } = await import('../lib/api/processes');
+                                            const atts = await processesApi.getAttachments(processId);
+                                            setProcessAttachments(atts);
+                                        } catch (error) {
+                                            console.error('Error cargando attachments:', error);
+                                        } finally {
+                                            setIsLoadingAttachments(false);
+                                        }
+                                    }
+                                }} 
+                                className="flex items-center px-3 md:px-4 py-2 bg-white border border-gray-300 rounded-md shadow-sm text-xs md:text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 whitespace-nowrap" 
+                                disabled={attachmentsCount !== null && attachmentsCount === 0}
+                            >
+                                <Paperclip className="w-4 h-4 mr-1 md:mr-2"/> 
+                                <span className="hidden sm:inline">Ver documentos</span> 
+                                ({attachmentsCount !== null ? attachmentsCount : process.attachments?.length || 0})
                             </button>
                             <button onClick={() => setIsProcessEditorOpen(true)} className="flex items-center px-3 md:px-4 py-2 bg-white border border-gray-300 rounded-md shadow-sm text-xs md:text-sm font-medium text-gray-700 hover:bg-gray-50 whitespace-nowrap">
                                 <Edit className="w-4 h-4 mr-1 md:mr-2"/> <span className="hidden md:inline">Editar proceso</span> <span className="md:hidden">Editar</span>
@@ -292,7 +393,20 @@ export const ProcessView: React.FC<ProcessViewProps> = ({ processId }) => {
             </main>
             {isAddCandidateOpen && <AddCandidateModal process={process} onClose={() => setIsAddCandidateOpen(false)} />}
             {isProcessEditorOpen && <ProcessEditorModal process={process} onClose={() => setIsProcessEditorOpen(false)} />}
-            {isAttachmentsModalOpen && <ProcessAttachmentsModal attachments={process.attachments} onClose={() => setIsAttachmentsModalOpen(false)} />}
+            {isAttachmentsModalOpen && (
+                <ProcessAttachmentsModal 
+                    processId={processId}
+                    attachments={processAttachments.length > 0 ? processAttachments : (process.attachments || [])} 
+                    onClose={() => setIsAttachmentsModalOpen(false)}
+                    onLoadAttachments={async () => {
+                        if (processAttachments.length === 0) {
+                            const { processesApi } = await import('../lib/api/processes');
+                            const atts = await processesApi.getAttachments(processId);
+                            setProcessAttachments(atts);
+                        }
+                    }}
+                />
+            )}
             {isBulkLetterOpen && <BulkLetterModal candidateIds={selectedCandidates} onClose={() => setIsBulkLetterOpen(false)} />}
         </div>
     );
