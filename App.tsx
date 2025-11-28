@@ -3,6 +3,7 @@ import { initialProcesses, initialCandidates, initialUsers, initialSettings, ini
 import { Process, Candidate, User, AppSettings, FormIntegration, InterviewEvent, CandidateHistory, Application, PostIt, Comment, Section, UserRole } from './types';
 import { getSettings, saveSettings as saveSettingsToStorage } from './lib/settings';
 import { usersApi, processesApi, candidatesApi, postItsApi, commentsApi, interviewsApi, settingsApi, setCurrentUser } from './lib/api/index';
+import { isCorsError, getErrorMessage } from './lib/supabase';
 import { googleDriveService } from './lib/googleDrive';
 import { Dashboard } from './components/Dashboard';
 import { ProcessList } from './components/ProcessList';
@@ -742,6 +743,18 @@ const App: React.FC = () => {
                 setState(s => ({ ...s, processes }));
             } catch (error: any) {
                 console.error('Error reloading processes:', error);
+                
+                // Detectar errores de CORS
+                if (isCorsError(error)) {
+                    const corsMessage = getErrorMessage(error);
+                    showToastHelper(
+                        corsMessage,
+                        'error',
+                        15000
+                    );
+                    return;
+                }
+                
                 const errorMessage = error.message || '';
                 const errorCode = error.code || '';
                 
@@ -780,6 +793,18 @@ const App: React.FC = () => {
                 setState(s => ({ ...s, candidates }));
             } catch (error: any) {
                 console.error('Error reloading candidates:', error);
+                
+                // Detectar errores de CORS
+                if (isCorsError(error)) {
+                    const corsMessage = getErrorMessage(error);
+                    showToastHelper(
+                        corsMessage,
+                        'error',
+                        15000
+                    );
+                    return;
+                }
+                
                 const errorMessage = error.message || '';
                 const errorCode = error.code || '';
                 

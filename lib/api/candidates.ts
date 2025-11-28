@@ -168,11 +168,13 @@ function candidateToDb(candidate: Partial<Candidate>): any {
 
 export const candidatesApi = {
     // Obtener todos los candidatos
+    // OPTIMIZADO: Carga todas las relaciones en batch en lugar de N+1 queries
     async getAll(includeArchived: boolean = false): Promise<Candidate[]> {
         let query = supabase
             .from('candidates')
             .select('*')
-            .order('created_at', { ascending: false });
+            .order('created_at', { ascending: false })
+            .limit(1000); // Limitar a 1000 candidatos para evitar timeouts
         
         if (!includeArchived) {
             query = query.eq('archived', false);
@@ -180,9 +182,170 @@ export const candidatesApi = {
 
         const { data, error } = await query;
         if (error) throw error;
-        if (!data) return [];
+        if (!data || data.length === 0) return [];
 
-        return Promise.all(data.map(dbToCandidate));
+        // Obtener todos los IDs de candidatos
+        const candidateIds = data.map(c => c.id);
+
+        // Cargar todas las relaciones en batch (solo 4-5 consultas en total)
+        const [historyResult, postItsResult, commentsResult, attachmentsResult] = await Promise.all([
+            supabase
+                .from('candidate_history')
+                .select('*')
+                .in('candidate_id', candidateIds)
+                .order('moved_at', { ascending: true }),
+            supabase
+                .from('post_its')
+                .select('*')
+                .in('candidate_id', candidateIds)
+                .order('created_at', { ascending: false }),
+            supabase
+                .from('comments')
+                .select('*')
+                .in('candidate_id', candidateIds)
+                .order('created_at', { ascending: false }),
+            supabase
+                .from('attachments')
+                .select('*')
+                .in('candidate_id', candidateIds)
+                .order('candidate_id, uploaded_at', { ascending: false }),
+        ]);
+
+        // Obtener IDs de comentarios para cargar sus attachments
+        const commentIds = (commentsResult.data || []).map(c => c.id);
+        let commentAttachmentsResult: any = { data: [] };
+        if (commentIds.length > 0) {
+            commentAttachmentsResult = await supabase
+                .from('attachments')
+                .select('*')
+                .in('comment_id', commentIds);
+        }
+
+        // Agrupar relaciones por candidate_id en memoria
+        const historyByCandidateId = new Map<string, any[]>();
+        const postItsByCandidateId = new Map<string, any[]>();
+        const commentsByCandidateId = new Map<string, any[]>();
+        const attachmentsByCandidateId = new Map<string, any[]>();
+        const commentAttachmentsByCommentId = new Map<string, any[]>();
+
+        (historyResult.data || []).forEach(history => {
+            if (!historyByCandidateId.has(history.candidate_id)) {
+                historyByCandidateId.set(history.candidate_id, []);
+            }
+            historyByCandidateId.get(history.candidate_id)!.push(history);
+        });
+
+        // Ordenar historial por moved_at dentro de cada candidato
+        historyByCandidateId.forEach((history, candidateId) => {
+            history.sort((a, b) => new Date(a.moved_at).getTime() - new Date(b.moved_at).getTime());
+        });
+
+        (postItsResult.data || []).forEach(postIt => {
+            if (!postItsByCandidateId.has(postIt.candidate_id)) {
+                postItsByCandidateId.set(postIt.candidate_id, []);
+            }
+            postItsByCandidateId.get(postIt.candidate_id)!.push(postIt);
+        });
+
+        (commentsResult.data || []).forEach(comment => {
+            if (!commentsByCandidateId.has(comment.candidate_id)) {
+                commentsByCandidateId.set(comment.candidate_id, []);
+            }
+            commentsByCandidateId.get(comment.candidate_id)!.push(comment);
+        });
+
+        (attachmentsResult.data || []).forEach(attachment => {
+            if (!attachmentsByCandidateId.has(attachment.candidate_id)) {
+                attachmentsByCandidateId.set(attachment.candidate_id, []);
+            }
+            attachmentsByCandidateId.get(attachment.candidate_id)!.push(attachment);
+        });
+
+        (commentAttachmentsResult.data || []).forEach(attachment => {
+            if (!commentAttachmentsByCommentId.has(attachment.comment_id)) {
+                commentAttachmentsByCommentId.set(attachment.comment_id, []);
+            }
+            commentAttachmentsByCommentId.get(attachment.comment_id)!.push(attachment);
+        });
+
+        // Mapear candidatos con sus relaciones
+        return data.map(dbCandidate => {
+            const history = historyByCandidateId.get(dbCandidate.id) || [];
+            const postIts = postItsByCandidateId.get(dbCandidate.id) || [];
+            const comments = commentsByCandidateId.get(dbCandidate.id) || [];
+            const attachments = attachmentsByCandidateId.get(dbCandidate.id) || [];
+
+            // Mapear comentarios con sus adjuntos
+            const commentsWithAttachments = comments.map(comment => ({
+                id: comment.id,
+                text: comment.text,
+                userId: comment.user_id,
+                createdAt: comment.created_at,
+                attachments: (commentAttachmentsByCommentId.get(comment.id) || []).map(att => ({
+                    id: att.id,
+                    name: att.name,
+                    url: att.url,
+                    type: att.type,
+                    size: att.size,
+                    category: att.category,
+                    uploadedAt: att.uploaded_at,
+                })),
+            }));
+
+            return {
+                id: dbCandidate.id,
+                name: dbCandidate.name,
+                email: dbCandidate.email,
+                phone: dbCandidate.phone,
+                phone2: dbCandidate.phone2,
+                processId: dbCandidate.process_id,
+                stageId: dbCandidate.stage_id,
+                description: dbCandidate.description,
+                history: history.map(h => ({
+                    stageId: h.stage_id,
+                    movedAt: h.moved_at,
+                    movedBy: h.moved_by || 'System',
+                })),
+                avatarUrl: dbCandidate.avatar_url,
+                attachments: attachments.map(att => ({
+                    id: att.id,
+                    name: att.name,
+                    url: att.url,
+                    type: att.type,
+                    size: att.size,
+                    category: att.category,
+                    uploadedAt: att.uploaded_at,
+                })),
+                source: dbCandidate.source,
+                salaryExpectation: dbCandidate.salary_expectation,
+                agreedSalary: dbCandidate.agreed_salary,
+                agreedSalaryInWords: dbCandidate.agreed_salary_in_words,
+                age: dbCandidate.age,
+                dni: dbCandidate.dni,
+                linkedinUrl: dbCandidate.linkedin_url,
+                address: dbCandidate.address,
+                province: dbCandidate.province,
+                district: dbCandidate.district,
+                postIts: postIts.map(p => ({
+                    id: p.id,
+                    text: p.text,
+                    color: p.color,
+                    createdBy: p.created_by,
+                    createdAt: p.created_at,
+                })),
+                comments: commentsWithAttachments,
+                archived: dbCandidate.archived || false,
+                archivedAt: dbCandidate.archived_at,
+                hireDate: dbCandidate.hire_date,
+                googleDriveFolderId: dbCandidate.google_drive_folder_id,
+                googleDriveFolderName: dbCandidate.google_drive_folder_name,
+                visibleToClients: dbCandidate.visible_to_clients ?? false,
+                offerAcceptedDate: dbCandidate.offer_accepted_date,
+                applicationStartedDate: dbCandidate.application_started_date,
+                applicationCompletedDate: dbCandidate.application_completed_date,
+                criticalStageReviewedAt: dbCandidate.critical_stage_reviewed_at,
+            };
+        });
     },
 
     // Obtener candidatos por proceso

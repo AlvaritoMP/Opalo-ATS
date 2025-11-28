@@ -69,34 +69,79 @@ function processToDb(process: Partial<Process>): any {
 
 export const processesApi = {
     // Obtener todos los procesos con sus stages y categorías
+    // OPTIMIZADO: Carga todas las relaciones en batch en lugar de N+1 queries
     async getAll(): Promise<Process[]> {
+        // 1. Cargar todos los procesos
         const { data: processes, error } = await supabase
             .from('processes')
             .select('*')
-            .order('created_at', { ascending: false });
+            .order('created_at', { ascending: false })
+            .limit(1000); // Limitar a 1000 procesos para evitar timeouts
         
         if (error) throw error;
-        if (!processes) return [];
+        if (!processes || processes.length === 0) return [];
 
-        // Obtener stages, categorías y attachments para cada proceso
-        const processesWithRelations = await Promise.all(
-            processes.map(async (process) => {
-                const [stages, categories, attachments] = await Promise.all([
-                    supabase.from('stages').select('*').eq('process_id', process.id).order('order_index'),
-                    supabase.from('document_categories').select('*').eq('process_id', process.id),
-                    supabase.from('attachments').select('*').eq('process_id', process.id).is('candidate_id', null),
-                ]);
+        // 2. Obtener todos los IDs de procesos
+        const processIds = processes.map(p => p.id);
 
-                return dbToProcess(
-                    process,
-                    stages.data || [],
-                    categories.data || [],
-                    attachments.data || []
-                );
-            })
+        // 3. Cargar todas las relaciones en batch (solo 3 consultas en total)
+        const [stagesResult, categoriesResult, attachmentsResult] = await Promise.all([
+            supabase
+                .from('stages')
+                .select('*')
+                .in('process_id', processIds)
+                .order('order_index'),
+            supabase
+                .from('document_categories')
+                .select('*')
+                .in('process_id', processIds),
+            supabase
+                .from('attachments')
+                .select('*')
+                .in('process_id', processIds)
+                .is('candidate_id', null),
+        ]);
+
+        // 4. Agrupar relaciones por process_id en memoria
+        const stagesByProcessId = new Map<string, any[]>();
+        const categoriesByProcessId = new Map<string, any[]>();
+        const attachmentsByProcessId = new Map<string, any[]>();
+
+        (stagesResult.data || []).forEach(stage => {
+            if (!stagesByProcessId.has(stage.process_id)) {
+                stagesByProcessId.set(stage.process_id, []);
+            }
+            stagesByProcessId.get(stage.process_id)!.push(stage);
+        });
+
+        // Ordenar stages por order_index dentro de cada proceso
+        stagesByProcessId.forEach((stages, processId) => {
+            stages.sort((a, b) => (a.order_index || 0) - (b.order_index || 0));
+        });
+
+        (categoriesResult.data || []).forEach(category => {
+            if (!categoriesByProcessId.has(category.process_id)) {
+                categoriesByProcessId.set(category.process_id, []);
+            }
+            categoriesByProcessId.get(category.process_id)!.push(category);
+        });
+
+        (attachmentsResult.data || []).forEach(attachment => {
+            if (!attachmentsByProcessId.has(attachment.process_id)) {
+                attachmentsByProcessId.set(attachment.process_id, []);
+            }
+            attachmentsByProcessId.get(attachment.process_id)!.push(attachment);
+        });
+
+        // 5. Mapear procesos con sus relaciones
+        return processes.map(process => 
+            dbToProcess(
+                process,
+                stagesByProcessId.get(process.id) || [],
+                categoriesByProcessId.get(process.id) || [],
+                attachmentsByProcessId.get(process.id) || []
+            )
         );
-
-        return processesWithRelations;
     },
 
     // Obtener un proceso por ID

@@ -3,7 +3,55 @@ import { createClient } from '@supabase/supabase-js';
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://afhiiplxqtodqxvmswor.supabase.co';
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFmaGlpcGx4cXRvZHF4dm1zd29yIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjI4Njg4MTYsImV4cCI6MjA3ODQ0NDgxNn0.r9YmrHHajLsd5YHUkPnmD7UazpvmsW0TfqC5jy0_3ZU';
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+// Configurar cliente de Supabase con opciones mejoradas
+export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+    auth: {
+        persistSession: false, // No persistir sesión en localStorage para evitar problemas
+        autoRefreshToken: false,
+    },
+    global: {
+        headers: {
+            'X-Client-Info': 'ats-pro-web',
+        },
+    },
+    db: {
+        schema: 'public',
+    },
+});
+
+// Función helper para detectar y manejar errores de CORS
+export function isCorsError(error: any): boolean {
+    if (!error) return false;
+    
+    const errorMessage = error.message || error.toString() || '';
+    const errorCode = error.code || '';
+    
+    return (
+        errorMessage.includes('CORS') ||
+        errorMessage.includes('Access-Control-Allow-Origin') ||
+        errorMessage.includes('Failed to fetch') ||
+        errorCode === 'CORS_ERROR' ||
+        (errorMessage.includes('fetch') && errorMessage.includes('blocked'))
+    );
+}
+
+// Función helper para obtener mensaje de error más claro
+export function getErrorMessage(error: any): string {
+    if (isCorsError(error)) {
+        const currentOrigin = window.location.origin;
+        return `Error de CORS: El dominio ${currentOrigin} no está permitido en Supabase. Por favor, agrega este dominio en la configuración de CORS de Supabase. Ver SOLUCION_CORS_SUPABASE.md para más detalles.`;
+    }
+    
+    if (error?.message) {
+        return error.message;
+    }
+    
+    if (typeof error === 'string') {
+        return error;
+    }
+    
+    return 'Error desconocido al conectar con Supabase';
+}
 
 // Función helper para establecer el usuario actual en la sesión
 export async function setCurrentUser(userId: string) {
