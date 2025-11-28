@@ -16,7 +16,9 @@ const ProcessAttachmentsModal: React.FC<{
     attachments: Attachment[]; 
     onClose: () => void;
     onLoadAttachments?: () => Promise<void>;
-}> = ({ processId, attachments, onClose, onLoadAttachments }) => {
+    processFolderId?: string;
+    googleDriveConfig?: any;
+}> = ({ processId, attachments, onClose, onLoadAttachments, processFolderId, googleDriveConfig }) => {
     const [isLoading, setIsLoading] = useState(false);
     const [loadedAttachments, setLoadedAttachments] = useState<Attachment[]>(attachments);
     const [hasLoaded, setHasLoaded] = useState(attachments.length > 0);
@@ -29,7 +31,7 @@ const ProcessAttachmentsModal: React.FC<{
                 await onLoadAttachments();
             } else {
                 const { processesApi } = await import('../lib/api/processes');
-                const atts = await processesApi.getAttachments(processId);
+                const atts = await processesApi.getAttachments(processId, processFolderId, googleDriveConfig);
                 setLoadedAttachments(atts);
             }
             setHasLoaded(true);
@@ -100,13 +102,18 @@ export const ProcessView: React.FC<ProcessViewProps> = ({ processId }) => {
 
     const process = state.processes.find(p => p.id === processId);
 
-    // Cargar conteo de attachments al montar el componente
+    // Cargar conteo de attachments al montar el componente (incluyendo archivos de Google Drive)
     React.useEffect(() => {
         const loadAttachmentsCount = async () => {
-            if (!processId) return;
+            if (!processId || !process) return;
             try {
                 const { processesApi } = await import('../lib/api/processes');
-                const count = await processesApi.getAttachmentsCount(processId);
+                const googleDriveConfig = state.settings?.googleDrive;
+                const count = await processesApi.getAttachmentsCount(
+                    processId, 
+                    process.googleDriveFolderId,
+                    googleDriveConfig
+                );
                 setAttachmentsCount(count);
             } catch (error) {
                 console.warn('Error cargando conteo de attachments del proceso:', error);
@@ -117,7 +124,7 @@ export const ProcessView: React.FC<ProcessViewProps> = ({ processId }) => {
             }
         };
         loadAttachmentsCount();
-    }, [processId, process?.attachments?.length]);
+    }, [processId, process?.id, process?.googleDriveFolderId, state.settings?.googleDrive]);
     
     // Filtrar candidatos según el rol del usuario
     // Admin y Recruiter ven todos los candidatos
@@ -327,7 +334,12 @@ export const ProcessView: React.FC<ProcessViewProps> = ({ processId }) => {
                                         setIsLoadingAttachments(true);
                                         try {
                                             const { processesApi } = await import('../lib/api/processes');
-                                            const atts = await processesApi.getAttachments(processId);
+                                            const googleDriveConfig = state.settings?.googleDrive;
+                                            const atts = await processesApi.getAttachments(
+                                                processId,
+                                                process?.googleDriveFolderId,
+                                                googleDriveConfig
+                                            );
                                             setProcessAttachments(atts);
                                         } catch (error) {
                                             console.error('Error cargando attachments:', error);
@@ -398,10 +410,17 @@ export const ProcessView: React.FC<ProcessViewProps> = ({ processId }) => {
                     processId={processId}
                     attachments={processAttachments.length > 0 ? processAttachments : (process.attachments || [])} 
                     onClose={() => setIsAttachmentsModalOpen(false)}
+                    processFolderId={process?.googleDriveFolderId}
+                    googleDriveConfig={state.settings?.googleDrive}
                     onLoadAttachments={async () => {
                         if (processAttachments.length === 0) {
                             const { processesApi } = await import('../lib/api/processes');
-                            const atts = await processesApi.getAttachments(processId);
+                            const googleDriveConfig = state.settings?.googleDrive;
+                            const atts = await processesApi.getAttachments(
+                                processId,
+                                process?.googleDriveFolderId,
+                                googleDriveConfig
+                            );
                             setProcessAttachments(atts);
                         }
                     }}

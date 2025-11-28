@@ -69,7 +69,9 @@ function processToDb(process: Partial<Process>): any {
 
 export const processesApi = {
     // Obtener solo el conteo de attachments de un proceso (sin cargar los datos)
-    async getAttachmentsCount(processId: string): Promise<number> {
+    // Incluye archivos de la base de datos y archivos en Google Drive (excluyendo carpetas de candidatos)
+    async getAttachmentsCount(processId: string, processFolderId?: string, googleDriveConfig?: any): Promise<number> {
+        // Contar attachments en la base de datos
         const { count, error } = await supabase
             .from('attachments')
             .select('*', { count: 'exact', head: true })
@@ -77,7 +79,56 @@ export const processesApi = {
             .is('candidate_id', null); // Solo attachments del proceso, no de candidatos
         
         if (error) throw error;
-        return count || 0;
+        let dbCount = count || 0;
+
+        // Si Google Drive está conectado y el proceso tiene carpeta, contar archivos en Drive
+        if (processFolderId && googleDriveConfig?.connected && googleDriveConfig?.accessToken) {
+            try {
+                const { googleDriveService } = await import('../googleDrive');
+                googleDriveService.initialize(googleDriveConfig);
+                
+                // Listar todos los archivos y carpetas en la carpeta del proceso
+                const allItems = await googleDriveService.listFilesInFolder(processFolderId);
+                
+                // Filtrar solo archivos (no carpetas) y excluir carpetas de candidatos
+                // Las carpetas de candidatos generalmente tienen nombres que coinciden con nombres de candidatos
+                const files = allItems.filter(item => {
+                    // Excluir carpetas (mimeType = 'application/vnd.google-apps.folder')
+                    if (item.mimeType === 'application/vnd.google-apps.folder') {
+                        return false;
+                    }
+                    return true;
+                });
+                
+                // Obtener IDs de archivos ya registrados en BD para evitar duplicados
+                const { data: dbAttachments } = await supabase
+                    .from('attachments')
+                    .select('url')
+                    .eq('process_id', processId)
+                    .is('candidate_id', null);
+                
+                const dbDriveFileIds = new Set(
+                    (dbAttachments || [])
+                        .map(att => {
+                            // Extraer ID de Google Drive de la URL
+                            const match = att.url?.match(/\/file\/d\/([a-zA-Z0-9_-]+)/);
+                            return match ? match[1] : null;
+                        })
+                        .filter(id => id !== null)
+                );
+                
+                // Contar solo archivos que no están en la BD
+                const driveOnlyFiles = files.filter(file => !dbDriveFileIds.has(file.id));
+                
+                return dbCount + driveOnlyFiles.length;
+            } catch (error) {
+                console.warn('Error contando archivos de Google Drive para el proceso:', error);
+                // Si falla, retornar solo el conteo de BD
+                return dbCount;
+            }
+        }
+        
+        return dbCount;
     },
 
     // Cargar attachments de un proceso específico (lazy loading para reducir egress)
