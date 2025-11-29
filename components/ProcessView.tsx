@@ -158,30 +158,39 @@ export const ProcessView: React.FC<ProcessViewProps> = ({ processId }) => {
     const validateDocumentRequirements = async (candidate: Candidate, targetStageId: string): Promise<{ valid: boolean; missingDocs: string[] }> => {
         const targetStage = process?.stages.find(s => s.id === targetStageId);
         if (!targetStage || !targetStage.requiredDocuments || targetStage.requiredDocuments.length === 0) {
+            console.log(`✅ No hay documentos requeridos para la etapa ${targetStage.name}`);
             return { valid: true, missingDocs: [] };
         }
         
         // Cargar attachments si no están disponibles (lazy loading)
-        let candidateAttachments = candidate.attachments || [];
-        if (candidateAttachments.length === 0) {
-            try {
-                const { candidatesApi } = await import('../lib/api/candidates');
-                candidateAttachments = await candidatesApi.getAttachments(candidate.id);
-                console.log(`📄 Cargados ${candidateAttachments.length} attachments para validación del candidato ${candidate.name}`);
-            } catch (error) {
-                console.error('Error cargando attachments para validación:', error);
-                // Continuar con attachments vacíos, la validación fallará pero no romperá la app
-            }
+        // SIEMPRE cargar desde la BD para asegurar que tenemos los attachments más recientes con sus categorías
+        let candidateAttachments: Attachment[] = [];
+        try {
+            const { candidatesApi } = await import('../lib/api/candidates');
+            candidateAttachments = await candidatesApi.getAttachments(candidate.id);
+            console.log(`📄 Cargados ${candidateAttachments.length} attachments para validación del candidato ${candidate.name}`);
+        } catch (error) {
+            console.error('❌ Error cargando attachments para validación:', error);
+            // Si falla la carga, intentar usar los attachments del candidato en memoria
+            candidateAttachments = candidate.attachments || [];
+            console.log(`⚠️ Usando attachments en memoria (${candidateAttachments.length} encontrados)`);
         }
         
         // Debug: Log de attachments y categorías
-        console.log(`🔍 Validando documentos para candidato ${candidate.name}:`);
+        console.log(`🔍 Validando documentos para candidato "${candidate.name}" (ID: ${candidate.id}):`);
         console.log(`  - Attachments encontrados: ${candidateAttachments.length}`);
-        console.log(`  - Categorías requeridas: ${targetStage.requiredDocuments.join(', ')}`);
+        console.log(`  - Categorías requeridas (${targetStage.requiredDocuments.length}):`, targetStage.requiredDocuments);
+        
+        // Mostrar todas las categorías disponibles en el proceso
+        console.log(`  - Categorías disponibles en el proceso:`, process?.documentCategories?.map(c => `${c.name} (${c.id})`).join(', ') || 'ninguna');
+        
+        // Mostrar todos los attachments con sus categorías
         candidateAttachments.forEach(att => {
-            console.log(`  - ${att.name}: categoría = "${att.category || 'sin categoría'}"`);
+            const categoryName = att.category ? process?.documentCategories?.find(c => c.id === att.category)?.name : 'sin categoría';
+            console.log(`  - 📄 ${att.name}: categoría = "${categoryName}" (ID: ${att.category || 'null'})`);
         });
         
+        // Agrupar attachments por categoría
         const attachmentsByCategory = candidateAttachments.reduce((acc, att) => {
             if (att.category) {
                 if (!acc[att.category]) acc[att.category] = [];
@@ -190,19 +199,32 @@ export const ProcessView: React.FC<ProcessViewProps> = ({ processId }) => {
             return acc;
         }, {} as Record<string, Attachment[]>);
         
+        console.log(`  - Attachments agrupados por categoría:`, Object.keys(attachmentsByCategory).map(catId => {
+            const catName = process?.documentCategories?.find(c => c.id === catId)?.name || catId;
+            return `${catName} (${attachmentsByCategory[catId].length} archivos)`;
+        }).join(', ') || 'ninguna');
+        
         const missingDocs: string[] = [];
         targetStage.requiredDocuments.forEach(catId => {
             const categoryAttachments = attachmentsByCategory[catId] || [];
+            const category = process?.documentCategories?.find(c => c.id === catId);
+            const categoryName = category?.name || catId;
+            
             if (categoryAttachments.length === 0) {
-                const category = process?.documentCategories?.find(c => c.id === catId);
-                missingDocs.push(category?.name || catId);
-                console.log(`  ❌ Falta categoría: ${category?.name || catId} (ID: ${catId})`);
+                missingDocs.push(categoryName);
+                console.log(`  ❌ FALTA: ${categoryName} (ID: ${catId}) - No se encontraron archivos con esta categoría`);
             } else {
-                console.log(`  ✅ Categoría encontrada: ${process?.documentCategories?.find(c => c.id === catId)?.name || catId} (${categoryAttachments.length} archivo(s))`);
+                console.log(`  ✅ ENCONTRADO: ${categoryName} (ID: ${catId}) - ${categoryAttachments.length} archivo(s)`);
+                categoryAttachments.forEach(att => {
+                    console.log(`     - ${att.name}`);
+                });
             }
         });
         
-        return { valid: missingDocs.length === 0, missingDocs };
+        const isValid = missingDocs.length === 0;
+        console.log(`📊 Resultado de validación: ${isValid ? '✅ VÁLIDO' : '❌ INVÁLIDO'} - ${missingDocs.length} documento(s) faltante(s)`);
+        
+        return { valid: isValid, missingDocs };
     };
 
     const handleDrop = async (e: React.DragEvent<HTMLDivElement>, stageId: string) => {
