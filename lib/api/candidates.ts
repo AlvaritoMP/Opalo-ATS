@@ -759,6 +759,7 @@ export const candidatesApi = {
         }
 
         // Sincronizar attachments: guardar en la tabla attachments
+        let savedAttachments: Attachment[] = [];
         if (candidateData.attachments !== undefined) {
             // Obtener attachments actuales de la BD
             const { data: currentAttachments } = await supabase
@@ -809,12 +810,49 @@ export const candidatesApi = {
                     console.error('Error guardando attachment:', attError);
                     console.error('Attachment data:', attachmentData);
                 } else {
-                    console.log(`✅ Attachment guardado en BD: ${attachment.name} (ID: ${attachmentId})`);
+                    console.log(`✅ Attachment guardado en BD: ${attachment.name} (ID: ${attachmentId}, categoría: ${attachment.category || 'sin categoría'})`);
+                    // Guardar el attachment con su categoría para devolverlo
+                    savedAttachments.push({
+                        id: attachmentId,
+                        name: attachment.name,
+                        url: attachment.url,
+                        type: attachment.type,
+                        size: attachment.size,
+                        category: attachment.category || undefined,
+                        uploadedAt: attachment.uploadedAt || new Date().toISOString(),
+                    });
                 }
             }
         }
 
-        return await this.getById(id) as Candidate;
+        // Obtener el candidato actualizado desde la BD
+        const updatedCandidate = await this.getById(id) as Candidate;
+        
+        // Si se guardaron attachments, asegurarse de que se incluyan con sus categorías
+        if (savedAttachments.length > 0 && updatedCandidate) {
+            // Combinar attachments guardados (con categorías) con los del candidato actualizado
+            // Priorizar los attachments guardados para preservar las categorías
+            const savedAttachmentsMap = new Map(savedAttachments.map(att => [att.id, att]));
+            const existingAttachments = updatedCandidate.attachments || [];
+            
+            // Crear lista de attachments combinando los guardados (con categorías) y los existentes
+            const combinedAttachments = existingAttachments.map(existing => {
+                const saved = savedAttachmentsMap.get(existing.id);
+                // Si hay un attachment guardado, usar ese (tiene la categoría actualizada)
+                return saved || existing;
+            });
+            
+            // Agregar attachments nuevos que no estaban en los existentes
+            savedAttachments.forEach(saved => {
+                if (!combinedAttachments.find(att => att.id === saved.id)) {
+                    combinedAttachments.push(saved);
+                }
+            });
+            
+            updatedCandidate.attachments = combinedAttachments;
+        }
+        
+        return updatedCandidate;
     },
 
     // Eliminar candidato

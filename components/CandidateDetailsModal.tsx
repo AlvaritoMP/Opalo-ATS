@@ -690,14 +690,22 @@ export const CandidateDetailsModal: React.FC<{ candidate: Candidate, onClose: ()
                 attachments: updatedAttachments 
             };
             
-            // Guardar en la base de datos (esto ya actualiza el estado global)
-            await actions.updateCandidate(updatedCandidate, state.currentUser?.name);
-            
-            // Actualizar estado local inmediatamente para reflejar el cambio
+            // Actualizar estado local PRIMERO para reflejo inmediato
             setEditableCandidate(updatedCandidate);
             
-            // NO recargar candidatos del estado global aquí porque puede sobrescribir los cambios
-            // actions.updateCandidate ya actualiza el estado global correctamente
+            // Guardar en la base de datos (esto actualiza el estado global)
+            const savedCandidate = await actions.updateCandidate(updatedCandidate, state.currentUser?.name);
+            
+            // Si el candidato guardado tiene attachments, usar esos (con categorías actualizadas)
+            if (savedCandidate && savedCandidate.attachments) {
+                // Actualizar estado local con el candidato guardado (que tiene las categorías correctas)
+                setEditableCandidate(prev => ({
+                    ...prev,
+                    ...savedCandidate,
+                    // Preservar attachments con categorías actualizadas
+                    attachments: savedCandidate.attachments || prev.attachments
+                }));
+            }
             
             setEditingAttachmentCategory(null);
             setSelectedCategoryForEdit('');
