@@ -100,9 +100,6 @@ export const CandidateDetailsModal: React.FC<{ candidate: Candidate, onClose: ()
         return () => clearTimeout(timer);
     }, [initialCandidate.id, state.currentUser?.role]); // Solo cuando cambia el ID del candidato o el rol del usuario
     
-    // Usar useRef para rastrear el último candidato procesado y evitar bucles infinitos
-    const lastProcessedCandidateRef = React.useRef<string>('');
-    
     // Actualizar editableCandidate cuando el candidato se actualiza en el estado
     React.useEffect(() => {
         const updatedCandidate = state.candidates.find(c => c.id === initialCandidate.id);
