@@ -155,13 +155,33 @@ export const ProcessView: React.FC<ProcessViewProps> = ({ processId }) => {
         e.dataTransfer.setData("text/plain", candidateId); // Necessary for Firefox
     };
 
-    const validateDocumentRequirements = (candidate: Candidate, targetStageId: string): { valid: boolean; missingDocs: string[] } => {
+    const validateDocumentRequirements = async (candidate: Candidate, targetStageId: string): Promise<{ valid: boolean; missingDocs: string[] }> => {
         const targetStage = process?.stages.find(s => s.id === targetStageId);
         if (!targetStage || !targetStage.requiredDocuments || targetStage.requiredDocuments.length === 0) {
             return { valid: true, missingDocs: [] };
         }
         
-        const candidateAttachments = candidate.attachments || [];
+        // Cargar attachments si no están disponibles (lazy loading)
+        let candidateAttachments = candidate.attachments || [];
+        if (candidateAttachments.length === 0) {
+            try {
+                const { candidatesApi } = await import('../lib/api/candidates');
+                candidateAttachments = await candidatesApi.getAttachments(candidate.id);
+                console.log(`📄 Cargados ${candidateAttachments.length} attachments para validación del candidato ${candidate.name}`);
+            } catch (error) {
+                console.error('Error cargando attachments para validación:', error);
+                // Continuar con attachments vacíos, la validación fallará pero no romperá la app
+            }
+        }
+        
+        // Debug: Log de attachments y categorías
+        console.log(`🔍 Validando documentos para candidato ${candidate.name}:`);
+        console.log(`  - Attachments encontrados: ${candidateAttachments.length}`);
+        console.log(`  - Categorías requeridas: ${targetStage.requiredDocuments.join(', ')}`);
+        candidateAttachments.forEach(att => {
+            console.log(`  - ${att.name}: categoría = "${att.category || 'sin categoría'}"`);
+        });
+        
         const attachmentsByCategory = candidateAttachments.reduce((acc, att) => {
             if (att.category) {
                 if (!acc[att.category]) acc[att.category] = [];
@@ -176,6 +196,9 @@ export const ProcessView: React.FC<ProcessViewProps> = ({ processId }) => {
             if (categoryAttachments.length === 0) {
                 const category = process?.documentCategories?.find(c => c.id === catId);
                 missingDocs.push(category?.name || catId);
+                console.log(`  ❌ Falta categoría: ${category?.name || catId} (ID: ${catId})`);
+            } else {
+                console.log(`  ✅ Categoría encontrada: ${process?.documentCategories?.find(c => c.id === catId)?.name || catId} (${categoryAttachments.length} archivo(s))`);
             }
         });
         
@@ -192,15 +215,23 @@ export const ProcessView: React.FC<ProcessViewProps> = ({ processId }) => {
             const candidatesToMove: Candidate[] = [];
             const candidatesWithMissingDocs: { candidate: Candidate; missingDocs: string[] }[] = [];
             
-            selectedCandidates.forEach(id => {
+            // Validar todos los candidatos en paralelo
+            const validationPromises = selectedCandidates.map(async (id) => {
                 const candidate = state.candidates.find(c => c.id === id);
                 if (candidate && candidate.stageId !== stageId) {
-                    const validation = validateDocumentRequirements(candidate, stageId);
-                    if (validation.valid) {
-                        candidatesToMove.push(candidate);
-                    } else {
-                        candidatesWithMissingDocs.push({ candidate, missingDocs: validation.missingDocs });
-                    }
+                    const validation = await validateDocumentRequirements(candidate, stageId);
+                    return { candidate, validation };
+                }
+                return null;
+            });
+            
+            const validationResults = await Promise.all(validationPromises);
+            
+            validationResults.forEach(result => {
+                if (result && result.validation.valid) {
+                    candidatesToMove.push(result.candidate);
+                } else if (result && !result.validation.valid) {
+                    candidatesWithMissingDocs.push({ candidate: result.candidate, missingDocs: result.validation.missingDocs });
                 }
             });
             
@@ -233,7 +264,7 @@ export const ProcessView: React.FC<ProcessViewProps> = ({ processId }) => {
         } else {
             const candidate = state.candidates.find(c => c.id === candidateId);
             if (candidate && candidate.stageId !== stageId) {
-                const validation = validateDocumentRequirements(candidate, stageId);
+                const validation = await validateDocumentRequirements(candidate, stageId);
                 if (!validation.valid) {
                     alert(`No se puede mover a "${process?.stages.find(s => s.id === stageId)?.name}" porque faltan los siguientes documentos requeridos:\n\n${validation.missingDocs.join(', ')}\n\nRevisa la pestaña "Documentos" en los detalles del candidato.`);
                     dragPayload.current = null;
