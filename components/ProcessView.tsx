@@ -98,7 +98,7 @@ export const ProcessView: React.FC<ProcessViewProps> = ({ processId }) => {
     const [attachmentsCount, setAttachmentsCount] = useState<number | null>(null);
     const [processAttachments, setProcessAttachments] = useState<Attachment[]>([]);
     const [isLoadingAttachments, setIsLoadingAttachments] = useState(false);
-    const dragPayload = React.useRef<{ candidateId: string; isBulk: boolean } | null>(null);
+    const dragPayload = React.useRef<{ candidateId: string; isBulk: boolean; processing?: boolean } | null>(null);
 
     const process = state.processes.find(p => p.id === processId);
 
@@ -228,12 +228,27 @@ export const ProcessView: React.FC<ProcessViewProps> = ({ processId }) => {
     };
 
     const handleDrop = async (e: React.DragEvent<HTMLDivElement>, stageId: string) => {
-        if (!canMoveCandidates || !dragPayload.current) return;
+        if (!canMoveCandidates || !dragPayload.current) {
+            // Limpiar clase si existe
+            if (e.currentTarget) {
+                e.currentTarget.classList.remove('bg-primary-50');
+            }
+            return;
+        }
+        
+        // Prevenir múltiples ejecuciones
+        if (dragPayload.current.processing) {
+            console.log('⚠️ Ya se está procesando un movimiento, ignorando...');
+            return;
+        }
+        
+        dragPayload.current.processing = true;
         const { candidateId, isBulk } = dragPayload.current;
 
         const movedBy = state.currentUser?.name || 'System';
 
-        if (isBulk && selectedCandidates.length > 0) {
+        try {
+            if (isBulk && selectedCandidates.length > 0) {
             const candidatesToMove: Candidate[] = [];
             const candidatesWithMissingDocs: { candidate: Candidate; missingDocs: string[] }[] = [];
             
@@ -290,19 +305,13 @@ export const ProcessView: React.FC<ProcessViewProps> = ({ processId }) => {
                 if (!validation.valid) {
                     alert(`No se puede mover a "${process?.stages.find(s => s.id === stageId)?.name}" porque faltan los siguientes documentos requeridos:\n\n${validation.missingDocs.join(', ')}\n\nRevisa la pestaña "Documentos" en los detalles del candidato.`);
                     dragPayload.current = null;
-                    e.currentTarget.classList.remove('bg-primary-50');
+                    if (e.currentTarget) {
+                        e.currentTarget.classList.remove('bg-primary-50');
+                    }
                     return;
                 }
                 try {
                     await actions.updateCandidate({ ...candidate, stageId }, movedBy);
-                    // Recargar candidatos después de mover para asegurar sincronización
-                    if (actions.reloadCandidates && typeof actions.reloadCandidates === 'function') {
-                        try {
-                            await actions.reloadCandidates();
-                        } catch (reloadError) {
-                            console.warn('Error recargando candidatos después de mover (no crítico):', reloadError);
-                        }
-                    }
                     // Recargar candidatos después de mover para asegurar sincronización
                     if (actions.reloadCandidates && typeof actions.reloadCandidates === 'function') {
                         try {
@@ -317,9 +326,16 @@ export const ProcessView: React.FC<ProcessViewProps> = ({ processId }) => {
                 }
             }
         }
-        
-        dragPayload.current = null;
-        e.currentTarget.classList.remove('bg-primary-50');
+        } finally {
+            // Limpiar estado de procesamiento
+            if (dragPayload.current) {
+                dragPayload.current.processing = false;
+            }
+            dragPayload.current = null;
+            if (e.currentTarget) {
+                e.currentTarget.classList.remove('bg-primary-50');
+            }
+        }
     };
 
     const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
