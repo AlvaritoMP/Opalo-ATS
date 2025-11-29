@@ -158,8 +158,54 @@ export const ProcessView: React.FC<ProcessViewProps> = ({ processId }) => {
     const validateDocumentRequirements = async (candidate: Candidate, targetStageId: string): Promise<{ valid: boolean; missingDocs: string[] }> => {
         const targetStage = process?.stages.find(s => s.id === targetStageId);
         if (!targetStage || !targetStage.requiredDocuments || targetStage.requiredDocuments.length === 0) {
-            console.log(`✅ No hay documentos requeridos para la etapa ${targetStage.name}`);
+            console.log(`✅ No hay documentos requeridos para la etapa ${targetStage?.name || targetStageId}`);
             return { valid: true, missingDocs: [] };
+        }
+        
+        // Asegurarse de que las categorías del proceso estén cargadas
+        // Si no están cargadas, recargar el proceso completo
+        let currentProcess = process;
+        if (!currentProcess?.documentCategories || currentProcess.documentCategories.length === 0) {
+            console.warn('⚠️ Las categorías del proceso no están cargadas, recargando proceso...');
+            try {
+                const { processesApi } = await import('../lib/api/processes');
+                const reloadedProcess = await processesApi.getById(processId);
+                if (reloadedProcess && reloadedProcess.documentCategories) {
+                    // Actualizar el proceso en el estado usando actions
+                    // Nota: No hay una acción específica para actualizar un proceso, pero podemos actualizar el estado directamente
+                    // Por ahora, usaremos el proceso recargado directamente
+                    currentProcess = reloadedProcess;
+                }
+            } catch (error) {
+                console.error('Error recargando proceso:', error);
+            }
+        }
+        
+        // Verificar si las categorías requeridas existen en el proceso
+        const missingCategoryIds: string[] = [];
+        targetStage.requiredDocuments.forEach(catId => {
+            const categoryExists = currentProcess?.documentCategories?.some(c => c.id === catId);
+            if (!categoryExists) {
+                missingCategoryIds.push(catId);
+            }
+        });
+        
+        // Si hay categorías requeridas que no existen en el proceso, es un problema de configuración
+        if (missingCategoryIds.length > 0) {
+            console.error(`❌ ERROR DE CONFIGURACIÓN: La etapa "${targetStage.name}" requiere categorías que no existen en el proceso:`);
+            missingCategoryIds.forEach(catId => {
+                console.error(`   - ID: ${catId}`);
+            });
+            console.error(`💡 SOLUCIÓN: Edita la etapa "${targetStage.name}" y configura las categorías requeridas correctamente.`);
+            // Aún así, validar con las categorías que SÍ existen
+            // Filtrar las categorías requeridas para solo validar las que existen
+            targetStage.requiredDocuments = targetStage.requiredDocuments.filter(catId => 
+                !missingCategoryIds.includes(catId)
+            );
+            if (targetStage.requiredDocuments.length === 0) {
+                console.warn('⚠️ No hay categorías válidas para validar. La etapa está mal configurada.');
+                return { valid: true, missingDocs: [] }; // Permitir pasar si no hay categorías válidas
+            }
         }
         
         // Cargar attachments si no están disponibles (lazy loading)
@@ -191,24 +237,24 @@ export const ProcessView: React.FC<ProcessViewProps> = ({ processId }) => {
         
         // Mostrar categorías requeridas con sus nombres
         const requiredCategoriesInfo = targetStage.requiredDocuments.map(catId => {
-            const category = process?.documentCategories?.find(c => c.id === catId);
+            const category = currentProcess?.documentCategories?.find(c => c.id === catId);
             return category ? `${category.name} (${catId})` : `[CATEGORÍA NO ENCONTRADA] (${catId})`;
         });
         console.log(`  - 📋 Categorías requeridas (${targetStage.requiredDocuments.length}):`, requiredCategoriesInfo.join(', '));
         
         // Mostrar todas las categorías disponibles en el proceso
-        console.log(`  - 📚 Categorías disponibles en el proceso:`, process?.documentCategories?.map(c => `${c.name} (${c.id})`).join(', ') || 'ninguna');
+        console.log(`  - 📚 Categorías disponibles en el proceso:`, currentProcess?.documentCategories?.map(c => `${c.name} (${c.id})`).join(', ') || 'ninguna');
         
         // Mostrar todos los attachments con sus categorías
         console.log(`  - 📄 Attachments del candidato:`);
         candidateAttachments.forEach(att => {
-            const categoryName = att.category ? (process?.documentCategories?.find(c => c.id === att.category)?.name || `[CATEGORÍA NO ENCONTRADA] (${att.category})`) : 'sin categoría';
+            const categoryName = att.category ? (currentProcess?.documentCategories?.find(c => c.id === att.category)?.name || `[CATEGORÍA NO ENCONTRADA] (${att.category})`) : 'sin categoría';
             console.log(`     • ${att.name}: categoría = "${categoryName}"`);
         });
         
         // Mostrar attachments agrupados por categoría
         const categoriesWithAttachments = Object.keys(attachmentsByCategory).map(catId => {
-            const catName = process?.documentCategories?.find(c => c.id === catId)?.name || `[CATEGORÍA NO ENCONTRADA] (${catId})`;
+            const catName = currentProcess?.documentCategories?.find(c => c.id === catId)?.name || `[CATEGORÍA NO ENCONTRADA] (${catId})`;
             return `${catName} (${attachmentsByCategory[catId].length} archivo(s))`;
         });
         console.log(`  - 📦 Attachments agrupados por categoría:`, categoriesWithAttachments.join(', ') || 'ninguna');
@@ -216,7 +262,7 @@ export const ProcessView: React.FC<ProcessViewProps> = ({ processId }) => {
         const missingDocs: string[] = [];
         targetStage.requiredDocuments.forEach(catId => {
             const categoryAttachments = attachmentsByCategory[catId] || [];
-            const category = process?.documentCategories?.find(c => c.id === catId);
+            const category = currentProcess?.documentCategories?.find(c => c.id === catId);
             const categoryName = category?.name || `[CATEGORÍA NO ENCONTRADA] (${catId})`;
             
             if (categoryAttachments.length === 0) {
@@ -226,7 +272,7 @@ export const ProcessView: React.FC<ProcessViewProps> = ({ processId }) => {
                 const candidateCategoryIds = Object.keys(attachmentsByCategory);
                 if (candidateCategoryIds.length > 0) {
                     const candidateCategoryNames = candidateCategoryIds.map(id => {
-                        const cat = process?.documentCategories?.find(c => c.id === id);
+                        const cat = currentProcess?.documentCategories?.find(c => c.id === id);
                         return cat ? cat.name : `[CATEGORÍA NO ENCONTRADA] (${id})`;
                     });
                     console.log(`     ⚠️ El candidato tiene estas categorías: ${candidateCategoryNames.join(', ')}`);
@@ -246,7 +292,7 @@ export const ProcessView: React.FC<ProcessViewProps> = ({ processId }) => {
             console.log(`💡 SOLUCIÓN: Asigna las siguientes categorías a los documentos del candidato:`);
             missingDocs.forEach(docName => {
                 const requiredCatId = targetStage.requiredDocuments.find(catId => {
-                    const cat = process?.documentCategories?.find(c => c.id === catId);
+                    const cat = currentProcess?.documentCategories?.find(c => c.id === catId);
                     return cat?.name === docName;
                 });
                 console.log(`   - "${docName}" (ID: ${requiredCatId})`);
