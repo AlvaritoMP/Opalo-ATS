@@ -20,19 +20,27 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
 });
 
 // Función helper para detectar y manejar errores de CORS
+// Solo detecta errores REALES de CORS, no errores de red genéricos
 export function isCorsError(error: any): boolean {
     if (!error) return false;
     
-    const errorMessage = error.message || error.toString() || '';
+    const errorMessage = (error.message || error.toString() || '').toLowerCase();
     const errorCode = error.code || '';
     
-    return (
-        errorMessage.includes('CORS') ||
-        errorMessage.includes('Access-Control-Allow-Origin') ||
-        errorMessage.includes('Failed to fetch') ||
-        errorCode === 'CORS_ERROR' ||
-        (errorMessage.includes('fetch') && errorMessage.includes('blocked'))
-    );
+    // Solo detectar errores específicos de CORS, no errores de red genéricos
+    // Los errores reales de CORS tienen mensajes específicos del navegador
+    const isRealCorsError = (
+        errorMessage.includes('cors') && (
+            errorMessage.includes('policy') ||
+            errorMessage.includes('blocked') ||
+            errorMessage.includes('not allowed')
+        )
+    ) || 
+    errorMessage.includes('access-control-allow-origin') ||
+    errorCode === 'CORS_ERROR' ||
+    (errorMessage.includes('fetch') && errorMessage.includes('blocked') && errorMessage.includes('cors'));
+    
+    return isRealCorsError;
 }
 
 // Función helper para obtener mensaje de error más claro

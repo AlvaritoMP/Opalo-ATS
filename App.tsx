@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useMemo } from 'react';
+import React, { createContext, useContext, useState, useEffect, useMemo, useRef } from 'react';
 import { initialProcesses, initialCandidates, initialUsers, initialSettings, initialFormIntegrations, initialInterviewEvents } from './lib/data';
 import { Process, Candidate, User, AppSettings, FormIntegration, InterviewEvent, CandidateHistory, Application, PostIt, Comment, Section, UserRole } from './types';
 import { getSettings, saveSettings as saveSettingsToStorage } from './lib/settings';
@@ -435,6 +435,10 @@ const App: React.FC = () => {
         toasts: [],
     });
 
+    // Referencia para evitar mostrar el mensaje de CORS repetidamente
+    const lastCorsErrorTime = useRef<number>(0);
+    const CORS_ERROR_DEBOUNCE_MS = 5 * 60 * 1000; // 5 minutos
+
     useEffect(() => {
         const loadData = async () => {
             try {
@@ -784,14 +788,24 @@ const App: React.FC = () => {
             } catch (error: any) {
                 console.error('Error reloading processes:', error);
                 
-                // Detectar errores de CORS
+                // Detectar errores de CORS (con debouncing para evitar mensajes repetitivos)
                 if (isCorsError(error)) {
-                    const corsMessage = getErrorMessage(error);
-                    showToastHelper(
-                        corsMessage,
-                        'error',
-                        15000
-                    );
+                    const now = Date.now();
+                    const timeSinceLastError = now - lastCorsErrorTime.current;
+                    
+                    // Solo mostrar el mensaje si han pasado al menos 5 minutos desde el último
+                    if (timeSinceLastError >= CORS_ERROR_DEBOUNCE_MS) {
+                        lastCorsErrorTime.current = now;
+                        const corsMessage = getErrorMessage(error);
+                        showToastHelper(
+                            corsMessage,
+                            'error',
+                            15000
+                        );
+                    } else {
+                        // Silenciar el error si ya se mostró recientemente
+                        console.warn('CORS error detected but message suppressed (debounced)');
+                    }
                     return;
                 }
                 
@@ -906,14 +920,24 @@ const App: React.FC = () => {
             } catch (error: any) {
                 console.error('Error reloading candidates:', error);
                 
-                // Detectar errores de CORS
+                // Detectar errores de CORS (con debouncing para evitar mensajes repetitivos)
                 if (isCorsError(error)) {
-                    const corsMessage = getErrorMessage(error);
-                    showToastHelper(
-                        corsMessage,
-                        'error',
-                        15000
-                    );
+                    const now = Date.now();
+                    const timeSinceLastError = now - lastCorsErrorTime.current;
+                    
+                    // Solo mostrar el mensaje si han pasado al menos 5 minutos desde el último
+                    if (timeSinceLastError >= CORS_ERROR_DEBOUNCE_MS) {
+                        lastCorsErrorTime.current = now;
+                        const corsMessage = getErrorMessage(error);
+                        showToastHelper(
+                            corsMessage,
+                            'error',
+                            15000
+                        );
+                    } else {
+                        // Silenciar el error si ya se mostró recientemente
+                        console.warn('CORS error detected but message suppressed (debounced)');
+                    }
                     return;
                 }
                 
@@ -1509,62 +1533,19 @@ const App: React.FC = () => {
         },
     }), [state.currentUser, state.users]);
 
-    // Sincronización automática periódica (cada 2 minutos cuando la app está activa)
-    // Reducida de 30s a 2min para reducir consumo de egress
-    // Debe estar después de la definición de actions
-    useEffect(() => {
-        if (!state.currentUser) return;
-        
-        let syncPaused = false;
-        
-        const syncInterval = setInterval(async () => {
-            // Si la sincronización está pausada por quota, no intentar
-            if (syncPaused) return;
-            
-            try {
-                // Solo recargar si la app está visible (no en background)
-                if (document.visibilityState === 'visible') {
-                    // Recargar procesos y candidatos
-                    if (actions.reloadProcesses && typeof actions.reloadProcesses === 'function') {
-                        await actions.reloadProcesses();
-                    }
-                    if (actions.reloadCandidates && typeof actions.reloadCandidates === 'function') {
-                        await actions.reloadCandidates();
-                    }
-                }
-            } catch (error: any) {
-                console.warn('Error en sincronización automática (no crítico):', error);
-                const errorMessage = error?.message || '';
-                const errorCode = error?.code || '';
-                
-                // Detectar errores de límite de egress/quota de Supabase
-                const isQuotaError = errorMessage.includes('quota') || 
-                                    errorMessage.includes('egress') || 
-                                    errorMessage.includes('limit') ||
-                                    errorMessage.includes('exceeded') ||
-                                    errorCode === 'PGRST301' ||
-                                    errorCode === 'PGRST302';
-                
-                if (isQuotaError) {
-                    syncPaused = true; // Pausar sincronización automática
-                    
-                    // Mostrar solo una vez cada 5 minutos para no saturar al usuario
-                    const lastQuotaWarning = localStorage.getItem('lastQuotaWarning');
-                    const now = Date.now();
-                    if (!lastQuotaWarning || (now - parseInt(lastQuotaWarning)) > 300000) {
-                        showToastHelper(
-                            '⚠️ Límite de transferencia de Supabase alcanzado. La sincronización automática está pausada. Usa el botón "Actualizar" para ver cambios.',
-                            'error',
-                            15000
-                        );
-                        localStorage.setItem('lastQuotaWarning', now.toString());
-                    }
-                }
-            }
-        }, 120000); // 2 minutos (reducido de 30s para ahorrar egress)
-        
-        return () => clearInterval(syncInterval);
-    }, [state.currentUser, actions]);
+    // Sincronización automática DESHABILITADA para reducir consumo de compute hours
+    // La sincronización ahora es manual mediante el botón "Actualizar" en el sidebar
+    // Esto evita llamadas innecesarias a Supabase cuando no hay usuarios activos
+    // 
+    // Si necesitas sincronización automática en el futuro, puedes:
+    // 1. Habilitarla solo cuando detectes actividad del usuario (clicks, teclas, etc.)
+    // 2. Usar un intervalo mucho más largo (ej: 10-15 minutos)
+    // 3. Verificar que el usuario esté realmente activo (no solo la pestaña visible)
+    //
+    // useEffect(() => {
+    //     if (!state.currentUser) return;
+    //     // ... código de sincronización
+    // }, [state.currentUser, actions]);
 
     const getLabel = (key: string, fallback: string): string => {
         return state.settings?.customLabels?.[key] || fallback;

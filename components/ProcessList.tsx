@@ -183,16 +183,25 @@ export const ProcessList: React.FC = () => {
     
     const canManageProcesses = ['admin', 'recruiter'].includes(state.currentUser?.role as UserRole);
     
-    // Recarga automática cada 30 segundos
-    useEffect(() => {
-        const interval = setInterval(() => {
-            actions.reloadProcesses().catch(error => {
-                console.error('Error en recarga automática:', error);
-            });
-        }, 30000); // 30 segundos
-        
-        return () => clearInterval(interval);
-    }, [actions]);
+    // Recarga automática DESHABILITADA para reducir consumo de compute hours
+    // Los usuarios pueden recargar manualmente usando el botón "Actualizar"
+    // Esto evita llamadas innecesarias a Supabase cuando no hay actividad
+    //
+    // Si necesitas recarga automática, considera:
+    // 1. Aumentar el intervalo a al menos 5-10 minutos
+    // 2. Solo recargar cuando detectes actividad del usuario
+    // 3. Verificar que la pestaña esté visible Y activa
+    //
+    // useEffect(() => {
+    //     const interval = setInterval(() => {
+    //         if (document.visibilityState === 'visible') {
+    //             actions.reloadProcesses().catch(error => {
+    //                 console.error('Error en recarga automática:', error);
+    //             });
+    //         }
+    //     }, 300000); // 5 minutos mínimo
+    //     return () => clearInterval(interval);
+    // }, [actions]);
     
     const handleReload = async () => {
         setIsReloading(true);
