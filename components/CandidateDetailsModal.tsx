@@ -1382,26 +1382,42 @@ export const CandidateDetailsModal: React.FC<{ candidate: Candidate, onClose: ()
                             </div>
                         </div>
                     )}
-                    {activeTab === 'history' && (
-                        <div className="p-6">
-                             <ul className="border rounded-lg overflow-hidden">
-                                <li className="p-3 bg-gray-50 font-medium text-sm grid grid-cols-3">
-                                    <span>Etapa</span>
-                                    <span className="text-center">Movido por</span>
-                                    <span className="text-right">Fecha</span>
-                                </li>
-                                {initialCandidate.history.length > 0 ? initialCandidate.history.slice().reverse().map((h, index) => (
-                                    <li key={index} className="p-3 border-t grid grid-cols-3 items-center">
-                                        <p className="font-medium text-gray-800">{process.stages.find(s => s.id === h.stageId)?.name || 'Desconocido'}</p>
-                                        <p className="text-sm text-gray-500 text-center">{h.movedBy}</p>
-                                        <p className="text-sm text-gray-500 text-right">{new Date(h.movedAt).toLocaleString()}</p>
+                    {activeTab === 'history' && (() => {
+                        // Función helper para obtener el nombre del usuario desde movedBy
+                        // Si movedBy es un ID, busca el usuario; si no, asume que ya es un nombre
+                        const getUserName = (movedBy: string): string => {
+                            if (!movedBy || movedBy === 'System') return 'System';
+                            // Si movedBy parece ser un ID (UUID o similar), buscar el usuario
+                            const isLikelyId = movedBy.length > 20 || movedBy.includes('-');
+                            if (isLikelyId) {
+                                const user = state.users.find(u => u.id === movedBy);
+                                return user?.name || movedBy;
+                            }
+                            // Si no parece ser un ID, asumir que ya es un nombre
+                            return movedBy;
+                        };
+                        
+                        return (
+                            <div className="p-6">
+                                 <ul className="border rounded-lg overflow-hidden">
+                                    <li className="p-3 bg-gray-50 font-medium text-sm grid grid-cols-3">
+                                        <span>Etapa</span>
+                                        <span className="text-center">Movido por</span>
+                                        <span className="text-right">Fecha</span>
                                     </li>
-                                )) : (
-                                    <li className="p-6 text-center text-gray-500">No hay historial.</li>
-                                )}
-                             </ul>
-                        </div>
-                    )}
+                                    {initialCandidate.history.length > 0 ? initialCandidate.history.slice().reverse().map((h, index) => (
+                                        <li key={index} className="p-3 border-t grid grid-cols-3 items-center">
+                                            <p className="font-medium text-gray-800">{process.stages.find(s => s.id === h.stageId)?.name || 'Desconocido'}</p>
+                                            <p className="text-sm text-gray-500 text-center">{getUserName(h.movedBy)}</p>
+                                            <p className="text-sm text-gray-500 text-right">{new Date(h.movedAt).toLocaleString()}</p>
+                                        </li>
+                                    )) : (
+                                        <li className="p-6 text-center text-gray-500">No hay historial.</li>
+                                    )}
+                                 </ul>
+                            </div>
+                        );
+                    })()}
                     {activeTab === 'schedule' && (
                         <div className="p-6">
                             <div className="flex justify-between items-center mb-4">

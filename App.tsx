@@ -1126,7 +1126,7 @@ const App: React.FC = () => {
                     };
                 }
                 
-                const updated = await candidatesApi.update(updatedCandidateData.id, updatedCandidateData, movedBy || state.currentUser?.id);
+                const updated = await candidatesApi.update(updatedCandidateData.id, updatedCandidateData, movedBy || state.currentUser?.name || 'System');
                 // Actualizar candidato en el estado, preservando si está archivado
                 setState(s => {
                     const existingIndex = s.candidates.findIndex(c => c.id === candidateData.id);
@@ -1190,7 +1190,7 @@ const App: React.FC = () => {
             }
 
                 const firstStageId = targetProcess.stages[0].id;
-            const movedBy = state.currentUser?.id || 'System';
+            const movedBy = state.currentUser?.name || 'System';
 
             try {
                 // Actualizar en la base de datos usando updateCandidate
