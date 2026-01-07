@@ -5,7 +5,7 @@ import { GoogleDriveConfig } from '../types';
 
 // URL del backend API
 // Configura VITE_API_URL en .env.local para producción
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5001';
 
 export interface GoogleDriveFile {
     id: string;
