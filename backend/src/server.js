@@ -10,9 +10,29 @@ const app = express();
 const PORT = process.env.PORT || 5000;
 const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:5173';
 
-// Middleware
+// Permitir múltiples orígenes para que el mismo backend sirva a Opalopy y Opalo ATS
+const allowedOrigins = [
+    'http://localhost:3000',  // Opalopy desarrollo
+    'http://localhost:3001',  // Opalo ATS desarrollo
+    'http://localhost:5173',  // Vite por defecto
+    process.env.FRONTEND_URL,
+    process.env.FRONTEND_URL_OPALOPY,
+    process.env.FRONTEND_URL_OPALO_ATS,
+].filter(Boolean); // Eliminar valores undefined/null
+
+// Middleware CORS
 app.use(cors({
-    origin: FRONTEND_URL,
+    origin: (origin, callback) => {
+        // Permitir requests sin origin (Postman, curl, etc.)
+        if (!origin) return callback(null, true);
+        
+        if (allowedOrigins.includes(origin)) {
+            callback(null, true);
+        } else {
+            console.warn(`⚠️  CORS bloqueado para origen: ${origin}`);
+            callback(new Error('Not allowed by CORS'));
+        }
+    },
     credentials: true,
 }));
 
@@ -33,7 +53,7 @@ app.get('/health', (req, res) => {
     res.json({ 
         status: 'ok', 
         timestamp: new Date().toISOString(),
-        service: 'ATS Pro Backend - Google Drive API'
+        service: 'Opalo ATS Backend - Google Drive API'
     });
 });
 

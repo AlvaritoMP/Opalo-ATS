@@ -1,10 +1,20 @@
 import { createClient } from '@supabase/supabase-js';
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://afhiiplxqtodqxvmswor.supabase.co';
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFmaGlpcGx4cXRvZHF4dm1zd29yIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjI4Njg4MTYsImV4cCI6MjA3ODQ0NDgxNn0.r9YmrHHajLsd5YHUkPnmD7UazpvmsW0TfqC5jy0_3ZU';
+// Configura estas variables en .env.local
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || '';
+const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
+
+// Validar que las credenciales estén configuradas
+if (!supabaseUrl || !supabaseAnonKey) {
+    console.warn('⚠️ Supabase no está configurado. Por favor, configura VITE_SUPABASE_URL y VITE_SUPABASE_ANON_KEY en .env.local');
+}
 
 // Configurar cliente de Supabase con opciones mejoradas
-export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+// Si no hay credenciales, usar valores dummy para evitar errores de inicialización
+export const supabase = createClient(
+    supabaseUrl || 'https://placeholder.supabase.co',
+    supabaseAnonKey || 'placeholder-key',
+    {
     auth: {
         persistSession: false, // No persistir sesión en localStorage para evitar problemas
         autoRefreshToken: false,
@@ -61,8 +71,17 @@ export function getErrorMessage(error: any): string {
     return 'Error desconocido al conectar con Supabase';
 }
 
+// Función helper para verificar si Supabase está configurado
+export function isSupabaseConfigured(): boolean {
+    return !!(supabaseUrl && supabaseAnonKey && supabaseUrl !== 'https://placeholder.supabase.co');
+}
+
 // Función helper para establecer el usuario actual en la sesión
 export async function setCurrentUser(userId: string) {
+    if (!isSupabaseConfigured()) {
+        console.warn('Supabase no está configurado, saltando setCurrentUser');
+        return;
+    }
     try {
         // Intentar usar la función RPC si existe
         const { error } = await supabase.rpc('set_current_user', { user_id: userId });
@@ -79,6 +98,9 @@ export async function setCurrentUser(userId: string) {
 
 // Función helper para obtener el usuario actual
 export async function getCurrentUserId(): Promise<string | null> {
+    if (!isSupabaseConfigured()) {
+        return null;
+    }
     try {
         const { data, error } = await supabase.rpc('get_current_user_id');
         if (error) {

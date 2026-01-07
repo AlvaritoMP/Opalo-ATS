@@ -1,5 +1,6 @@
 import { supabase, setCurrentUser } from '../supabase';
 import { User } from '../../types';
+import { APP_NAME } from '../appConfig';
 
 // Convertir de DB a tipo de aplicación
 function dbToUser(dbUser: any): User {
@@ -29,23 +30,25 @@ function userToDb(user: Partial<User>): any {
 }
 
 export const usersApi = {
-    // Obtener todos los usuarios
+    // Obtener todos los usuarios (solo de esta app)
     async getAll(): Promise<User[]> {
         const { data, error } = await supabase
             .from('users')
             .select('*')
+            .eq('app_name', APP_NAME)
             .order('created_at', { ascending: false });
         
         if (error) throw error;
         return (data || []).map(dbToUser);
     },
 
-    // Obtener un usuario por ID
+    // Obtener un usuario por ID (solo de esta app)
     async getById(id: string): Promise<User | null> {
         const { data, error } = await supabase
             .from('users')
             .select('*')
             .eq('id', id)
+            .eq('app_name', APP_NAME)
             .single();
         
         if (error) {
@@ -55,12 +58,13 @@ export const usersApi = {
         return data ? dbToUser(data) : null;
     },
 
-    // Obtener usuario por email
+    // Obtener usuario por email (solo de esta app)
     async getByEmail(email: string): Promise<User | null> {
         const { data, error } = await supabase
             .from('users')
             .select('*')
             .eq('email', email.toLowerCase())
+            .eq('app_name', APP_NAME)
             .single();
         
         if (error) {
@@ -70,9 +74,10 @@ export const usersApi = {
         return data ? dbToUser(data) : null;
     },
 
-    // Crear usuario
+    // Crear usuario (con app_name automático)
     async create(userData: Omit<User, 'id'>): Promise<User> {
         const dbData = userToDb(userData);
+        dbData.app_name = APP_NAME; // Asegurar que siempre se asigne el app_name
         const { data, error } = await supabase
             .from('users')
             .insert(dbData)
@@ -83,13 +88,16 @@ export const usersApi = {
         return dbToUser(data);
     },
 
-    // Actualizar usuario
+    // Actualizar usuario (solo de esta app)
     async update(id: string, userData: Partial<User>): Promise<User> {
         const dbData = userToDb(userData);
+        // No permitir cambiar app_name
+        delete dbData.app_name;
         const { data, error } = await supabase
             .from('users')
             .update(dbData)
             .eq('id', id)
+            .eq('app_name', APP_NAME) // Asegurar que solo se actualicen usuarios de esta app
             .select()
             .single();
         
@@ -97,14 +105,14 @@ export const usersApi = {
         return dbToUser(data);
     },
 
-    // Eliminar usuario
+    // Eliminar usuario (solo de esta app)
     async delete(id: string): Promise<void> {
         console.log('usersApi.delete called with id:', id);
         
-        // Primero verificar que el usuario existe
+        // Primero verificar que el usuario existe y pertenece a esta app
         const existingUser = await this.getById(id);
         if (!existingUser) {
-            console.warn('User not found, cannot delete:', id);
+            console.warn('User not found or does not belong to this app, cannot delete:', id);
             throw new Error('Usuario no encontrado');
         }
         
@@ -114,7 +122,8 @@ export const usersApi = {
         const { error: deleteError } = await supabase
             .from('users')
             .delete()
-            .eq('id', id);
+            .eq('id', id)
+            .eq('app_name', APP_NAME); // Asegurar que solo se eliminen usuarios de esta app
         
         console.log('Delete result (without select):', { deleteError });
         
@@ -142,9 +151,9 @@ export const usersApi = {
         console.log('User deleted successfully. Verified by checking if user still exists.');
     },
 
-    // Login (verificar credenciales)
+    // Login (verificar credenciales - solo usuarios de esta app)
     async login(email: string, password: string): Promise<User | null> {
-        const user = await this.getByEmail(email);
+        const user = await this.getByEmail(email); // Ya filtra por app_name
         if (!user || user.password !== password) {
             return null;
         }

@@ -3,7 +3,7 @@ import { initialProcesses, initialCandidates, initialUsers, initialSettings, ini
 import { Process, Candidate, User, AppSettings, FormIntegration, InterviewEvent, CandidateHistory, Application, PostIt, Comment, Section, UserRole } from './types';
 import { getSettings, saveSettings as saveSettingsToStorage } from './lib/settings';
 import { usersApi, processesApi, candidatesApi, postItsApi, commentsApi, interviewsApi, settingsApi, setCurrentUser } from './lib/api/index';
-import { isCorsError, getErrorMessage } from './lib/supabase';
+import { isCorsError, getErrorMessage, isSupabaseConfigured } from './lib/supabase';
 import { googleDriveService } from './lib/googleDrive';
 import { Dashboard } from './components/Dashboard';
 import { ProcessList } from './components/ProcessList';
@@ -168,7 +168,7 @@ const LoginPage: React.FC = () => {
                 <div className="w-full max-w-sm p-8 space-y-6 bg-white rounded-xl shadow-lg">
                     <div className="text-center">
                         {state.settings?.logoUrl && <img src={state.settings.logoUrl} alt="Logo" className="h-12 mx-auto mb-4 object-contain" />}
-                        <h1 className="text-3xl font-bold text-gray-900">{state.settings?.appName || 'ATS Pro'}</h1>
+                        <h1 className="text-3xl font-bold text-gray-900">{state.settings?.appName || 'Opalo ATS'}</h1>
                         <p className="mt-2 text-sm text-gray-600">Please sign in to your account</p>
                     </div>
                     <form className="space-y-6" onSubmit={handleLogin}>
@@ -303,7 +303,7 @@ const Sidebar: React.FC = () => {
                     {!isCollapsed && (
                          <div className="flex items-center overflow-hidden">
                             {state.settings?.logoUrl && <img src={state.settings.logoUrl} alt="Logo" className="h-8 mr-2 object-contain" />}
-                            <span className="font-bold text-xl text-gray-800 truncate">{state.settings?.appName || 'ATS Pro'}</span>
+                            <span className="font-bold text-xl text-gray-800 truncate">{state.settings?.appName || 'Opalo ATS'}</span>
                         </div>
                     )}
                     <button 
@@ -442,6 +442,21 @@ const App: React.FC = () => {
     useEffect(() => {
         const loadData = async () => {
             try {
+                // Verificar si Supabase está configurado
+                if (!isSupabaseConfigured()) {
+                    console.warn('⚠️ Supabase no está configurado. La aplicación funcionará en modo limitado.');
+                    console.warn('Por favor, configura VITE_SUPABASE_URL y VITE_SUPABASE_ANON_KEY en .env.local');
+                    
+                    // Cargar settings desde localStorage si existen
+                    const localSettings = getSettings();
+                    setState(s => ({
+                        ...s,
+                        settings: localSettings || initialSettings,
+                        loading: false,
+                    }));
+                    return;
+                }
+                
                 console.log('Loading data from Supabase...');
                 
                 // Cargar datos de Supabase con timeouts y mejor manejo de errores

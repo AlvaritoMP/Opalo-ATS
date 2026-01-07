@@ -106,7 +106,7 @@ export const GoogleDriveSettings: React.FC<GoogleDriveSettingsProps> = ({ config
                     userEmail: userInfo?.email || config?.userEmail,
                     userName: userInfo?.name || config?.userName,
                     rootFolderId: rootFolderId || config?.rootFolderId,
-                    rootFolderName: rootFolderName || config?.rootFolderName || 'ATS Pro',
+                    rootFolderName: rootFolderName || config?.rootFolderName || 'Opalo ATS',
                 };
 
                 googleDriveService.setTokens(accessToken, refreshToken || '');
@@ -148,7 +148,7 @@ export const GoogleDriveSettings: React.FC<GoogleDriveSettingsProps> = ({ config
                     userEmail: userEmail || config?.userEmail,
                     userName: userName || config?.userName,
                     rootFolderId: rootFolderId || config?.rootFolderId,
-                    rootFolderName: rootFolderName || config?.rootFolderName || 'ATS Pro',
+                    rootFolderName: rootFolderName || config?.rootFolderName || 'Opalo ATS',
                 };
                 googleDriveService.setTokens(accessToken, refreshToken || '');
                 
@@ -237,7 +237,7 @@ export const GoogleDriveSettings: React.FC<GoogleDriveSettingsProps> = ({ config
                             userEmail: userInfo?.email || config?.userEmail,
                             userName: userInfo?.name || config?.userName,
                             rootFolderId: rootFolderId || config?.rootFolderId,
-                            rootFolderName: rootFolderName || config?.rootFolderName || 'ATS Pro',
+                            rootFolderName: rootFolderName || config?.rootFolderName || 'Opalo ATS',
                         };
 
                         console.log('💾 Guardando configuración:', { connected: newConfig.connected, hasToken: !!newConfig.accessToken });
@@ -333,7 +333,7 @@ export const GoogleDriveSettings: React.FC<GoogleDriveSettingsProps> = ({ config
                                     userEmail: userEmail || config?.userEmail,
                                     userName: userName || config?.userName,
                                     rootFolderId: rootFolderId || config?.rootFolderId,
-                                    rootFolderName: rootFolderName || config?.rootFolderName || 'ATS Pro',
+                                    rootFolderName: rootFolderName || config?.rootFolderName || 'Opalo ATS',
                                 };
                                 
                                 console.log('💾 Guardando configuración desde URL:', { connected: newConfig.connected, hasToken: !!newConfig.accessToken });
@@ -520,7 +520,7 @@ export const GoogleDriveSettings: React.FC<GoogleDriveSettingsProps> = ({ config
                     </h4>
                     <div className="text-sm text-blue-800 space-y-2">
                         <p>
-                            <strong>Carpeta raíz:</strong> Todos los archivos se almacenan en la carpeta raíz configurada (por defecto <strong>"ATS Pro"</strong>). Puedes cambiarla haciendo clic en "Cambiar" arriba.
+                            <strong>Carpeta raíz:</strong> Todos los archivos se almacenan en la carpeta raíz configurada (por defecto <strong>"Opalo ATS"</strong>). Puedes cambiarla haciendo clic en "Cambiar" arriba.
                         </p>
                         <p>
                             <strong>Organización por proceso:</strong> Puedes configurar una carpeta específica para cada proceso de contratación. 
@@ -531,10 +531,10 @@ export const GoogleDriveSettings: React.FC<GoogleDriveSettingsProps> = ({ config
                         </p>
                         <ul className="list-disc list-inside ml-2 space-y-1">
                             <li>Si el proceso tiene una carpeta configurada → Los archivos se suben a esa carpeta</li>
-                            <li>Si el proceso NO tiene carpeta → Los archivos se suben directamente a "ATS Pro"</li>
+                            <li>Si el proceso NO tiene carpeta → Los archivos se suben directamente a "Opalo ATS"</li>
                         </ul>
                         <p className="mt-2">
-                            <strong>Botón "Actualizar carpetas":</strong> Lista las carpetas disponibles dentro de "ATS Pro" para que puedas asignarlas a procesos.
+                            <strong>Botón "Actualizar carpetas":</strong> Lista las carpetas disponibles dentro de "Opalo ATS" para que puedas asignarlas a procesos.
                         </p>
                     </div>
                 </div>
@@ -553,7 +553,7 @@ export const GoogleDriveSettings: React.FC<GoogleDriveSettingsProps> = ({ config
                         )}
                         {config.rootFolderId && (
                             <div className="flex items-center justify-between">
-                                <p><strong>Carpeta raíz:</strong> {config.rootFolderName || 'ATS Pro'}</p>
+                                <p><strong>Carpeta raíz:</strong> {config.rootFolderName || 'Opalo ATS'}</p>
                                 <button
                                     onClick={() => {
                                         setShowRootFolderSelector(!showRootFolderSelector);

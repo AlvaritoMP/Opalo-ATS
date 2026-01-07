@@ -1,7 +1,7 @@
 {
   "name": "ats-pro-backend",
   "version": "1.0.0",
-  "description": "Backend API para ATS Pro - Google Drive Integration",
+  "description": "Backend API para Opalo ATS - Google Drive Integration",
   "main": "src/server.js",
   "type": "module",
   "engines": {

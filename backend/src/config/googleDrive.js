@@ -113,9 +113,9 @@ export const getUserInfo = async (accessToken, req = null) => {
 
 /**
  * Crea o obtiene la carpeta raíz en Google Drive
- * Si no se especifica un nombre, usa "ATS Pro" por defecto
+ * Si no se especifica un nombre, usa "Opalo ATS" por defecto
  */
-export const getOrCreateRootFolder = async (accessToken, req = null, folderName = 'ATS Pro') => {
+export const getOrCreateRootFolder = async (accessToken, req = null, folderName = 'Opalo ATS') => {
     try {
         const client = getOAuth2Client(req);
         client.setCredentials({

@@ -2,35 +2,40 @@ import { supabase } from '../supabase';
 import { Candidate, CandidateHistory, PostIt, Comment, Attachment } from '../../types';
 import { processesApi } from './processes';
 import { convertirSalarioALetras } from '../numberToWords';
+import { APP_NAME } from '../appConfig';
 
 // Convertir de DB a tipo de aplicación
 async function dbToCandidate(dbCandidate: any): Promise<Candidate> {
-    // Obtener historial
+    // Obtener historial (solo de esta app)
     const { data: history } = await supabase
         .from('candidate_history')
         .select('*')
         .eq('candidate_id', dbCandidate.id)
+        .eq('app_name', APP_NAME)
         .order('moved_at', { ascending: true });
 
-    // Obtener post-its
+    // Obtener post-its (solo de esta app)
     const { data: postIts } = await supabase
         .from('post_its')
         .select('*')
         .eq('candidate_id', dbCandidate.id)
+        .eq('app_name', APP_NAME)
         .order('created_at', { ascending: false });
 
-    // Obtener comentarios
+    // Obtener comentarios (solo de esta app)
     const { data: comments } = await supabase
         .from('comments')
         .select('*')
         .eq('candidate_id', dbCandidate.id)
+        .eq('app_name', APP_NAME)
         .order('created_at', { ascending: false });
 
-    // Obtener adjuntos
+    // Obtener adjuntos (solo de esta app)
     const { data: attachments } = await supabase
         .from('attachments')
         .select('*')
         .eq('candidate_id', dbCandidate.id)
+        .eq('app_name', APP_NAME)
         .order('uploaded_at', { ascending: false });
 
     // Obtener adjuntos de comentarios
@@ -40,7 +45,8 @@ async function dbToCandidate(dbCandidate: any): Promise<Candidate> {
         const { data: commentAtts } = await supabase
             .from('attachments')
             .select('*')
-            .in('comment_id', commentIds);
+            .in('comment_id', commentIds)
+            .eq('app_name', APP_NAME);
         commentAttachments = commentAtts || [];
     }
 
@@ -177,10 +183,11 @@ export const candidatesApi = {
     // OPTIMIZADO: Carga todas las relaciones en batch en lugar de N+1 queries
     // OPTIMIZADO EGRESS: Selecciona solo campos necesarios, attachments/comments se cargan lazy
     async getAll(includeArchived: boolean = false, includeRelations: boolean = true): Promise<Candidate[]> {
-        // Seleccionar solo campos básicos para reducir egress
+        // Seleccionar solo campos básicos para reducir egress (solo de esta app)
         let query = supabase
             .from('candidates')
             .select('id, name, email, phone, phone2, process_id, stage_id, description, avatar_url, source, salary_expectation, agreed_salary, agreed_salary_in_words, age, dni, linkedin_url, address, province, district, archived, archived_at, discarded, discard_reason, discarded_at, hire_date, google_drive_folder_id, google_drive_folder_name, visible_to_clients, offer_accepted_date, application_started_date, application_completed_date, critical_stage_reviewed_at, created_at')
+            .eq('app_name', APP_NAME) // Filtrar solo candidatos de esta app
             .order('created_at', { ascending: false })
             .limit(200); // Reducir límite para reducir egress
         
@@ -243,16 +250,19 @@ export const candidatesApi = {
                 .from('candidate_history')
                 .select('id, candidate_id, stage_id, moved_at, moved_by')
                 .in('candidate_id', candidateIds)
+                .eq('app_name', APP_NAME) // Filtrar solo historial de esta app
                 .order('moved_at', { ascending: true }),
             supabase
                 .from('post_its')
                 .select('id, candidate_id, text, color, created_by, created_at')
                 .in('candidate_id', candidateIds)
+                .eq('app_name', APP_NAME) // Filtrar solo post-its de esta app
                 .order('created_at', { ascending: false }),
             supabase
                 .from('comments')
                 .select('id, candidate_id, text, user_id, created_at')
                 .in('candidate_id', candidateIds)
+                .eq('app_name', APP_NAME) // Filtrar solo comentarios de esta app
                 .order('created_at', { ascending: false }),
         ]);
 
@@ -433,6 +443,7 @@ export const candidatesApi = {
             .from('candidates')
             .select('id, name, email, phone, phone2, process_id, stage_id, description, avatar_url, source, salary_expectation, agreed_salary, agreed_salary_in_words, age, dni, linkedin_url, address, province, district, archived, archived_at, discarded, discard_reason, discarded_at, hire_date, google_drive_folder_id, google_drive_folder_name, visible_to_clients, offer_accepted_date, application_started_date, application_completed_date, critical_stage_reviewed_at, created_at')
             .eq('id', id)
+            .eq('app_name', APP_NAME) // Filtrar solo candidatos de esta app
             .single();
         
         if (error) {
@@ -447,6 +458,7 @@ export const candidatesApi = {
     async create(candidateData: Omit<Candidate, 'id' | 'history'>, createdBy?: string): Promise<Candidate> {
         const dbData = candidateToDb(candidateData);
         if (createdBy) dbData.created_by = createdBy;
+        dbData.app_name = APP_NAME; // Asegurar que siempre se asigne el app_name
         // Set application_started_date if not provided
         if (!dbData.application_started_date) {
             dbData.application_started_date = new Date().toISOString();
@@ -470,6 +482,7 @@ export const candidatesApi = {
             if (isColumnError) {
                 // Separar campos opcionales y reintentar
                 const { agreed_salary_in_words, province, district, critical_stage_reviewed_at, ...standardCreateFields } = dbData;
+                standardCreateFields.app_name = APP_NAME; // Asegurar app_name en el reintento
                 
                 const { data: data2, error: error2 } = await supabase
                     .from('candidates')
@@ -522,6 +535,7 @@ export const candidatesApi = {
                 stage_id: candidateData.stageId,
                 moved_at: new Date().toISOString(),
                 moved_by: createdBy || null,
+                app_name: APP_NAME, // Asegurar que siempre se asigne el app_name
             });
         }
 
@@ -540,6 +554,7 @@ export const candidatesApi = {
                     name: att.name,
                     url: att.url,
                     type: att.type,
+                    app_name: APP_NAME, // Asegurar que siempre se asigne el app_name
                     size: att.size,
                     category: att.category || null,
                     uploaded_at: att.uploadedAt || new Date().toISOString(),
@@ -593,11 +608,15 @@ export const candidatesApi = {
         // IMPORTANTE: discarded, discard_reason, discarded_at deben estar en standardFields para que se guarden
         const { province, district, critical_stage_reviewed_at, agreed_salary_in_words, ...standardFields } = dbData;
         
+        // No permitir cambiar app_name
+        delete standardFields.app_name;
+        
         // Primero intentar actualizar solo los campos estándar
         const { error: standardError } = await supabase
             .from('candidates')
             .update(standardFields)
-            .eq('id', id);
+            .eq('id', id)
+            .eq('app_name', APP_NAME); // Asegurar que solo se actualicen candidatos de esta app
         
         if (standardError) throw standardError;
         
@@ -612,7 +631,8 @@ export const candidatesApi = {
             const { error: locationError } = await supabase
                 .from('candidates')
                 .update(locationFields)
-                .eq('id', id);
+                .eq('id', id)
+                .eq('app_name', APP_NAME);
             
             // Si hay error, verificar si es por columnas faltantes
             if (locationError) {
@@ -634,7 +654,8 @@ export const candidatesApi = {
                 const { error: criticalError } = await supabase
                     .from('candidates')
                     .update({ critical_stage_reviewed_at })
-                    .eq('id', id);
+                    .eq('id', id)
+                    .eq('app_name', APP_NAME);
                 
                 if (criticalError) {
                     const errorMsg = criticalError.message || '';
@@ -666,6 +687,7 @@ export const candidatesApi = {
                         .from('candidates')
                         .update({ agreed_salary_in_words })
                         .eq('id', id)
+                        .eq('app_name', APP_NAME)
                         .select('agreed_salary_in_words')
                         .single();
                     
@@ -855,17 +877,24 @@ export const candidatesApi = {
         return updatedCandidate;
     },
 
-    // Eliminar candidato
+    // Eliminar candidato (solo de esta app)
     async delete(id: string): Promise<void> {
+        // Primero verificar que el candidato existe y pertenece a esta app
+        const existing = await this.getById(id);
+        if (!existing) {
+            throw new Error('Candidato no encontrado');
+        }
+        
         const { error } = await supabase
             .from('candidates')
             .delete()
-            .eq('id', id);
+            .eq('id', id)
+            .eq('app_name', APP_NAME); // Asegurar que solo se eliminen candidatos de esta app
         
         if (error) throw error;
     },
 
-    // Archivar candidato
+    // Archivar candidato (solo de esta app)
     async archive(id: string): Promise<Candidate> {
         const { error } = await supabase
             .from('candidates')
@@ -873,13 +902,14 @@ export const candidatesApi = {
                 archived: true,
                 archived_at: new Date().toISOString(),
             })
-            .eq('id', id);
+            .eq('id', id)
+            .eq('app_name', APP_NAME); // Asegurar que solo se archiven candidatos de esta app
         
         if (error) throw error;
         return await this.getById(id) as Candidate;
     },
 
-    // Restaurar candidato
+    // Restaurar candidato (solo de esta app)
     async restore(id: string): Promise<Candidate> {
         const { error } = await supabase
             .from('candidates')
@@ -887,7 +917,8 @@ export const candidatesApi = {
                 archived: false,
                 archived_at: null,
             })
-            .eq('id', id);
+            .eq('id', id)
+            .eq('app_name', APP_NAME); // Asegurar que solo se restauren candidatos de esta app
         
         if (error) throw error;
         return await this.getById(id) as Candidate;

@@ -1,5 +1,6 @@
 import { supabase } from '../supabase';
 import { AppSettings } from '../../types';
+import { APP_NAME } from '../appConfig';
 
 const SETTINGS_ID = '00000000-0000-0000-0000-000000000000';
 
@@ -10,7 +11,7 @@ function dbToSettings(dbSettings: any): AppSettings {
         fileStorage: dbSettings.file_storage_config || { provider: 'None', connected: false },
         googleDrive: dbSettings.google_drive_config || undefined,
         currencySymbol: dbSettings.currency_symbol || '$',
-        appName: dbSettings.app_name || 'ATS Pro',
+        appName: dbSettings.app_name || 'Opalo ATS',
         logoUrl: dbSettings.logo_url || '',
         poweredByLogoUrl: dbSettings.powered_by_logo_url || undefined,
         customLabels: dbSettings.custom_labels || {},
@@ -44,12 +45,12 @@ function settingsToDb(settings: Partial<AppSettings>): any {
 }
 
 export const settingsApi = {
-    // Obtener configuración
+    // Obtener configuración (solo de esta app)
     async get(): Promise<AppSettings> {
         const { data, error } = await supabase
             .from('app_settings')
             .select('*')
-            .eq('id', SETTINGS_ID)
+            .eq('app_name', APP_NAME) // Filtrar solo settings de esta app
             .single();
         
         if (error) {
@@ -59,7 +60,7 @@ export const settingsApi = {
                     database: { apiUrl: '', apiToken: '' },
                     fileStorage: { provider: 'None', connected: false },
                     currencySymbol: '$',
-                    appName: 'ATS Pro',
+                    appName: APP_NAME,
                     logoUrl: '',
                     customLabels: {},
                 });
@@ -69,10 +70,10 @@ export const settingsApi = {
         return dbToSettings(data);
     },
 
-    // Crear configuración (solo si no existe)
+    // Crear configuración (solo si no existe, con app_name automático)
     async create(settings: AppSettings): Promise<AppSettings> {
         const dbData = settingsToDb(settings);
-        dbData.id = SETTINGS_ID;
+        dbData.app_name = APP_NAME; // Asegurar que siempre se asigne el app_name
 
         const { data, error } = await supabase
             .from('app_settings')
@@ -98,11 +99,14 @@ export const settingsApi = {
         // Separar campos opcionales que pueden no existir en el esquema
         const { candidate_sources, provinces, districts, powered_by_logo_url, ...standardFields } = mergedDbData;
         
+        // No permitir cambiar app_name
+        delete standardFields.app_name;
+        
         // Primero actualizar campos estándar
         const { error: standardError } = await supabase
             .from('app_settings')
             .update(standardFields)
-            .eq('id', SETTINGS_ID);
+            .eq('app_name', APP_NAME);
         
         if (standardError) {
             console.error('Error updating standard settings fields:', standardError);
@@ -117,10 +121,10 @@ export const settingsApi = {
         if (powered_by_logo_url !== undefined) optionalFields.powered_by_logo_url = powered_by_logo_url;
         
         if (Object.keys(optionalFields).length > 0) {
-            const { error: optionalError } = await supabase
-                .from('app_settings')
-                .update(optionalFields)
-                .eq('id', SETTINGS_ID);
+                const { error: optionalError } = await supabase
+                    .from('app_settings')
+                    .update(optionalFields)
+                    .eq('app_name', APP_NAME);
             
             if (optionalError) {
                 const errorMsg = optionalError.message || '';
@@ -138,7 +142,7 @@ export const settingsApi = {
         const { data, error: fetchError } = await supabase
             .from('app_settings')
             .select('*')
-            .eq('id', SETTINGS_ID)
+            .eq('app_name', APP_NAME)
             .single();
         
         if (fetchError) {

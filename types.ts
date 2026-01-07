@@ -186,7 +186,7 @@ export interface GoogleDriveConfig {
     tokenExpiry?: string;
     userEmail?: string;
     userName?: string;
-    rootFolderId?: string; // Carpeta raíz en Google Drive (puede ser "ATS Pro" o cualquier otra)
+    rootFolderId?: string; // Carpeta raíz en Google Drive (puede ser "Opalo ATS" o cualquier otra)
     rootFolderName?: string; // Nombre de la carpeta raíz
 }
 

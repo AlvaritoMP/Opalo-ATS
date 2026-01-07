@@ -46,18 +46,18 @@ router.get('/google/callback', async (req, res) => {
         // Obtener información del usuario
         const userInfo = await getUserInfo(tokens.access_token, req);
 
-        // Crear o obtener carpeta raíz "ATS Pro" (por defecto)
-        const rootFolderId = await getOrCreateRootFolder(tokens.access_token, req, 'ATS Pro');
+        // Crear o obtener carpeta raíz "Opalo ATS" (por defecto)
+        const rootFolderId = await getOrCreateRootFolder(tokens.access_token, req, 'Opalo ATS');
         
         // Obtener el nombre de la carpeta raíz
-        let rootFolderName = 'ATS Pro';
+        let rootFolderName = 'Opalo ATS';
         try {
             const { google } = await import('googleapis');
             const client = getOAuth2Client(req);
             client.setCredentials({ access_token: tokens.access_token });
             const drive = google.drive({ version: 'v3', auth: client });
             const folderInfo = await drive.files.get({ fileId: rootFolderId, fields: 'name' });
-            rootFolderName = folderInfo.data.name || 'ATS Pro';
+            rootFolderName = folderInfo.data.name || 'Opalo ATS';
         } catch (error) {
             console.error('Error obteniendo nombre de carpeta raíz:', error);
         }
