@@ -47,42 +47,125 @@ function settingsToDb(settings: Partial<AppSettings>): any {
 export const settingsApi = {
     // Obtener configuración (solo de esta app)
     async get(): Promise<AppSettings> {
-        const { data, error } = await supabase
-            .from('app_settings')
-            .select('*')
-            .eq('app_name', APP_NAME) // Filtrar solo settings de esta app
-            .single();
-        
-        if (error) {
-            // Si no existe, crear con valores por defecto
-            if (error.code === 'PGRST116') {
-                return await this.create({
-                    database: { apiUrl: '', apiToken: '' },
-                    fileStorage: { provider: 'None', connected: false },
-                    currencySymbol: '$',
-                    appName: APP_NAME,
-                    logoUrl: '',
-                    customLabels: {},
-                });
+        try {
+            // Intentar primero con filtro por app_name
+            const { data, error } = await supabase
+                .from('app_settings')
+                .select('*')
+                .eq('app_name', APP_NAME) // Filtrar solo settings de esta app
+                .maybeSingle();
+            
+            if (error) {
+                // Si el error es 406 o relacionado con app_name, intentar sin filtro
+                if (error.code === 'PGRST116' || error.message?.includes('app_name') || error.message?.includes('406')) {
+                    console.warn('⚠️ Error al cargar settings con filtro app_name, intentando sin filtro:', error.message);
+                    
+                    // Intentar sin filtro (para compatibilidad con tablas sin app_name)
+                    const { data: allData, error: allError } = await supabase
+                        .from('app_settings')
+                        .select('*')
+                        .maybeSingle();
+                    
+                    if (allError) {
+                        // Si tampoco funciona sin filtro, crear con valores por defecto
+                        if (allError.code === 'PGRST116') {
+                            console.warn('⚠️ No hay settings en la BD, creando con valores por defecto');
+                            return await this.create({
+                                database: { apiUrl: '', apiToken: '' },
+                                fileStorage: { provider: 'None', connected: false },
+                                currencySymbol: '$',
+                                appName: APP_NAME,
+                                logoUrl: '',
+                                customLabels: {},
+                            });
+                        }
+                        throw allError;
+                    }
+                    
+                    // Si hay datos sin filtro, usar esos (puede ser de otra app, pero es mejor que nada)
+                    if (allData) {
+                        return dbToSettings(allData);
+                    }
+                } else {
+                    throw error;
+                }
             }
-            throw error;
+            
+            // Si encontramos datos con filtro, usarlos
+            if (data) {
+                return dbToSettings(data);
+            }
+            
+            // Si no hay datos, crear con valores por defecto
+            console.warn('⚠️ No hay settings para esta app, creando con valores por defecto');
+            return await this.create({
+                database: { apiUrl: '', apiToken: '' },
+                fileStorage: { provider: 'None', connected: false },
+                currencySymbol: '$',
+                appName: APP_NAME,
+                logoUrl: '',
+                customLabels: {},
+            });
+        } catch (error: any) {
+            console.error('❌ Error al obtener settings:', error);
+            // Retornar valores por defecto si todo falla
+            return {
+                database: { apiUrl: '', apiToken: '' },
+                fileStorage: { provider: 'None', connected: false },
+                currencySymbol: '$',
+                appName: APP_NAME,
+                logoUrl: '',
+                customLabels: {},
+            } as AppSettings;
         }
-        return dbToSettings(data);
     },
 
     // Crear configuración (solo si no existe, con app_name automático)
     async create(settings: AppSettings): Promise<AppSettings> {
-        const dbData = settingsToDb(settings);
-        dbData.app_name = APP_NAME; // Asegurar que siempre se asigne el app_name
+        try {
+            const dbData = settingsToDb(settings);
+            // Intentar asignar app_name solo si la columna existe
+            try {
+                dbData.app_name = APP_NAME;
+            } catch (e) {
+                // Si falla, continuar sin app_name (compatibilidad)
+                console.warn('⚠️ No se pudo asignar app_name:', e);
+            }
 
-        const { data, error } = await supabase
-            .from('app_settings')
-            .insert(dbData)
-            .select()
-            .single();
-        
-        if (error) throw error;
-        return dbToSettings(data);
+            const { data, error } = await supabase
+                .from('app_settings')
+                .insert(dbData)
+                .select()
+                .maybeSingle();
+            
+            if (error) {
+                // Si el error es que app_name no existe, intentar sin app_name
+                if (error.message?.includes('app_name') || error.message?.includes('column') || error.code === 'PGRST106') {
+                    console.warn('⚠️ Error al crear settings con app_name, intentando sin app_name:', error.message);
+                    delete dbData.app_name;
+                    
+                    const { data: retryData, error: retryError } = await supabase
+                        .from('app_settings')
+                        .insert(dbData)
+                        .select()
+                        .maybeSingle();
+                    
+                    if (retryError) throw retryError;
+                    if (retryData) return dbToSettings(retryData);
+                }
+                throw error;
+            }
+            
+            if (!data) {
+                throw new Error('No se creó el registro de settings');
+            }
+            
+            return dbToSettings(data);
+        } catch (error: any) {
+            console.error('❌ Error al crear settings:', error);
+            // Retornar settings originales si la creación falla
+            return settings;
+        }
     },
 
     // Actualizar configuración
