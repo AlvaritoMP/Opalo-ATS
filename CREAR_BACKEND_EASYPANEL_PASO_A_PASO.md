@@ -42,8 +42,8 @@ Después de crear el servicio, ve a **Environment Variables** y agrega:
 PORT=5000
 NODE_ENV=production
 FRONTEND_URL=https://opalo-atsopalo.bouasv.easypanel.host
-GOOGLE_CLIENT_ID=968572483416-v3dju424jrbae7b85u7fb7jurskfmh15.apps.googleusercontent.com
-GOOGLE_CLIENT_SECRET=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
+GOOGLE_CLIENT_ID=tu_google_client_id
+GOOGLE_CLIENT_SECRET=tu_google_client_secret
 GOOGLE_REDIRECT_URI=https://opalo-atsopalo-backend.bouasv.easypanel.host/api/auth/google/callback
 ```
 

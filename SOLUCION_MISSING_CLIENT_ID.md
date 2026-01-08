@@ -121,7 +121,7 @@ Get-Content .env | Select-String "GOOGLE_CLIENT_ID"
 
 Debería mostrar:
 ```
-GOOGLE_CLIENT_ID=968572483416-v3dju424jrbae7b85u7fb7jurskfmh15.apps.googleusercontent.com
+GOOGLE_CLIENT_ID=tu_google_client_id
 ```
 
 ### Verificar que el Backend Esté Leyendo el `.env`
