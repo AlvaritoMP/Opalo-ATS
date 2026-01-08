@@ -4,12 +4,18 @@ import { getOrCreateRootFolder } from '../config/googleDrive.js';
 
 const router = express.Router();
 
-// OAuth2 client (se inicializa con las credenciales del .env)
-const oauth2Client = new google.auth.OAuth2(
-    process.env.GOOGLE_CLIENT_ID,
-    process.env.GOOGLE_CLIENT_SECRET,
-    process.env.GOOGLE_REDIRECT_URI || 'http://localhost:5000/api/auth/google/callback'
-);
+// Función helper para crear OAuth2 client (se crea cada vez para asegurar que lee las variables de entorno)
+function getOAuth2Client() {
+    const clientId = process.env.GOOGLE_CLIENT_ID;
+    const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
+    const redirectUri = process.env.GOOGLE_REDIRECT_URI || 'http://localhost:5000/api/auth/google/callback';
+    
+    if (!clientId || !clientSecret) {
+        throw new Error('GOOGLE_CLIENT_ID y GOOGLE_CLIENT_SECRET deben estar configurados en .env');
+    }
+    
+    return new google.auth.OAuth2(clientId, clientSecret, redirectUri);
+}
 
 // Scopes necesarios para Google Drive
 const SCOPES = [
@@ -22,12 +28,8 @@ const SCOPES = [
 // Ruta para iniciar el flujo OAuth
 router.get('/google/drive', (req, res) => {
     try {
-        if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET) {
-            return res.status(500).json({ 
-                error: 'Google OAuth no configurado',
-                message: 'GOOGLE_CLIENT_ID y GOOGLE_CLIENT_SECRET deben estar en .env'
-            });
-        }
+        // Crear OAuth2 client (lee las variables de entorno en este momento)
+        const oauth2Client = getOAuth2Client();
 
         // Obtener el frontend URL desde el query o usar el default
         const frontendUrl = req.query.frontend_url || process.env.FRONTEND_URL || 'http://localhost:3001';
@@ -41,6 +43,7 @@ router.get('/google/drive', (req, res) => {
         });
 
         console.log(`🔗 Redirigiendo a Google OAuth para: ${frontendUrl}`);
+        console.log(`🔑 Client ID: ${process.env.GOOGLE_CLIENT_ID?.substring(0, 20)}...`);
         res.redirect(authUrl);
     } catch (error) {
         console.error('Error en /google/drive:', error);
@@ -55,8 +58,11 @@ router.get('/google/callback', async (req, res) => {
         const frontendUrl = state || process.env.FRONTEND_URL || 'http://localhost:3001';
 
         if (!code) {
-            return res.redirect(`${frontendUrl}/settings?error=no_code`);
+            return res.redirect(`${frontendUrl}/google-drive-callback.html?error=no_code&message=No se recibió código de autorización`);
         }
+
+        // Crear OAuth2 client (lee las variables de entorno en este momento)
+        const oauth2Client = getOAuth2Client();
 
         // Intercambiar código por tokens
         const { tokens } = await oauth2Client.getToken(code);
@@ -85,7 +91,8 @@ router.get('/google/callback', async (req, res) => {
         }
 
         // Construir URL de redirección con los tokens
-        const redirectUrl = new URL(`${frontendUrl}/settings`);
+        // Usar una página HTML simple para el popup en lugar de la app completa
+        const redirectUrl = new URL(`${frontendUrl}/google-drive-callback.html`);
         redirectUrl.searchParams.set('drive_connected', 'true');
         redirectUrl.searchParams.set('access_token', tokens.access_token);
         if (tokens.refresh_token) {
@@ -106,7 +113,7 @@ router.get('/google/callback', async (req, res) => {
     } catch (error) {
         console.error('Error en /google/callback:', error);
         const frontendUrl = req.query.state || process.env.FRONTEND_URL || 'http://localhost:3001';
-        res.redirect(`${frontendUrl}/settings?error=oauth_failed&message=${encodeURIComponent(error.message)}`);
+        res.redirect(`${frontendUrl}/google-drive-callback.html?error=oauth_failed&message=${encodeURIComponent(error.message)}`);
     }
 });
 
@@ -119,6 +126,8 @@ router.post('/google/refresh', async (req, res) => {
             return res.status(400).json({ error: 'refresh_token requerido' });
         }
 
+        // Crear OAuth2 client (lee las variables de entorno en este momento)
+        const oauth2Client = getOAuth2Client();
         oauth2Client.setCredentials({ refresh_token });
         const { credentials } = await oauth2Client.refreshAccessToken();
 

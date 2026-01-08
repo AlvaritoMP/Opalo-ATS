@@ -67,17 +67,17 @@ export const settingsApi = {
                         .maybeSingle();
                     
                     if (allError) {
-                        // Si tampoco funciona sin filtro, crear con valores por defecto
+                        // Si tampoco funciona sin filtro, retornar valores por defecto (no crear en BD)
                         if (allError.code === 'PGRST116') {
-                            console.warn('⚠️ No hay settings en la BD, creando con valores por defecto');
-                            return await this.create({
+                            console.warn('⚠️ No hay settings en la BD, usando valores por defecto');
+                            return {
                                 database: { apiUrl: '', apiToken: '' },
                                 fileStorage: { provider: 'None', connected: false },
                                 currencySymbol: '$',
                                 appName: APP_NAME,
                                 logoUrl: '',
                                 customLabels: {},
-                            });
+                            } as AppSettings;
                         }
                         throw allError;
                     }
@@ -96,16 +96,16 @@ export const settingsApi = {
                 return dbToSettings(data);
             }
             
-            // Si no hay datos, crear con valores por defecto
-            console.warn('⚠️ No hay settings para esta app, creando con valores por defecto');
-            return await this.create({
+            // Si no hay datos, retornar valores por defecto directamente (no crear en BD)
+            console.warn('⚠️ No hay settings para esta app, usando valores por defecto');
+            return {
                 database: { apiUrl: '', apiToken: '' },
                 fileStorage: { provider: 'None', connected: false },
                 currencySymbol: '$',
                 appName: APP_NAME,
                 logoUrl: '',
                 customLabels: {},
-            });
+            } as AppSettings;
         } catch (error: any) {
             console.error('❌ Error al obtener settings:', error);
             // Retornar valores por defecto si todo falla

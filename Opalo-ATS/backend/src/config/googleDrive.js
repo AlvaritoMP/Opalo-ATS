@@ -14,8 +14,9 @@ export const getOrCreateRootFolder = async (accessToken, req = null, folderName 
         
         const drive = google.drive({ version: 'v3', auth });
 
-        // Buscar carpeta existente
-        const searchQuery = `name='${folderName}' and mimeType='application/vnd.google-apps.folder' and trashed=false and 'root' in parents`;
+        // Buscar carpeta existente con el nombre exacto (escapar comillas simples en el nombre)
+        const escapedFolderName = folderName.replace(/'/g, "\\'");
+        const searchQuery = `name='${escapedFolderName}' and mimeType='application/vnd.google-apps.folder' and trashed=false and 'root' in parents`;
         
         const searchResponse = await drive.files.list({
             q: searchQuery,
@@ -24,11 +25,15 @@ export const getOrCreateRootFolder = async (accessToken, req = null, folderName 
         });
 
         if (searchResponse.data.files && searchResponse.data.files.length > 0) {
-            const folderId = searchResponse.data.files[0].id;
-            if (req) {
-                console.log(`📁 Carpeta raíz "${folderName}" encontrada: ${folderId}`);
+            // Verificar que el nombre coincida exactamente (case-sensitive)
+            const exactMatch = searchResponse.data.files.find(f => f.name === folderName);
+            if (exactMatch) {
+                const folderId = exactMatch.id;
+                if (req) {
+                    console.log(`📁 Carpeta raíz "${folderName}" encontrada: ${folderId}`);
+                }
+                return folderId;
             }
-            return folderId;
         }
 
         // Crear carpeta si no existe
