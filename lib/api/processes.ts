@@ -171,12 +171,37 @@ export const processesApi = {
     // OPTIMIZADO EGRESS: Selecciona solo campos necesarios, attachments se cargan lazy
     async getAll(includeAttachments: boolean = false): Promise<Process[]> {
         // 1. Cargar todos los procesos (solo campos necesarios para reducir egress)
-        const { data: processes, error } = await supabase
-            .from('processes')
-            .select('id, title, description, salary_range, experience_level, seniority, flyer_url, flyer_position, service_order_code, start_date, end_date, status, vacancies, google_drive_folder_id, google_drive_folder_name, published_date, need_identified_date, client_id, created_at')
-            .eq('app_name', APP_NAME) // Filtrar solo procesos de esta app
-            .order('created_at', { ascending: false })
-            .limit(200); // Reducir límite para reducir egress
+        // Nota: client_id puede no existir si la migración no se ha ejecutado, por lo que lo manejamos con try-catch
+        let processes: any[] = [];
+        let error: any = null;
+        
+        try {
+            const result = await supabase
+                .from('processes')
+                .select('id, title, description, salary_range, experience_level, seniority, flyer_url, flyer_position, service_order_code, start_date, end_date, status, vacancies, google_drive_folder_id, google_drive_folder_name, published_date, need_identified_date, client_id, created_at')
+                .eq('app_name', APP_NAME) // Filtrar solo procesos de esta app
+                .order('created_at', { ascending: false })
+                .limit(200); // Reducir límite para reducir egress
+            
+            processes = result.data || [];
+            error = result.error;
+        } catch (err: any) {
+            // Si falla porque client_id no existe, intentar sin ese campo
+            if (err.message?.includes('client_id') || err.message?.includes('column') || err.code === 'PGRST116') {
+                console.warn('⚠️ Columna client_id no existe, cargando procesos sin ese campo');
+                const result = await supabase
+                    .from('processes')
+                    .select('id, title, description, salary_range, experience_level, seniority, flyer_url, flyer_position, service_order_code, start_date, end_date, status, vacancies, google_drive_folder_id, google_drive_folder_name, published_date, need_identified_date, created_at')
+                    .eq('app_name', APP_NAME)
+                    .order('created_at', { ascending: false })
+                    .limit(200);
+                
+                processes = result.data || [];
+                error = result.error;
+            } else {
+                error = err;
+            }
+        }
         
         if (error) throw error;
         if (!processes || processes.length === 0) return [];
