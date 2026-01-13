@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useAppState } from '../App';
-import { AppSettings } from '../types';
-import { Save, Database, HardDrive, Globe, Brush, Type } from 'lucide-react';
+import { AppSettings, Client } from '../types';
+import { Save, Database, HardDrive, Globe, Brush, Type, Building2, Plus, Trash2, Edit2 } from 'lucide-react';
 import { GoogleDriveSettings } from './GoogleDriveSettings';
+import { clientsApi } from '../lib/api';
 
 const fileToBase64 = (file: File): Promise<string> => {
     return new Promise((resolve, reject) => {
@@ -18,11 +19,94 @@ export const Settings: React.FC = () => {
     const { state, actions } = useAppState();
     const [settings, setSettings] = useState<AppSettings | null>(state.settings);
     const [isSaving, setIsSaving] = useState(false);
+    const [clients, setClients] = useState<Client[]>([]);
+    const [isLoadingClients, setIsLoadingClients] = useState(false);
+    const [showClientModal, setShowClientModal] = useState(false);
+    const [editingClient, setEditingClient] = useState<Client | null>(null);
+    const [clientRazonSocial, setClientRazonSocial] = useState('');
+    const [clientRuc, setClientRuc] = useState('');
     const logoInputRef = useRef<HTMLInputElement>(null);
 
     useEffect(() => {
         setSettings(state.settings);
     }, [state.settings]);
+
+    useEffect(() => {
+        loadClients();
+    }, []);
+
+    const loadClients = async () => {
+        setIsLoadingClients(true);
+        try {
+            const allClients = await clientsApi.getAll();
+            setClients(allClients);
+        } catch (error: any) {
+            console.error('Error cargando clientes:', error);
+            alert('Error al cargar clientes: ' + error.message);
+        } finally {
+            setIsLoadingClients(false);
+        }
+    };
+
+    const handleOpenClientModal = (client?: Client) => {
+        if (client) {
+            setEditingClient(client);
+            setClientRazonSocial(client.razonSocial);
+            setClientRuc(client.ruc);
+        } else {
+            setEditingClient(null);
+            setClientRazonSocial('');
+            setClientRuc('');
+        }
+        setShowClientModal(true);
+    };
+
+    const handleCloseClientModal = () => {
+        setShowClientModal(false);
+        setEditingClient(null);
+        setClientRazonSocial('');
+        setClientRuc('');
+    };
+
+    const handleSaveClient = async () => {
+        if (!clientRazonSocial.trim() || !clientRuc.trim()) {
+            alert('Por favor completa todos los campos');
+            return;
+        }
+
+        try {
+            if (editingClient) {
+                await clientsApi.update(editingClient.id, {
+                    razonSocial: clientRazonSocial.trim(),
+                    ruc: clientRuc.trim(),
+                });
+            } else {
+                await clientsApi.create({
+                    razonSocial: clientRazonSocial.trim(),
+                    ruc: clientRuc.trim(),
+                });
+            }
+            await loadClients();
+            handleCloseClientModal();
+        } catch (error: any) {
+            console.error('Error guardando cliente:', error);
+            alert('Error al guardar cliente: ' + error.message);
+        }
+    };
+
+    const handleDeleteClient = async (id: string) => {
+        if (!confirm('¿Estás seguro de que deseas eliminar este cliente?')) {
+            return;
+        }
+
+        try {
+            await clientsApi.delete(id);
+            await loadClients();
+        } catch (error: any) {
+            console.error('Error eliminando cliente:', error);
+            alert('Error al eliminar cliente: ' + error.message);
+        }
+    };
 
     if (!settings) {
         return null; // Or a loading state
@@ -229,6 +313,58 @@ export const Settings: React.FC = () => {
                     </div>
                 </div>
 
+                {/* Clients Management */}
+                <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
+                    <div className="flex justify-between items-center mb-4">
+                        <div>
+                            <h2 className="text-xl font-semibold mb-1 flex items-center"><Building2 className="mr-2"/> Clientes</h2>
+                            <p className="text-sm text-gray-500">Gestiona los clientes que pueden ser asignados a los procesos.</p>
+                        </div>
+                        <button
+                            onClick={() => handleOpenClientModal()}
+                            className="flex items-center px-4 py-2 bg-primary-600 text-white rounded-lg shadow-sm hover:bg-primary-700"
+                        >
+                            <Plus className="w-4 h-4 mr-2" /> Nuevo Cliente
+                        </button>
+                    </div>
+                    {isLoadingClients ? (
+                        <div className="text-center py-8 text-gray-500">Cargando clientes...</div>
+                    ) : clients.length === 0 ? (
+                        <div className="text-center py-8 text-gray-500">
+                            <Building2 className="w-12 h-12 mx-auto mb-2 text-gray-300" />
+                            <p>No hay clientes registrados</p>
+                            <p className="text-sm">Haz clic en "Nuevo Cliente" para agregar uno</p>
+                        </div>
+                    ) : (
+                        <div className="space-y-2">
+                            {clients.map(client => (
+                                <div key={client.id} className="flex items-center justify-between p-3 border border-gray-200 rounded-md hover:bg-gray-50">
+                                    <div>
+                                        <div className="font-medium text-gray-900">{client.razonSocial}</div>
+                                        <div className="text-sm text-gray-500">RUC: {client.ruc}</div>
+                                    </div>
+                                    <div className="flex items-center space-x-2">
+                                        <button
+                                            onClick={() => handleOpenClientModal(client)}
+                                            className="p-2 text-gray-600 hover:text-primary-600 hover:bg-primary-50 rounded-md"
+                                            title="Editar"
+                                        >
+                                            <Edit2 className="w-4 h-4" />
+                                        </button>
+                                        <button
+                                            onClick={() => handleDeleteClient(client.id)}
+                                            className="p-2 text-gray-600 hover:text-red-600 hover:bg-red-50 rounded-md"
+                                            title="Eliminar"
+                                        >
+                                            <Trash2 className="w-4 h-4" />
+                                        </button>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                </div>
+
                 {/* Provinces and Districts Settings */}
                 <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
                     <h2 className="text-xl font-semibold mb-1 flex items-center"><Type className="mr-2"/> Provincias y Distritos</h2>
@@ -428,6 +564,59 @@ export const Settings: React.FC = () => {
                     </div>
                 )}
             </div>
+
+            {/* Modal para crear/editar cliente */}
+            {showClientModal && (
+                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+                    <div className="bg-white rounded-xl shadow-xl max-w-md w-full mx-4">
+                        <div className="p-6">
+                            <h3 className="text-xl font-semibold mb-4">
+                                {editingClient ? 'Editar Cliente' : 'Nuevo Cliente'}
+                            </h3>
+                            <div className="space-y-4">
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                                        Razón Social *
+                                    </label>
+                                    <input
+                                        type="text"
+                                        value={clientRazonSocial}
+                                        onChange={e => setClientRazonSocial(e.target.value)}
+                                        className="w-full px-3 py-2 border border-gray-300 rounded-md"
+                                        placeholder="Ej: Empresa S.A.C."
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                                        RUC *
+                                    </label>
+                                    <input
+                                        type="text"
+                                        value={clientRuc}
+                                        onChange={e => setClientRuc(e.target.value)}
+                                        className="w-full px-3 py-2 border border-gray-300 rounded-md"
+                                        placeholder="Ej: 20123456789"
+                                    />
+                                </div>
+                            </div>
+                            <div className="flex justify-end space-x-3 mt-6">
+                                <button
+                                    onClick={handleCloseClientModal}
+                                    className="px-4 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200"
+                                >
+                                    Cancelar
+                                </button>
+                                <button
+                                    onClick={handleSaveClient}
+                                    className="px-4 py-2 bg-primary-600 text-white rounded-md hover:bg-primary-700"
+                                >
+                                    {editingClient ? 'Actualizar' : 'Crear'}
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             <style>{`.input { padding: 0.5rem 0.75rem; border: 1px solid #D1D5DB; border-radius: 0.375rem; box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05); }`}</style>
         </div>

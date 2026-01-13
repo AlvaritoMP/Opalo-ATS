@@ -26,6 +26,14 @@ export interface DocumentCategory {
     required: boolean; // Si es requerido para el proceso
 }
 
+export interface Client {
+    id: string;
+    razonSocial: string;
+    ruc: string;
+    createdAt?: string;
+    updatedAt?: string;
+}
+
 export interface Process {
     id: string;
     title: string;
@@ -47,6 +55,8 @@ export interface Process {
     googleDriveFolderName?: string; // Nombre de la carpeta (para mostrar)
     publishedDate?: string; // Fecha de publicación de la oferta (para Time to Hire)
     needIdentifiedDate?: string; // Fecha de identificación de necesidad (para Time to Fill)
+    clientId?: string; // ID del cliente al que pertenece el proceso
+    client?: Client; // Información del cliente (opcional, para cuando se carga con JOIN)
 }
 
 export interface CandidateHistory {

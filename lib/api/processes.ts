@@ -43,6 +43,14 @@ function dbToProcess(dbProcess: any, stages: any[] = [], documentCategories: any
         googleDriveFolderName: dbProcess.google_drive_folder_name,
         publishedDate: dbProcess.published_date,
         needIdentifiedDate: dbProcess.need_identified_date,
+        clientId: dbProcess.client_id || undefined,
+        client: dbProcess.client ? {
+            id: dbProcess.client.id,
+            razonSocial: dbProcess.client.razon_social,
+            ruc: dbProcess.client.ruc,
+            createdAt: dbProcess.client.created_at,
+            updatedAt: dbProcess.client.updated_at,
+        } : undefined,
     };
 }
 
@@ -65,6 +73,7 @@ function processToDb(process: Partial<Process>): any {
     if (process.googleDriveFolderName !== undefined) dbProcess.google_drive_folder_name = process.googleDriveFolderName;
     if (process.publishedDate !== undefined) dbProcess.published_date = process.publishedDate && process.publishedDate.trim() !== '' ? process.publishedDate : null;
     if (process.needIdentifiedDate !== undefined) dbProcess.need_identified_date = process.needIdentifiedDate && process.needIdentifiedDate.trim() !== '' ? process.needIdentifiedDate : null;
+    if (process.clientId !== undefined) dbProcess.client_id = process.clientId || null;
     return dbProcess;
 }
 
@@ -164,7 +173,7 @@ export const processesApi = {
         // 1. Cargar todos los procesos (solo campos necesarios para reducir egress)
         const { data: processes, error } = await supabase
             .from('processes')
-            .select('id, title, description, salary_range, experience_level, seniority, flyer_url, flyer_position, service_order_code, start_date, end_date, status, vacancies, google_drive_folder_id, google_drive_folder_name, published_date, need_identified_date, created_at')
+            .select('id, title, description, salary_range, experience_level, seniority, flyer_url, flyer_position, service_order_code, start_date, end_date, status, vacancies, google_drive_folder_id, google_drive_folder_name, published_date, need_identified_date, client_id, created_at')
             .eq('app_name', APP_NAME) // Filtrar solo procesos de esta app
             .order('created_at', { ascending: false })
             .limit(200); // Reducir límite para reducir egress
