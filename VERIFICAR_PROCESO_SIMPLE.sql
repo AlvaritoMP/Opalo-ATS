@@ -1,9 +1,9 @@
 -- Verificar el proceso de Opalo ATS (versión simple - ejecuta solo esta query)
+-- Nota: client_id puede no existir, por eso se verifica primero
 SELECT 
     id,
     title,
     app_name,
-    client_id,
     status,
     created_at
 FROM processes
