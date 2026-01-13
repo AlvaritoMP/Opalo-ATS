@@ -179,6 +179,26 @@ export const settingsApi = {
         const mergedDbData = settingsToDb(mergedSettings);
         console.log('settingsApi.update - mergedDbData:', JSON.stringify(mergedDbData, null, 2));
         
+        // Verificar si existe un registro para esta app
+        const { data: existingData, error: checkError } = await supabase
+            .from('app_settings')
+            .select('id')
+            .eq('app_name', APP_NAME)
+            .maybeSingle();
+        
+        // Si no existe, crear el registro primero
+        if (!existingData || checkError?.code === 'PGRST116') {
+            console.log('⚠️ No existe registro de settings, creando uno nuevo...');
+            try {
+                const created = await this.create(mergedSettings);
+                console.log('✅ Settings creados exitosamente');
+                return created;
+            } catch (createError: any) {
+                console.error('Error creating settings:', createError);
+                // Si falla la creación, intentar actualizar de todas formas (puede que exista pero el check falló)
+            }
+        }
+        
         // Separar campos opcionales que pueden no existir en el esquema
         const { candidate_sources, provinces, districts, powered_by_logo_url, ...standardFields } = mergedDbData;
         
@@ -186,14 +206,38 @@ export const settingsApi = {
         delete standardFields.app_name;
         
         // Primero actualizar campos estándar
-        const { error: standardError } = await supabase
+        const { error: standardError, data: updatedData } = await supabase
             .from('app_settings')
             .update(standardFields)
-            .eq('app_name', APP_NAME);
+            .eq('app_name', APP_NAME)
+            .select('id');
         
         if (standardError) {
             console.error('Error updating standard settings fields:', standardError);
+            // Si el error es que no existe el registro, intentar crear
+            if (standardError.code === 'PGRST116' || standardError.message?.includes('No rows')) {
+                console.log('⚠️ No se encontró registro para actualizar, creando uno nuevo...');
+                try {
+                    const created = await this.create(mergedSettings);
+                    return created;
+                } catch (createError: any) {
+                    console.error('Error creating settings after failed update:', createError);
+                    throw standardError;
+                }
+            }
             throw standardError;
+        }
+        
+        // Verificar que se actualizó al menos una fila
+        if (!updatedData || updatedData.length === 0) {
+            console.warn('⚠️ No se actualizó ninguna fila, creando registro nuevo...');
+            try {
+                const created = await this.create(mergedSettings);
+                return created;
+            } catch (createError: any) {
+                console.error('Error creating settings after zero update count:', createError);
+                // Continuar para intentar actualizar campos opcionales
+            }
         }
         
         // Actualizar campos opcionales por separado (si existen)
@@ -230,11 +274,22 @@ export const settingsApi = {
         
         if (fetchError) {
             console.error('Error fetching updated settings:', fetchError);
+            // Si no se encuentra, intentar crear
+            if (fetchError.code === 'PGRST116') {
+                console.log('⚠️ No se encontró registro después de actualizar, creando uno nuevo...');
+                try {
+                    const created = await this.create(mergedSettings);
+                    return created;
+                } catch (createError: any) {
+                    console.error('Error creating settings after fetch error:', createError);
+                    throw fetchError;
+                }
+            }
             throw fetchError;
         }
         
         const result = dbToSettings(data);
-        console.log('settingsApi.update - result:', JSON.stringify(result.googleDrive, null, 2));
+        console.log('✅ Settings actualizados exitosamente:', JSON.stringify(result.googleDrive, null, 2));
         return result;
     },
 };
