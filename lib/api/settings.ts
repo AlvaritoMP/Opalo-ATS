@@ -121,22 +121,24 @@ export const settingsApi = {
     },
 
     // Crear configuración (solo si no existe, con app_name automático)
+    // NOTA: La tabla tiene un constraint que solo permite un registro con ID específico
+    // Por eso usamos UPSERT (INSERT ... ON CONFLICT DO UPDATE)
     async create(settings: AppSettings): Promise<AppSettings> {
         try {
             const dbData = settingsToDb(settings);
-            // Intentar asignar app_name solo si la columna existe
-            try {
-                dbData.app_name = APP_NAME;
-            } catch (e) {
-                // Si falla, continuar sin app_name (compatibilidad)
-                console.warn('⚠️ No se pudo asignar app_name:', e);
-            }
+            dbData.app_name = APP_NAME;
+            // Usar el ID específico que requiere el constraint
+            dbData.id = SETTINGS_ID;
 
+            // Usar UPSERT para insertar o actualizar
             const { data, error } = await supabase
                 .from('app_settings')
-                .insert(dbData)
+                .upsert(dbData, { 
+                    onConflict: 'id',
+                    ignoreDuplicates: false 
+                })
                 .select()
-                .maybeSingle();
+                .single();
             
             if (error) {
                 // Si el error es que app_name no existe, intentar sin app_name
@@ -146,9 +148,12 @@ export const settingsApi = {
                     
                     const { data: retryData, error: retryError } = await supabase
                         .from('app_settings')
-                        .insert(dbData)
+                        .upsert(dbData, { 
+                            onConflict: 'id',
+                            ignoreDuplicates: false 
+                        })
                         .select()
-                        .maybeSingle();
+                        .single();
                     
                     if (retryError) throw retryError;
                     if (retryData) return dbToSettings(retryData);
@@ -157,7 +162,7 @@ export const settingsApi = {
             }
             
             if (!data) {
-                throw new Error('No se creó el registro de settings');
+                throw new Error('No se creó/actualizó el registro de settings');
             }
             
             return dbToSettings(data);
@@ -179,14 +184,13 @@ export const settingsApi = {
         const mergedDbData = settingsToDb(mergedSettings);
         console.log('settingsApi.update - mergedDbData:', JSON.stringify(mergedDbData, null, 2));
         
-        // Verificar si existe un registro para esta app
+        // Verificar si existe un registro (la tabla solo permite uno con ID específico)
         const { data: existingData, error: checkError } = await supabase
             .from('app_settings')
-            .select('id')
-            .eq('app_name', APP_NAME)
+            .select('id, app_name')
             .maybeSingle();
         
-        // Si no existe, crear el registro primero
+        // Si no existe ningún registro, crear uno
         if (!existingData || checkError?.code === 'PGRST116') {
             console.log('⚠️ No existe registro de settings, creando uno nuevo...');
             try {
@@ -195,8 +199,11 @@ export const settingsApi = {
                 return created;
             } catch (createError: any) {
                 console.error('Error creating settings:', createError);
-                // Si falla la creación, intentar actualizar de todas formas (puede que exista pero el check falló)
+                // Si falla la creación, intentar actualizar de todas formas
             }
+        } else if (existingData.app_name !== APP_NAME) {
+            // Si existe pero tiene app_name diferente, actualizarlo
+            console.log(`⚠️ Registro existe pero con app_name = '${existingData.app_name}', actualizando a '${APP_NAME}'...`);
         }
         
         // Separar campos opcionales que pueden no existir en el esquema
