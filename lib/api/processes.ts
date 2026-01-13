@@ -238,7 +238,38 @@ export const processesApi = {
             queries.push(Promise.resolve({ data: [] }));
         }
 
-        const [stagesResult, categoriesResult, attachmentsResult] = await Promise.all(queries);
+        // Ejecutar queries con manejo de errores individual para que si una falla, las otras continúen
+        let stagesResult: any = { data: [] };
+        let categoriesResult: any = { data: [] };
+        let attachmentsResult: any = { data: [] };
+        
+        try {
+            const results = await Promise.allSettled(queries);
+            
+            // stages
+            if (results[0].status === 'fulfilled') {
+                stagesResult = results[0].value;
+            } else {
+                console.warn('⚠️ Error cargando stages, continuando sin stages:', results[0].reason);
+            }
+            
+            // document_categories
+            if (results[1].status === 'fulfilled') {
+                categoriesResult = results[1].value;
+            } else {
+                console.warn('⚠️ Error cargando document_categories, continuando sin categorías:', results[1].reason);
+            }
+            
+            // attachments
+            if (results[2].status === 'fulfilled') {
+                attachmentsResult = results[2].value;
+            } else {
+                console.warn('⚠️ Error cargando attachments, continuando sin attachments:', results[2].reason);
+            }
+        } catch (error) {
+            console.error('Error ejecutando queries de relaciones:', error);
+            // Continuar con arrays vacíos
+        }
 
         // 4. Agrupar relaciones por process_id en memoria
         const stagesByProcessId = new Map<string, any[]>();
