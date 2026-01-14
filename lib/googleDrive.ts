@@ -42,21 +42,43 @@ class GoogleDriveService {
             this.accessToken = config.accessToken;
             this.refreshToken = config.refreshToken || null;
             
+            // Log para debug
+            console.log('🔧 Inicializando GoogleDriveService:', {
+                hasAccessToken: !!this.accessToken,
+                hasRefreshToken: !!this.refreshToken,
+                refreshTokenLength: this.refreshToken?.length || 0,
+                tokenExpiry: config.tokenExpiry
+            });
+            
             // Verificar si el token expiró
             if (config.tokenExpiry) {
                 this.tokenExpiry = new Date(config.tokenExpiry);
                 const now = new Date();
+                const timeUntilExpiry = this.tokenExpiry.getTime() - now.getTime();
                 // Si el token expiró o expira en menos de 5 minutos, refrescarlo
-                if (this.tokenExpiry <= now || (this.tokenExpiry.getTime() - now.getTime()) < 5 * 60 * 1000) {
+                if (this.tokenExpiry <= now || timeUntilExpiry < 5 * 60 * 1000) {
                     console.log('🔄 Token de Google Drive expirado o próximo a expirar, refrescando...');
+                    if (!this.refreshToken) {
+                        console.error('❌ No se puede refrescar: no hay refresh token guardado');
+                        throw new Error('No hay refresh token disponible. Por favor, reconecta tu cuenta de Google Drive.');
+                    }
                     try {
                         await this.refreshAccessToken();
                     } catch (error) {
                         console.error('❌ Error refrescando token al inicializar:', error);
-                        // No lanzar error, solo loguear - el token se refrescará cuando se use
+                        // Si falla el refresh, limpiar tokens para forzar reconexión
+                        this.accessToken = null;
+                        this.refreshToken = null;
+                        throw error;
                     }
+                } else {
+                    console.log(`✅ Token válido por ${Math.floor(timeUntilExpiry / 1000 / 60)} minutos más`);
                 }
+            } else if (!this.refreshToken) {
+                console.warn('⚠️ No hay refresh token guardado. El token puede expirar sin poder refrescarse.');
             }
+        } else {
+            console.log('⚠️ Google Drive no está configurado o no hay access token');
         }
     }
 
