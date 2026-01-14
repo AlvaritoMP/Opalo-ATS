@@ -1349,6 +1349,35 @@ export const CandidateDetailsModal: React.FC<{ candidate: Candidate, onClose: ()
                                     )}
                                     <input type="file" ref={attachmentInputRef} onChange={handleAttachmentUpload} className="hidden" />
                                     <div className="mt-2 space-y-2">
+                                        {/* Botón para sincronizar archivos de Google Drive */}
+                                        {currentCandidate.googleDriveFolderId && state.settings?.googleDrive?.connected && (
+                                            <button
+                                                type="button"
+                                                onClick={() => {
+                                                    hasSyncedDriveRef.current = false; // Permitir nueva sincronización
+                                                    syncDriveFiles(true);
+                                                }}
+                                                disabled={isSyncingDrive}
+                                                className={`flex items-center justify-center w-full px-3 py-2 text-sm font-medium rounded-md transition-colors mb-2 ${
+                                                    isSyncingDrive
+                                                        ? 'bg-gray-200 text-gray-500 cursor-not-allowed'
+                                                        : 'bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200'
+                                                }`}
+                                                title="Sincronizar documentos desde Google Drive"
+                                            >
+                                                {isSyncingDrive ? (
+                                                    <>
+                                                        <Loader className="w-4 h-4 mr-2 animate-spin" />
+                                                        <span>Sincronizando...</span>
+                                                    </>
+                                                ) : (
+                                                    <>
+                                                        <RefreshCw className="w-4 h-4 mr-2" />
+                                                        <span>Sincronizar con Google Drive</span>
+                                                    </>
+                                                )}
+                                            </button>
+                                        )}
                                         <button 
                                             type="button" 
                                             onClick={() => attachmentInputRef.current?.click()} 
