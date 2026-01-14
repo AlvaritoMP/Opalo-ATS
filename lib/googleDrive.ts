@@ -28,12 +28,35 @@ export interface GoogleDriveFolder {
 class GoogleDriveService {
     private accessToken: string | null = null;
     private refreshToken: string | null = null;
+    private tokenExpiry: Date | null = null;
+    private onTokenUpdate: ((accessToken: string, refreshToken?: string, expiresIn?: number) => void) | null = null;
+
+    // Establecer callback para actualizar tokens en settings cuando se refrescan
+    setTokenUpdateCallback(callback: (accessToken: string, refreshToken?: string, expiresIn?: number) => void) {
+        this.onTokenUpdate = callback;
+    }
 
     // Inicializar con tokens guardados
-    initialize(config: GoogleDriveConfig | undefined) {
+    async initialize(config: GoogleDriveConfig | undefined) {
         if (config?.connected && config.accessToken) {
             this.accessToken = config.accessToken;
             this.refreshToken = config.refreshToken || null;
+            
+            // Verificar si el token expiró
+            if (config.tokenExpiry) {
+                this.tokenExpiry = new Date(config.tokenExpiry);
+                const now = new Date();
+                // Si el token expiró o expira en menos de 5 minutos, refrescarlo
+                if (this.tokenExpiry <= now || (this.tokenExpiry.getTime() - now.getTime()) < 5 * 60 * 1000) {
+                    console.log('🔄 Token de Google Drive expirado o próximo a expirar, refrescando...');
+                    try {
+                        await this.refreshAccessToken();
+                    } catch (error) {
+                        console.error('❌ Error refrescando token al inicializar:', error);
+                        // No lanzar error, solo loguear - el token se refrescará cuando se use
+                    }
+                }
+            }
         }
     }
 
@@ -579,15 +602,36 @@ class GoogleDriveService {
             }
 
             const data = await response.json();
-            this.accessToken = data.accessToken;
-            if (data.refreshToken) {
-                this.refreshToken = data.refreshToken;
+            this.accessToken = data.access_token || data.accessToken;
+            
+            // Actualizar refresh token si se proporciona uno nuevo
+            if (data.refresh_token || data.refreshToken) {
+                this.refreshToken = data.refresh_token || data.refreshToken;
             }
+            
+            // Actualizar fecha de expiración
+            if (data.expires_in) {
+                this.tokenExpiry = new Date(Date.now() + data.expires_in * 1000);
+            } else if (data.expiry_date) {
+                this.tokenExpiry = new Date(data.expiry_date);
+            }
+            
+            // Notificar callback para actualizar settings
+            if (this.onTokenUpdate) {
+                this.onTokenUpdate(
+                    this.accessToken,
+                    this.refreshToken || undefined,
+                    data.expires_in
+                );
+            }
+            
+            console.log('✅ Token de Google Drive refrescado exitosamente');
         } catch (error) {
             console.error('Error refrescando token:', error);
             // Limpiar tokens si falla
             this.accessToken = null;
             this.refreshToken = null;
+            this.tokenExpiry = null;
             throw error;
         }
     }
