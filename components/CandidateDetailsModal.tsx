@@ -1,7 +1,7 @@
 import React, { useRef, useState } from 'react';
 import { useAppState } from '../App';
 import { Candidate, Attachment, InterviewEvent, UserRole, Process, DocumentCategory } from '../types';
-import { X, Mail, Phone, Linkedin, User, FileText, Eye, Download, Upload, Trash2, Briefcase, DollarSign, Calendar, Info, MapPin, Edit, ArrowRightLeft, Copy, MessageCircle, PhoneCall, Archive, Undo2 } from 'lucide-react';
+import { X, Mail, Phone, Linkedin, User, FileText, Eye, Download, Upload, Trash2, Briefcase, DollarSign, Calendar, Info, MapPin, Edit, ArrowRightLeft, Copy, MessageCircle, PhoneCall, Archive, Undo2, RefreshCw, Loader } from 'lucide-react';
 import { ScheduleInterviewModal } from './ScheduleInterviewModal';
 import { ChangeProcessModal } from './ChangeProcessModal';
 import { CandidateCommentsModal } from './CandidateCommentsModal';
@@ -165,12 +165,14 @@ export const CandidateDetailsModal: React.FC<{ candidate: Candidate, onClose: ()
     // Sincronizar archivos de Google Drive con attachments al abrir el modal
     // Usar useRef para evitar múltiples sincronizaciones y preservar categorías
     const hasSyncedDriveRef = React.useRef<boolean>(false);
+    const [isSyncingDrive, setIsSyncingDrive] = React.useState(false);
     
-    React.useEffect(() => {
-        // Solo sincronizar una vez al abrir el modal, no cada vez que cambia el candidato
-        if (hasSyncedDriveRef.current) return;
+    // Función de sincronización que puede ser llamada manualmente
+    const syncDriveFiles = React.useCallback(async (force: boolean = false) => {
+        // Si ya se sincronizó y no es forzado, no hacer nada
+        if (hasSyncedDriveRef.current && !force) return;
         
-        const syncDriveFiles = async () => {
+        setIsSyncingDrive(true);
             const googleDriveConfig = state.settings?.googleDrive;
             const isGoogleDriveConnected = googleDriveConfig?.connected && googleDriveConfig?.accessToken;
             if (!isGoogleDriveConnected || !googleDriveConfig) return;
@@ -209,22 +211,63 @@ export const CandidateDetailsModal: React.FC<{ candidate: Candidate, onClose: ()
                     return;
                 }
 
-                // Listar archivos de la carpeta de Google Drive
-                const driveFiles = await googleDriveService.listFilesInFolder(folder.id);
+                // Listar archivos de la carpeta de Google Drive (excluir carpetas)
+                const allItems = await googleDriveService.listFilesInFolder(folder.id);
+                const driveFiles = allItems.filter(item => 
+                    item.mimeType !== 'application/vnd.google-apps.folder'
+                );
                 
-                // Obtener los IDs de Google Drive de los attachments actuales (extraer de la URL)
+                console.log(`📁 Archivos encontrados en Drive para ${currentCandidate.name}:`, driveFiles.length);
+                console.log('📋 Archivos:', driveFiles.map(f => ({ id: f.id, name: f.name })));
+                
+                // Función mejorada para extraer ID de Google Drive de cualquier formato de URL
+                const extractDriveFileId = (url: string | undefined): string | null => {
+                    if (!url) return null;
+                    
+                    // Formato 1: https://drive.google.com/file/d/{id}/view o /preview
+                    let match = url.match(/\/file\/d\/([a-zA-Z0-9_-]+)/);
+                    if (match && match[1]) return match[1];
+                    
+                    // Formato 2: https://drive.google.com/open?id={id}
+                    match = url.match(/[?&]id=([a-zA-Z0-9_-]+)/);
+                    if (match && match[1]) return match[1];
+                    
+                    // Formato 3: https://docs.google.com/document/d/{id}/...
+                    match = url.match(/\/document\/d\/([a-zA-Z0-9_-]+)/);
+                    if (match && match[1]) return match[1];
+                    
+                    // Formato 4: https://docs.google.com/spreadsheets/d/{id}/...
+                    match = url.match(/\/spreadsheets\/d\/([a-zA-Z0-9_-]+)/);
+                    if (match && match[1]) return match[1];
+                    
+                    return null;
+                };
+                
+                // Obtener los IDs de Google Drive de los attachments actuales
                 const existingDriveFileIds = new Set<string>();
                 
                 (currentCandidate.attachments || []).forEach(att => {
-                    // Extraer ID de Google Drive de la URL (formato: .../file/d/{id}/...)
-                    const match = att.url?.match(/\/file\/d\/([a-zA-Z0-9_-]+)/);
-                    if (match && match[1]) {
-                        existingDriveFileIds.add(match[1]);
+                    const fileId = extractDriveFileId(att.url);
+                    if (fileId) {
+                        existingDriveFileIds.add(fileId);
+                        console.log(`✅ Attachment ya registrado: ${att.name} (ID: ${fileId})`);
+                    } else {
+                        console.warn(`⚠️ No se pudo extraer ID de Google Drive de: ${att.url}`);
                     }
                 });
 
+                console.log(`📊 IDs de archivos ya registrados:`, Array.from(existingDriveFileIds));
+                
                 // Encontrar archivos de Drive que no están en los attachments
-                const newFiles = driveFiles.filter(file => !existingDriveFileIds.has(file.id));
+                const newFiles = driveFiles.filter(file => {
+                    const isNew = !existingDriveFileIds.has(file.id);
+                    if (!isNew) {
+                        console.log(`⏭️ Archivo ya registrado, omitiendo: ${file.name} (ID: ${file.id})`);
+                    }
+                    return isNew;
+                });
+                
+                console.log(`🆕 Archivos nuevos encontrados: ${newFiles.length}`, newFiles.map(f => f.name));
 
                 // Si hay archivos nuevos, agregarlos como attachments (sin categoría por defecto)
                 if (newFiles.length > 0) {
@@ -248,19 +291,36 @@ export const CandidateDetailsModal: React.FC<{ candidate: Candidate, onClose: ()
 
                     await actions.updateCandidate(updatedCandidate, state.currentUser?.name);
                     console.log(`✅ Sincronizados ${newFiles.length} archivos de Google Drive para ${currentCandidate.name}`);
+                    actions.showToast(
+                        newFiles.length > 0 
+                            ? `✅ ${newFiles.length} documento(s) sincronizado(s) desde Google Drive`
+                            : '✅ Sincronización completada. No hay archivos nuevos.',
+                        'success',
+                        3000
+                    );
+                } else {
+                    console.log('✅ No hay archivos nuevos para sincronizar');
+                    if (force) {
+                        actions.showToast('✅ Todos los documentos están sincronizados', 'success', 2000);
+                    }
                 }
                 
                 hasSyncedDriveRef.current = true; // Marcar como sincronizado
-            } catch (error) {
-                console.warn('Error sincronizando archivos de Google Drive:', error);
+            } catch (error: any) {
+                console.error('❌ Error sincronizando archivos de Google Drive:', error);
                 hasSyncedDriveRef.current = true; // Marcar como sincronizado incluso si hay error para evitar reintentos
-                // No mostrar error al usuario, es una sincronización en background
+                if (force) {
+                    actions.showToast(`Error al sincronizar: ${error.message || 'Error desconocido'}`, 'error', 5000);
+                }
+            } finally {
+                setIsSyncingDrive(false);
             }
-        };
-
+    }, [state.settings?.googleDrive, state.candidates, state.processes, initialCandidate.id, actions, state.currentUser?.name]);
+    
+    React.useEffect(() => {
         // Ejecutar después de un pequeño delay para asegurar que el modal esté completamente cargado
         const timer = setTimeout(() => {
-            syncDriveFiles();
+            syncDriveFiles(false);
         }, 500);
 
         return () => {
