@@ -532,15 +532,27 @@ const App: React.FC = () => {
                 
                 // Inicializar Google Drive si está configurado
                 if (settings?.googleDrive?.connected && settings.googleDrive.accessToken) {
+                    console.log('🔧 Configurando Google Drive:', {
+                        hasAccessToken: !!settings.googleDrive.accessToken,
+                        hasRefreshToken: !!settings.googleDrive.refreshToken,
+                        refreshTokenLength: settings.googleDrive.refreshToken?.length || 0,
+                        tokenExpiry: settings.googleDrive.tokenExpiry
+                    });
+                    
                     // Configurar callback para actualizar tokens en settings cuando se refrescan
                     googleDriveService.setTokenUpdateCallback(async (accessToken, refreshToken, expiresIn) => {
                         try {
                             const updatedGoogleDrive = {
                                 ...settings.googleDrive!,
                                 accessToken,
-                                refreshToken: refreshToken || settings.googleDrive!.refreshToken,
+                                refreshToken: refreshToken || settings.googleDrive!.refreshToken, // Preservar refresh token si no se proporciona uno nuevo
                                 tokenExpiry: expiresIn ? new Date(Date.now() + expiresIn * 1000).toISOString() : settings.googleDrive!.tokenExpiry,
                             };
+                            console.log('💾 Actualizando tokens en settings:', {
+                                hasAccessToken: !!updatedGoogleDrive.accessToken,
+                                hasRefreshToken: !!updatedGoogleDrive.refreshToken,
+                                refreshTokenLength: updatedGoogleDrive.refreshToken?.length || 0
+                            });
                             const updatedSettings = await settingsApi.update({ googleDrive: updatedGoogleDrive });
                             setState(s => ({ ...s, settings: updatedSettings }));
                             console.log('✅ Token de Google Drive actualizado en settings');
@@ -550,7 +562,15 @@ const App: React.FC = () => {
                     });
                     
                     // Inicializar (puede refrescar el token si está expirado)
-                    await googleDriveService.initialize(settings.googleDrive);
+                    try {
+                        await googleDriveService.initialize(settings.googleDrive);
+                    } catch (error: any) {
+                        console.error('❌ Error inicializando Google Drive:', error);
+                        // Si falla la inicialización, mostrar mensaje pero no bloquear la app
+                        if (error.message?.includes('refresh token')) {
+                            console.warn('⚠️ Google Drive requiere reconexión. El usuario deberá reconectar en Settings.');
+                        }
+                    }
                 }
                 
                 setState({

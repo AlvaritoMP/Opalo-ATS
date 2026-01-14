@@ -584,21 +584,33 @@ class GoogleDriveService {
     // Refrescar token de acceso
     private async refreshAccessToken(): Promise<void> {
         if (!this.refreshToken) {
+            console.error('❌ No hay refresh token disponible. Refresh token:', this.refreshToken);
             throw new Error('No hay refresh token disponible. Por favor, reconecta tu cuenta de Google Drive.');
         }
 
         try {
+            console.log('🔄 Intentando refrescar token de Google Drive...');
             // En producción, esto debe hacerse en el backend por seguridad
+            // El backend espera 'refresh_token' (snake_case), no 'refreshToken'
             const response = await fetch(`${API_BASE_URL}/api/auth/google/refresh`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                 },
-                body: JSON.stringify({ refreshToken: this.refreshToken }),
+                body: JSON.stringify({ refresh_token: this.refreshToken }),
             });
 
             if (!response.ok) {
-                throw new Error('Error al refrescar token');
+                const errorText = await response.text();
+                console.error('❌ Error del backend al refrescar token:', response.status, errorText);
+                let errorMessage = 'Error al refrescar token';
+                try {
+                    const errorData = JSON.parse(errorText);
+                    errorMessage = errorData.error || errorData.message || errorMessage;
+                } catch (e) {
+                    errorMessage = errorText || errorMessage;
+                }
+                throw new Error(errorMessage);
             }
 
             const data = await response.json();
