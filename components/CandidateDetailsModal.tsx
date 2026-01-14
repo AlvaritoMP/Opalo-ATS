@@ -289,8 +289,20 @@ export const CandidateDetailsModal: React.FC<{ candidate: Candidate, onClose: ()
                         attachments: [...(latestCandidate.attachments || []), ...newAttachments],
                     };
 
-                    await actions.updateCandidate(updatedCandidate, state.currentUser?.name);
+                    const savedCandidate = await actions.updateCandidate(updatedCandidate, state.currentUser?.name);
                     console.log(`✅ Sincronizados ${newFiles.length} archivos de Google Drive para ${currentCandidate.name}`);
+                    
+                    // Actualizar el estado local del candidato con los attachments sincronizados
+                    if (savedCandidate) {
+                        setEditableCandidate(savedCandidate);
+                        // Actualizar el contador de attachments
+                        setAttachmentsCount(savedCandidate.attachments?.length || 0);
+                    } else {
+                        // Si no se retorna el candidato actualizado, actualizar manualmente
+                        setEditableCandidate(updatedCandidate);
+                        setAttachmentsCount(updatedCandidate.attachments?.length || 0);
+                    }
+                    
                     actions.showToast(
                         newFiles.length > 0 
                             ? `✅ ${newFiles.length} documento(s) sincronizado(s) desde Google Drive`
@@ -301,6 +313,14 @@ export const CandidateDetailsModal: React.FC<{ candidate: Candidate, onClose: ()
                 } else {
                     console.log('✅ No hay archivos nuevos para sincronizar');
                     if (force) {
+                        // Recargar el contador para asegurar que esté actualizado
+                        try {
+                            const { candidatesApi } = await import('../lib/api/candidates');
+                            const count = await candidatesApi.getAttachmentsCount(initialCandidate.id);
+                            setAttachmentsCount(count);
+                        } catch (error) {
+                            console.warn('Error recargando conteo de attachments:', error);
+                        }
                         actions.showToast('✅ Todos los documentos están sincronizados', 'success', 2000);
                     }
                 }
