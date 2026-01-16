@@ -15,11 +15,12 @@ import { Candidates as CandidatesView } from './components/Candidates';
 import { Forms } from './components/Forms';
 import { CalendarView } from './components/CalendarView';
 import { BulkImportView } from './components/BulkImportView';
+import { BulkProcessesView } from './components/BulkProcessesView';
 import { Spinner } from './components/Spinner';
 import { ArchivedCandidates } from './components/ArchivedCandidates';
 import { Letters } from './components/Letters';
 import { ToastContainer } from './components/Toast';
-import { LayoutDashboard, Briefcase, FileText, Settings as SettingsIcon, Users as UsersIcon, ChevronsLeft, ChevronsRight, BarChart2, Calendar, FileUp, LogOut, X, Archive, RefreshCw, Menu } from 'lucide-react';
+import { LayoutDashboard, Briefcase, FileText, Settings as SettingsIcon, Users as UsersIcon, ChevronsLeft, ChevronsRight, BarChart2, Calendar, FileUp, LogOut, X, Archive, RefreshCw, Menu, Grid3x3 } from 'lucide-react';
 import { CandidateComparator } from './components/CandidateComparator';
 
 
@@ -229,16 +230,19 @@ const LoginPage: React.FC = () => {
 const getVisibleSections = (user: User | null): Section[] => {
     if (!user) return [];
     if (user.visibleSections && user.visibleSections.length > 0) {
+        console.log('🔍 Usuario con secciones personalizadas:', user.visibleSections);
         return user.visibleSections;
     }
     // Secciones por defecto según rol
     const defaultSections: Record<UserRole, Section[]> = {
-        admin: ['dashboard', 'processes', 'archived', 'candidates', 'forms', 'letters', 'calendar', 'reports', 'compare', 'bulk-import', 'users', 'settings'],
-        recruiter: ['dashboard', 'processes', 'archived', 'candidates', 'forms', 'letters', 'calendar', 'reports', 'compare', 'bulk-import'],
+        admin: ['dashboard', 'processes', 'archived', 'candidates', 'forms', 'letters', 'calendar', 'reports', 'compare', 'bulk-import', 'bulk-processes', 'users', 'settings'],
+        recruiter: ['dashboard', 'processes', 'archived', 'candidates', 'forms', 'letters', 'calendar', 'reports', 'compare', 'bulk-import', 'bulk-processes'],
         client: ['dashboard', 'processes', 'candidates', 'calendar', 'reports', 'compare'],
         viewer: ['dashboard', 'processes', 'candidates', 'calendar', 'reports']
     };
-    return defaultSections[user.role] || [];
+    const sections = defaultSections[user.role] || [];
+    console.log('🔍 Usuario:', user.role, 'Secciones visibles:', sections);
+    return sections;
 };
 
 const NavItem: React.FC<{
@@ -274,7 +278,19 @@ const Sidebar: React.FC = () => {
     if (!state.currentUser) return null;
     
     const visibleSections = getVisibleSections(state.currentUser);
-    const canSeeSection = (section: Section) => visibleSections.includes(section);
+    const canSeeSection = (section: Section) => {
+        const canSee = visibleSections.includes(section);
+        if (section === 'bulk-processes') {
+            console.log('🔍 Verificando bulk-processes:', {
+                canSee,
+                visibleSections,
+                userRole: state.currentUser.role,
+                hasCustomSections: !!state.currentUser.visibleSections,
+                customSections: state.currentUser.visibleSections
+            });
+        }
+        return canSee;
+    };
 
     return (
         <>
@@ -327,6 +343,7 @@ const Sidebar: React.FC = () => {
             <nav className="flex-1 p-4 space-y-2 overflow-y-auto">
                 {canSeeSection('dashboard') && <NavItem icon={LayoutDashboard} label={getLabel('sidebar_dashboard', 'Panel')} view="dashboard" currentView={state.view.type} setView={actions.setView} isCollapsed={isCollapsed} />}
                 {canSeeSection('processes') && <NavItem icon={Briefcase} label={getLabel('sidebar_processes', 'Procesos')} view="processes" currentView={state.view.type} setView={actions.setView} isCollapsed={isCollapsed} />}
+                {canSeeSection('bulk-processes') && <NavItem icon={Grid3x3} label={getLabel('sidebar_bulk_processes', 'Procesos Masivos')} view="bulk-processes" currentView={state.view.type} setView={actions.setView} isCollapsed={isCollapsed} />}
                 {canSeeSection('archived') && <NavItem icon={Archive} label={getLabel('sidebar_archived', 'Archivados')} view="archived" currentView={state.view.type} setView={actions.setView} isCollapsed={isCollapsed} />}
                 {canSeeSection('candidates') && <NavItem icon={UsersIcon} label={getLabel('menu_candidates', 'Candidatos')} view="candidates" currentView={state.view.type} setView={actions.setView} isCollapsed={isCollapsed} />}
                 {canSeeSection('forms') && <NavItem icon={FileText} label={getLabel('sidebar_forms', 'Formularios')} view="forms" currentView={state.view.type} setView={actions.setView} isCollapsed={isCollapsed} />}
@@ -1621,7 +1638,8 @@ const App: React.FC = () => {
                 'compare': 'compare',
                 'users': 'users',
                 'settings': 'settings',
-                'bulk-import': 'bulk-import'
+                'bulk-import': 'bulk-import',
+                'bulk-processes': 'bulk-processes'
             };
             
             const requiredSection = viewSectionMap[state.view.type];
@@ -1651,6 +1669,7 @@ const App: React.FC = () => {
             case 'users': return <Users />;
             case 'settings': return <Settings />;
             case 'bulk-import': return <BulkImportView />;
+            case 'bulk-processes': return <BulkProcessesView />;
             case 'archived': return <ArchivedCandidates />;
             default: return <Dashboard />;
         }

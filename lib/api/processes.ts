@@ -51,6 +51,8 @@ function dbToProcess(dbProcess: any, stages: any[] = [], documentCategories: any
             createdAt: dbProcess.client.created_at,
             updatedAt: dbProcess.client.updated_at,
         } : undefined,
+        isBulkProcess: dbProcess.is_bulk_process === true || dbProcess.is_bulk_process === 1,
+        bulkConfig: dbProcess.bulk_config ? (typeof dbProcess.bulk_config === 'string' ? JSON.parse(dbProcess.bulk_config) : dbProcess.bulk_config) : undefined,
     };
 }
 
@@ -74,6 +76,8 @@ function processToDb(process: Partial<Process>): any {
     if (process.publishedDate !== undefined) dbProcess.published_date = process.publishedDate && process.publishedDate.trim() !== '' ? process.publishedDate : null;
     if (process.needIdentifiedDate !== undefined) dbProcess.need_identified_date = process.needIdentifiedDate && process.needIdentifiedDate.trim() !== '' ? process.needIdentifiedDate : null;
     if (process.clientId !== undefined) dbProcess.client_id = process.clientId || null;
+    if (process.isBulkProcess !== undefined) dbProcess.is_bulk_process = process.isBulkProcess;
+    if (process.bulkConfig !== undefined) dbProcess.bulk_config = process.bulkConfig;
     return dbProcess;
 }
 
@@ -178,8 +182,9 @@ export const processesApi = {
         try {
             const result = await supabase
                 .from('processes')
-                .select('id, title, description, salary_range, experience_level, seniority, flyer_url, flyer_position, service_order_code, start_date, end_date, status, vacancies, google_drive_folder_id, google_drive_folder_name, published_date, need_identified_date, client_id, created_at')
+                .select('id, title, description, salary_range, experience_level, seniority, flyer_url, flyer_position, service_order_code, start_date, end_date, status, vacancies, google_drive_folder_id, google_drive_folder_name, published_date, need_identified_date, client_id, is_bulk_process, bulk_config, created_at')
                 .eq('app_name', APP_NAME) // Filtrar solo procesos de esta app
+                .eq('is_bulk_process', false) // Excluir procesos masivos (se gestionan en otra sección)
                 .order('created_at', { ascending: false })
                 .limit(200); // Reducir límite para reducir egress
             
@@ -191,8 +196,9 @@ export const processesApi = {
                 console.warn('⚠️ Columna client_id no existe, cargando procesos sin ese campo');
                 const result = await supabase
                     .from('processes')
-                    .select('id, title, description, salary_range, experience_level, seniority, flyer_url, flyer_position, service_order_code, start_date, end_date, status, vacancies, google_drive_folder_id, google_drive_folder_name, published_date, need_identified_date, created_at')
+                    .select('id, title, description, salary_range, experience_level, seniority, flyer_url, flyer_position, service_order_code, start_date, end_date, status, vacancies, google_drive_folder_id, google_drive_folder_name, published_date, need_identified_date, is_bulk_process, bulk_config, created_at')
                     .eq('app_name', APP_NAME)
+                    .eq('is_bulk_process', false) // Excluir procesos masivos
                     .order('created_at', { ascending: false })
                     .limit(200);
                 
@@ -1023,6 +1029,94 @@ export const processesApi = {
         }
         
         console.log(`✅ Proceso eliminado correctamente: ${id}`);
+    },
+
+    // Obtener todos los procesos masivos (solo procesos masivos)
+    async getAllBulkProcesses(): Promise<Process[]> {
+        let processes: any[] = [];
+        let error: any = null;
+        
+        try {
+            const result = await supabase
+                .from('processes')
+                .select('id, title, description, salary_range, experience_level, seniority, flyer_url, flyer_position, service_order_code, start_date, end_date, status, vacancies, google_drive_folder_id, google_drive_folder_name, published_date, need_identified_date, client_id, is_bulk_process, bulk_config, created_at')
+                .eq('app_name', APP_NAME)
+                .eq('is_bulk_process', true) // Solo procesos masivos
+                .order('created_at', { ascending: false });
+            
+            processes = result.data || [];
+            error = result.error;
+        } catch (err: any) {
+            // Si falla porque is_bulk_process no existe, intentar sin ese campo
+            if (err.message?.includes('is_bulk_process') || err.message?.includes('column') || err.code === 'PGRST116') {
+                console.warn('⚠️ Columna is_bulk_process no existe, cargando todos los procesos');
+                const result = await supabase
+                    .from('processes')
+                    .select('id, title, description, salary_range, experience_level, seniority, flyer_url, flyer_position, service_order_code, start_date, end_date, status, vacancies, google_drive_folder_id, google_drive_folder_name, published_date, need_identified_date, client_id, bulk_config, created_at')
+                    .eq('app_name', APP_NAME)
+                    .order('created_at', { ascending: false });
+                
+                processes = result.data || [];
+                error = result.error;
+            } else {
+                error = err;
+            }
+        }
+        
+        if (error) throw error;
+        if (!processes || processes.length === 0) return [];
+
+        // Obtener todos los IDs de procesos
+        const processIds = processes.map(p => p.id);
+
+        // Cargar todas las relaciones en batch
+        const queries: Promise<any>[] = [
+            supabase
+                .from('stages')
+                .select('id, process_id, name, order_index, required_documents, is_critical')
+                .in('process_id', processIds)
+                .eq('app_name', APP_NAME)
+                .order('process_id, order_index'),
+            supabase
+                .from('document_categories')
+                .select('id, process_id, name, description, required')
+                .in('process_id', processIds)
+                .eq('app_name', APP_NAME),
+        ];
+
+        const [stagesResult, categoriesResult] = await Promise.all(queries);
+
+        if (stagesResult.error) throw stagesResult.error;
+        if (categoriesResult.error) throw categoriesResult.error;
+
+        const stages = stagesResult.data || [];
+        const documentCategories = categoriesResult.data || [];
+
+        // Agrupar stages y categorías por process_id
+        const stagesByProcessId = new Map<string, any[]>();
+        const categoriesByProcessId = new Map<string, any[]>();
+
+        stages.forEach((stage: any) => {
+            if (!stagesByProcessId.has(stage.process_id)) {
+                stagesByProcessId.set(stage.process_id, []);
+            }
+            stagesByProcessId.get(stage.process_id)!.push(stage);
+        });
+
+        documentCategories.forEach((category: any) => {
+            if (!categoriesByProcessId.has(category.process_id)) {
+                categoriesByProcessId.set(category.process_id, []);
+            }
+            categoriesByProcessId.get(category.process_id)!.push(category);
+        });
+
+        // Convertir a objetos Process
+        return processes.map(p => dbToProcess(
+            p,
+            stagesByProcessId.get(p.id) || [],
+            categoriesByProcessId.get(p.id) || [],
+            [] // Attachments se cargan lazy
+        ));
     },
 };
 

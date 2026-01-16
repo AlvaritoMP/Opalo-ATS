@@ -57,6 +57,28 @@ export interface Process {
     needIdentifiedDate?: string; // Fecha de identificación de necesidad (para Time to Fill)
     clientId?: string; // ID del cliente al que pertenece el proceso
     client?: Client; // Información del cliente (opcional, para cuando se carga con JOIN)
+    isBulkProcess?: boolean; // Indica si es un proceso masivo (se gestiona en Procesos Masivos, no en Procesos normal)
+    bulkConfig?: BulkProcessConfig; // Configuración específica para procesos masivos
+}
+
+// Configuración para procesos masivos
+export interface BulkProcessConfig {
+    killerQuestions?: KillerQuestion[]; // Preguntas automáticas que filtran candidatos
+    aiPrompt?: string; // Prompt específico para OpenAI al analizar CVs
+    scoreThreshold?: number; // Score mínimo (0-100) para que un candidato aparezca en la vista principal
+    whatsappEnabled?: boolean; // Habilitar acceso rápido a WhatsApp
+    whatsappMessageTemplate?: string; // Plantilla de mensaje para WhatsApp
+    autoFilterEnabled?: boolean; // Activar filtrado automático basado en killer questions y score
+}
+
+// Pregunta "killer" para filtrado automático en procesos masivos
+export interface KillerQuestion {
+    id: string;
+    question: string; // Texto de la pregunta
+    type: 'yes_no' | 'multiple_choice'; // Tipo de pregunta
+    options?: string[]; // Opciones para multiple_choice
+    correctAnswer: string | string[]; // Respuesta(s) correcta(s) que permiten pasar el filtro
+    required: boolean; // Si es requerida para pasar
 }
 
 export interface CandidateHistory {
@@ -120,6 +142,8 @@ export interface Candidate {
     applicationStartedDate?: string; // Fecha de inicio de solicitud (para Application Completion Rate)
     applicationCompletedDate?: string; // Fecha de finalización de solicitud (para Application Completion Rate)
     criticalStageReviewedAt?: string; // Fecha en que un usuario revisó el candidato en etapa crítica (para ocultar alertas)
+    metadataIa?: string; // Resumen/metadata generado por IA (OpenAI)
+    scoreIa?: number; // Score/puntuación generado por IA
 }
 
 export type UserRole = 'admin' | 'recruiter' | 'client' | 'viewer';
@@ -163,6 +187,7 @@ export type Section =
     | 'reports' 
     | 'compare' 
     | 'bulk-import' 
+    | 'bulk-processes'
     | 'users' 
     | 'settings';
 

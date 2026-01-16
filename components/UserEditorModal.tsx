@@ -105,8 +105,8 @@ const DEFAULT_ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
 
 // Secciones visibles por defecto según rol
 const DEFAULT_ROLE_SECTIONS: Record<UserRole, Section[]> = {
-    admin: ['dashboard', 'processes', 'archived', 'candidates', 'forms', 'letters', 'calendar', 'reports', 'compare', 'bulk-import', 'users', 'settings'],
-    recruiter: ['dashboard', 'processes', 'archived', 'candidates', 'forms', 'letters', 'calendar', 'reports', 'compare', 'bulk-import'],
+    admin: ['dashboard', 'processes', 'archived', 'candidates', 'forms', 'letters', 'calendar', 'reports', 'compare', 'bulk-import', 'bulk-processes', 'users', 'settings'],
+    recruiter: ['dashboard', 'processes', 'archived', 'candidates', 'forms', 'letters', 'calendar', 'reports', 'compare', 'bulk-import', 'bulk-processes'],
     client: ['dashboard', 'processes', 'candidates', 'calendar', 'reports', 'compare'],
     viewer: ['dashboard', 'processes', 'candidates', 'calendar', 'reports']
 };
@@ -122,6 +122,7 @@ const SECTION_LABELS: Record<Section, string> = {
     'reports': 'Reportes',
     'compare': 'Comparador',
     'bulk-import': 'Importación Masiva',
+    'bulk-processes': 'Procesos Masivos',
     'users': 'Usuarios',
     'settings': 'Configuración'
 };
