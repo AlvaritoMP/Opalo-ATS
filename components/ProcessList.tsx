@@ -44,6 +44,13 @@ const ProcessCard: React.FC<{
     const [dropdownOpen, setDropdownOpen] = useState(false);
     const { state } = useAppState();
 
+    // Obtener información de candidatos contratados
+    const hiredCandidates = process.hiredCandidateIds 
+        ? process.hiredCandidateIds
+            .map(id => state.candidates.find(c => c.id === id))
+            .filter((c): c is Candidate => c !== undefined)
+        : [];
+
     const statusLabels: Record<ProcessStatus, string> = {
         en_proceso: 'En Proceso',
         standby: 'Stand By',
@@ -161,6 +168,24 @@ const ProcessCard: React.FC<{
                             <span>{candidateCount}</span>
                         </div>
                     </div>
+                    {hiredCandidates.length > 0 && (
+                        <div className="mt-3 pt-3 border-t border-gray-200">
+                            <div className="text-xs font-medium text-gray-700 mb-2">Candidatos Contratados:</div>
+                            <div className="space-y-1">
+                                {hiredCandidates.slice(0, 3).map(candidate => (
+                                    <div key={candidate.id} className="text-xs text-gray-600 flex items-center gap-1">
+                                        <span className="w-1.5 h-1.5 bg-green-500 rounded-full"></span>
+                                        <span className="truncate">{candidate.name || 'Sin nombre'}</span>
+                                    </div>
+                                ))}
+                                {hiredCandidates.length > 3 && (
+                                    <div className="text-xs text-gray-500">
+                                        +{hiredCandidates.length - 3} más
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    )}
                 </div>
             </div>
              <div className="p-4 bg-gray-50 border-t">

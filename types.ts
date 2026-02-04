@@ -59,6 +59,8 @@ export interface Process {
     client?: Client; // Información del cliente (opcional, para cuando se carga con JOIN)
     isBulkProcess?: boolean; // Indica si es un proceso masivo (se gestiona en Procesos Masivos, no en Procesos normal)
     bulkConfig?: BulkProcessConfig; // Configuración específica para procesos masivos
+    hiredCandidateIds?: string[]; // IDs de candidatos contratados al cerrar el proceso
+    closedAt?: string; // Fecha y hora en que se cerró el proceso
 }
 
 // Configuración para procesos masivos

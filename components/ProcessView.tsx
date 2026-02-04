@@ -1,10 +1,12 @@
 import React, { useState } from 'react';
 import { useAppState } from '../App';
 import { CandidateCard } from './CandidateCard';
-import { Plus, Edit, Briefcase, DollarSign, BarChart, Clock, Paperclip, X, FileText, ClipboardList, Tag, Users, ArrowLeft } from 'lucide-react';
+import { Plus, Edit, Briefcase, DollarSign, BarChart, Clock, Paperclip, X, FileText, ClipboardList, Tag, Users, ArrowLeft, CheckCircle, Mail, MessageCircle } from 'lucide-react';
 import { AddCandidateModal } from './AddCandidateModal';
 import { ProcessEditorModal } from './ProcessEditorModal';
 import { BulkLetterModal } from './BulkLetterModal';
+import { CloseProcessModal } from './CloseProcessModal';
+import { ProcessCommunicationModal } from './ProcessCommunicationModal';
 import { Attachment, UserRole, ProcessStatus, Candidate } from '../types';
 
 interface ProcessViewProps {
@@ -94,6 +96,8 @@ export const ProcessView: React.FC<ProcessViewProps> = ({ processId }) => {
     const [isProcessEditorOpen, setIsProcessEditorOpen] = useState(false);
     const [isAttachmentsModalOpen, setIsAttachmentsModalOpen] = useState(false);
     const [isBulkLetterOpen, setIsBulkLetterOpen] = useState(false);
+    const [isCloseProcessOpen, setIsCloseProcessOpen] = useState(false);
+    const [isCommunicationOpen, setIsCommunicationOpen] = useState(false);
     const [selectedCandidates, setSelectedCandidates] = useState<string[]>([]);
     const [attachmentsCount, setAttachmentsCount] = useState<number | null>(null);
     const [processAttachments, setProcessAttachments] = useState<Attachment[]>([]);
@@ -468,8 +472,21 @@ export const ProcessView: React.FC<ProcessViewProps> = ({ processId }) => {
                      {canManageProcess && (
                         <div className="flex flex-wrap items-center gap-2 md:gap-3">
                             {selectedCandidates.length > 0 && (
-                                <button onClick={() => setIsBulkLetterOpen(true)} className="flex items-center px-3 md:px-4 py-2 bg-white border border-gray-300 rounded-md shadow-sm text-xs md:text-sm font-medium text-gray-700 hover:bg-gray-50 whitespace-nowrap">
-                                    <FileText className="w-4 h-4 mr-1 md:mr-2"/> <span className="hidden sm:inline">Emitir cartas</span> <span className="sm:hidden">Cartas</span> ({selectedCandidates.length})
+                                <>
+                                    <button onClick={() => setIsBulkLetterOpen(true)} className="flex items-center px-3 md:px-4 py-2 bg-white border border-gray-300 rounded-md shadow-sm text-xs md:text-sm font-medium text-gray-700 hover:bg-gray-50 whitespace-nowrap">
+                                        <FileText className="w-4 h-4 mr-1 md:mr-2"/> <span className="hidden sm:inline">Emitir cartas</span> <span className="sm:hidden">Cartas</span> ({selectedCandidates.length})
+                                    </button>
+                                    <button onClick={() => setIsCommunicationOpen(true)} className="flex items-center px-3 md:px-4 py-2 bg-primary-600 text-white rounded-md shadow-sm hover:bg-primary-700 text-xs md:text-sm font-medium whitespace-nowrap">
+                                        <Mail className="w-4 h-4 mr-1 md:mr-2"/> <span className="hidden sm:inline">Comunicar</span> <span className="sm:hidden">Comunicar</span> ({selectedCandidates.length})
+                                    </button>
+                                </>
+                            )}
+                            <button onClick={() => setIsCommunicationOpen(true)} className="flex items-center px-3 md:px-4 py-2 bg-white border border-gray-300 rounded-md shadow-sm text-xs md:text-sm font-medium text-gray-700 hover:bg-gray-50 whitespace-nowrap">
+                                <MessageCircle className="w-4 h-4 mr-1 md:mr-2"/> <span className="hidden md:inline">Comunicación masiva</span> <span className="md:hidden">Comunicar</span>
+                            </button>
+                            {process.status !== 'terminado' && (
+                                <button onClick={() => setIsCloseProcessOpen(true)} className="flex items-center px-3 md:px-4 py-2 bg-green-600 text-white rounded-md shadow-sm hover:bg-green-700 text-xs md:text-sm font-medium whitespace-nowrap">
+                                    <CheckCircle className="w-4 h-4 mr-1 md:mr-2"/> <span className="hidden md:inline">Cerrar proceso</span> <span className="md:hidden">Cerrar</span>
                                 </button>
                             )}
                             <button 
@@ -573,6 +590,63 @@ export const ProcessView: React.FC<ProcessViewProps> = ({ processId }) => {
                 />
             )}
             {isBulkLetterOpen && <BulkLetterModal candidateIds={selectedCandidates} onClose={() => setIsBulkLetterOpen(false)} />}
+            {isCloseProcessOpen && (
+                <CloseProcessModal
+                    isOpen={isCloseProcessOpen}
+                    onClose={() => setIsCloseProcessOpen(false)}
+                    process={process}
+                    candidates={candidates}
+                    onCloseProcess={async (hiredCandidateIds) => {
+                        const { processesApi } = await import('../lib/api/processes');
+                        await processesApi.closeProcess(processId, hiredCandidateIds);
+                        await actions.reloadProcesses();
+                        actions.showToast('Proceso cerrado exitosamente', 'success', 3000);
+                    }}
+                />
+            )}
+            {isCommunicationOpen && (
+                <ProcessCommunicationModal
+                    isOpen={isCommunicationOpen}
+                    onClose={() => setIsCommunicationOpen(false)}
+                    candidates={selectedCandidates.length > 0 
+                        ? candidates.filter(c => selectedCandidates.includes(c.id))
+                        : candidates
+                    }
+                    onSendEmail={(candidateIds, subject, body) => {
+                        const selectedCandidatesForEmail = candidates.filter(c => candidateIds.includes(c.id) && c.email);
+                        if (selectedCandidatesForEmail.length === 0) {
+                            actions.showToast('No hay candidatos seleccionados con email', 'error', 3000);
+                            return;
+                        }
+                        const emailAddresses = selectedCandidatesForEmail.map(c => c.email).filter(Boolean);
+                        const toEmails = emailAddresses.join(';');
+                        const personalizedBody = body
+                            .replace(/\{\{nombre\}\}/g, selectedCandidatesForEmail[0].name || 'Candidato')
+                            .replace(/\{\{email\}\}/g, selectedCandidatesForEmail[0].email || '')
+                            .replace(/\{\{telefono\}\}/g, selectedCandidatesForEmail[0].phone || '');
+                        const mailtoLink = `mailto:${toEmails}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(personalizedBody)}`;
+                        window.location.href = mailtoLink;
+                        actions.showToast(`Abriendo cliente de correo para ${emailAddresses.length} candidato(s)`, 'success', 3000);
+                    }}
+                    onSendWhatsApp={(candidateIds, message) => {
+                        const selectedCandidatesForWhatsApp = candidates.filter(c => candidateIds.includes(c.id) && c.phone);
+                        if (selectedCandidatesForWhatsApp.length === 0) {
+                            actions.showToast('No hay candidatos seleccionados con teléfono', 'error', 3000);
+                            return;
+                        }
+                        // Abrir WhatsApp Web con el primer candidato
+                        const firstCandidate = selectedCandidatesForWhatsApp[0];
+                        const personalizedMessage = message
+                            .replace(/\{\{nombre\}\}/g, firstCandidate.name || 'Candidato')
+                            .replace(/\{\{email\}\}/g, firstCandidate.email || '')
+                            .replace(/\{\{telefono\}\}/g, firstCandidate.phone || '');
+                        const phoneNumber = firstCandidate.phone?.replace(/[^0-9]/g, '');
+                        const whatsappUrl = `https://wa.me/${phoneNumber}?text=${encodeURIComponent(personalizedMessage)}`;
+                        window.open(whatsappUrl, '_blank');
+                        actions.showToast(`Abriendo WhatsApp para ${selectedCandidatesForWhatsApp.length} candidato(s)`, 'success', 3000);
+                    }}
+                />
+            )}
         </div>
     );
 };

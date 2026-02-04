@@ -53,6 +53,8 @@ function dbToProcess(dbProcess: any, stages: any[] = [], documentCategories: any
         } : undefined,
         isBulkProcess: dbProcess.is_bulk_process === true || dbProcess.is_bulk_process === 1,
         bulkConfig: dbProcess.bulk_config ? (typeof dbProcess.bulk_config === 'string' ? JSON.parse(dbProcess.bulk_config) : dbProcess.bulk_config) : undefined,
+        hiredCandidateIds: dbProcess.hired_candidate_ids || undefined,
+        closedAt: dbProcess.closed_at || undefined,
     };
 }
 
@@ -78,6 +80,8 @@ function processToDb(process: Partial<Process>): any {
     if (process.clientId !== undefined) dbProcess.client_id = process.clientId || null;
     if (process.isBulkProcess !== undefined) dbProcess.is_bulk_process = process.isBulkProcess;
     if (process.bulkConfig !== undefined) dbProcess.bulk_config = process.bulkConfig;
+    if (process.hiredCandidateIds !== undefined) dbProcess.hired_candidate_ids = process.hiredCandidateIds;
+    if (process.closedAt !== undefined) dbProcess.closed_at = process.closedAt;
     return dbProcess;
 }
 
@@ -196,7 +200,7 @@ export const processesApi = {
                 console.warn('⚠️ Columna client_id no existe, cargando procesos sin ese campo');
                 const result = await supabase
                     .from('processes')
-                    .select('id, title, description, salary_range, experience_level, seniority, flyer_url, flyer_position, service_order_code, start_date, end_date, status, vacancies, google_drive_folder_id, google_drive_folder_name, published_date, need_identified_date, is_bulk_process, bulk_config, created_at')
+                    .select('id, title, description, salary_range, experience_level, seniority, flyer_url, flyer_position, service_order_code, start_date, end_date, status, vacancies, google_drive_folder_id, google_drive_folder_name, published_date, need_identified_date, is_bulk_process, bulk_config, hired_candidate_ids, closed_at, created_at')
                     .eq('app_name', APP_NAME)
                     .eq('is_bulk_process', false) // Excluir procesos masivos
                     .order('created_at', { ascending: false })
@@ -342,6 +346,28 @@ export const processesApi = {
         ]);
 
         return dbToProcess(process, stages.data || [], categories.data || [], attachments.data || []);
+    },
+
+    // Cerrar proceso seleccionando candidatos contratados
+    async closeProcess(processId: string, hiredCandidateIds: string[]): Promise<Process> {
+        const { error } = await supabase
+            .from('processes')
+            .update({
+                status: 'terminado',
+                hired_candidate_ids: hiredCandidateIds,
+                closed_at: new Date().toISOString(),
+            })
+            .eq('id', processId)
+            .eq('app_name', APP_NAME);
+        
+        if (error) throw error;
+
+        // Recargar el proceso actualizado
+        const updatedProcess = await this.getById(processId);
+        if (!updatedProcess) {
+            throw new Error('No se pudo recargar el proceso después de cerrarlo');
+        }
+        return updatedProcess;
     },
 
     // Crear proceso con sus stages y categorías
@@ -1039,7 +1065,7 @@ export const processesApi = {
         try {
             const result = await supabase
                 .from('processes')
-                .select('id, title, description, salary_range, experience_level, seniority, flyer_url, flyer_position, service_order_code, start_date, end_date, status, vacancies, google_drive_folder_id, google_drive_folder_name, published_date, need_identified_date, client_id, is_bulk_process, bulk_config, created_at')
+                .select('id, title, description, salary_range, experience_level, seniority, flyer_url, flyer_position, service_order_code, start_date, end_date, status, vacancies, google_drive_folder_id, google_drive_folder_name, published_date, need_identified_date, client_id, is_bulk_process, bulk_config, hired_candidate_ids, closed_at, created_at')
                 .eq('app_name', APP_NAME)
                 .eq('is_bulk_process', true) // Solo procesos masivos
                 .order('created_at', { ascending: false });
@@ -1052,7 +1078,7 @@ export const processesApi = {
                 console.warn('⚠️ Columna is_bulk_process no existe, cargando todos los procesos');
                 const result = await supabase
                     .from('processes')
-                    .select('id, title, description, salary_range, experience_level, seniority, flyer_url, flyer_position, service_order_code, start_date, end_date, status, vacancies, google_drive_folder_id, google_drive_folder_name, published_date, need_identified_date, client_id, bulk_config, created_at')
+                    .select('id, title, description, salary_range, experience_level, seniority, flyer_url, flyer_position, service_order_code, start_date, end_date, status, vacancies, google_drive_folder_id, google_drive_folder_name, published_date, need_identified_date, client_id, bulk_config, hired_candidate_ids, closed_at, created_at')
                     .eq('app_name', APP_NAME)
                     .order('created_at', { ascending: false });
                 
