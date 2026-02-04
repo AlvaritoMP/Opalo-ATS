@@ -249,7 +249,7 @@ export const ProcessCommunicationModal: React.FC<ProcessCommunicationModalProps>
                                     className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none"
                                 />
                                 <p className="mt-1 text-xs text-gray-500">
-                                    Puedes usar variables: {'{'}{'{'}}nombre{'}'}{'}'}, {'{'}{'{'}}email{'}'}{'}'}, {'{'}{'{'}}telefono{'}'}{'}'}
+                                    Puedes usar variables: {'{{nombre}}'}, {'{{email}}'}, {'{{telefono}}'}
                                 </p>
                             </div>
                         )}
@@ -270,7 +270,7 @@ export const ProcessCommunicationModal: React.FC<ProcessCommunicationModalProps>
                                 className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none resize-none"
                             />
                             <p className="mt-1 text-xs text-gray-500">
-                                Puedes usar variables: {'{'}{'{'}}nombre{'}'}{'}'}, {'{'}{'{'}}email{'}'}{'}'}, {'{'}{'{'}}telefono{'}'}{'}'}
+                                Puedes usar variables: {'{{nombre}}'}, {'{{email}}'}, {'{{telefono}}'}
                             </p>
                         </div>
                     </div>
