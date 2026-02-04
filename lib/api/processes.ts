@@ -350,13 +350,22 @@ export const processesApi = {
 
     // Cerrar proceso seleccionando candidatos contratados
     async closeProcess(processId: string, hiredCandidateIds: string[]): Promise<Process> {
+        // Obtener el proceso actual para verificar si ya tiene closed_at
+        const currentProcess = await this.getById(processId);
+        
+        const updateData: any = {
+            status: 'terminado',
+            hired_candidate_ids: hiredCandidateIds,
+        };
+        
+        // Solo establecer closed_at si no existe ya
+        if (!currentProcess?.closedAt) {
+            updateData.closed_at = new Date().toISOString();
+        }
+        
         const { error } = await supabase
             .from('processes')
-            .update({
-                status: 'terminado',
-                hired_candidate_ids: hiredCandidateIds,
-                closed_at: new Date().toISOString(),
-            })
+            .update(updateData)
             .eq('id', processId)
             .eq('app_name', APP_NAME);
         

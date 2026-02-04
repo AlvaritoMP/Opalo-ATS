@@ -484,11 +484,22 @@ export const ProcessView: React.FC<ProcessViewProps> = ({ processId }) => {
                             <button onClick={() => setIsCommunicationOpen(true)} className="flex items-center px-3 md:px-4 py-2 bg-white border border-gray-300 rounded-md shadow-sm text-xs md:text-sm font-medium text-gray-700 hover:bg-gray-50 whitespace-nowrap">
                                 <MessageCircle className="w-4 h-4 mr-1 md:mr-2"/> <span className="hidden md:inline">Comunicación masiva</span> <span className="md:hidden">Comunicar</span>
                             </button>
-                            {process.status !== 'terminado' && (
-                                <button onClick={() => setIsCloseProcessOpen(true)} className="flex items-center px-3 md:px-4 py-2 bg-green-600 text-white rounded-md shadow-sm hover:bg-green-700 text-xs md:text-sm font-medium whitespace-nowrap">
-                                    <CheckCircle className="w-4 h-4 mr-1 md:mr-2"/> <span className="hidden md:inline">Cerrar proceso</span> <span className="md:hidden">Cerrar</span>
-                                </button>
-                            )}
+                            <button 
+                                onClick={() => setIsCloseProcessOpen(true)} 
+                                className={`flex items-center px-3 md:px-4 py-2 rounded-md shadow-sm text-xs md:text-sm font-medium whitespace-nowrap ${
+                                    process.status === 'terminado'
+                                        ? 'bg-blue-600 text-white hover:bg-blue-700'
+                                        : 'bg-green-600 text-white hover:bg-green-700'
+                                }`}
+                            >
+                                <CheckCircle className="w-4 h-4 mr-1 md:mr-2"/> 
+                                <span className="hidden md:inline">
+                                    {process.status === 'terminado' ? 'Gestionar candidatos contratados' : 'Cerrar proceso'}
+                                </span> 
+                                <span className="md:hidden">
+                                    {process.status === 'terminado' ? 'Gestionar' : 'Cerrar'}
+                                </span>
+                            </button>
                             <button 
                                 onClick={async () => {
                                     setIsAttachmentsModalOpen(true);

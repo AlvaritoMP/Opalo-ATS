@@ -24,11 +24,23 @@ export const CloseProcessModal: React.FC<CloseProcessModalProps> = ({
     // Cargar candidatos ya contratados si el proceso ya está cerrado
     useEffect(() => {
         if (process?.hiredCandidateIds && process.hiredCandidateIds.length > 0) {
+            // Usar el nuevo sistema de hiredCandidateIds
             setSelectedCandidateIds(new Set(process.hiredCandidateIds));
+        } else if (process?.status === 'terminado') {
+            // Si el proceso está terminado pero no tiene hiredCandidateIds,
+            // buscar candidatos con hireDate
+            const candidatesWithHireDate = candidates
+                .filter(c => c.hireDate && c.hireDate.trim() !== '' && !c.discarded && !c.archived)
+                .map(c => c.id);
+            if (candidatesWithHireDate.length > 0) {
+                setSelectedCandidateIds(new Set(candidatesWithHireDate));
+            } else {
+                setSelectedCandidateIds(new Set());
+            }
         } else {
             setSelectedCandidateIds(new Set());
         }
-    }, [process]);
+    }, [process, candidates]);
 
     if (!isOpen || !process) return null;
 

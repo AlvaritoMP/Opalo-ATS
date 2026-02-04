@@ -45,11 +45,21 @@ const ProcessCard: React.FC<{
     const { state } = useAppState();
 
     // Obtener información de candidatos contratados
-    const hiredCandidates = process.hiredCandidateIds 
-        ? process.hiredCandidateIds
-            .map(id => state.candidates.find(c => c.id === id))
-            .filter((c): c is Candidate => c !== undefined)
-        : [];
+    // Primero intentar usar hiredCandidateIds (nuevo sistema)
+    // Si no hay, y el proceso está terminado, buscar candidatos con hireDate
+    const allProcessCandidates = state.candidates.filter(c => c.processId === process.id && !c.archived);
+    
+    let hiredCandidates: Candidate[] = [];
+    if (process.hiredCandidateIds && process.hiredCandidateIds.length > 0) {
+        // Usar el nuevo sistema de hiredCandidateIds
+        hiredCandidates = process.hiredCandidateIds
+            .map(id => allProcessCandidates.find(c => c.id === id))
+            .filter((c): c is Candidate => c !== undefined);
+    } else if (process.status === 'terminado') {
+        // Si el proceso está terminado pero no tiene hiredCandidateIds,
+        // mostrar candidatos que tienen hireDate
+        hiredCandidates = allProcessCandidates.filter(c => c.hireDate && c.hireDate.trim() !== '');
+    }
 
     const statusLabels: Record<ProcessStatus, string> = {
         en_proceso: 'En Proceso',
