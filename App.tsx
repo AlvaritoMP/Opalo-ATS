@@ -48,7 +48,7 @@ interface AppActions {
     deleteProcess: (processId: string) => Promise<void>;
     reloadProcesses: () => Promise<void>;
     reloadCandidates: () => Promise<void>;
-    addCandidate: (candidateData: Omit<Candidate, 'id' | 'history'>) => Promise<void>;
+    addCandidate: (candidateData: Omit<Candidate, 'id' | 'history'>) => Promise<Candidate>;
     updateCandidate: (candidateData: Candidate, movedBy?: string) => Promise<void>;
     deleteCandidate: (candidateId: string) => Promise<void>;
     moveCandidateToProcess: (candidateId: string, targetProcessId: string) => Promise<void>;
@@ -1133,9 +1133,11 @@ const App: React.FC = () => {
                 const newCandidate = await candidatesApi.create(candidateDataWithFolder, state.currentUser?.id);
                 
                 // Recargar el candidato desde la BD para asegurar que tiene todos los datos (attachments, history, etc.)
+                let finalCandidate = newCandidate;
                 try {
                     const reloadedCandidate = await candidatesApi.getById(newCandidate.id);
                     if (reloadedCandidate) {
+                        finalCandidate = reloadedCandidate;
                         // Actualizar estado con el candidato completo recargado desde la BD
                         setState(s => {
                             // Verificar si ya existe (por si acaso)
@@ -1152,16 +1154,19 @@ const App: React.FC = () => {
                         });
                     } else {
                         // Si no se puede recargar, usar el que se creó
-                setState(s => ({ ...s, candidates: [...s.candidates, newCandidate] }));
+                        setState(s => ({ ...s, candidates: [...s.candidates, newCandidate] }));
                     }
                 } catch (reloadError) {
                     console.warn('Error recargando candidato después de crear, usando el retornado:', reloadError);
                     // Si falla la recarga, usar el candidato retornado
-                setState(s => ({ ...s, candidates: [...s.candidates, newCandidate] }));
+                    setState(s => ({ ...s, candidates: [...s.candidates, newCandidate] }));
                 }
                 
                 hideToastHelper(loadingToastId);
                 showToastHelper('Candidato creado exitosamente', 'success');
+                
+                // Retornar el candidato final para que pueda ser usado por quien llama
+                return finalCandidate;
             } catch (error: any) {
                 console.error('Error adding candidate:', error);
                 hideToastHelper(loadingToastId);
@@ -1259,7 +1264,7 @@ const App: React.FC = () => {
                 throw new Error('Candidato o proceso no encontrado, o el proceso no tiene etapas');
             }
 
-                const firstStageId = targetProcess.stages[0].id;
+            const firstStageId = targetProcess.stages[0].id;
             const movedBy = state.currentUser?.name || 'System';
 
             try {
@@ -1271,6 +1276,21 @@ const App: React.FC = () => {
                 };
 
                 await actions.updateCandidate(updatedCandidate, movedBy);
+                
+                // Actualizar el estado local inmediatamente para reflejar el cambio
+                setState(s => {
+                    const existingIndex = s.candidates.findIndex(c => c.id === candidateId);
+                    if (existingIndex >= 0) {
+                        const updatedCandidates = [...s.candidates];
+                        updatedCandidates[existingIndex] = {
+                            ...updatedCandidates[existingIndex],
+                            processId: targetProcessId,
+                            stageId: firstStageId,
+                        };
+                        return { ...s, candidates: updatedCandidates };
+                    }
+                    return s;
+                });
             } catch (error: any) {
                 console.error('Error moving candidate to process:', error);
                 const errorMessage = error.message || 'No se pudo mover el candidato al proceso.';
@@ -1286,17 +1306,20 @@ const App: React.FC = () => {
                 throw new Error('Candidato o proceso no encontrado, o el proceso no tiene etapas');
             }
 
-                const firstStageId = targetProcess.stages[0].id;
+            const firstStageId = targetProcess.stages[0].id;
 
             try {
                 // Crear nuevo candidato en la base de datos usando addCandidate
                 const { id, history, ...candidateData } = originalCandidate;
-                await actions.addCandidate({
+                const newCandidate = await actions.addCandidate({
                     ...candidateData,
                     processId: targetProcessId,
                     stageId: firstStageId,
                     archived: false,
                 });
+                
+                // El candidato ya se agregó al estado en addCandidate, no necesitamos hacer nada más aquí
+                console.log('✅ Candidato duplicado exitosamente:', newCandidate.id);
             } catch (error: any) {
                 console.error('Error duplicating candidate to process:', error);
                 const errorMessage = error.message || 'No se pudo duplicar el candidato al proceso.';
