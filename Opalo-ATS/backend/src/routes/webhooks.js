@@ -161,15 +161,44 @@ router.post('/tally/:webhookId', async (req, res) => {
         console.log('📋 Datos recibidos:', JSON.stringify(tallyData, null, 2));
 
         // Construir la URL completa del webhook
-        const webhookUrl = `${req.protocol}://${req.get('host')}${req.originalUrl}`;
-        console.log(`🔍 Buscando integración con webhook_url: ${webhookUrl}`);
+        // Normalizar a https siempre (en producción siempre es https)
+        const host = req.get('host');
+        const path = req.originalUrl;
+        const webhookUrlHttp = `http://${host}${path}`;
+        const webhookUrlHttps = `https://${host}${path}`;
+        
+        console.log(`🔍 Buscando integración con webhook_url (http): ${webhookUrlHttp}`);
+        console.log(`🔍 Buscando integración con webhook_url (https): ${webhookUrlHttps}`);
 
-        // 1. Buscar la integración por webhook URL
-        const { data: integration, error: integrationError } = await supabase
+        // 1. Buscar la integración por webhook URL (probar ambas versiones)
+        let integration = null;
+        let integrationError = null;
+        
+        // Primero intentar con https (más común en producción)
+        let result = await supabase
             .from('form_integrations')
             .select('*')
-            .eq('webhook_url', webhookUrl)
+            .eq('webhook_url', webhookUrlHttps)
             .maybeSingle();
+        
+        if (result.error) {
+            integrationError = result.error;
+        } else if (result.data) {
+            integration = result.data;
+        } else {
+            // Si no se encuentra con https, intentar con http
+            result = await supabase
+                .from('form_integrations')
+                .select('*')
+                .eq('webhook_url', webhookUrlHttp)
+                .maybeSingle();
+            
+            if (result.error) {
+                integrationError = result.error;
+            } else {
+                integration = result.data;
+            }
+        }
 
         if (integrationError) {
             console.error('❌ Error buscando integración:', integrationError);
