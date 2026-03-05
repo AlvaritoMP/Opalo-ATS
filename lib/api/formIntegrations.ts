@@ -4,6 +4,22 @@ import { APP_NAME } from '../appConfig';
 
 // Convertir de DB a tipo de aplicación
 function dbToFormIntegration(dbIntegration: any): FormIntegration {
+    let fieldMapping: FieldMapping | undefined = undefined;
+    
+    // Manejar field_mapping que puede venir como JSONB (objeto) o JSON (string)
+    if (dbIntegration.field_mapping) {
+        try {
+            if (typeof dbIntegration.field_mapping === 'string') {
+                fieldMapping = JSON.parse(dbIntegration.field_mapping);
+            } else if (typeof dbIntegration.field_mapping === 'object') {
+                fieldMapping = dbIntegration.field_mapping;
+            }
+        } catch (err) {
+            console.warn('Error parseando field_mapping:', err);
+            fieldMapping = undefined;
+        }
+    }
+    
     return {
         id: dbIntegration.id,
         platform: dbIntegration.platform || 'Tally',
@@ -11,7 +27,7 @@ function dbToFormIntegration(dbIntegration: any): FormIntegration {
         formIdOrUrl: dbIntegration.form_id_or_url || '',
         processId: dbIntegration.process_id || '',
         webhookUrl: dbIntegration.webhook_url || '',
-        fieldMapping: dbIntegration.field_mapping ? JSON.parse(dbIntegration.field_mapping) : undefined,
+        fieldMapping,
     };
 }
 
@@ -23,7 +39,11 @@ function formIntegrationToDb(integration: Partial<FormIntegration>): any {
     if (integration.formIdOrUrl !== undefined) dbIntegration.form_id_or_url = integration.formIdOrUrl;
     if (integration.processId !== undefined) dbIntegration.process_id = integration.processId;
     if (integration.webhookUrl !== undefined) dbIntegration.webhook_url = integration.webhookUrl;
-    if (integration.fieldMapping !== undefined) {
+    // Solo incluir field_mapping si existe y tiene al menos una propiedad
+    if (integration.fieldMapping !== undefined && 
+        integration.fieldMapping !== null &&
+        typeof integration.fieldMapping === 'object' &&
+        Object.keys(integration.fieldMapping).length > 0) {
         dbIntegration.field_mapping = JSON.stringify(integration.fieldMapping);
     }
     return dbIntegration;
@@ -88,16 +108,73 @@ export const formIntegrationsApi = {
             (typeof window !== 'undefined' ? window.location.origin : 'https://opalo-atsopalo-backend.bouasv.easypanel.host');
         dbData.webhook_url = `${baseUrl}/api/webhooks/tally/${webhookId}`;
         
-        const { data, error } = await supabase
+        // Separar field_mapping para manejarlo por separado (puede no existir la columna)
+        const { field_mapping, ...standardFields } = dbData;
+        
+        // Validar campos requeridos
+        if (!standardFields.platform || !standardFields.form_name || !standardFields.form_id_or_url || !standardFields.process_id) {
+            throw new Error('Faltan campos requeridos: platform, formName, formIdOrUrl, processId');
+        }
+        
+        console.log('🔍 Datos a insertar (sin field_mapping):', standardFields);
+        
+        // Intentar insertar primero sin field_mapping
+        let { data, error } = await supabase
             .from('form_integrations')
-            .insert(dbData)
+            .insert(standardFields)
             .select()
             .single();
         
-        if (error) throw error;
+        if (error) {
+            console.error('❌ Error al crear integración:', error);
+            console.error('❌ Código de error:', error.code);
+            console.error('❌ Mensaje:', error.message);
+            console.error('❌ Detalles:', error.details);
+            console.error('❌ Hint:', error.hint);
+            
+            // Si el error es por columnas faltantes, intentar sin field_mapping
+            const errorMsg = error.message || '';
+            if (errorMsg.includes('field_mapping') || errorMsg.includes('column') || error.code === '42703') {
+                console.warn('⚠️ Columna field_mapping no existe, intentando sin ella...');
+                // Ya intentamos sin field_mapping, así que el error es otro
+                throw new Error(`Error de base de datos: ${error.message}. Verifica que la columna field_mapping existe o ejecuta MIGRATION_ADD_FIELD_MAPPING.sql`);
+            }
+            throw new Error(`Error al crear integración: ${error.message || 'Error desconocido'}`);
+        }
+        
         if (!data) throw new Error('No se creó la integración');
         
-        return dbToFormIntegration(data);
+        // Si hay field_mapping y se creó correctamente, intentar actualizarlo
+        if (field_mapping && data.id) {
+            try {
+                // field_mapping viene como string JSON de formIntegrationToDb, parsearlo a objeto para JSONB
+                const fieldMappingObj = typeof field_mapping === 'string' ? JSON.parse(field_mapping) : field_mapping;
+                // Intentar actualizar con field_mapping como JSONB
+                const { error: updateError } = await supabase
+                    .from('form_integrations')
+                    .update({ field_mapping: fieldMappingObj })
+                    .eq('id', data.id);
+                
+                if (updateError) {
+                    const updateErrorMsg = updateError.message || '';
+                    if (updateErrorMsg.includes('field_mapping') || updateErrorMsg.includes('column')) {
+                        console.warn('⚠️ Columna field_mapping no existe. Ejecuta MIGRATION_ADD_FIELD_MAPPING.sql para habilitar esta funcionalidad.');
+                    } else {
+                        console.warn('⚠️ Error actualizando field_mapping:', updateError);
+                    }
+                    // No lanzar error, la integración se creó correctamente
+                }
+            } catch (err) {
+                console.warn('⚠️ Error procesando field_mapping:', err);
+                // No lanzar error, la integración se creó correctamente
+            }
+        }
+        
+        // Recargar la integración completa
+        const fullIntegration = await this.getById(data.id);
+        if (!fullIntegration) throw new Error('No se pudo recargar la integración');
+        
+        return fullIntegration;
     },
 
     // Actualizar integración
@@ -106,9 +183,13 @@ export const formIntegrationsApi = {
         // No permitir cambiar app_name
         delete dbData.app_name;
         
+        // Separar field_mapping para manejarlo por separado
+        const { field_mapping, ...standardFields } = dbData;
+        
+        // Actualizar campos estándar primero
         const { data, error } = await supabase
             .from('form_integrations')
-            .update(dbData)
+            .update(standardFields)
             .eq('id', id)
             .eq('app_name', APP_NAME)
             .select()
@@ -117,7 +198,38 @@ export const formIntegrationsApi = {
         if (error) throw error;
         if (!data) throw new Error('No se actualizó la integración');
         
-        return dbToFormIntegration(data);
+        // Si hay field_mapping, intentar actualizarlo por separado
+        if (field_mapping !== undefined && data.id) {
+            try {
+                const fieldMappingValue = typeof field_mapping === 'string' 
+                    ? JSON.parse(field_mapping) 
+                    : field_mapping;
+                
+                const { error: updateError } = await supabase
+                    .from('form_integrations')
+                    .update({ field_mapping: fieldMappingValue })
+                    .eq('id', data.id);
+                
+                if (updateError) {
+                    const updateErrorMsg = updateError.message || '';
+                    if (updateErrorMsg.includes('field_mapping') || updateErrorMsg.includes('column')) {
+                        console.warn('⚠️ Columna field_mapping no existe. Ejecuta MIGRATION_ADD_FIELD_MAPPING.sql para habilitar esta funcionalidad.');
+                    } else {
+                        console.warn('⚠️ Error actualizando field_mapping:', updateError);
+                    }
+                    // No lanzar error, los otros campos se actualizaron correctamente
+                }
+            } catch (err) {
+                console.warn('⚠️ Error procesando field_mapping:', err);
+                // No lanzar error, los otros campos se actualizaron correctamente
+            }
+        }
+        
+        // Recargar la integración completa
+        const fullIntegration = await this.getById(data.id);
+        if (!fullIntegration) throw new Error('No se pudo recargar la integración');
+        
+        return fullIntegration;
     },
 
     // Eliminar integración
