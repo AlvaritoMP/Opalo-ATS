@@ -45,8 +45,8 @@ const ProcessCard: React.FC<{
     const { state } = useAppState();
 
     // Obtener información de candidatos contratados
-    // Primero intentar usar hiredCandidateIds (nuevo sistema)
-    // Si no hay, y el proceso está terminado, buscar candidatos con hireDate
+    // 1) Preferir siempre hiredCandidateIds (nuevo sistema de cierre de proceso)
+    // 2) Si no hay hiredCandidateIds, usar candidatos con hireDate como backup
     const allProcessCandidates = state.candidates.filter(c => c.processId === process.id && !c.archived);
     
     let hiredCandidates: Candidate[] = [];
@@ -55,9 +55,9 @@ const ProcessCard: React.FC<{
         hiredCandidates = process.hiredCandidateIds
             .map(id => allProcessCandidates.find(c => c.id === id))
             .filter((c): c is Candidate => c !== undefined);
-    } else if (process.status === 'terminado') {
-        // Si el proceso está terminado pero no tiene hiredCandidateIds,
-        // mostrar candidatos que tienen hireDate
+    } else {
+        // Backup: candidatos con fecha de contratación (hireDate),
+        // incluso si el proceso aún no está marcado como terminado.
         hiredCandidates = allProcessCandidates.filter(c => c.hireDate && c.hireDate.trim() !== '');
     }
 

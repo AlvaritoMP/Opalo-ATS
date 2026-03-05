@@ -1,6 +1,7 @@
 import { supabase } from '../supabase';
 import { AppSettings } from '../../types';
 import { APP_NAME } from '../appConfig';
+import { getSettings } from '../settings';
 
 const SETTINGS_ID = '00000000-0000-0000-0000-000000000000';
 
@@ -21,6 +22,23 @@ function dbToSettings(dbSettings: any): AppSettings {
         candidateSources: dbSettings.candidate_sources || undefined,
         provinces: dbSettings.provinces || undefined,
         districts: dbSettings.districts || undefined,
+    };
+}
+
+// Mezclar settings obtenidos de la BD con el backup local (localStorage)
+// para evitar que, si la BD no guarda bien algún campo (ej. currencySymbol),
+// se vuelva siempre al valor por defecto.
+function mergeWithLocalSettings(settingsFromRemote: AppSettings): AppSettings {
+    const local = getSettings();
+    if (!local) return settingsFromRemote;
+
+    return {
+        ...settingsFromRemote,
+        ...local,
+        customLabels: {
+            ...(settingsFromRemote.customLabels || {}),
+            ...(local.customLabels || {}),
+        },
     };
 }
 
@@ -67,9 +85,14 @@ export const settingsApi = {
                         .maybeSingle();
                     
                     if (allError) {
-                        // Si tampoco funciona sin filtro, retornar valores por defecto (no crear en BD)
+                        // Si tampoco funciona sin filtro, intentar usar settings locales
                         if (allError.code === 'PGRST116') {
-                            console.warn('⚠️ No hay settings en la BD, usando valores por defecto');
+                            console.warn('⚠️ No hay settings en la BD, intentando usar backup local');
+                            const local = getSettings();
+                            if (local) {
+                                return local;
+                            }
+                            console.warn('⚠️ No hay backup local, usando valores por defecto');
                             return {
                                 database: { apiUrl: '', apiToken: '' },
                                 fileStorage: { provider: 'None', connected: false },
@@ -84,7 +107,7 @@ export const settingsApi = {
                     
                     // Si hay datos sin filtro, usar esos (puede ser de otra app, pero es mejor que nada)
                     if (allData) {
-                        return dbToSettings(allData);
+                        return mergeWithLocalSettings(dbToSettings(allData));
                     }
                 } else {
                     throw error;
@@ -93,11 +116,16 @@ export const settingsApi = {
             
             // Si encontramos datos con filtro, usarlos
             if (data) {
-                return dbToSettings(data);
+                return mergeWithLocalSettings(dbToSettings(data));
             }
             
-            // Si no hay datos, retornar valores por defecto directamente (no crear en BD)
-            console.warn('⚠️ No hay settings para esta app, usando valores por defecto');
+            // Si no hay datos, intentar usar backup local antes de valores por defecto
+            console.warn('⚠️ No hay settings para esta app, intentando usar backup local');
+            const local = getSettings();
+            if (local) {
+                return local;
+            }
+            console.warn('⚠️ No hay backup local, usando valores por defecto');
             return {
                 database: { apiUrl: '', apiToken: '' },
                 fileStorage: { provider: 'None', connected: false },
@@ -108,7 +136,13 @@ export const settingsApi = {
             } as AppSettings;
         } catch (error: any) {
             console.error('❌ Error al obtener settings:', error);
-            // Retornar valores por defecto si todo falla
+            // Si todo falla, intentar usar settings locales antes de valores por defecto
+            const local = getSettings();
+            if (local) {
+                console.warn('⚠️ Usando backup local de settings tras error');
+                return local;
+            }
+            // Retornar valores por defecto si tampoco hay backup local
             return {
                 database: { apiUrl: '', apiToken: '' },
                 fileStorage: { provider: 'None', connected: false },

@@ -1,13 +1,14 @@
 import React, { useState } from 'react';
 import { useAppState } from '../App';
 import { CandidateCard } from './CandidateCard';
-import { Plus, Edit, Briefcase, DollarSign, BarChart, Clock, Paperclip, X, FileText, ClipboardList, Tag, Users, ArrowLeft, CheckCircle, Mail, MessageCircle } from 'lucide-react';
+import { Plus, Edit, Briefcase, DollarSign, BarChart, Clock, Paperclip, X, FileText, ClipboardList, Tag, Users, ArrowLeft, CheckCircle, Mail, MessageCircle, Download } from 'lucide-react';
 import { AddCandidateModal } from './AddCandidateModal';
 import { ProcessEditorModal } from './ProcessEditorModal';
 import { BulkLetterModal } from './BulkLetterModal';
 import { CloseProcessModal } from './CloseProcessModal';
 import { ProcessCommunicationModal } from './ProcessCommunicationModal';
 import { Attachment, UserRole, ProcessStatus, Candidate } from '../types';
+import * as XLSX from 'xlsx';
 
 interface ProcessViewProps {
     processId: string;
@@ -449,6 +450,42 @@ export const ProcessView: React.FC<ProcessViewProps> = ({ processId }) => {
         </div>
     );
 
+    const handleExportStage = (stageId: string) => {
+        const stage = process.stages.find(s => s.id === stageId);
+        if (!stage) return;
+
+        const stageCandidates = candidates.filter(c => c.stageId === stageId);
+        if (stageCandidates.length === 0) {
+            actions.showToast('No hay candidatos en esta etapa para exportar', 'info', 3000);
+            return;
+        }
+
+        const data = stageCandidates.map(c => ({
+            'Proceso': process.title,
+            'Etapa': stage.name,
+            'Nombre': c.name,
+            'Email': c.email,
+            'Teléfono': c.phone || '',
+            'Teléfono 2': c.phone2 || '',
+            'Fuente': c.source || '',
+            'Expectativa salarial': c.salaryExpectation || '',
+            'Salario acordado': c.agreedSalary || '',
+            'Fecha contratación': c.hireDate || '',
+            'Descartado': c.discarded ? 'Sí' : 'No',
+            'Motivo descarte': c.discardReason || '',
+        }));
+
+        const wb = XLSX.utils.book_new();
+        const ws = XLSX.utils.json_to_sheet(data);
+        XLSX.utils.book_append_sheet(wb, ws, 'Candidatos');
+
+        const processName = process.title.replace(/[^a-z0-9]/gi, '_').substring(0, 25) || 'Proceso';
+        const stageName = stage.name.replace(/[^a-z0-9]/gi, '_').substring(0, 20) || 'Etapa';
+        const fileName = `${processName}_${stageName}_candidatos.xlsx`;
+
+        XLSX.writeFile(wb, fileName);
+    };
+
     const currentStatus = process.status || 'en_proceso';
     const totalVacancies = process.vacancies ?? 0;
 
@@ -556,9 +593,21 @@ export const ProcessView: React.FC<ProcessViewProps> = ({ processId }) => {
                         onDragLeave={handleDragLeave}
                         className="flex-shrink-0 w-[280px] md:w-80 bg-gray-100 rounded-lg p-2 md:p-3 transition-colors"
                     >
-                        <h3 className="font-semibold text-sm md:text-base text-gray-700 mb-2 md:mb-3 px-1 flex justify-between">
+                        <h3 className="font-semibold text-sm md:text-base text-gray-700 mb-2 md:mb-3 px-1 flex items-center justify-between gap-1">
                             <span className="truncate mr-2">{stage.name}</span>
-                            <span className="flex-shrink-0">({candidates.filter(c => c.stageId === stage.id).length})</span>
+                            <div className="flex items-center gap-1 flex-shrink-0">
+                                <button
+                                    type="button"
+                                    onClick={() => handleExportStage(stage.id)}
+                                    className="p-1 rounded hover:bg-gray-200 text-gray-500 hover:text-gray-700"
+                                    title="Exportar candidatos de esta etapa a Excel"
+                                >
+                                    <Download className="w-3 h-3" />
+                                </button>
+                                <span className="text-xs text-gray-600">
+                                    ({candidates.filter(c => c.stageId === stage.id).length})
+                                </span>
+                            </div>
                         </h3>
                         <div className="space-y-3 min-h-[50px]">
                             {candidates
