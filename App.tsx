@@ -57,7 +57,8 @@ interface AppActions {
     updateUser: (userData: User) => Promise<void>;
     deleteUser: (userId: string) => Promise<void>;
     saveSettings: (settings: AppSettings) => Promise<void>;
-    addFormIntegration: (integrationData: Omit<FormIntegration, 'id' | 'webhookUrl'>) => Promise<void>;
+    addFormIntegration: (integrationData: Omit<FormIntegration, 'id' | 'webhookUrl'>) => Promise<FormIntegration>;
+    updateFormIntegration: (integrationId: string, integrationData: Partial<FormIntegration>) => Promise<void>;
     deleteFormIntegration: (integrationId: string) => Promise<void>;
     addInterviewEvent: (eventData: Omit<InterviewEvent, 'id'>) => Promise<void>;
     updateInterviewEvent: (eventData: InterviewEvent) => Promise<void>;
@@ -1372,6 +1373,23 @@ const App: React.FC = () => {
                 console.error('Error creating form integration:', error);
                 const errorMessage = error.message || 'No se pudo crear la integración.';
                 showToastHelper(`Error al crear integración: ${errorMessage}`, 'error', 7000);
+                throw error;
+            }
+        },
+        updateFormIntegration: async (integrationId, integrationData) => {
+            try {
+                const updated = await formIntegrationsApi.update(integrationId, integrationData);
+                setState(s => ({ 
+                    ...s, 
+                    formIntegrations: s.formIntegrations.map(fi => 
+                        fi.id === integrationId ? updated : fi
+                    ) 
+                }));
+                showToastHelper('Integración actualizada exitosamente', 'success', 3000);
+            } catch (error: any) {
+                console.error('Error updating form integration:', error);
+                const errorMessage = error.message || 'No se pudo actualizar la integración.';
+                showToastHelper(`Error al actualizar integración: ${errorMessage}`, 'error', 7000);
                 throw error;
             }
         },

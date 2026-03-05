@@ -4,21 +4,25 @@ import { FormIntegration, Process, FieldMapping } from '../types';
 import { X, Copy, ChevronDown, ChevronUp, Settings } from 'lucide-react';
 
 interface FormIntegrationModalProps {
-    form: null; // Prop is kept for compatibility but not used for new integrations
+    integration: FormIntegration | null; // null = crear nueva, objeto = editar existente
     onClose: () => void;
 }
 
-export const FormEditorModal: React.FC<FormIntegrationModalProps> = ({ onClose }) => {
+export const FormEditorModal: React.FC<FormIntegrationModalProps> = ({ integration, onClose }) => {
     const { state, actions, getLabel } = useAppState();
-    const [platform, setPlatform] = useState<'Tally' | 'Google Forms' | 'Microsoft Forms'>('Tally');
-    const [formName, setFormName] = useState('');
-    const [formIdOrUrl, setFormIdOrUrl] = useState('');
-    const [processId, setProcessId] = useState(state.processes[0]?.id || '');
+    const isEditing = integration !== null;
+    
+    const [platform, setPlatform] = useState<'Tally' | 'Google Forms' | 'Microsoft Forms'>(
+        integration?.platform as any || 'Tally'
+    );
+    const [formName, setFormName] = useState(integration?.formName || '');
+    const [formIdOrUrl, setFormIdOrUrl] = useState(integration?.formIdOrUrl || '');
+    const [processId, setProcessId] = useState(integration?.processId || state.processes[0]?.id || '');
     const [showWebhook, setShowWebhook] = useState(false);
-    const [webhookUrl, setWebhookUrl] = useState('');
+    const [webhookUrl, setWebhookUrl] = useState(integration?.webhookUrl || '');
     const [isSaving, setIsSaving] = useState(false);
     const [showFieldMapping, setShowFieldMapping] = useState(false);
-    const [fieldMapping, setFieldMapping] = useState<FieldMapping>({});
+    const [fieldMapping, setFieldMapping] = useState<FieldMapping>(integration?.fieldMapping || {});
     
     // Campos disponibles en el candidato
     const candidateFields = [
@@ -54,18 +58,31 @@ export const FormEditorModal: React.FC<FormIntegrationModalProps> = ({ onClose }
         
         setIsSaving(true);
         try {
-            const integration = await actions.addFormIntegration({
-                platform,
-                formName: formName.trim(),
-                formIdOrUrl: formIdOrUrl.trim(),
-                processId,
-                fieldMapping: Object.keys(fieldMapping).length > 0 ? fieldMapping : undefined,
-            });
-            setWebhookUrl(integration.webhookUrl);
-            setShowWebhook(true);
+            if (isEditing && integration) {
+                // Actualizar integración existente
+                await actions.updateFormIntegration(integration.id, {
+                    platform,
+                    formName: formName.trim(),
+                    formIdOrUrl: formIdOrUrl.trim(),
+                    processId,
+                    fieldMapping: Object.keys(fieldMapping).length > 0 ? fieldMapping : undefined,
+                });
+                onClose();
+            } else {
+                // Crear nueva integración
+                const newIntegration = await actions.addFormIntegration({
+                    platform,
+                    formName: formName.trim(),
+                    formIdOrUrl: formIdOrUrl.trim(),
+                    processId,
+                    fieldMapping: Object.keys(fieldMapping).length > 0 ? fieldMapping : undefined,
+                });
+                setWebhookUrl(newIntegration.webhookUrl);
+                setShowWebhook(true);
+            }
         } catch (error) {
-            console.error('Error creating integration:', error);
-            // El error ya se muestra en el toast desde addFormIntegration
+            console.error(`Error ${isEditing ? 'updating' : 'creating'} integration:`, error);
+            // El error ya se muestra en el toast desde las acciones
         } finally {
             setIsSaving(false);
         }
@@ -76,7 +93,7 @@ export const FormEditorModal: React.FC<FormIntegrationModalProps> = ({ onClose }
         actions.showToast('URL del webhook copiada al portapapeles', 'success', 2000);
     };
 
-    if (showWebhook) {
+    if (showWebhook && !isEditing) {
          return (
              <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
                 <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg p-8 text-center">
@@ -113,7 +130,12 @@ export const FormEditorModal: React.FC<FormIntegrationModalProps> = ({ onClose }
             <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col">
                 <form onSubmit={handleSubmit} className="flex flex-col h-full">
                     <div className="p-6 border-b flex justify-between items-center flex-shrink-0">
-                        <h2 className="text-2xl font-bold text-gray-800">{getLabel('modal_new_form_integration', 'Nueva integración de formulario')}</h2>
+                        <h2 className="text-2xl font-bold text-gray-800">
+                            {isEditing 
+                                ? 'Editar integración de formulario' 
+                                : getLabel('modal_new_form_integration', 'Nueva integración de formulario')
+                            }
+                        </h2>
                         <button type="button" onClick={onClose} className="p-2 rounded-full hover:bg-gray-100">
                             <X className="w-6 h-6 text-gray-600" />
                         </button>
@@ -125,16 +147,21 @@ export const FormEditorModal: React.FC<FormIntegrationModalProps> = ({ onClose }
                                 id="platform" 
                                 value={platform} 
                                 onChange={e => setPlatform(e.target.value as any)} 
-                                disabled={isSaving}
+                                disabled={isSaving || isEditing}
                                 className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm disabled:bg-gray-100 disabled:cursor-not-allowed"
                             >
                                 <option>Tally</option>
                                 <option>Google Forms</option>
                                 <option>Microsoft Forms</option>
                             </select>
-                            {platform === 'Tally' && (
+                            {platform === 'Tally' && !isEditing && (
                                 <p className="mt-1 text-xs text-gray-500">
                                     Configura el webhook en Tally después de crear la integración.
+                                </p>
+                            )}
+                            {isEditing && (
+                                <p className="mt-1 text-xs text-gray-500">
+                                    La plataforma no se puede cambiar al editar.
                                 </p>
                             )}
                         </div>
@@ -293,10 +320,10 @@ export const FormEditorModal: React.FC<FormIntegrationModalProps> = ({ onClose }
                             {isSaving ? (
                                 <>
                                     <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                                    Creando...
+                                    {isEditing ? 'Guardando...' : 'Creando...'}
                                 </>
                             ) : (
-                                'Crear integración'
+                                isEditing ? 'Guardar cambios' : 'Crear integración'
                             )}
                         </button>
                     </div>
