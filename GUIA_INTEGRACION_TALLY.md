@@ -151,8 +151,8 @@ app.post('/api/webhooks/tally/:webhookId', async (req, res) => {
       return res.status(404).json({ error: 'Process not found' });
     }
 
-    // 3. Mapear campos de Tally a candidato
-    const candidateData = mapTallyToCandidate(tallyData, process.stages[0].id);
+    // 3. Mapear campos de Tally a candidato (usando el mapeo personalizado si existe)
+    const candidateData = mapTallyToCandidate(tallyData, integration);
 
     // 4. Crear el candidato en Supabase
     const { data: candidate, error: candidateError } = await supabase
@@ -192,7 +192,7 @@ app.post('/api/webhooks/tally/:webhookId', async (req, res) => {
 });
 
 // Función para mapear datos de Tally a formato de candidato
-function mapTallyToCandidate(tallyData, firstStageId) {
+function mapTallyToCandidate(tallyData, integration) {
   const fields = {};
   
   // Convertir array de fields a objeto
@@ -203,27 +203,72 @@ function mapTallyToCandidate(tallyData, firstStageId) {
     });
   }
 
-  // Mapear campos comunes
+  // Obtener mapeo personalizado si existe
+  const customMapping = integration.field_mapping || {};
+  
+  // Función helper para obtener valor de campo con mapeo personalizado
+  const getFieldValue = (candidateFieldKey) => {
+    // 1. Si hay mapeo personalizado, usarlo primero
+    if (customMapping[candidateFieldKey]) {
+      const mappedTallyField = customMapping[candidateFieldKey].toLowerCase();
+      if (fields[mappedTallyField] !== undefined) {
+        return fields[mappedTallyField];
+      }
+    }
+    
+    // 2. Intentar con nombres estándar
+    const standardNames = getStandardFieldNames(candidateFieldKey);
+    for (const name of standardNames) {
+      if (fields[name] !== undefined) {
+        return fields[name];
+      }
+    }
+    
+    return '';
+  };
+
+  // Mapear campos usando la función helper
   const candidate = {
-    name: fields.name || fields.nombre || '',
-    email: fields.email || fields.correo || '',
-    phone: fields.phone || fields.telefono || '',
-    phone2: fields.phone2 || fields.telefono2 || '',
-    description: fields.description || fields.descripcion || '',
-    source: fields.source || fields.fuente || 'Tally',
-    salaryExpectation: fields.salaryexpectation || fields.expectativa_salarial || '',
-    dni: fields.dni || '',
-    linkedinUrl: fields.linkedinurl || fields.linkedin || '',
-    address: fields.address || fields.direccion || '',
-    province: fields.province || fields.provincia || '',
-    district: fields.district || fields.distrito || '',
-    age: fields.age ? parseInt(fields.age) : undefined,
+    name: getFieldValue('name'),
+    email: getFieldValue('email'),
+    phone: getFieldValue('phone'),
+    phone2: getFieldValue('phone2'),
+    description: getFieldValue('description'),
+    source: getFieldValue('source') || integration.form_name || 'Tally',
+    salaryExpectation: getFieldValue('salaryExpectation'),
+    dni: getFieldValue('dni'),
+    linkedinUrl: getFieldValue('linkedinUrl'),
+    address: getFieldValue('address'),
+    province: getFieldValue('province'),
+    district: getFieldValue('district'),
+    age: getFieldValue('age') ? parseInt(getFieldValue('age')) : undefined,
     archived: false,
     discarded: false,
     visible_to_clients: false,
   };
 
   return candidate;
+}
+
+// Función helper para obtener nombres estándar de campos
+function getStandardFieldNames(candidateFieldKey) {
+  const mappings = {
+    'name': ['name', 'nombre', 'nombre_completo', 'full_name', 'nombre completo'],
+    'email': ['email', 'correo', 'e-mail', 'correo_electronico'],
+    'phone': ['phone', 'telefono', 'teléfono', 'telefono_principal', 'teléfono principal'],
+    'phone2': ['phone2', 'telefono2', 'teléfono2', 'telefono_secundario', 'teléfono secundario'],
+    'description': ['description', 'descripcion', 'descripción', 'notas', 'comentarios'],
+    'source': ['source', 'fuente', 'origen', 'como_se_entero', 'cómo se enteró'],
+    'salaryExpectation': ['salaryexpectation', 'expectativa_salarial', 'expectativa salarial', 'salario_esperado'],
+    'dni': ['dni', 'documento', 'documento_identidad', 'cedula', 'cédula'],
+    'linkedinUrl': ['linkedinurl', 'linkedin', 'perfil_linkedin', 'url_linkedin'],
+    'address': ['address', 'direccion', 'dirección', 'domicilio'],
+    'province': ['province', 'provincia'],
+    'district': ['district', 'distrito'],
+    'age': ['age', 'edad'],
+  };
+  
+  return mappings[candidateFieldKey] || [];
 }
 
 const PORT = process.env.PORT || 3000;
@@ -274,8 +319,8 @@ def handle_tally_webhook(webhook_id):
         if not process.data or not process.data.get('stages'):
             return jsonify({'error': 'Process not found'}), 404
 
-        # 3. Mapear datos
-        candidate_data = map_tally_to_candidate(tally_data, process.data['stages'][0]['id'])
+        # 3. Mapear datos (usando el mapeo personalizado si existe)
+        candidate_data = map_tally_to_candidate(tally_data, integration.data)
 
         # 4. Crear candidato
         candidate = supabase.table('candidates')\
@@ -306,7 +351,42 @@ def handle_tally_webhook(webhook_id):
         print(f'Webhook error: {e}')
         return jsonify({'error': 'Internal server error'}), 500
 
-def map_tally_to_candidate(tally_data, first_stage_id):
+def get_standard_field_names(candidate_field_key):
+    """Retorna lista de nombres estándar para un campo del candidato"""
+    mappings = {
+        'name': ['name', 'nombre', 'nombre_completo', 'full_name', 'nombre completo'],
+        'email': ['email', 'correo', 'e-mail', 'correo_electronico'],
+        'phone': ['phone', 'telefono', 'teléfono', 'telefono_principal', 'teléfono principal'],
+        'phone2': ['phone2', 'telefono2', 'teléfono2', 'telefono_secundario', 'teléfono secundario'],
+        'description': ['description', 'descripcion', 'descripción', 'notas', 'comentarios'],
+        'source': ['source', 'fuente', 'origen', 'como_se_entero', 'cómo se enteró'],
+        'salaryExpectation': ['salaryexpectation', 'expectativa_salarial', 'expectativa salarial', 'salario_esperado'],
+        'dni': ['dni', 'documento', 'documento_identidad', 'cedula', 'cédula'],
+        'linkedinUrl': ['linkedinurl', 'linkedin', 'perfil_linkedin', 'url_linkedin'],
+        'address': ['address', 'direccion', 'dirección', 'domicilio'],
+        'province': ['province', 'provincia'],
+        'district': ['district', 'distrito'],
+        'age': ['age', 'edad'],
+    }
+    return mappings.get(candidate_field_key, [])
+
+def get_field_value(fields, candidate_field_key, custom_mapping):
+    """Obtiene el valor de un campo usando mapeo personalizado o nombres estándar"""
+    # 1. Si hay mapeo personalizado, usarlo primero
+    if custom_mapping and candidate_field_key in custom_mapping:
+        mapped_tally_field = custom_mapping[candidate_field_key].lower()
+        if mapped_tally_field in fields:
+            return fields[mapped_tally_field]
+    
+    # 2. Intentar con nombres estándar
+    standard_names = get_standard_field_names(candidate_field_key)
+    for name in standard_names:
+        if name in fields:
+            return fields[name]
+    
+    return ''
+
+def map_tally_to_candidate(tally_data, integration):
     fields = {}
     
     if 'fields' in tally_data and isinstance(tally_data['fields'], list):
@@ -314,20 +394,23 @@ def map_tally_to_candidate(tally_data, first_stage_id):
             key = (field.get('key') or field.get('label') or '').lower()
             fields[key] = field.get('value', '')
 
+    # Obtener mapeo personalizado si existe
+    custom_mapping = integration.get('field_mapping') or {}
+
     return {
-        'name': fields.get('name') or fields.get('nombre', ''),
-        'email': fields.get('email') or fields.get('correo', ''),
-        'phone': fields.get('phone') or fields.get('telefono', ''),
-        'phone2': fields.get('phone2') or fields.get('telefono2', ''),
-        'description': fields.get('description') or fields.get('descripcion', ''),
-        'source': fields.get('source') or fields.get('fuente', 'Tally'),
-        'salary_expectation': fields.get('salaryexpectation') or fields.get('expectativa_salarial', ''),
-        'dni': fields.get('dni', ''),
-        'linkedin_url': fields.get('linkedinurl') or fields.get('linkedin', ''),
-        'address': fields.get('address') or fields.get('direccion', ''),
-        'province': fields.get('province') or fields.get('provincia', ''),
-        'district': fields.get('district') or fields.get('distrito', ''),
-        'age': int(fields['age']) if fields.get('age') and fields['age'].isdigit() else None,
+        'name': get_field_value(fields, 'name', custom_mapping),
+        'email': get_field_value(fields, 'email', custom_mapping),
+        'phone': get_field_value(fields, 'phone', custom_mapping),
+        'phone2': get_field_value(fields, 'phone2', custom_mapping),
+        'description': get_field_value(fields, 'description', custom_mapping),
+        'source': get_field_value(fields, 'source', custom_mapping) or integration.get('form_name') or 'Tally',
+        'salary_expectation': get_field_value(fields, 'salaryExpectation', custom_mapping),
+        'dni': get_field_value(fields, 'dni', custom_mapping),
+        'linkedin_url': get_field_value(fields, 'linkedinUrl', custom_mapping),
+        'address': get_field_value(fields, 'address', custom_mapping),
+        'province': get_field_value(fields, 'province', custom_mapping),
+        'district': get_field_value(fields, 'district', custom_mapping),
+        'age': int(get_field_value(fields, 'age', custom_mapping)) if get_field_value(fields, 'age', custom_mapping) and get_field_value(fields, 'age', custom_mapping).isdigit() else None,
         'archived': False,
         'discarded': False,
         'visible_to_clients': False,
@@ -342,6 +425,35 @@ if __name__ == '__main__':
 1. Completa un formulario de prueba en Tally
 2. Verifica en el ATS que el candidato aparezca en el proceso asociado
 3. Revisa los logs del backend para confirmar que el webhook se recibió correctamente
+
+## 🗺️ Mapeo Personalizado de Campos
+
+Si los nombres de tus campos en Tally son diferentes a los estándar, puedes configurar un mapeo personalizado directamente en el ATS.
+
+### Cómo Configurar el Mapeo
+
+1. Al crear o editar una integración, expande la sección **"Mapeo de campos personalizado"**
+2. Para cada campo del candidato que quieras mapear, ingresa el nombre exacto del campo en Tally
+3. El sistema usará primero tu mapeo personalizado, y si no encuentra el campo, intentará con los nombres estándar
+
+### Ejemplo
+
+Si en Tally tienes un campo llamado `"Nombre y Apellidos"` en lugar de `"name"`:
+- En el campo **"Nombre"** del mapeo, ingresa: `Nombre y Apellidos`
+- El sistema buscará ese campo en Tally y lo mapeará al campo `name` del candidato
+
+### Uso en el Backend
+
+El mapeo personalizado se guarda en `integration.field_mapping` como un objeto JSON:
+```json
+{
+  "name": "Nombre y Apellidos",
+  "email": "Correo Electrónico",
+  "phone": "Teléfono de Contacto"
+}
+```
+
+El código del backend ya está preparado para usar este mapeo automáticamente. Solo asegúrate de pasar el objeto `integration` completo a la función de mapeo.
 
 ## 🔍 Solución de Problemas
 

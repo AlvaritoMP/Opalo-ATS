@@ -262,6 +262,13 @@ export interface FormIntegration {
     formIdOrUrl: string;
     processId: string;
     webhookUrl: string;
+    fieldMapping?: FieldMapping; // Mapeo personalizado de campos
+}
+
+// Mapeo de campos: campo de Tally -> campo del candidato
+export interface FieldMapping {
+    // Campo en Tally (key o label) -> Campo en el candidato
+    [tallyField: string]: string;
 }
 
 export interface InterviewEvent {

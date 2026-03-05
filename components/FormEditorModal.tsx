@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useAppState } from '../App';
-import { FormIntegration, Process } from '../types';
-import { X, Copy } from 'lucide-react';
+import { FormIntegration, Process, FieldMapping } from '../types';
+import { X, Copy, ChevronDown, ChevronUp, Settings } from 'lucide-react';
 
 interface FormIntegrationModalProps {
     form: null; // Prop is kept for compatibility but not used for new integrations
@@ -17,6 +17,25 @@ export const FormEditorModal: React.FC<FormIntegrationModalProps> = ({ onClose }
     const [showWebhook, setShowWebhook] = useState(false);
     const [webhookUrl, setWebhookUrl] = useState('');
     const [isSaving, setIsSaving] = useState(false);
+    const [showFieldMapping, setShowFieldMapping] = useState(false);
+    const [fieldMapping, setFieldMapping] = useState<FieldMapping>({});
+    
+    // Campos disponibles en el candidato
+    const candidateFields = [
+        { key: 'name', label: 'Nombre', placeholder: 'nombre, name, nombre_completo' },
+        { key: 'email', label: 'Email', placeholder: 'email, correo, e-mail' },
+        { key: 'phone', label: 'Teléfono', placeholder: 'phone, telefono, teléfono' },
+        { key: 'phone2', label: 'Teléfono 2', placeholder: 'phone2, telefono2, teléfono_secundario' },
+        { key: 'description', label: 'Descripción', placeholder: 'description, descripcion, notas' },
+        { key: 'source', label: 'Fuente', placeholder: 'source, fuente, origen' },
+        { key: 'salaryExpectation', label: 'Expectativa salarial', placeholder: 'salaryExpectation, expectativa_salarial' },
+        { key: 'dni', label: 'DNI', placeholder: 'dni, documento, documento_identidad' },
+        { key: 'linkedinUrl', label: 'LinkedIn', placeholder: 'linkedinUrl, linkedin, perfil_linkedin' },
+        { key: 'address', label: 'Dirección', placeholder: 'address, direccion, dirección' },
+        { key: 'province', label: 'Provincia', placeholder: 'province, provincia' },
+        { key: 'district', label: 'Distrito', placeholder: 'district, distrito' },
+        { key: 'age', label: 'Edad', placeholder: 'age, edad' },
+    ];
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -40,6 +59,7 @@ export const FormEditorModal: React.FC<FormIntegrationModalProps> = ({ onClose }
                 formName: formName.trim(),
                 formIdOrUrl: formIdOrUrl.trim(),
                 processId,
+                fieldMapping: Object.keys(fieldMapping).length > 0 ? fieldMapping : undefined,
             });
             setWebhookUrl(integration.webhookUrl);
             setShowWebhook(true);
@@ -166,6 +186,72 @@ export const FormEditorModal: React.FC<FormIntegrationModalProps> = ({ onClose }
                             <p className="mt-1 text-xs text-gray-500">
                                 Los candidatos que completen este formulario se agregarán automáticamente a este proceso
                             </p>
+                        </div>
+                        
+                        {/* Mapeo de campos personalizado */}
+                        <div className="border-t pt-4">
+                            <button
+                                type="button"
+                                onClick={() => setShowFieldMapping(!showFieldMapping)}
+                                className="flex items-center justify-between w-full text-left"
+                            >
+                                <div className="flex items-center gap-2">
+                                    <Settings className="w-4 h-4 text-gray-500" />
+                                    <span className="text-sm font-medium text-gray-700">
+                                        Mapeo de campos personalizado
+                                    </span>
+                                    <span className="text-xs text-gray-500">
+                                        (Opcional)
+                                    </span>
+                                </div>
+                                {showFieldMapping ? (
+                                    <ChevronUp className="w-4 h-4 text-gray-500" />
+                                ) : (
+                                    <ChevronDown className="w-4 h-4 text-gray-500" />
+                                )}
+                            </button>
+                            {showFieldMapping && (
+                                <div className="mt-4 space-y-3 p-4 bg-gray-50 rounded-lg">
+                                    <p className="text-xs text-gray-600 mb-3">
+                                        Si los nombres de tus campos en Tally son diferentes a los estándar, 
+                                        puedes mapearlos aquí. Deja en blanco para usar el mapeo automático.
+                                    </p>
+                                    {candidateFields.map(field => (
+                                        <div key={field.key}>
+                                            <label className="block text-xs font-medium text-gray-700 mb-1">
+                                                {field.label}
+                                            </label>
+                                            <input
+                                                type="text"
+                                                value={fieldMapping[field.key] || ''}
+                                                onChange={e => {
+                                                    const newMapping = { ...fieldMapping };
+                                                    if (e.target.value.trim()) {
+                                                        newMapping[field.key] = e.target.value.trim();
+                                                    } else {
+                                                        delete newMapping[field.key];
+                                                    }
+                                                    setFieldMapping(newMapping);
+                                                }}
+                                                placeholder={field.placeholder}
+                                                className="w-full px-2 py-1.5 text-xs border border-gray-300 rounded-md focus:ring-1 focus:ring-primary-500 focus:border-primary-500"
+                                            />
+                                            <p className="mt-0.5 text-xs text-gray-500">
+                                                Campo en Tally (key o label) que mapea a "{field.label}"
+                                            </p>
+                                        </div>
+                                    ))}
+                                    {Object.keys(fieldMapping).length > 0 && (
+                                        <button
+                                            type="button"
+                                            onClick={() => setFieldMapping({})}
+                                            className="mt-2 text-xs text-red-600 hover:text-red-700"
+                                        >
+                                            Limpiar mapeo personalizado
+                                        </button>
+                                    )}
+                                </div>
+                            )}
                         </div>
                     </div>
                      <div className="p-6 bg-gray-50 rounded-b-xl flex justify-end space-x-3">

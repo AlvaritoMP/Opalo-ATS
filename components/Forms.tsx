@@ -67,13 +67,18 @@ export const Forms: React.FC = () => {
                              const process = state.processes.find(p => p.id === integration.processId);
                              return (
                                 <li key={integration.id} className="px-6 py-4 flex items-center justify-between hover:bg-gray-50">
-                                    <div className="flex items-center">
+                                    <div className="flex items-center flex-1">
                                         <PlatformLogo platform={integration.platform} />
-                                        <div>
+                                        <div className="flex-1">
                                             <p className="text-sm font-medium text-gray-900">{integration.formName}</p>
                                             <p className="text-sm text-gray-500">
                                                 Vinculado a: <span className="font-medium">{process?.title || 'Proceso desconocido'}</span>
                                             </p>
+                                            {integration.fieldMapping && Object.keys(integration.fieldMapping).length > 0 && (
+                                                <p className="text-xs text-blue-600 mt-1">
+                                                    Mapeo personalizado configurado ({Object.keys(integration.fieldMapping).length} campos)
+                                                </p>
+                                            )}
                                         </div>
                                     </div>
                                     <div className="flex items-center space-x-4">

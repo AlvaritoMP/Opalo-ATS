@@ -1,5 +1,5 @@
 import { supabase } from '../supabase';
-import { FormIntegration } from '../../types';
+import { FormIntegration, FieldMapping } from '../../types';
 import { APP_NAME } from '../appConfig';
 
 // Convertir de DB a tipo de aplicación
@@ -11,6 +11,7 @@ function dbToFormIntegration(dbIntegration: any): FormIntegration {
         formIdOrUrl: dbIntegration.form_id_or_url || '',
         processId: dbIntegration.process_id || '',
         webhookUrl: dbIntegration.webhook_url || '',
+        fieldMapping: dbIntegration.field_mapping ? JSON.parse(dbIntegration.field_mapping) : undefined,
     };
 }
 
@@ -22,6 +23,9 @@ function formIntegrationToDb(integration: Partial<FormIntegration>): any {
     if (integration.formIdOrUrl !== undefined) dbIntegration.form_id_or_url = integration.formIdOrUrl;
     if (integration.processId !== undefined) dbIntegration.process_id = integration.processId;
     if (integration.webhookUrl !== undefined) dbIntegration.webhook_url = integration.webhookUrl;
+    if (integration.fieldMapping !== undefined) {
+        dbIntegration.field_mapping = JSON.stringify(integration.fieldMapping);
+    }
     return dbIntegration;
 }
 
