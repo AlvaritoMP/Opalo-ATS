@@ -101,12 +101,14 @@ export const formIntegrationsApi = {
         
         // Generar ID único para el webhook
         const webhookId = crypto.randomUUID();
-        // Construir URL del webhook basada en la URL base de la app
-        // En producción, esto debería usar la URL real de tu backend
-        // Si tienes VITE_API_URL configurado, úsalo; si no, usa la URL del frontend
-        const baseUrl = import.meta.env.VITE_API_URL || 
-            (typeof window !== 'undefined' ? window.location.origin : 'https://opalo-atsopalo-backend.bouasv.easypanel.host');
-        dbData.webhook_url = `${baseUrl}/api/webhooks/tally/${webhookId}`;
+        // Construir URL del webhook usando Edge Function de Supabase
+        // Esto es más confiable que usar el backend de Easypanel
+        // La URL de Supabase viene de VITE_SUPABASE_URL (ej: https://afhiiplxqtodqxvmswor.supabase.co)
+        const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+        if (!supabaseUrl) {
+            throw new Error('VITE_SUPABASE_URL no está configurada. No se puede crear la integración.');
+        }
+        dbData.webhook_url = `${supabaseUrl}/functions/v1/tally-webhook/${webhookId}`;
         
         // Separar field_mapping para manejarlo por separado (puede no existir la columna)
         const { field_mapping, ...standardFields } = dbData;
