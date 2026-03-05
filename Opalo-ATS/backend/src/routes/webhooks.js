@@ -7,6 +7,18 @@ const router = express.Router();
 
 console.log('🔵 Router de webhooks creado');
 
+// Endpoint de prueba simple
+router.get('/test', (req, res) => {
+    console.log('🔴 GET /api/webhooks/test llamado');
+    res.json({ message: 'Webhook router funciona', timestamp: new Date().toISOString() });
+});
+
+router.post('/test', (req, res) => {
+    console.log('🔴 POST /api/webhooks/test llamado');
+    console.log('🔴 Body:', req.body);
+    res.json({ message: 'Webhook router POST funciona', body: req.body, timestamp: new Date().toISOString() });
+});
+
 // Inicializar cliente de Supabase con service key para bypass RLS
 console.log('🔵 Inicializando cliente Supabase...');
 console.log('🔵 SUPABASE_URL:', process.env.SUPABASE_URL ? '✅ Configurado' : '❌ NO configurado');

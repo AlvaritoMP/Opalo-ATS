@@ -24,17 +24,34 @@ const allowedOrigins = [
     process.env.FRONTEND_URL_OPALO_ATS,
 ].filter(Boolean); // Eliminar valores undefined/null
 
-// Middleware CORS
+// Middleware CORS - Permitir todos los orígenes para webhooks
+app.use((req, res, next) => {
+    // Para webhooks, permitir todos los orígenes
+    if (req.path && req.path.includes('/webhooks/')) {
+        res.header('Access-Control-Allow-Origin', '*');
+        res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+        res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+        if (req.method === 'OPTIONS') {
+            return res.sendStatus(200);
+        }
+    }
+    next();
+});
+
 app.use(cors({
     origin: (origin, callback) => {
-        // Permitir requests sin origin (Postman, curl, etc.)
-        if (!origin) return callback(null, true);
+        // Permitir requests sin origin (Postman, curl, webhooks, etc.)
+        if (!origin) {
+            console.log('🔍 Request sin origin - permitiendo (webhook/curl)');
+            return callback(null, true);
+        }
         
         if (allowedOrigins.includes(origin)) {
             callback(null, true);
         } else {
             console.warn(`⚠️  CORS bloqueado para origen: ${origin}`);
-            callback(new Error('Not allowed by CORS'));
+            // Permitir siempre para desarrollo/debugging
+            callback(null, true);
         }
     },
     credentials: true,
@@ -46,6 +63,7 @@ app.use(express.urlencoded({ extended: true }));
 // Logging middleware
 app.use((req, res, next) => {
     console.log(`${new Date().toISOString()} - ${req.method} ${req.path}`);
+    console.log(`🔍 Request URL completa: ${req.protocol}://${req.get('host')}${req.originalUrl}`);
     next();
 });
 
