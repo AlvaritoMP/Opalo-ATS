@@ -109,16 +109,16 @@ export const FormEditorModal: React.FC<FormIntegrationModalProps> = ({ onClose }
     }
     
     return (
-         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-            <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg">
-                <form onSubmit={handleSubmit}>
-                    <div className="p-6 border-b flex justify-between items-center">
+         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col">
+                <form onSubmit={handleSubmit} className="flex flex-col h-full">
+                    <div className="p-6 border-b flex justify-between items-center flex-shrink-0">
                         <h2 className="text-2xl font-bold text-gray-800">{getLabel('modal_new_form_integration', 'Nueva integración de formulario')}</h2>
                         <button type="button" onClick={onClose} className="p-2 rounded-full hover:bg-gray-100">
                             <X className="w-6 h-6 text-gray-600" />
                         </button>
                     </div>
-                    <div className="p-6 space-y-4">
+                    <div className="p-6 space-y-4 overflow-y-auto flex-1">
                         <div>
                             <label htmlFor="platform" className="block text-sm font-medium text-gray-700">Plataforma</label>
                             <select 
@@ -189,72 +189,94 @@ export const FormEditorModal: React.FC<FormIntegrationModalProps> = ({ onClose }
                         </div>
                         
                         {/* Mapeo de campos personalizado */}
-                        <div className="border-t pt-4">
+                        <div className="border-t pt-4 mt-4">
                             <button
                                 type="button"
                                 onClick={() => setShowFieldMapping(!showFieldMapping)}
-                                className="flex items-center justify-between w-full text-left"
+                                className="flex items-center justify-between w-full text-left p-3 rounded-lg hover:bg-gray-50 transition-colors"
                             >
                                 <div className="flex items-center gap-2">
-                                    <Settings className="w-4 h-4 text-gray-500" />
-                                    <span className="text-sm font-medium text-gray-700">
-                                        Mapeo de campos personalizado
-                                    </span>
-                                    <span className="text-xs text-gray-500">
-                                        (Opcional)
-                                    </span>
+                                    <Settings className="w-5 h-5 text-primary-600" />
+                                    <div className="text-left">
+                                        <span className="text-sm font-semibold text-gray-900 block">
+                                            Mapeo de campos personalizado
+                                        </span>
+                                        <span className="text-xs text-gray-500">
+                                            {showFieldMapping ? 'Ocultar configuración' : 'Configurar cómo se mapean los campos de Tally (Opcional)'}
+                                        </span>
+                                    </div>
                                 </div>
                                 {showFieldMapping ? (
-                                    <ChevronUp className="w-4 h-4 text-gray-500" />
+                                    <ChevronUp className="w-5 h-5 text-gray-500" />
                                 ) : (
-                                    <ChevronDown className="w-4 h-4 text-gray-500" />
+                                    <ChevronDown className="w-5 h-5 text-gray-500" />
                                 )}
                             </button>
                             {showFieldMapping && (
-                                <div className="mt-4 space-y-3 p-4 bg-gray-50 rounded-lg">
-                                    <p className="text-xs text-gray-600 mb-3">
-                                        Si los nombres de tus campos en Tally son diferentes a los estándar, 
-                                        puedes mapearlos aquí. Deja en blanco para usar el mapeo automático.
-                                    </p>
-                                    {candidateFields.map(field => (
-                                        <div key={field.key}>
-                                            <label className="block text-xs font-medium text-gray-700 mb-1">
-                                                {field.label}
-                                            </label>
-                                            <input
-                                                type="text"
-                                                value={fieldMapping[field.key] || ''}
-                                                onChange={e => {
-                                                    const newMapping = { ...fieldMapping };
-                                                    if (e.target.value.trim()) {
-                                                        newMapping[field.key] = e.target.value.trim();
-                                                    } else {
-                                                        delete newMapping[field.key];
-                                                    }
-                                                    setFieldMapping(newMapping);
-                                                }}
-                                                placeholder={field.placeholder}
-                                                className="w-full px-2 py-1.5 text-xs border border-gray-300 rounded-md focus:ring-1 focus:ring-primary-500 focus:border-primary-500"
-                                            />
-                                            <p className="mt-0.5 text-xs text-gray-500">
-                                                Campo en Tally (key o label) que mapea a "{field.label}"
-                                            </p>
-                                        </div>
-                                    ))}
+                                <div className="mt-4 space-y-3 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                                    <div className="mb-4">
+                                        <p className="text-sm font-medium text-blue-900 mb-2">
+                                            ¿Cómo funciona el mapeo?
+                                        </p>
+                                        <p className="text-xs text-blue-800 mb-2">
+                                            Si los nombres de tus campos en Tally son diferentes a los estándar, 
+                                            puedes mapearlos aquí. Por ejemplo, si en Tally tu campo se llama 
+                                            <strong>"Nombre Completo del Candidato"</strong> en lugar de <strong>"name"</strong>, 
+                                            ingresa ese nombre exacto en el campo "Nombre" de abajo.
+                                        </p>
+                                        <p className="text-xs text-blue-800">
+                                            <strong>Deja en blanco</strong> para usar el mapeo automático (el sistema intentará 
+                                            encontrar el campo usando nombres comunes).
+                                        </p>
+                                    </div>
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-96 overflow-y-auto p-2 bg-white rounded border border-blue-100">
+                                        {candidateFields.map(field => (
+                                            <div key={field.key} className="space-y-1">
+                                                <label className="block text-xs font-semibold text-gray-700">
+                                                    {field.label} <span className="text-gray-400 font-normal">→</span>
+                                                </label>
+                                                <input
+                                                    type="text"
+                                                    value={fieldMapping[field.key] || ''}
+                                                    onChange={e => {
+                                                        const newMapping = { ...fieldMapping };
+                                                        if (e.target.value.trim()) {
+                                                            newMapping[field.key] = e.target.value.trim();
+                                                        } else {
+                                                            delete newMapping[field.key];
+                                                        }
+                                                        setFieldMapping(newMapping);
+                                                    }}
+                                                    placeholder={field.placeholder}
+                                                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+                                                />
+                                                <p className="text-xs text-gray-500">
+                                                    Nombre exacto del campo en Tally
+                                                </p>
+                                            </div>
+                                        ))}
+                                    </div>
                                     {Object.keys(fieldMapping).length > 0 && (
-                                        <button
-                                            type="button"
-                                            onClick={() => setFieldMapping({})}
-                                            className="mt-2 text-xs text-red-600 hover:text-red-700"
-                                        >
-                                            Limpiar mapeo personalizado
-                                        </button>
+                                        <div className="mt-3 pt-3 border-t border-blue-200">
+                                            <div className="flex items-center justify-between">
+                                                <span className="text-xs text-blue-800">
+                                                    <strong>{Object.keys(fieldMapping).length}</strong> campo(s) mapeado(s) personalmente
+                                                </span>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setFieldMapping({})}
+                                                    className="text-xs text-red-600 hover:text-red-700 font-medium"
+                                                >
+                                                    Limpiar todo
+                                                </button>
+                                            </div>
+                                        </div>
                                     )}
                                 </div>
                             )}
                         </div>
                     </div>
-                     <div className="p-6 bg-gray-50 rounded-b-xl flex justify-end space-x-3">
+                     <div className="p-6 bg-gray-50 rounded-b-xl flex justify-end space-x-3 flex-shrink-0 border-t">
                         <button 
                             type="button" 
                             onClick={onClose} 
