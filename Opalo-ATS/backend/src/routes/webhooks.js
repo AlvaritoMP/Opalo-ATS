@@ -1,13 +1,23 @@
 import express from 'express';
 import { createClient } from '@supabase/supabase-js';
 
+console.log('🔵 Cargando módulo webhooks.js...');
+
 const router = express.Router();
 
+console.log('🔵 Router de webhooks creado');
+
 // Inicializar cliente de Supabase con service key para bypass RLS
+console.log('🔵 Inicializando cliente Supabase...');
+console.log('🔵 SUPABASE_URL:', process.env.SUPABASE_URL ? '✅ Configurado' : '❌ NO configurado');
+console.log('🔵 SUPABASE_SERVICE_KEY:', process.env.SUPABASE_SERVICE_KEY ? '✅ Configurado' : '❌ NO configurado');
+
 const supabase = createClient(
     process.env.SUPABASE_URL,
     process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_ANON_KEY
 );
+
+console.log('🔵 Cliente Supabase inicializado');
 
 // Función helper para obtener nombres estándar de campos
 function getStandardFieldNames(candidateFieldKey) {
@@ -123,6 +133,14 @@ function mapTallyToCandidate(tallyData, integration) {
 
 // Endpoint para recibir webhooks de Tally
 router.post('/tally/:webhookId', async (req, res) => {
+    // FORZAR LOG INMEDIATO - VERIFICAR QUE SE EJECUTA
+    console.log('🔴 ==========================================');
+    console.log('🔴 WEBHOOK ENDPOINT LLAMADO');
+    console.log('🔴 Timestamp:', new Date().toISOString());
+    console.log('🔴 Params:', req.params);
+    console.log('🔴 Body keys:', Object.keys(req.body || {}));
+    console.log('🔴 ==========================================');
+    
     try {
         const { webhookId } = req.params;
         const tallyData = req.body;

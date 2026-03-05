@@ -2,7 +2,10 @@ import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import authRoutes from './routes/auth.js';
+
+console.log('🔵 Cargando webhookRoutes...');
 import webhookRoutes from './routes/webhooks.js';
+console.log('🔵 webhookRoutes cargado:', webhookRoutes ? 'OK' : 'ERROR');
 
 // Cargar variables de entorno
 dotenv.config();
@@ -48,7 +51,9 @@ app.use((req, res, next) => {
 
 // Rutas
 app.use('/api/auth', authRoutes);
+console.log('🔵 Registrando ruta /api/webhooks');
 app.use('/api/webhooks', webhookRoutes);
+console.log('🔵 Ruta /api/webhooks registrada correctamente');
 
 // Health check
 app.get('/health', (req, res) => {
