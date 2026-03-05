@@ -9,6 +9,7 @@ export * from './attachments';
 export * from './interviews';
 export * from './settings';
 export * from './clients';
+export * from './formIntegrations';
 
 // Exportar funciones helper de Supabase
 export { setCurrentUser } from '../supabase';

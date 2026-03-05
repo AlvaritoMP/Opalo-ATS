@@ -2,7 +2,7 @@ import React, { createContext, useContext, useState, useEffect, useMemo, useRef 
 import { initialProcesses, initialCandidates, initialUsers, initialSettings, initialFormIntegrations, initialInterviewEvents } from './lib/data';
 import { Process, Candidate, User, AppSettings, FormIntegration, InterviewEvent, CandidateHistory, Application, PostIt, Comment, Section, UserRole } from './types';
 import { getSettings, saveSettings as saveSettingsToStorage } from './lib/settings';
-import { usersApi, processesApi, candidatesApi, postItsApi, commentsApi, interviewsApi, settingsApi, setCurrentUser } from './lib/api/index';
+import { usersApi, processesApi, candidatesApi, postItsApi, commentsApi, interviewsApi, settingsApi, formIntegrationsApi, setCurrentUser } from './lib/api/index';
 import { isCorsError, getErrorMessage, isSupabaseConfigured } from './lib/supabase';
 import { googleDriveService } from './lib/googleDrive';
 import { Dashboard } from './components/Dashboard';
@@ -596,7 +596,7 @@ const App: React.FC = () => {
                     users,
                     applications: [],
                     settings,
-                    formIntegrations: initialFormIntegrations, // TODO: Implementar API
+                    formIntegrations: await loadWithEmptyFallback(() => formIntegrationsApi.getAll(), initialFormIntegrations, 'formIntegrations', true),
                     interviewEvents,
                     currentUser,
                     view: { type: 'dashboard' },
@@ -626,7 +626,7 @@ const App: React.FC = () => {
                     users: [],
                     applications: [],
                     settings: loadedSettings || initialSettings,
-                    formIntegrations: initialFormIntegrations,
+                    formIntegrations: [],
                     interviewEvents: [],
                     currentUser,
                     view: { type: 'dashboard' },
@@ -1363,15 +1363,29 @@ const App: React.FC = () => {
             }
         },
         addFormIntegration: async (integrationData) => {
-            const newIntegration: FormIntegration = {
-                ...integrationData,
-                id: `fi-${Date.now()}`,
-                webhookUrl: `https://example.com/webhook/${Date.now()}`
-            };
-            setState(s => ({ ...s, formIntegrations: [...s.formIntegrations, newIntegration] }));
+            try {
+                const newIntegration = await formIntegrationsApi.create(integrationData);
+                setState(s => ({ ...s, formIntegrations: [...s.formIntegrations, newIntegration] }));
+                showToastHelper('Integración creada exitosamente', 'success', 3000);
+                return newIntegration;
+            } catch (error: any) {
+                console.error('Error creating form integration:', error);
+                const errorMessage = error.message || 'No se pudo crear la integración.';
+                showToastHelper(`Error al crear integración: ${errorMessage}`, 'error', 7000);
+                throw error;
+            }
         },
         deleteFormIntegration: async (integrationId) => {
-            setState(s => ({ ...s, formIntegrations: s.formIntegrations.filter(fi => fi.id !== integrationId) }));
+            try {
+                await formIntegrationsApi.delete(integrationId);
+                setState(s => ({ ...s, formIntegrations: s.formIntegrations.filter(fi => fi.id !== integrationId) }));
+                showToastHelper('Integración eliminada exitosamente', 'success', 3000);
+            } catch (error: any) {
+                console.error('Error deleting form integration:', error);
+                const errorMessage = error.message || 'No se pudo eliminar la integración.';
+                showToastHelper(`Error al eliminar integración: ${errorMessage}`, 'error', 7000);
+                throw error;
+            }
         },
         addInterviewEvent: async (eventData) => {
             try {

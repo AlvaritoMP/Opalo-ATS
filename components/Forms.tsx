@@ -77,7 +77,12 @@ export const Forms: React.FC = () => {
                                         </div>
                                     </div>
                                     <div className="flex items-center space-x-4">
-                                         <a href="#" className="text-sm text-primary-600 hover:text-primary-800 flex items-center">
+                                         <a 
+                                            href={integration.formIdOrUrl} 
+                                            target="_blank" 
+                                            rel="noopener noreferrer"
+                                            className="text-sm text-primary-600 hover:text-primary-800 flex items-center"
+                                         >
                                             Ver formulario <ExternalLink className="w-4 h-4 ml-1"/>
                                          </a>
                                          <button onClick={() => handleDelete(integration.id)} className="p-2 rounded-md hover:bg-red-100" title="Eliminar integración">
