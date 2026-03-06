@@ -1,7 +1,7 @@
 [phases.setup]
-nixPkgs = ["nodejs_20"]
+nixPkgs = ["nodejs_20", "caddy"]
 # npm viene incluido con nodejs_20, no necesita especificarse por separado
-# Caddy se instala automáticamente cuando Nixpacks detecta el Caddyfile
+# Caddy debe instalarse explícitamente para servir los archivos estáticos
 
 [phases.install]
 cmds = ["npm ci"]
@@ -11,5 +11,5 @@ cmds = ["npm run build"]
 # Las variables de entorno VITE_* se pasan automáticamente desde Easypanel
 
 [start]
-cmd = "caddy run --config /app/Caddyfile --adapter caddyfile"
+cmd = "caddy run --config /app/Caddyfile --adapter caddyfile --watch"
 
