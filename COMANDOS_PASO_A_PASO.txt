@@ -1,0 +1,28 @@
+PASO 1: Instalar Supabase CLI
+===============================
+1. Ve a: https://github.com/supabase/cli/releases
+2. Descarga: supabase_x.x.x_windows_amd64.zip
+3. Extrae el ZIP
+4. Copia supabase.exe a C:\Windows\System32\
+5. Cierra y abre una nueva terminal
+6. Ejecuta: supabase --version
+
+PASO 2: Login en Supabase
+==========================
+supabase login
+
+(Esto abrirá tu navegador para autenticarte)
+
+PASO 3: Conectar con tu Proyecto
+==================================
+supabase link --project-ref afhiiplxqtodqxvmswor
+
+PASO 4: Desplegar la Función
+=============================
+supabase functions deploy tally-webhook
+
+PASO 5: Verificar en Supabase Dashboard
+========================================
+1. Ve a: https://supabase.com/dashboard/project/afhiiplxqtodqxvmswor
+2. Haz clic en "Edge Functions" (menú lateral)
+3. Deberías ver "tally-webhook" en la lista

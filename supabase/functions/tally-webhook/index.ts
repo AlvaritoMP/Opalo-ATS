@@ -20,12 +20,21 @@ serve(async (req) => {
     const webhookId = pathParts[pathParts.length - 1]
 
     console.log(`📥 Webhook recibido de Tally - ID: ${webhookId}`)
+    console.log(`🔍 URL completa: ${req.url}`)
+    console.log(`🔍 Headers recibidos:`, Object.fromEntries(req.headers.entries()))
+    
+    // Verificar si hay apikey en la URL (query parameter)
+    const apikeyFromUrl = url.searchParams.get('apikey')
+    if (apikeyFromUrl) {
+      console.log('✅ Apikey encontrado en URL')
+    }
 
     // Parsear el body
     const tallyData = await req.json()
     console.log('📋 Datos recibidos:', JSON.stringify(tallyData, null, 2))
 
-    // Inicializar cliente de Supabase
+    // Inicializar cliente de Supabase con service role key
+    // Usamos service role key para evitar problemas de RLS
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!
     const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     

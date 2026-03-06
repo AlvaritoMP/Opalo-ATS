@@ -443,9 +443,16 @@ export const CandidateDetailsModal: React.FC<{ candidate: Candidate, onClose: ()
     // Handler para cambiar la etapa directamente (sin modo edición)
     const handleStageChange = async (e: React.ChangeEvent<HTMLSelectElement>) => {
         const newStageId = e.target.value;
-        const updatedCandidate = { ...currentCandidate, stageId: newStageId };
-        setEditableCandidate(updatedCandidate);
-        await actions.updateCandidate(updatedCandidate, state.currentUser?.name);
+        // IMPORTANTE: Asegurar que se incluyan todos los attachments existentes
+        // para evitar que se eliminen al cambiar de etapa
+        const candidateWithAllAttachments = {
+            ...currentCandidate,
+            stageId: newStageId,
+            // Preservar todos los attachments existentes
+            attachments: editableCandidate.attachments || currentCandidate.attachments || []
+        };
+        setEditableCandidate(candidateWithAllAttachments);
+        await actions.updateCandidate(candidateWithAllAttachments, state.currentUser?.name);
     };
     
     // Handler para cambiar la visibilidad directamente (sin modo edición)

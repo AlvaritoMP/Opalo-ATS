@@ -1202,6 +1202,15 @@ const App: React.FC = () => {
                     };
                 }
                 
+                // IMPORTANTE: Si no se pasan attachments explícitamente, preservar los existentes
+                // Esto evita que se eliminen attachments al cambiar de etapa u otros campos
+                if (updatedCandidateData.attachments === undefined && currentCandidate) {
+                    updatedCandidateData = {
+                        ...updatedCandidateData,
+                        attachments: currentCandidate.attachments || []
+                    };
+                }
+                
                 const updated = await candidatesApi.update(updatedCandidateData.id, updatedCandidateData, movedBy || state.currentUser?.name || 'System');
                 // Actualizar candidato en el estado, preservando si está archivado
                 setState(s => {

@@ -783,23 +783,35 @@ export const candidatesApi = {
         // Sincronizar attachments: guardar en la tabla attachments
         let savedAttachments: Attachment[] = [];
         if (candidateData.attachments !== undefined) {
-            // Obtener attachments actuales de la BD
+            // Obtener attachments actuales de la BD (filtrar por app_name para consistencia)
             const { data: currentAttachments } = await supabase
                 .from('attachments')
                 .select('id')
                 .eq('candidate_id', id)
-                .is('comment_id', null);
+                .is('comment_id', null)
+                .eq('app_name', APP_NAME); // Filtrar por app_name para consistencia
 
             const currentAttachmentIds = new Set((currentAttachments || []).map(a => a.id));
             const newAttachmentIds = new Set(candidateData.attachments.map(a => a.id));
 
-            // Eliminar attachments que ya no están en la lista
-            const toDelete = Array.from(currentAttachmentIds).filter(id => !newAttachmentIds.has(id));
-            if (toDelete.length > 0) {
-                await supabase
-                    .from('attachments')
-                    .delete()
-                    .in('id', toDelete);
+            // IMPORTANTE: Solo eliminar attachments si la lista nueva NO está vacía
+            // Si la lista está vacía pero hay attachments en BD, significa que se está
+            // actualizando otro campo (como stageId) y debemos preservar los attachments
+            if (candidateData.attachments.length > 0) {
+                // Eliminar attachments que ya no están en la lista
+                const toDelete = Array.from(currentAttachmentIds).filter(id => !newAttachmentIds.has(id));
+                if (toDelete.length > 0) {
+                    console.log(`🗑️ Eliminando ${toDelete.length} attachment(s) que ya no están en la lista:`, toDelete);
+                    await supabase
+                        .from('attachments')
+                        .delete()
+                        .in('id', toDelete)
+                        .eq('app_name', APP_NAME); // Asegurar que solo se eliminen de esta app
+                }
+            } else {
+                // Si la lista está vacía, preservar todos los attachments existentes
+                // Esto evita que se eliminen cuando solo se actualiza el stageId
+                console.log('⚠️ Lista de attachments vacía - preservando attachments existentes en BD');
             }
 
             // Insertar o actualizar attachments
@@ -821,6 +833,7 @@ export const candidatesApi = {
                     category: attachment.category || null,
                     uploaded_at: attachment.uploadedAt || new Date().toISOString(),
                     comment_id: null, // Attachments de candidato no tienen comment_id
+                    app_name: APP_NAME, // Asegurar que siempre se asigne el app_name
                 };
 
                 // Usar upsert para insertar o actualizar
@@ -829,8 +842,8 @@ export const candidatesApi = {
                     .upsert(attachmentData, { onConflict: 'id' });
 
                 if (attError) {
-                    console.error('Error guardando attachment:', attError);
-                    console.error('Attachment data:', attachmentData);
+                    console.error('❌ Error guardando attachment:', attError);
+                    console.error('❌ Attachment data:', attachmentData);
                 } else {
                     console.log(`✅ Attachment guardado en BD: ${attachment.name} (ID: ${attachmentId}, categoría: ${attachment.category || 'sin categoría'})`);
                     // Guardar el attachment con su categoría para devolverlo
@@ -845,6 +858,10 @@ export const candidatesApi = {
                     });
                 }
             }
+        } else {
+            // Si attachments no está definido, preservar los existentes
+            // Esto es importante cuando solo se actualiza el stageId u otros campos
+            console.log('ℹ️ attachments no definido en candidateData - preservando attachments existentes');
         }
 
         // Obtener el candidato actualizado desde la BD
