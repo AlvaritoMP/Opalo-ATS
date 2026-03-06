@@ -221,7 +221,7 @@ router.post('/tally/:webhookId', async (req, res) => {
         // 2. Obtener el proceso asociado
         const { data: process, error: processError } = await supabase
             .from('processes')
-            .select('id, stages')
+            .select('id')
             .eq('id', integration.process_id)
             .eq('app_name', integration.app_name)
             .maybeSingle();
@@ -242,7 +242,23 @@ router.post('/tally/:webhookId', async (req, res) => {
             });
         }
 
-        if (!process.stages || process.stages.length === 0) {
+        // 3. Obtener las etapas del proceso desde la tabla stages
+        const { data: stages, error: stagesError } = await supabase
+            .from('stages')
+            .select('id, name, order_index')
+            .eq('process_id', integration.process_id)
+            .eq('app_name', integration.app_name)
+            .order('order_index', { ascending: true });
+
+        if (stagesError) {
+            console.error('❌ Error buscando etapas:', stagesError);
+            return res.status(500).json({ 
+                error: 'Error buscando etapas',
+                details: stagesError.message 
+            });
+        }
+
+        if (!stages || stages.length === 0) {
             console.error(`❌ Proceso no tiene etapas: ${integration.process_id}`);
             return res.status(400).json({ 
                 error: 'Process has no stages',
@@ -250,12 +266,12 @@ router.post('/tally/:webhookId', async (req, res) => {
             });
         }
 
-        console.log(`✅ Proceso encontrado con ${process.stages.length} etapas`);
+        console.log(`✅ Proceso encontrado con ${stages.length} etapas`);
 
-        // 3. Mapear campos de Tally a candidato
+        // 4. Mapear campos de Tally a candidato
         const candidateData = mapTallyToCandidate(tallyData, integration);
         candidateData.process_id = integration.process_id;
-        candidateData.stage_id = process.stages[0].id;
+        candidateData.stage_id = stages[0].id;
         candidateData.app_name = integration.app_name;
 
         console.log('👤 Datos del candidato mapeados:', JSON.stringify(candidateData, null, 2));
@@ -269,7 +285,7 @@ router.post('/tally/:webhookId', async (req, res) => {
             });
         }
 
-        // 4. Crear el candidato en Supabase
+        // 5. Crear el candidato en Supabase
         const { data: candidate, error: candidateError } = await supabase
             .from('candidates')
             .insert({
@@ -289,14 +305,14 @@ router.post('/tally/:webhookId', async (req, res) => {
 
         console.log(`✅ Candidato creado: ${candidate.id} - ${candidate.name || candidate.email}`);
 
-        // 5. Crear entrada en historial
+        // 6. Crear entrada en historial
         // Nota: moved_by es UUID (referencia a usuario), no texto
         // Usamos null ya que es una integración automática
         const { error: historyError } = await supabase
             .from('candidate_history')
             .insert({
                 candidate_id: candidate.id,
-                stage_id: process.stages[0].id,
+                stage_id: stages[0].id,
                 moved_at: new Date().toISOString(),
                 moved_by: null, // Integración automática, no hay usuario específico
                 app_name: integration.app_name,
