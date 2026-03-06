@@ -27,3 +27,7 @@
 	@html {
 		path *.html
 	}
+	header @html {
+		Cache-Control "no-cache, no-store, must-revalidate"
+	}
+}
