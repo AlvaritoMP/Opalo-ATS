@@ -298,6 +298,12 @@ router.post('/tally/:webhookId', async (req, res) => {
         }
 
         // 5. Crear el candidato en Supabase
+        console.log('📝 Intentando insertar candidato en Supabase...');
+        console.log('📝 Datos a insertar:', JSON.stringify({
+            ...candidateData,
+            created_at: new Date().toISOString(),
+        }, null, 2));
+        
         const { data: candidate, error: candidateError } = await supabase
             .from('candidates')
             .insert({
@@ -309,13 +315,24 @@ router.post('/tally/:webhookId', async (req, res) => {
 
         if (candidateError) {
             console.error('❌ Error creando candidato:', candidateError);
+            console.error('❌ Detalles del error:', JSON.stringify(candidateError, null, 2));
             return res.status(500).json({ 
                 error: 'Failed to create candidate',
-                details: candidateError.message 
+                details: candidateError.message,
+                fullError: candidateError
+            });
+        }
+
+        if (!candidate) {
+            console.error('❌ Candidato no retornado después de insertar');
+            return res.status(500).json({ 
+                error: 'Candidate not returned after insert',
+                candidateData
             });
         }
 
         console.log(`✅ Candidato creado: ${candidate.id} - ${candidate.name || candidate.email}`);
+        console.log('📝 Candidato completo:', JSON.stringify(candidate, null, 2));
 
         // 6. Crear entrada en historial
         // Nota: moved_by es UUID (referencia a usuario), no texto
@@ -339,11 +356,16 @@ router.post('/tally/:webhookId', async (req, res) => {
 
         console.log(`🎉 Webhook procesado exitosamente - Candidato: ${candidate.id}`);
 
-        res.status(200).json({ 
+        const response = { 
             success: true, 
             candidateId: candidate.id,
-            candidateName: candidate.name || candidate.email
-        });
+            candidateName: candidate.name || candidate.email,
+            candidate: candidate
+        };
+        
+        console.log('📤 Enviando respuesta:', JSON.stringify(response, null, 2));
+        
+        res.status(200).json(response);
 
     } catch (error) {
         console.error('❌ Error procesando webhook:', error);
