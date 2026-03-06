@@ -34,8 +34,8 @@ console.log('🔵 Cliente Supabase inicializado');
 // Función helper para obtener nombres estándar de campos
 function getStandardFieldNames(candidateFieldKey) {
     const mappings = {
-        name: ['name', 'nombre', 'nombre_completo', 'full_name', 'nombre_y_apellidos'],
-        email: ['email', 'correo', 'e-mail'],
+        name: ['name', 'nombre', 'nombre_completo', 'nombre completo', 'full_name', 'nombre_y_apellidos', 'question_8d2xpz'],
+        email: ['email', 'correo', 'correo electrónico', 'correo electronico', 'e-mail', 'question_ylg9wd'],
         phone: ['phone', 'telefono', 'teléfono', 'mobile', 'celular'],
         phone2: ['phone2', 'telefono2', 'teléfono_secundario', 'secondary_phone'],
         description: ['description', 'descripcion', 'notas', 'comments'],
@@ -72,18 +72,26 @@ function mapTallyToCandidate(tallyData, integration) {
     };
 
     // Convertir array de fields a objeto para búsqueda rápida
-    const fields = {};
-    if (tallyData.fields && Array.isArray(tallyData.fields)) {
-        tallyData.fields.forEach(field => {
-            const key = field.key?.toLowerCase() || '';
-            const label = field.label?.toLowerCase() || '';
-            const value = field.value || '';
-            
-            // Guardar por key y por label
-            if (key) fields[key] = value;
-            if (label) fields[label] = value;
-        });
+    // Tally puede enviar los datos en diferentes formatos
+    let fieldsArray = [];
+    if (tallyData.data && tallyData.data.fields && Array.isArray(tallyData.data.fields)) {
+        fieldsArray = tallyData.data.fields;
+    } else if (tallyData.fields && Array.isArray(tallyData.fields)) {
+        fieldsArray = tallyData.fields;
     }
+    
+    const fields = {};
+    fieldsArray.forEach(field => {
+        const key = field.key?.toLowerCase() || '';
+        const label = field.label?.toLowerCase() || '';
+        const value = field.value || '';
+        
+        // Guardar por key y por label
+        if (key) fields[key] = value;
+        if (label) fields[label] = value;
+    });
+    
+    console.log('🔍 Campos mapeados:', JSON.stringify(fields, null, 2));
 
     // Obtener mapeo personalizado si existe
     let customMapping = {};
@@ -123,6 +131,10 @@ function mapTallyToCandidate(tallyData, integration) {
     // Mapear campos
     candidate.name = getFieldValue('name') || '';
     candidate.email = getFieldValue('email') || '';
+    
+    console.log('🔍 Búsqueda de campos:');
+    console.log('  - name:', candidate.name, '(buscado en:', Object.keys(fields).filter(k => k.includes('nombre') || k.includes('name')), ')');
+    console.log('  - email:', candidate.email, '(buscado en:', Object.keys(fields).filter(k => k.includes('correo') || k.includes('email')), ')');
     candidate.phone = getFieldValue('phone') || '';
     candidate.phone2 = getFieldValue('phone2') || '';
     candidate.description = getFieldValue('description') || '';
