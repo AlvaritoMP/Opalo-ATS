@@ -3,13 +3,3 @@
 
 export const APP_NAME = 'Opalo ATS';
 
-// Función helper para obtener el nombre de la app
-export function getAppName(): string {
-    return APP_NAME;
-}
-
-// Función helper para verificar si estamos usando multi-tenant
-export function isMultiTenantEnabled(): boolean {
-    return true;
-}
-

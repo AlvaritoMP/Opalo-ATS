@@ -96,21 +96,4 @@ export async function setCurrentUser(userId: string) {
     }
 }
 
-// Función helper para obtener el usuario actual
-export async function getCurrentUserId(): Promise<string | null> {
-    if (!isSupabaseConfigured()) {
-        return null;
-    }
-    try {
-        const { data, error } = await supabase.rpc('get_current_user_id');
-        if (error) {
-            console.error('Error getting current user:', error);
-            return null;
-        }
-        return data;
-    } catch (err) {
-        console.error('Error in getCurrentUserId:', err);
-        return null;
-    }
-}
 

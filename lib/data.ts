@@ -1,5 +1,5 @@
 // Populated `lib/data.ts` with initial seed data for processes, candidates, users, and settings. This provides default content for the application on first load and resolves module-related errors.
-import { Process, Candidate, User, Form, Application, AppSettings, FormIntegration, InterviewEvent } from '../types';
+import { Process, Candidate, User, AppSettings, FormIntegration, InterviewEvent } from '../types';
 import { getLocationData } from './locationData';
 
 // Datos iniciales vacíos - La aplicación comenzará sin procesos, candidatos ni usuarios
@@ -10,9 +10,6 @@ export const initialCandidates: Candidate[] = [];
 
 // Datos iniciales vacíos - Los usuarios se crearán desde la interfaz de administración
 export const initialUsers: User[] = [];
-
-export const initialForms: Form[] = [];
-export const initialApplications: Application[] = [];
 
 export const initialSettings: AppSettings = {
     database: {
