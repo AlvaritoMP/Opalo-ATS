@@ -6,18 +6,22 @@ import { X, Copy, ChevronDown, ChevronUp, Settings } from 'lucide-react';
 interface FormIntegrationModalProps {
     integration: FormIntegration | null; // null = crear nueva, objeto = editar existente
     onClose: () => void;
+    availableProcesses?: Process[]; // opcional para mantener retrocompatibilidad si se usa en otro lado
 }
 
-export const FormEditorModal: React.FC<FormIntegrationModalProps> = ({ integration, onClose }) => {
+export const FormEditorModal: React.FC<FormIntegrationModalProps> = ({ integration, onClose, availableProcesses }) => {
     const { state, actions, getLabel } = useAppState();
     const isEditing = integration !== null;
+    
+    // Usar los procesos pasados por prop o los del estado por defecto
+    const processesList = availableProcesses || state.processes;
     
     const [platform, setPlatform] = useState<'Tally' | 'Google Forms' | 'Microsoft Forms'>(
         integration?.platform as any || 'Tally'
     );
     const [formName, setFormName] = useState(integration?.formName || '');
     const [formIdOrUrl, setFormIdOrUrl] = useState(integration?.formIdOrUrl || '');
-    const [processId, setProcessId] = useState(integration?.processId || state.processes[0]?.id || '');
+    const [processId, setProcessId] = useState(integration?.processId || processesList[0]?.id || '');
     const [showWebhook, setShowWebhook] = useState(false);
     const [webhookUrl, setWebhookUrl] = useState(integration?.webhookUrl || '');
     const [isSaving, setIsSaving] = useState(false);
@@ -204,10 +208,10 @@ export const FormEditorModal: React.FC<FormIntegrationModalProps> = ({ integrati
                                 disabled={isSaving}
                                 className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm disabled:bg-gray-100 disabled:cursor-not-allowed"
                             >
-                                {state.processes.length === 0 ? (
+                                {processesList.length === 0 ? (
                                     <option value="">No hay procesos disponibles</option>
                                 ) : (
-                                    state.processes.map(p => <option key={p.id} value={p.id}>{p.title}</option>)
+                                    processesList.map(p => <option key={p.id} value={p.id}>{p.title}{p.isBulkProcess ? ' (Masivo)' : ''}</option>)
                                 )}
                             </select>
                             <p className="mt-1 text-xs text-gray-500">

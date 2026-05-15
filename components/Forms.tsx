@@ -1,8 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAppState } from '../App';
 import { Plus, Trash2, Link as LinkIcon, ExternalLink, Edit2 } from 'lucide-react';
 import { FormEditorModal } from './FormEditorModal'; // This is now the FormIntegrationModal
-import { FormIntegration } from '../types';
+import { FormIntegration, Process } from '../types';
+import { processesApi } from '../lib/api/processes';
 
 const PlatformLogo: React.FC<{platform: string}> = ({platform}) => {
     const baseClasses = "w-8 h-8 mr-4 rounded-md flex items-center justify-center text-white font-bold";
@@ -28,6 +29,21 @@ export const Forms: React.FC = () => {
     const { state, actions, getLabel } = useAppState();
     const [isEditorOpen, setIsEditorOpen] = useState(false);
     const [editingIntegration, setEditingIntegration] = useState<FormIntegration | null>(null);
+    const [bulkProcesses, setBulkProcesses] = useState<Process[]>([]);
+
+    useEffect(() => {
+        const loadBulkProcesses = async () => {
+            try {
+                const processes = await processesApi.getAllBulkProcesses();
+                setBulkProcesses(processes);
+            } catch (error) {
+                console.error('Error loading bulk processes for forms:', error);
+            }
+        };
+        loadBulkProcesses();
+    }, []);
+
+    const allProcesses = [...state.processes, ...bulkProcesses];
     
     const handleDelete = (formId: string) => {
         if (window.confirm('¿Seguro que quieres eliminar esta integración? Esto no eliminará el formulario en la plataforma original.')) {
@@ -75,7 +91,7 @@ export const Forms: React.FC = () => {
                 <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
                     <ul role="list" className="divide-y divide-gray-200">
                         {state.formIntegrations.map((integration) => {
-                             const process = state.processes.find(p => p.id === integration.processId);
+                             const process = allProcesses.find(p => p.id === integration.processId);
                              return (
                                 <li key={integration.id} className="px-6 py-4 flex items-center justify-between hover:bg-gray-50">
                                     <div className="flex items-center flex-1">
@@ -126,6 +142,7 @@ export const Forms: React.FC = () => {
                 <FormEditorModal 
                     integration={editingIntegration} 
                     onClose={handleCloseEditor} 
+                    availableProcesses={allProcesses}
                 />
             )}
         </div>
