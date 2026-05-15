@@ -202,6 +202,7 @@ export interface User {
     avatarUrl?: string;
     permissions?: Permission[]; // Permisos personalizados (sobrescribe los del rol)
     visibleSections?: Section[]; // Secciones visibles en el menú (si no se define, usa las del rol por defecto)
+    allowedClientIds?: string[] | null; // IDs de clientes a los que el usuario tiene acceso (null o undefined = acceso a todos si su rol/permisos lo permiten)
 }
 
 // Basic definitions for unused types to satisfy compiler

@@ -1,7 +1,8 @@
-import React, { useRef, useState } from 'react';
+import React, { useRef, useState, useEffect } from 'react';
 import { useAppState } from '../App';
-import { User, UserRole, Permission, PermissionCategory, Section } from '../types';
-import { X, ChevronDown, ChevronRight, Shield, Eye } from 'lucide-react';
+import { User, UserRole, Permission, PermissionCategory, Section, Client } from '../types';
+import { X, ChevronDown, ChevronRight, Shield, Eye, Building2 } from 'lucide-react';
+import { clientsApi } from '../lib/api';
 
 interface UserEditorModalProps {
     user: User | null;
@@ -172,7 +173,22 @@ export const UserEditorModal: React.FC<UserEditorModalProps> = ({ user, onClose 
     const [useCustomSections, setUseCustomSections] = useState(!!user?.visibleSections);
     const [visibleSections, setVisibleSections] = useState<Section[]>(user?.visibleSections || DEFAULT_ROLE_SECTIONS[user?.role || 'viewer']);
     const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set(['processes', 'candidates']));
+    const [clients, setClients] = useState<Client[]>([]);
+    const [restrictClients, setRestrictClients] = useState(Array.isArray(user?.allowedClientIds) && user?.allowedClientIds !== null);
+    const [allowedClientIds, setAllowedClientIds] = useState<string[]>(user?.allowedClientIds || []);
     const avatarInputRef = useRef<HTMLInputElement>(null);
+
+    useEffect(() => {
+        const fetchClients = async () => {
+            try {
+                const data = await clientsApi.getAll();
+                setClients(data);
+            } catch (err) {
+                console.error("Error fetching clients", err);
+            }
+        };
+        fetchClients();
+    }, []);
 
     // Actualizar permisos y secciones cuando cambia el rol (si no hay personalización)
     const handleRoleChange = (newRole: UserRole) => {
@@ -257,7 +273,8 @@ export const UserEditorModal: React.FC<UserEditorModalProps> = ({ user, onClose 
             role, 
             avatarUrl,
             permissions: useCustomPermissions ? permissions : undefined,
-            visibleSections: useCustomSections ? visibleSections : undefined
+            visibleSections: useCustomSections ? visibleSections : undefined,
+            allowedClientIds: restrictClients ? allowedClientIds : null
         };
 
         if (password) {
@@ -354,6 +371,65 @@ export const UserEditorModal: React.FC<UserEditorModalProps> = ({ user, onClose 
                             <p className="mt-1 text-xs text-gray-500">
                                 El rol define los permisos por defecto. Puedes personalizarlos abajo.
                             </p>
+                        </div>
+
+                        {/* Sección de Acceso a Clientes */}
+                        <div className="border-t pt-4 mt-4">
+                            <div className="flex items-center justify-between mb-3">
+                                <div className="flex items-center gap-2">
+                                    <Building2 className="w-5 h-5 text-gray-600" />
+                                    <label className="text-sm font-medium text-gray-700">Acceso a Clientes</label>
+                                </div>
+                                <label className="flex items-center gap-2 text-sm">
+                                    <input
+                                        type="checkbox"
+                                        checked={restrictClients}
+                                        onChange={e => {
+                                            const restrict = e.target.checked;
+                                            setRestrictClients(restrict);
+                                            if (!restrict) {
+                                                setAllowedClientIds([]);
+                                            }
+                                        }}
+                                        className="rounded text-primary-600 focus:ring-primary-500"
+                                    />
+                                    Restringir por cliente
+                                </label>
+                            </div>
+                            
+                            {restrictClients ? (
+                                <div className="space-y-2 border rounded-lg p-3 bg-gray-50 max-h-60 overflow-y-auto">
+                                    {clients.length === 0 ? (
+                                        <p className="text-sm text-gray-500">No hay clientes creados en el sistema.</p>
+                                    ) : (
+                                        clients.map(client => (
+                                            <label key={client.id} className="flex items-center gap-2 p-2 hover:bg-white rounded cursor-pointer border border-transparent hover:border-gray-200 shadow-sm transition-all">
+                                                <input
+                                                    type="checkbox"
+                                                    checked={allowedClientIds.includes(client.id)}
+                                                    onChange={e => {
+                                                        if (e.target.checked) {
+                                                            setAllowedClientIds([...allowedClientIds, client.id]);
+                                                        } else {
+                                                            setAllowedClientIds(allowedClientIds.filter(id => id !== client.id));
+                                                        }
+                                                    }}
+                                                    className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                                                />
+                                                <div className="flex flex-col">
+                                                    <span className="text-sm font-medium text-gray-900">{client.razonSocial}</span>
+                                                    <span className="text-xs text-gray-500">RUC: {client.ruc}</span>
+                                                </div>
+                                            </label>
+                                        ))
+                                    )}
+                                </div>
+                            ) : (
+                                <div className="text-sm text-gray-600 bg-blue-50 border border-blue-200 rounded-lg p-3">
+                                    <p>Este usuario tiene acceso a los procesos de <strong>todos los clientes</strong> (sujetos a su rol y permisos).</p>
+                                    <p className="mt-1 text-xs">Activa "Restringir por cliente" para limitar su acceso solo a ciertos clientes.</p>
+                                </div>
+                            )}
                         </div>
                         
                         {/* Sección de Permisos */}

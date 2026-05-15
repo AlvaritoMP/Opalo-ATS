@@ -35,13 +35,19 @@ export const Forms: React.FC = () => {
         const loadBulkProcesses = async () => {
             try {
                 const processes = await processesApi.getAllBulkProcesses();
-                setBulkProcesses(processes);
+                let filteredProcesses = processes;
+                const currentUser = state.currentUser;
+                if (currentUser && currentUser.allowedClientIds !== undefined && currentUser.allowedClientIds !== null) {
+                    const allowedClientIdsSet = new Set(currentUser.allowedClientIds);
+                    filteredProcesses = processes.filter(p => p.clientId && allowedClientIdsSet.has(p.clientId));
+                }
+                setBulkProcesses(filteredProcesses);
             } catch (error) {
                 console.error('Error loading bulk processes for forms:', error);
             }
         };
         loadBulkProcesses();
-    }, []);
+    }, [state.currentUser]);
 
     const allProcesses = [...state.processes, ...bulkProcesses];
     

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { useAppState } from '../App';
 import { FormIntegration, Process, FieldMapping } from '../types';
 import { X, Copy, ChevronDown, ChevronUp, Settings } from 'lucide-react';
@@ -28,22 +28,71 @@ export const FormEditorModal: React.FC<FormIntegrationModalProps> = ({ integrati
     const [showFieldMapping, setShowFieldMapping] = useState(false);
     const [fieldMapping, setFieldMapping] = useState<FieldMapping>(integration?.fieldMapping || {});
     
-    // Campos disponibles en el candidato
-    const candidateFields = [
-        { key: 'name', label: 'Nombre', placeholder: 'nombre, name, nombre_completo' },
-        { key: 'email', label: 'Email', placeholder: 'email, correo, e-mail' },
-        { key: 'phone', label: 'Teléfono', placeholder: 'phone, telefono, teléfono' },
-        { key: 'phone2', label: 'Teléfono 2', placeholder: 'phone2, telefono2, teléfono_secundario' },
-        { key: 'description', label: 'Descripción', placeholder: 'description, descripcion, notas' },
-        { key: 'source', label: 'Fuente', placeholder: 'source, fuente, origen' },
-        { key: 'salaryExpectation', label: 'Expectativa salarial', placeholder: 'salaryExpectation, expectativa_salarial' },
-        { key: 'dni', label: 'DNI', placeholder: 'dni, documento, documento_identidad' },
-        { key: 'linkedinUrl', label: 'LinkedIn', placeholder: 'linkedinUrl, linkedin, perfil_linkedin' },
-        { key: 'address', label: 'Dirección', placeholder: 'address, direccion, dirección' },
-        { key: 'province', label: 'Provincia', placeholder: 'province, provincia' },
-        { key: 'district', label: 'Distrito', placeholder: 'district, distrito' },
-        { key: 'age', label: 'Edad', placeholder: 'age, edad' },
-    ];
+    // Cargar columnas personalizadas y ocultas (solo relevantes para procesos masivos)
+    const customColumns = useMemo(() => {
+        try {
+            const saved = localStorage.getItem('bulkProcessesCustomColumns');
+            return saved ? JSON.parse(saved) : [];
+        } catch {
+            return [];
+        }
+    }, []);
+    
+    const hiddenColumns = useMemo(() => {
+        try {
+            const saved = localStorage.getItem('bulkProcessesHiddenColumns');
+            return saved ? JSON.parse(saved) : [];
+        } catch {
+            return [];
+        }
+    }, []);
+
+    // Proceso seleccionado
+    const selectedProcessDetails = useMemo(() => {
+        return processesList.find(p => p.id === processId);
+    }, [processId, processesList]);
+
+    // Campos disponibles en el candidato, ajustados según el proceso seleccionado
+    const candidateFields = useMemo(() => {
+        const baseFields = [
+            { key: 'name', label: 'Nombre', placeholder: 'nombre, name, nombre_completo' },
+            { key: 'email', label: 'Email', placeholder: 'email, correo, e-mail' },
+            { key: 'phone', label: 'Teléfono', placeholder: 'phone, telefono, teléfono' },
+            { key: 'phone2', label: 'Teléfono 2', placeholder: 'phone2, telefono2, teléfono_secundario' },
+            { key: 'description', label: 'Descripción', placeholder: 'description, descripcion, notas' },
+            { key: 'source', label: 'Fuente', placeholder: 'source, fuente, origen' },
+            { key: 'salaryExpectation', label: 'Expectativa salarial', placeholder: 'salaryExpectation, expectativa_salarial' },
+            { key: 'dni', label: 'DNI', placeholder: 'dni, documento, documento_identidad' },
+            { key: 'linkedinUrl', label: 'LinkedIn', placeholder: 'linkedinUrl, linkedin, perfil_linkedin' },
+            { key: 'address', label: 'Dirección', placeholder: 'address, direccion, dirección' },
+            { key: 'province', label: 'Provincia', placeholder: 'province, provincia' },
+            { key: 'district', label: 'Distrito', placeholder: 'district, distrito' },
+            { key: 'age', label: 'Edad', placeholder: 'age, edad' },
+        ];
+
+        if (!selectedProcessDetails?.isBulkProcess) {
+            return baseFields;
+        }
+
+        // Si es masivo, filtramos por las ocultas y agregamos custom columns
+        let fields = [...baseFields];
+
+        // Remover campos base que estén ocultos
+        fields = fields.filter(f => !hiddenColumns.includes(f.key));
+
+        // Agregar custom columns que no estén ocultos
+        const visibleCustomCols = customColumns.filter((c: any) => !hiddenColumns.includes(`custom_${c.id}`));
+        
+        visibleCustomCols.forEach((col: any) => {
+            fields.push({
+                key: `custom_${col.id}`,
+                label: col.name,
+                placeholder: col.name.toLowerCase()
+            });
+        });
+
+        return fields;
+    }, [selectedProcessDetails, customColumns, hiddenColumns]);
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();

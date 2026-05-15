@@ -332,6 +332,11 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
     });
     const [showAddColumnModal, setShowAddColumnModal] = useState(false);
     const [showTemplateModal, setShowTemplateModal] = useState(false);
+    const [showColumnConfig, setShowColumnConfig] = useState(false);
+    const [hiddenColumns, setHiddenColumns] = useState<string[]>(() => {
+        const saved = localStorage.getItem('bulkProcessesHiddenColumns');
+        return saved ? JSON.parse(saved) : [];
+    });
     const [columnValues, setColumnValues] = useState<Record<string, Record<string, any>>>(() => {
         const saved = localStorage.getItem('bulkProcessesColumnValues');
         return saved ? JSON.parse(saved) : {};
@@ -353,9 +358,15 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
         setIsLoadingProcesses(true);
         try {
             const processes = await processesApi.getAllBulkProcesses();
-            setBulkProcesses(processes);
-            if (processes.length > 0 && !selectedProcess) {
-                setSelectedProcess(processes[0].id);
+            let filteredProcesses = processes;
+            const currentUser = state.currentUser;
+            if (currentUser && currentUser.allowedClientIds !== undefined && currentUser.allowedClientIds !== null) {
+                const allowedClientIdsSet = new Set(currentUser.allowedClientIds);
+                filteredProcesses = processes.filter(p => p.clientId && allowedClientIdsSet.has(p.clientId));
+            }
+            setBulkProcesses(filteredProcesses);
+            if (filteredProcesses.length > 0 && !selectedProcess) {
+                setSelectedProcess(filteredProcesses[0].id);
             }
         } catch (error) {
             console.error('Error cargando procesos masivos:', error);
@@ -363,7 +374,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
         } finally {
             setIsLoadingProcesses(false);
         }
-    }, [selectedProcess, actions]);
+    }, [selectedProcess, actions, state.currentUser]);
 
     useEffect(() => {
         loadBulkProcesses();
@@ -1036,6 +1047,43 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                         <Settings className="w-4 h-4" />
                                         Plantillas
                                     </button>
+                                    <div className="relative">
+                                        <button
+                                            onClick={() => setShowColumnConfig(!showColumnConfig)}
+                                            className="flex items-center gap-2 px-4 py-2 bg-gray-100 text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-200 transition-colors"
+                                            title="Configurar columnas"
+                                        >
+                                            <Filter className="w-4 h-4" />
+                                            Columnas
+                                        </button>
+                                        {showColumnConfig && (
+                                            <div className="absolute right-0 mt-2 w-56 bg-white border border-gray-200 rounded-lg shadow-xl z-50 p-2 max-h-96 overflow-y-auto">
+                                                <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2 px-2">Mostrar/Ocultar</div>
+                                                {allColumnIds.map(colId => {
+                                                    let colName = colId;
+                                                    if (colId.startsWith('custom_')) {
+                                                        const customCol = customColumns.find(c => c.id === colId.replace('custom_', ''));
+                                                        colName = customCol ? customCol.name : colId;
+                                                    } else {
+                                                        const baseCol = baseColumns.find(c => c.id === colId);
+                                                        colName = baseCol ? baseCol.label : colId;
+                                                    }
+                                                    
+                                                    return (
+                                                        <label key={colId} className="flex items-center gap-2 px-2 py-1.5 hover:bg-gray-50 rounded cursor-pointer">
+                                                            <input
+                                                                type="checkbox"
+                                                                checked={!hiddenColumns.includes(colId)}
+                                                                onChange={() => toggleColumnVisibility(colId)}
+                                                                className="w-4 h-4 text-primary-600 rounded focus:ring-primary-500"
+                                                            />
+                                                            <span className="text-sm text-gray-700 truncate" title={colName}>{colName}</span>
+                                                        </label>
+                                                    );
+                                                })}
+                                            </div>
+                                        )}
+                                    </div>
                                 </>
                             )}
                         </div>
@@ -1111,235 +1159,146 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                         className="w-4 h-4 text-primary-600 rounded focus:ring-primary-500"
                                     />
                                 </th>
-                                <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap" style={{ minWidth: '150px' }}>
-                                    <div className="flex flex-col gap-1">
-                                        <button
-                                            onClick={() => handleSort('name')}
-                                            className="flex items-center gap-1 hover:text-primary-600 transition-colors"
-                                        >
-                                            <span>Nombre</span>
-                                            {sortColumn === 'name' ? (
-                                                sortDirection === 'asc' ? (
-                                                    <ArrowUp className="w-3 h-3" />
-                                                ) : (
-                                                    <ArrowDown className="w-3 h-3" />
-                                                )
-                                            ) : (
-                                                <div className="w-3 h-3 opacity-30">
-                                                    <ArrowUp className="w-3 h-3" />
+                                {columnOrder.filter(colId => !hiddenColumns.includes(colId)).map(colId => {
+                                    const commonProps = {
+                                        key: colId,
+                                        draggable: true,
+                                        onDragStart: (e: React.DragEvent<HTMLTableCellElement>) => handleDragStart(e, colId),
+                                        onDragOver: handleDragOver,
+                                        onDragLeave: handleDragLeave,
+                                        onDrop: (e: React.DragEvent<HTMLTableCellElement>) => handleDrop(e, colId),
+                                        onDragEnd: handleDragEnd,
+                                        className: "px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap cursor-move transition-colors"
+                                    };
+
+                                    if (colId === 'name') {
+                                        return (
+                                            <th {...commonProps} style={{ minWidth: '150px' }}>
+                                                <div className="flex flex-col gap-1">
+                                                    <button onClick={() => handleSort('name')} className="flex items-center gap-1 hover:text-primary-600 transition-colors">
+                                                        <span>Nombre</span>
+                                                        {sortColumn === 'name' ? (sortDirection === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />) : <div className="w-3 h-3 opacity-30"><ArrowUp className="w-3 h-3" /></div>}
+                                                    </button>
+                                                    <input type="text" placeholder="Filtrar..." value={columnFilters.name || ''} onChange={(e) => setColumnFilters({ ...columnFilters, name: e.target.value })} className="text-xs px-2 py-1 border border-gray-300 rounded focus:ring-1 focus:ring-primary-500 focus:border-primary-500 font-normal normal-case" onClick={(e) => e.stopPropagation()} />
                                                 </div>
-                                            )}
-                                        </button>
-                                        <input
-                                            type="text"
-                                            placeholder="Filtrar..."
-                                            value={columnFilters.name || ''}
-                                            onChange={(e) => setColumnFilters({ ...columnFilters, name: e.target.value })}
-                                            className="text-xs px-2 py-1 border border-gray-300 rounded focus:ring-1 focus:ring-primary-500 focus:border-primary-500"
-                                            onClick={(e) => e.stopPropagation()}
-                                        />
-                                    </div>
-                                </th>
-                                <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap" style={{ minWidth: '100px' }}>
-                                    <div className="flex flex-col gap-1">
-                                        <button
-                                            onClick={() => handleSort('dni')}
-                                            className="flex items-center gap-1 hover:text-primary-600 transition-colors"
-                                        >
-                                            <span>DNI</span>
-                                            {sortColumn === 'dni' ? (
-                                                sortDirection === 'asc' ? (
-                                                    <ArrowUp className="w-3 h-3" />
-                                                ) : (
-                                                    <ArrowDown className="w-3 h-3" />
-                                                )
-                                            ) : (
-                                                <div className="w-3 h-3 opacity-30">
-                                                    <ArrowUp className="w-3 h-3" />
+                                            </th>
+                                        );
+                                    }
+                                    if (colId === 'dni') {
+                                        return (
+                                            <th {...commonProps} style={{ minWidth: '100px' }}>
+                                                <div className="flex flex-col gap-1">
+                                                    <button onClick={() => handleSort('dni')} className="flex items-center gap-1 hover:text-primary-600 transition-colors">
+                                                        <span>DNI</span>
+                                                        {sortColumn === 'dni' ? (sortDirection === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />) : <div className="w-3 h-3 opacity-30"><ArrowUp className="w-3 h-3" /></div>}
+                                                    </button>
+                                                    <input type="text" placeholder="Filtrar..." value={columnFilters.dni || ''} onChange={(e) => setColumnFilters({ ...columnFilters, dni: e.target.value })} className="text-xs px-2 py-1 border border-gray-300 rounded focus:ring-1 focus:ring-primary-500 focus:border-primary-500 font-normal normal-case" onClick={(e) => e.stopPropagation()} />
                                                 </div>
-                                            )}
-                                        </button>
-                                        <input
-                                            type="text"
-                                            placeholder="Filtrar..."
-                                            value={columnFilters.dni || ''}
-                                            onChange={(e) => setColumnFilters({ ...columnFilters, dni: e.target.value })}
-                                            className="text-xs px-2 py-1 border border-gray-300 rounded focus:ring-1 focus:ring-primary-500 focus:border-primary-500"
-                                            onClick={(e) => e.stopPropagation()}
-                                        />
-                                    </div>
-                                </th>
-                                <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap" style={{ minWidth: '180px' }}>
-                                    <div className="flex flex-col gap-1">
-                                        <button
-                                            onClick={() => handleSort('email')}
-                                            className="flex items-center gap-1 hover:text-primary-600 transition-colors"
-                                        >
-                                            <span>Email</span>
-                                            {sortColumn === 'email' ? (
-                                                sortDirection === 'asc' ? (
-                                                    <ArrowUp className="w-3 h-3" />
-                                                ) : (
-                                                    <ArrowDown className="w-3 h-3" />
-                                                )
-                                            ) : (
-                                                <div className="w-3 h-3 opacity-30">
-                                                    <ArrowUp className="w-3 h-3" />
+                                            </th>
+                                        );
+                                    }
+                                    if (colId === 'email') {
+                                        return (
+                                            <th {...commonProps} style={{ minWidth: '180px' }}>
+                                                <div className="flex flex-col gap-1">
+                                                    <button onClick={() => handleSort('email')} className="flex items-center gap-1 hover:text-primary-600 transition-colors">
+                                                        <span>Email</span>
+                                                        {sortColumn === 'email' ? (sortDirection === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />) : <div className="w-3 h-3 opacity-30"><ArrowUp className="w-3 h-3" /></div>}
+                                                    </button>
+                                                    <input type="text" placeholder="Filtrar..." value={columnFilters.email || ''} onChange={(e) => setColumnFilters({ ...columnFilters, email: e.target.value })} className="text-xs px-2 py-1 border border-gray-300 rounded focus:ring-1 focus:ring-primary-500 focus:border-primary-500 font-normal normal-case" onClick={(e) => e.stopPropagation()} />
                                                 </div>
-                                            )}
-                                        </button>
-                                        <input
-                                            type="text"
-                                            placeholder="Filtrar..."
-                                            value={columnFilters.email || ''}
-                                            onChange={(e) => setColumnFilters({ ...columnFilters, email: e.target.value })}
-                                            className="text-xs px-2 py-1 border border-gray-300 rounded focus:ring-1 focus:ring-primary-500 focus:border-primary-500"
-                                            onClick={(e) => e.stopPropagation()}
-                                        />
-                                    </div>
-                                </th>
-                                <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap" style={{ minWidth: '100px' }}>
-                                    <div className="flex flex-col gap-1">
-                                        <button
-                                            onClick={() => handleSort('scoreIa')}
-                                            className="flex items-center gap-1 hover:text-primary-600 transition-colors"
-                                        >
-                                            <span>Score IA</span>
-                                            {sortColumn === 'scoreIa' ? (
-                                                sortDirection === 'asc' ? (
-                                                    <ArrowUp className="w-3 h-3" />
-                                                ) : (
-                                                    <ArrowDown className="w-3 h-3" />
-                                                )
-                                            ) : (
-                                                <div className="w-3 h-3 opacity-30">
-                                                    <ArrowUp className="w-3 h-3" />
+                                            </th>
+                                        );
+                                    }
+                                    if (colId === 'scoreIa') {
+                                        return (
+                                            <th {...commonProps} style={{ minWidth: '100px' }}>
+                                                <div className="flex flex-col gap-1">
+                                                    <button onClick={() => handleSort('scoreIa')} className="flex items-center gap-1 hover:text-primary-600 transition-colors">
+                                                        <span>Score IA</span>
+                                                        {sortColumn === 'scoreIa' ? (sortDirection === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />) : <div className="w-3 h-3 opacity-30"><ArrowUp className="w-3 h-3" /></div>}
+                                                    </button>
+                                                    <input type="text" placeholder="Min..." value={columnFilters.scoreIa || ''} onChange={(e) => setColumnFilters({ ...columnFilters, scoreIa: e.target.value })} className="text-xs px-2 py-1 border border-gray-300 rounded focus:ring-1 focus:ring-primary-500 focus:border-primary-500 font-normal normal-case" onClick={(e) => e.stopPropagation()} />
                                                 </div>
-                                            )}
-                                        </button>
-                                        <input
-                                            type="text"
-                                            placeholder="Min..."
-                                            value={columnFilters.scoreIa || ''}
-                                            onChange={(e) => setColumnFilters({ ...columnFilters, scoreIa: e.target.value })}
-                                            className="text-xs px-2 py-1 border border-gray-300 rounded focus:ring-1 focus:ring-primary-500 focus:border-primary-500"
-                                            onClick={(e) => e.stopPropagation()}
-                                        />
-                                    </div>
-                                </th>
-                                <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap" style={{ minWidth: '100px' }}>
-                                    <button
-                                        onClick={() => handleSort('scoreIa')}
-                                        className="flex items-center gap-1 hover:text-primary-600 transition-colors"
-                                    >
-                                        <span>Status</span>
-                                        {sortColumn === 'scoreIa' ? (
-                                            sortDirection === 'asc' ? (
-                                                <ArrowUp className="w-3 h-3" />
-                                            ) : (
-                                                <ArrowDown className="w-3 h-3" />
-                                            )
-                                        ) : (
-                                            <div className="w-3 h-3 opacity-30">
-                                                <ArrowUp className="w-3 h-3" />
-                                            </div>
-                                        )}
-                                    </button>
-                                </th>
-                                <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap" style={{ minWidth: '130px' }}>
-                                    <div className="flex flex-col gap-1">
-                                        <button
-                                            onClick={() => handleSort('phone')}
-                                            className="flex items-center gap-1 hover:text-primary-600 transition-colors"
-                                        >
-                                            <span>Teléfono</span>
-                                            {sortColumn === 'phone' ? (
-                                                sortDirection === 'asc' ? (
-                                                    <ArrowUp className="w-3 h-3" />
-                                                ) : (
-                                                    <ArrowDown className="w-3 h-3" />
-                                                )
-                                            ) : (
-                                                <div className="w-3 h-3 opacity-30">
-                                                    <ArrowUp className="w-3 h-3" />
+                                            </th>
+                                        );
+                                    }
+                                    if (colId === 'status') {
+                                        return (
+                                            <th {...commonProps} style={{ minWidth: '100px' }}>
+                                                <button onClick={() => handleSort('scoreIa')} className="flex items-center gap-1 hover:text-primary-600 transition-colors">
+                                                    <span>Status</span>
+                                                    {sortColumn === 'scoreIa' ? (sortDirection === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />) : <div className="w-3 h-3 opacity-30"><ArrowUp className="w-3 h-3" /></div>}
+                                                </button>
+                                            </th>
+                                        );
+                                    }
+                                    if (colId === 'phone') {
+                                        return (
+                                            <th {...commonProps} style={{ minWidth: '130px' }}>
+                                                <div className="flex flex-col gap-1">
+                                                    <button onClick={() => handleSort('phone')} className="flex items-center gap-1 hover:text-primary-600 transition-colors">
+                                                        <span>Teléfono</span>
+                                                        {sortColumn === 'phone' ? (sortDirection === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />) : <div className="w-3 h-3 opacity-30"><ArrowUp className="w-3 h-3" /></div>}
+                                                    </button>
+                                                    <input type="text" placeholder="Filtrar..." value={columnFilters.phone || ''} onChange={(e) => setColumnFilters({ ...columnFilters, phone: e.target.value })} className="text-xs px-2 py-1 border border-gray-300 rounded focus:ring-1 focus:ring-primary-500 focus:border-primary-500 font-normal normal-case" onClick={(e) => e.stopPropagation()} />
                                                 </div>
-                                            )}
-                                        </button>
-                                        <input
-                                            type="text"
-                                            placeholder="Filtrar..."
-                                            value={columnFilters.phone || ''}
-                                            onChange={(e) => setColumnFilters({ ...columnFilters, phone: e.target.value })}
-                                            className="text-xs px-2 py-1 border border-gray-300 rounded focus:ring-1 focus:ring-primary-500 focus:border-primary-500"
-                                            onClick={(e) => e.stopPropagation()}
-                                        />
-                                    </div>
-                                </th>
-                                <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap" style={{ minWidth: '140px' }}>
-                                    <button
-                                        onClick={() => handleSort('lastInteraction')}
-                                        className="flex items-center gap-1 hover:text-primary-600 transition-colors"
-                                    >
-                                        <span>Última Interacción</span>
-                                        {sortColumn === 'lastInteraction' ? (
-                                            sortDirection === 'asc' ? (
-                                                <ArrowUp className="w-3 h-3" />
-                                            ) : (
-                                                <ArrowDown className="w-3 h-3" />
-                                            )
-                                        ) : (
-                                            <div className="w-3 h-3 opacity-30">
-                                                <ArrowUp className="w-3 h-3" />
-                                            </div>
-                                        )}
-                                    </button>
-                                </th>
-                                <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap" style={{ minWidth: '100px' }}>Contacto</th>
-                                <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap" style={{ minWidth: '150px' }}>
-                                    <button
-                                        onClick={() => handleSort('nextInterview')}
-                                        className="flex items-center gap-1 hover:text-primary-600 transition-colors"
-                                    >
-                                        <span>Próxima Entrevista</span>
-                                        {sortColumn === 'nextInterview' ? (
-                                            sortDirection === 'asc' ? (
-                                                <ArrowUp className="w-3 h-3" />
-                                            ) : (
-                                                <ArrowDown className="w-3 h-3" />
-                                            )
-                                        ) : (
-                                            <div className="w-3 h-3 opacity-30">
-                                                <ArrowUp className="w-3 h-3" />
-                                            </div>
-                                        )}
-                                    </button>
-                                </th>
-                                <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap" style={{ minWidth: '90px' }}>Agendar</th>
-                                <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap" style={{ minWidth: '130px' }}>
-                                    <button
-                                        onClick={() => handleSort('stage')}
-                                        className="flex items-center gap-1 hover:text-primary-600 transition-colors"
-                                    >
-                                        <span>Etapa</span>
-                                        {sortColumn === 'stage' ? (
-                                            sortDirection === 'asc' ? (
-                                                <ArrowUp className="w-3 h-3" />
-                                            ) : (
-                                                <ArrowDown className="w-3 h-3" />
-                                            )
-                                        ) : (
-                                            <div className="w-3 h-3 opacity-30">
-                                                <ArrowUp className="w-3 h-3" />
-                                            </div>
-                                        )}
-                                    </button>
-                                </th>
+                                            </th>
+                                        );
+                                    }
+                                    if (colId === 'lastInteraction') {
+                                        return (
+                                            <th {...commonProps} style={{ minWidth: '140px' }}>
+                                                <button onClick={() => handleSort('lastInteraction')} className="flex items-center gap-1 hover:text-primary-600 transition-colors">
+                                                    <span>Última Interacción</span>
+                                                    {sortColumn === 'lastInteraction' ? (sortDirection === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />) : <div className="w-3 h-3 opacity-30"><ArrowUp className="w-3 h-3" /></div>}
+                                                </button>
+                                            </th>
+                                        );
+                                    }
+                                    if (colId === 'contact') {
+                                        return (
+                                            <th {...commonProps} style={{ minWidth: '100px' }}>Contacto</th>
+                                        );
+                                    }
+                                    if (colId === 'nextInterview') {
+                                        return (
+                                            <th {...commonProps} style={{ minWidth: '150px' }}>
+                                                <button onClick={() => handleSort('nextInterview')} className="flex items-center gap-1 hover:text-primary-600 transition-colors">
+                                                    <span>Próxima Entrevista</span>
+                                                    {sortColumn === 'nextInterview' ? (sortDirection === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />) : <div className="w-3 h-3 opacity-30"><ArrowUp className="w-3 h-3" /></div>}
+                                                </button>
+                                            </th>
+                                        );
+                                    }
+                                    if (colId === 'schedule') {
+                                        return (
+                                            <th {...commonProps} style={{ minWidth: '90px' }}>Agendar</th>
+                                        );
+                                    }
+                                    if (colId === 'stage') {
+                                        return (
+                                            <th {...commonProps} style={{ minWidth: '130px' }}>
+                                                <button onClick={() => handleSort('stage')} className="flex items-center gap-1 hover:text-primary-600 transition-colors">
+                                                    <span>Etapa</span>
+                                                    {sortColumn === 'stage' ? (sortDirection === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />) : <div className="w-3 h-3 opacity-30"><ArrowUp className="w-3 h-3" /></div>}
+                                                </button>
+                                            </th>
+                                        );
+                                    }
+                                    if (colId.startsWith('custom_')) {
+                                        const customColId = colId.replace('custom_', '');
+                                        const col = customColumns.find(c => c.id === customColId);
+                                        if (!col) return null;
+                                        return (
+                                            <th {...commonProps} style={{ minWidth: '120px' }}>
+                                                {col.name}
+                                            </th>
+                                        );
+                                    }
+                                    return null;
+                                })}
                                 <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap" style={{ minWidth: '120px' }}>Acciones</th>
-                                {customColumns.map(col => (
-                                    <th key={col.id} className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap" style={{ minWidth: '120px' }}>
-                                        {col.name}
-                                    </th>
-                                ))}
                             </tr>
                         </thead>
                         <tbody className="bg-white divide-y divide-gray-200">
@@ -1388,267 +1347,211 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                                 className="w-4 h-4 text-primary-600 rounded focus:ring-primary-500"
                                             />
                                         </td>
-                                        <td className="px-3 py-3 whitespace-nowrap">
-                                            {editingCell?.candidateId === candidate.id && editingCell?.field === 'name' ? (
-                                                <input
-                                                    type="text"
-                                                    value={editValue}
-                                                    onChange={(e) => setEditValue(e.target.value)}
-                                                    onBlur={() => handleSaveEdit(candidate.id, 'name')}
-                                                    onKeyDown={(e) => {
-                                                        if (e.key === 'Enter') handleSaveEdit(candidate.id, 'name');
-                                                        if (e.key === 'Escape') handleCancelEdit();
-                                                    }}
-                                                    autoFocus
-                                                    className="w-full px-2 py-1 border border-primary-500 rounded focus:ring-2 focus:ring-primary-500"
-                                                />
-                                            ) : (
-                                                <MetadataTooltip 
-                                                    metadata={displayCandidate.metadataIa || ''} 
-                                                    scoreIa={displayCandidate.scoreIa}
-                                                >
-                                                    <span 
-                                                        className="font-medium text-gray-900 cursor-help hover:bg-gray-50 px-1 py-0.5 rounded"
-                                                        onDoubleClick={() => handleStartEdit(candidate.id, 'name', displayCandidate.name)}
-                                                        title="Doble clic para editar"
-                                                    >
-                                                        {displayCandidate.name}
-                                                    </span>
-                                                </MetadataTooltip>
-                                            )}
-                                        </td>
-                                        <td className="px-3 py-3 text-sm whitespace-nowrap">
-                                            {editingCell?.candidateId === candidate.id && editingCell?.field === 'dni' ? (
-                                                <input
-                                                    type="text"
-                                                    value={editValue}
-                                                    onChange={(e) => setEditValue(e.target.value)}
-                                                    onBlur={() => handleSaveEdit(candidate.id, 'dni')}
-                                                    onKeyDown={(e) => {
-                                                        if (e.key === 'Enter') handleSaveEdit(candidate.id, 'dni');
-                                                        if (e.key === 'Escape') handleCancelEdit();
-                                                    }}
-                                                    autoFocus
-                                                    className="w-full px-2 py-1 border border-primary-500 rounded focus:ring-2 focus:ring-primary-500"
-                                                />
-                                            ) : (
-                                                <span 
-                                                    className="text-gray-600 hover:bg-gray-50 px-1 py-0.5 rounded cursor-pointer"
-                                                    onDoubleClick={() => handleStartEdit(candidate.id, 'dni', displayCandidate.dni || '')}
-                                                    title="Doble clic para editar"
-                                                >
-                                                    {displayCandidate.dni || '-'}
-                                                </span>
-                                            )}
-                                        </td>
-                                        <td className="px-3 py-3 text-sm text-gray-500 whitespace-nowrap">
-                                            {editingCell?.candidateId === candidate.id && editingCell?.field === 'email' ? (
-                                                <input
-                                                    type="email"
-                                                    value={editValue}
-                                                    onChange={(e) => setEditValue(e.target.value)}
-                                                    onBlur={() => handleSaveEdit(candidate.id, 'email')}
-                                                    onKeyDown={(e) => {
-                                                        if (e.key === 'Enter') handleSaveEdit(candidate.id, 'email');
-                                                        if (e.key === 'Escape') handleCancelEdit();
-                                                    }}
-                                                    autoFocus
-                                                    className="w-full px-2 py-1 border border-primary-500 rounded focus:ring-2 focus:ring-primary-500"
-                                                />
-                                            ) : displayCandidate.email ? (
-                                                <a 
-                                                    href={`mailto:${displayCandidate.email}`}
-                                                    onClick={(e) => e.stopPropagation()}
-                                                    onDoubleClick={(e) => {
-                                                        e.preventDefault();
-                                                        handleStartEdit(candidate.id, 'email', displayCandidate.email || '');
-                                                    }}
-                                                    className="text-blue-600 hover:text-blue-700 hover:underline"
-                                                    title="Doble clic para editar"
-                                                >
-                                                    {displayCandidate.email}
-                                                </a>
-                                            ) : (
-                                                <span 
-                                                    className="text-gray-400 hover:bg-gray-50 px-1 py-0.5 rounded cursor-pointer"
-                                                    onDoubleClick={() => handleStartEdit(candidate.id, 'email', '')}
-                                                    title="Doble clic para editar"
-                                                >
-                                                    N/A
-                                                </span>
-                                            )}
-                                        </td>
-                                        <td className="px-3 py-3 text-sm whitespace-nowrap">
-                                            {displayCandidate.scoreIa !== undefined ? (
-                                                <span className={`font-semibold ${
-                                                    displayCandidate.scoreIa >= 70 ? 'text-green-600' : 
-                                                    displayCandidate.scoreIa >= 50 ? 'text-yellow-600' : 
-                                                    'text-red-600'
-                                                }`}>
-                                                    {displayCandidate.scoreIa}
-                                                </span>
-                                            ) : (
-                                                <span className="text-gray-400">-</span>
-                                            )}
-                                        </td>
-                                        <td className="px-3 py-3 text-sm whitespace-nowrap">
-                                            {(() => {
-                                                const scoreThreshold = process?.bulkConfig?.scoreThreshold;
-                                                const autoFilterEnabled = process?.bulkConfig?.autoFilterEnabled;
-                                                
-                                                if (displayCandidate.scoreIa === undefined) {
-                                                    return <span className="text-gray-400">-</span>;
-                                                }
-                                                
-                                                // Si el filtrado automático está activo y hay threshold
-                                                if (autoFilterEnabled && scoreThreshold !== undefined) {
-                                                    // Si llegó aquí, significa que pasó el filtro (porque la query ya lo filtró)
-                                                    return (
-                                                        <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
-                                                            ✅ Apto
-                                                        </span>
-                                                    );
-                                                }
-                                                
-                                                // Si no hay filtrado automático, mostrar estado basado en score
-                                                if (displayCandidate.scoreIa >= 70) {
-                                                    return (
-                                                        <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
-                                                            ✅ Alto
-                                                        </span>
-                                                    );
-                                                } else if (displayCandidate.scoreIa >= 50) {
-                                                    return (
-                                                        <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
-                                                            ⚠️ Medio
-                                                        </span>
-                                                    );
-                                                } else {
-                                                    return (
-                                                        <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-red-100 text-red-800">
-                                                            ❌ Bajo
-                                                        </span>
-                                                    );
-                                                }
-                                            })()}
-                                        </td>
-                                        <td className="px-3 py-3 text-sm text-gray-500 whitespace-nowrap">
-                                            {editingCell?.candidateId === candidate.id && editingCell?.field === 'phone' ? (
-                                                <input
-                                                    type="tel"
-                                                    value={editValue}
-                                                    onChange={(e) => setEditValue(e.target.value)}
-                                                    onBlur={() => handleSaveEdit(candidate.id, 'phone')}
-                                                    onKeyDown={(e) => {
-                                                        if (e.key === 'Enter') handleSaveEdit(candidate.id, 'phone');
-                                                        if (e.key === 'Escape') handleCancelEdit();
-                                                    }}
-                                                    autoFocus
-                                                    className="w-full px-2 py-1 border border-primary-500 rounded focus:ring-2 focus:ring-primary-500"
-                                                />
-                                            ) : (
-                                                <span 
-                                                    className="hover:bg-gray-50 px-1 py-0.5 rounded cursor-pointer"
-                                                    onDoubleClick={() => handleStartEdit(candidate.id, 'phone', displayCandidate.phone || '')}
-                                                    title="Doble clic para editar"
-                                                >
-                                                    {displayCandidate.phone || 'N/A'}
-                                                </span>
-                                            )}
-                                        </td>
-                                        <td className="px-3 py-3 text-sm text-gray-600 whitespace-nowrap">
-                                            {displayCandidate.lastWhatsAppInteractionAt ? (
-                                                <span className="text-xs" title={new Date(displayCandidate.lastWhatsAppInteractionAt).toLocaleString('es-PE')}>
-                                                    {formatTimeAgo(displayCandidate.lastWhatsAppInteractionAt)}
-                                                </span>
-                                            ) : (
-                                                <span className="text-gray-400 text-xs">Nunca</span>
-                                            )}
-                                        </td>
-                                        <td className="px-3 py-3 whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
-                                            <div className="flex gap-2 items-center">
-                                                {displayCandidate.phone && (
-                                                    <>
-                                                        <button
-                                                            onClick={() => handleWhatsAppClick(displayCandidate.id, displayCandidate.phone!)}
-                                                            className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-green-600 hover:text-green-700 hover:bg-green-50 rounded transition-colors"
-                                                            title="Abrir WhatsApp y registrar interacción"
-                                                        >
-                                                            <MessageCircle className="w-4 h-4" />
-                                                        </button>
-                                                        {isMobile && (
-                                                            <a
-                                                                href={`tel:${displayCandidate.phone.replace(/[^\d]/g, '')}`}
-                                                                className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-blue-600 hover:text-blue-700 hover:bg-blue-50 rounded transition-colors"
-                                                                title="Llamar"
-                                                            >
-                                                                <Phone className="w-4 h-4" />
-                                                            </a>
+                                        {columnOrder.filter(colId => !hiddenColumns.includes(colId)).map(colId => {
+                                            if (colId === 'name') {
+                                                return (
+                                                    <td key="name" className="px-3 py-3 whitespace-nowrap">
+                                                        {editingCell?.candidateId === candidate.id && editingCell?.field === 'name' ? (
+                                                            <input type="text" value={editValue} onChange={(e) => setEditValue(e.target.value)} onBlur={() => handleSaveEdit(candidate.id, 'name')} onKeyDown={(e) => { if (e.key === 'Enter') handleSaveEdit(candidate.id, 'name'); if (e.key === 'Escape') handleCancelEdit(); }} autoFocus className="w-full px-2 py-1 border border-primary-500 rounded focus:ring-2 focus:ring-primary-500" />
+                                                        ) : (
+                                                            <MetadataTooltip metadata={displayCandidate.metadataIa || ''} scoreIa={displayCandidate.scoreIa}>
+                                                                <span className="font-medium text-gray-900 cursor-help hover:bg-gray-50 px-1 py-0.5 rounded" onDoubleClick={() => handleStartEdit(candidate.id, 'name', displayCandidate.name)} title="Doble clic para editar">{displayCandidate.name}</span>
+                                                            </MetadataTooltip>
                                                         )}
-                                                    </>
-                                                )}
-                                                {displayCandidate.email && (
-                                                    <a
-                                                        href={`mailto:${displayCandidate.email}`}
-                                                        className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-blue-600 hover:text-blue-700 hover:bg-blue-50 rounded transition-colors"
-                                                        title="Enviar correo"
-                                                    >
-                                                        <Mail className="w-4 h-4" />
-                                                    </a>
-                                                )}
-                                                {!displayCandidate.phone && !displayCandidate.email && (
-                                                    <span className="text-gray-400 text-xs">-</span>
-                                                )}
-                                            </div>
-                                        </td>
-                                        <td className="px-3 py-3 text-sm text-gray-600 whitespace-nowrap">
-                                            {displayCandidate.nextInterviewAt ? (
-                                                <div className="flex flex-col">
-                                                    <span className="text-xs font-medium text-gray-900">
-                                                        {new Date(displayCandidate.nextInterviewAt).toLocaleDateString('es-PE', { 
-                                                            day: '2-digit', 
-                                                            month: 'short',
-                                                            weekday: 'short'
-                                                        })}
-                                                    </span>
-                                                    <span className="text-xs text-gray-500">
-                                                        {new Date(displayCandidate.nextInterviewAt).toLocaleTimeString('es-PE', { 
-                                                            hour: '2-digit', 
-                                                            minute: '2-digit' 
-                                                        })}
-                                                    </span>
-                                                </div>
-                                            ) : (
-                                                <span className="text-gray-400 text-xs">-</span>
-                                            )}
-                                        </td>
+                                                    </td>
+                                                );
+                                            }
+                                            if (colId === 'dni') {
+                                                return (
+                                                    <td key="dni" className="px-3 py-3 text-sm whitespace-nowrap">
+                                                        {editingCell?.candidateId === candidate.id && editingCell?.field === 'dni' ? (
+                                                            <input type="text" value={editValue} onChange={(e) => setEditValue(e.target.value)} onBlur={() => handleSaveEdit(candidate.id, 'dni')} onKeyDown={(e) => { if (e.key === 'Enter') handleSaveEdit(candidate.id, 'dni'); if (e.key === 'Escape') handleCancelEdit(); }} autoFocus className="w-full px-2 py-1 border border-primary-500 rounded focus:ring-2 focus:ring-primary-500" />
+                                                        ) : (
+                                                            <span className="text-gray-600 hover:bg-gray-50 px-1 py-0.5 rounded cursor-pointer" onDoubleClick={() => handleStartEdit(candidate.id, 'dni', displayCandidate.dni || '')} title="Doble clic para editar">{displayCandidate.dni || '-'}</span>
+                                                        )}
+                                                    </td>
+                                                );
+                                            }
+                                            if (colId === 'email') {
+                                                return (
+                                                    <td key="email" className="px-3 py-3 text-sm text-gray-500 whitespace-nowrap">
+                                                        {editingCell?.candidateId === candidate.id && editingCell?.field === 'email' ? (
+                                                            <input type="email" value={editValue} onChange={(e) => setEditValue(e.target.value)} onBlur={() => handleSaveEdit(candidate.id, 'email')} onKeyDown={(e) => { if (e.key === 'Enter') handleSaveEdit(candidate.id, 'email'); if (e.key === 'Escape') handleCancelEdit(); }} autoFocus className="w-full px-2 py-1 border border-primary-500 rounded focus:ring-2 focus:ring-primary-500" />
+                                                        ) : displayCandidate.email ? (
+                                                            <a href={`mailto:${displayCandidate.email}`} onClick={(e) => e.stopPropagation()} onDoubleClick={(e) => { e.preventDefault(); handleStartEdit(candidate.id, 'email', displayCandidate.email || ''); }} className="text-blue-600 hover:text-blue-700 hover:underline" title="Doble clic para editar">{displayCandidate.email}</a>
+                                                        ) : (
+                                                            <span className="text-gray-400 hover:bg-gray-50 px-1 py-0.5 rounded cursor-pointer" onDoubleClick={() => handleStartEdit(candidate.id, 'email', '')} title="Doble clic para editar">N/A</span>
+                                                        )}
+                                                    </td>
+                                                );
+                                            }
+                                            if (colId === 'scoreIa') {
+                                                return (
+                                                    <td key="scoreIa" className="px-3 py-3 text-sm whitespace-nowrap">
+                                                        {displayCandidate.scoreIa !== undefined ? (
+                                                            <span className={`font-semibold ${displayCandidate.scoreIa >= 70 ? 'text-green-600' : displayCandidate.scoreIa >= 50 ? 'text-yellow-600' : 'text-red-600'}`}>{displayCandidate.scoreIa}</span>
+                                                        ) : (
+                                                            <span className="text-gray-400">-</span>
+                                                        )}
+                                                    </td>
+                                                );
+                                            }
+                                            if (colId === 'status') {
+                                                return (
+                                                    <td key="status" className="px-3 py-3 text-sm whitespace-nowrap">
+                                                        {(() => {
+                                                            const scoreThreshold = process?.bulkConfig?.scoreThreshold;
+                                                            const autoFilterEnabled = process?.bulkConfig?.autoFilterEnabled;
+                                                            if (displayCandidate.scoreIa === undefined) return <span className="text-gray-400">-</span>;
+                                                            if (autoFilterEnabled && scoreThreshold !== undefined) return <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">✅ Apto</span>;
+                                                            if (displayCandidate.scoreIa >= 70) return <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">✅ Alto</span>;
+                                                            else if (displayCandidate.scoreIa >= 50) return <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">⚠️ Medio</span>;
+                                                            else return <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-red-100 text-red-800">❌ Bajo</span>;
+                                                        })()}
+                                                    </td>
+                                                );
+                                            }
+                                            if (colId === 'phone') {
+                                                return (
+                                                    <td key="phone" className="px-3 py-3 text-sm text-gray-500 whitespace-nowrap">
+                                                        {editingCell?.candidateId === candidate.id && editingCell?.field === 'phone' ? (
+                                                            <input type="tel" value={editValue} onChange={(e) => setEditValue(e.target.value)} onBlur={() => handleSaveEdit(candidate.id, 'phone')} onKeyDown={(e) => { if (e.key === 'Enter') handleSaveEdit(candidate.id, 'phone'); if (e.key === 'Escape') handleCancelEdit(); }} autoFocus className="w-full px-2 py-1 border border-primary-500 rounded focus:ring-2 focus:ring-primary-500" />
+                                                        ) : (
+                                                            <span className="hover:bg-gray-50 px-1 py-0.5 rounded cursor-pointer" onDoubleClick={() => handleStartEdit(candidate.id, 'phone', displayCandidate.phone || '')} title="Doble clic para editar">{displayCandidate.phone || 'N/A'}</span>
+                                                        )}
+                                                    </td>
+                                                );
+                                            }
+                                            if (colId === 'lastInteraction') {
+                                                return (
+                                                    <td key="lastInteraction" className="px-3 py-3 text-sm text-gray-600 whitespace-nowrap">
+                                                        {displayCandidate.lastWhatsAppInteractionAt ? (
+                                                            <span className="text-xs" title={new Date(displayCandidate.lastWhatsAppInteractionAt).toLocaleString('es-PE')}>{formatTimeAgo(displayCandidate.lastWhatsAppInteractionAt)}</span>
+                                                        ) : (
+                                                            <span className="text-gray-400 text-xs">Nunca</span>
+                                                        )}
+                                                    </td>
+                                                );
+                                            }
+                                            if (colId === 'contact') {
+                                                return (
+                                                    <td key="contact" className="px-3 py-3 whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
+                                                        <div className="flex gap-2 items-center">
+                                                            {displayCandidate.phone && (
+                                                                <>
+                                                                    <button onClick={() => handleWhatsAppClick(displayCandidate.id, displayCandidate.phone!)} className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-green-600 hover:text-green-700 hover:bg-green-50 rounded transition-colors" title="Abrir WhatsApp y registrar interacción"><MessageCircle className="w-4 h-4" /></button>
+                                                                    {isMobile && <a href={`tel:${displayCandidate.phone.replace(/[^\d]/g, '')}`} className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-blue-600 hover:text-blue-700 hover:bg-blue-50 rounded transition-colors" title="Llamar"><Phone className="w-4 h-4" /></a>}
+                                                                </>
+                                                            )}
+                                                            {displayCandidate.email && <a href={`mailto:${displayCandidate.email}`} className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-blue-600 hover:text-blue-700 hover:bg-blue-50 rounded transition-colors" title="Enviar correo"><Mail className="w-4 h-4" /></a>}
+                                                            {!displayCandidate.phone && !displayCandidate.email && <span className="text-gray-400 text-xs">-</span>}
+                                                        </div>
+                                                    </td>
+                                                );
+                                            }
+                                            if (colId === 'nextInterview') {
+                                                return (
+                                                    <td key="nextInterview" className="px-3 py-3 text-sm text-gray-600 whitespace-nowrap">
+                                                        {displayCandidate.nextInterviewAt ? (
+                                                            <div className="flex flex-col">
+                                                                <span className="text-xs font-medium text-gray-900">{new Date(displayCandidate.nextInterviewAt).toLocaleDateString('es-PE', { day: '2-digit', month: 'short', weekday: 'short' })}</span>
+                                                                <span className="text-xs text-gray-500">{new Date(displayCandidate.nextInterviewAt).toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' })}</span>
+                                                            </div>
+                                                        ) : (
+                                                            <span className="text-gray-400 text-xs">-</span>
+                                                        )}
+                                                    </td>
+                                                );
+                                            }
+                                            if (colId === 'schedule') {
+                                                return (
+                                                    <td key="schedule" className="px-3 py-3 whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
+                                                        <div className="relative">
+                                                            <button onClick={() => setQuickScheduleCandidate(quickScheduleCandidate === candidate.id ? null : candidate.id)} className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-primary-600 hover:text-primary-700 hover:bg-primary-50 rounded transition-colors" title="Agendar entrevista rápidamente"><Calendar className="w-4 h-4" /></button>
+                                                            {quickScheduleCandidate === candidate.id && (
+                                                                <div className="absolute right-0 top-full mt-1 z-50 bg-white border border-gray-200 rounded-lg shadow-lg p-3 min-w-[280px]">
+                                                                    <QuickScheduleInline candidateId={candidate.id} candidateName={candidate.name} onSchedule={async (date, time, interviewerId) => { await handleQuickSchedule(date, time, interviewerId); setQuickScheduleCandidate(null); await loadCandidates(currentPage, true); }} onCancel={() => setQuickScheduleCandidate(null)} />
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                    </td>
+                                                );
+                                            }
+                                            if (colId === 'stage') {
+                                                return (
+                                                    <td key="stage" className="px-3 py-3 text-sm text-gray-500 whitespace-nowrap">{stage?.name || 'N/A'}</td>
+                                                );
+                                            }
+                                            if (colId.startsWith('custom_')) {
+                                                const customColId = colId.replace('custom_', '');
+                                                const col = customColumns.find(c => c.id === customColId);
+                                                if (!col) return null;
+                                                const value = getColumnValue(candidate.id, col.id);
+                                                return (
+                                                    <td key={col.id} className="px-3 py-3 text-sm whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
+                                                        {col.type === 'checkbox' ? (
+                                                            <input type="checkbox" checked={value === true} onChange={(e) => handleColumnValueChange(candidate.id, col.id, e.target.checked)} className="w-4 h-4 text-primary-600 rounded focus:ring-primary-500" />
+                                                        ) : col.type === 'select' && col.options ? (
+                                                            <select value={value || ''} onChange={(e) => handleColumnValueChange(candidate.id, col.id, e.target.value)} className="w-full px-2 py-1 text-xs border border-gray-300 rounded focus:ring-1 focus:ring-primary-500 focus:border-primary-500">
+                                                                <option value="">-</option>
+                                                                {col.options.map(opt => <option key={opt} value={opt}>{opt}</option>)}
+                                                            </select>
+                                                        ) : col.type === 'date' ? (
+                                                            <input type="date" value={value || ''} onChange={(e) => handleColumnValueChange(candidate.id, col.id, e.target.value)} className="w-full px-2 py-1 text-xs border border-gray-300 rounded focus:ring-1 focus:ring-primary-500 focus:border-primary-500" />
+                                                        ) : col.type === 'number' ? (
+                                                            <input type="number" value={value || ''} onChange={(e) => handleColumnValueChange(candidate.id, col.id, e.target.value ? parseFloat(e.target.value) : '')} className="w-full px-2 py-1 text-xs border border-gray-300 rounded focus:ring-1 focus:ring-primary-500 focus:border-primary-500" placeholder="-" />
+                                                        ) : (
+                                                            <input type="text" value={value || ''} onChange={(e) => handleColumnValueChange(candidate.id, col.id, e.target.value)} className="w-full px-2 py-1 text-xs border border-gray-300 rounded focus:ring-1 focus:ring-primary-500 focus:border-primary-500" placeholder="-" />
+                                                        )}
+                                                    </td>
+                                                );
+                                            }
+                                            return null;
+                                        })}
                                         <td className="px-3 py-3 whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
-                                            <div className="relative">
-                                                <button
-                                                    onClick={() => setQuickScheduleCandidate(quickScheduleCandidate === candidate.id ? null : candidate.id)}
-                                                    className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-primary-600 hover:text-primary-700 hover:bg-primary-50 rounded transition-colors"
-                                                    title="Agendar entrevista rápidamente"
-                                                >
-                                                    <Calendar className="w-4 h-4" />
-                                                </button>
-                                                
-                                                {quickScheduleCandidate === candidate.id && (
-                                                    <div className="absolute right-0 top-full mt-1 z-50 bg-white border border-gray-200 rounded-lg shadow-lg p-3 min-w-[280px]">
-                                                        <QuickScheduleInline
-                                                            candidateId={candidate.id}
-                                                            candidateName={candidate.name}
-                                                            onSchedule={async (date, time, interviewerId) => {
-                                                                await handleQuickSchedule(date, time, interviewerId);
-                                                                setQuickScheduleCandidate(null);
-                                                                await loadCandidates(currentPage, true);
-                                                            }}
-                                                            onCancel={() => setQuickScheduleCandidate(null)}
-                                                        />
-                                                    </div>
-                                                )}
-                                            </div>
-                                        </td>
-                                        <td className="px-3 py-3 text-sm text-gray-500 whitespace-nowrap">{stage?.name || 'N/A'}</td>
+                                                    <td key="schedule" className="px-3 py-3 whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
+                                                        <div className="relative">
+                                                            <button onClick={() => setQuickScheduleCandidate(quickScheduleCandidate === candidate.id ? null : candidate.id)} className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-primary-600 hover:text-primary-700 hover:bg-primary-50 rounded transition-colors" title="Agendar entrevista rápidamente"><Calendar className="w-4 h-4" /></button>
+                                                            {quickScheduleCandidate === candidate.id && (
+                                                                <div className="absolute right-0 top-full mt-1 z-50 bg-white border border-gray-200 rounded-lg shadow-lg p-3 min-w-[280px]">
+                                                                    <QuickScheduleInline candidateId={candidate.id} candidateName={candidate.name} onSchedule={async (date, time, interviewerId) => { await handleQuickSchedule(date, time, interviewerId); setQuickScheduleCandidate(null); await loadCandidates(currentPage, true); }} onCancel={() => setQuickScheduleCandidate(null)} />
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                    </td>
+                                                );
+                                            }
+                                            if (colId === 'stage') {
+                                                return (
+                                                    <td key="stage" className="px-3 py-3 text-sm text-gray-500 whitespace-nowrap">{stage?.name || 'N/A'}</td>
+                                                );
+                                            }
+                                            if (colId.startsWith('custom_')) {
+                                                const customColId = colId.replace('custom_', '');
+                                                const col = customColumns.find(c => c.id === customColId);
+                                                if (!col) return null;
+                                                const value = getColumnValue(candidate.id, col.id);
+                                                return (
+                                                    <td key={col.id} className="px-3 py-3 text-sm whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
+                                                        {col.type === 'checkbox' ? (
+                                                            <input type="checkbox" checked={value === true} onChange={(e) => handleColumnValueChange(candidate.id, col.id, e.target.checked)} className="w-4 h-4 text-primary-600 rounded focus:ring-primary-500" />
+                                                        ) : col.type === 'select' && col.options ? (
+                                                            <select value={value || ''} onChange={(e) => handleColumnValueChange(candidate.id, col.id, e.target.value)} className="w-full px-2 py-1 text-xs border border-gray-300 rounded focus:ring-1 focus:ring-primary-500 focus:border-primary-500">
+                                                                <option value="">-</option>
+                                                                {col.options.map(opt => <option key={opt} value={opt}>{opt}</option>)}
+                                                            </select>
+                                                        ) : col.type === 'date' ? (
+                                                            <input type="date" value={value || ''} onChange={(e) => handleColumnValueChange(candidate.id, col.id, e.target.value)} className="w-full px-2 py-1 text-xs border border-gray-300 rounded focus:ring-1 focus:ring-primary-500 focus:border-primary-500" />
+                                                        ) : col.type === 'number' ? (
+                                                            <input type="number" value={value || ''} onChange={(e) => handleColumnValueChange(candidate.id, col.id, e.target.value ? parseFloat(e.target.value) : '')} className="w-full px-2 py-1 text-xs border border-gray-300 rounded focus:ring-1 focus:ring-primary-500 focus:border-primary-500" placeholder="-" />
+                                                        ) : (
+                                                            <input type="text" value={value || ''} onChange={(e) => handleColumnValueChange(candidate.id, col.id, e.target.value)} className="w-full px-2 py-1 text-xs border border-gray-300 rounded focus:ring-1 focus:ring-primary-500 focus:border-primary-500" placeholder="-" />
+                                                        )}
+                                                    </td>
+                                                );
+                                            }
+                                            return null;
+                                        })}
                                         <td className="px-3 py-3 whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
                                             <div className="flex gap-2">
                                                 <button
@@ -1676,55 +1579,6 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                                 </button>
                                             </div>
                                         </td>
-                                        {customColumns.map(col => {
-                                            const value = getColumnValue(candidate.id, col.id);
-                                            return (
-                                                <td key={col.id} className="px-3 py-3 text-sm whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
-                                                    {col.type === 'checkbox' ? (
-                                                        <input
-                                                            type="checkbox"
-                                                            checked={value === true}
-                                                            onChange={(e) => handleColumnValueChange(candidate.id, col.id, e.target.checked)}
-                                                            className="w-4 h-4 text-primary-600 rounded focus:ring-primary-500"
-                                                        />
-                                                    ) : col.type === 'select' && col.options ? (
-                                                        <select
-                                                            value={value || ''}
-                                                            onChange={(e) => handleColumnValueChange(candidate.id, col.id, e.target.value)}
-                                                            className="w-full px-2 py-1 text-xs border border-gray-300 rounded focus:ring-1 focus:ring-primary-500 focus:border-primary-500"
-                                                        >
-                                                            <option value="">-</option>
-                                                            {col.options.map(opt => (
-                                                                <option key={opt} value={opt}>{opt}</option>
-                                                            ))}
-                                                        </select>
-                                                    ) : col.type === 'date' ? (
-                                                        <input
-                                                            type="date"
-                                                            value={value || ''}
-                                                            onChange={(e) => handleColumnValueChange(candidate.id, col.id, e.target.value)}
-                                                            className="w-full px-2 py-1 text-xs border border-gray-300 rounded focus:ring-1 focus:ring-primary-500 focus:border-primary-500"
-                                                        />
-                                                    ) : col.type === 'number' ? (
-                                                        <input
-                                                            type="number"
-                                                            value={value || ''}
-                                                            onChange={(e) => handleColumnValueChange(candidate.id, col.id, e.target.value ? parseFloat(e.target.value) : '')}
-                                                            className="w-full px-2 py-1 text-xs border border-gray-300 rounded focus:ring-1 focus:ring-primary-500 focus:border-primary-500"
-                                                            placeholder="-"
-                                                        />
-                                                    ) : (
-                                                        <input
-                                                            type="text"
-                                                            value={value || ''}
-                                                            onChange={(e) => handleColumnValueChange(candidate.id, col.id, e.target.value)}
-                                                            className="w-full px-2 py-1 text-xs border border-gray-300 rounded focus:ring-1 focus:ring-primary-500 focus:border-primary-500"
-                                                            placeholder="-"
-                                                        />
-                                                    )}
-                                                </td>
-                                            );
-                                        })}
                                     </tr>
                                 );
                             })}

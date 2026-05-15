@@ -13,6 +13,7 @@ function dbToUser(dbUser: any): User {
         avatarUrl: dbUser.avatar_url,
         permissions: dbUser.permissions || undefined,
         visibleSections: dbUser.visible_sections || undefined,
+        allowedClientIds: dbUser.allowed_client_ids || undefined,
     };
 }
 
@@ -26,6 +27,7 @@ function userToDb(user: Partial<User>): any {
     if (user.avatarUrl !== undefined) dbUser.avatar_url = user.avatarUrl;
     if (user.permissions !== undefined) dbUser.permissions = user.permissions;
     if (user.visibleSections !== undefined) dbUser.visible_sections = user.visibleSections;
+    if (user.allowedClientIds !== undefined) dbUser.allowed_client_ids = user.allowedClientIds;
     return dbUser;
 }
 

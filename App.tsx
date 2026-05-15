@@ -591,9 +591,20 @@ const App: React.FC = () => {
                     }
                 }
                 
+                // Filtrar procesos y candidatos según allowedClientIds del usuario
+                let filteredProcesses = processes;
+                let filteredCandidates = candidates;
+                if (currentUser && currentUser.allowedClientIds !== undefined && currentUser.allowedClientIds !== null) {
+                    const allowedClientIdsSet = new Set(currentUser.allowedClientIds);
+                    filteredProcesses = processes.filter(p => p.clientId && allowedClientIdsSet.has(p.clientId));
+                    
+                    const allowedProcessIds = new Set(filteredProcesses.map(p => p.id));
+                    filteredCandidates = candidates.filter(c => allowedProcessIds.has(c.processId));
+                }
+                
                 setState({
-                    processes,
-                    candidates,
+                    processes: filteredProcesses,
+                    candidates: filteredCandidates,
                     users,
                     applications: [],
                     settings,
@@ -665,7 +676,7 @@ const App: React.FC = () => {
                 if (user) {
                     localStorage.setItem('ats_pro_user', user.id);
                     await setCurrentUser(user.id);
-                    setState(s => ({ ...s, currentUser: user }));
+                    window.location.reload(); // Recargar para filtrar datos según el usuario
                     return true;
                 }
                 return false;
@@ -675,7 +686,7 @@ const App: React.FC = () => {
                 const user = state.users.find(u => u.email.toLowerCase() === email.toLowerCase());
                 if (user && user.password === password) {
                     localStorage.setItem('ats_pro_user', user.id);
-                    setState(s => ({ ...s, currentUser: user }));
+                    window.location.reload(); // Recargar para filtrar datos según el usuario
                     return true;
                 }
                 return false;
@@ -683,7 +694,7 @@ const App: React.FC = () => {
         },
         logout: () => {
             localStorage.removeItem('ats_pro_user');
-            setState(s => ({ ...s, currentUser: null, view: { type: 'dashboard' }, lastViewedProcessId: null }));
+            window.location.reload(); // Recargar para limpiar datos en memoria
         },
         setView: (type, payload) => {
             setState(s => {
