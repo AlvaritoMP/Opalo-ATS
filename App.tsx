@@ -488,7 +488,7 @@ const App: React.FC = () => {
                         const result = await Promise.race([
                             apiCall(),
                             new Promise<T>((_, reject) => 
-                                setTimeout(() => reject(new Error('Timeout')), 10000)
+                                setTimeout(() => reject(new Error('Timeout')), 30000)
                             )
                         ]);
                         console.log(`✓ Loaded ${name} from Supabase`);

@@ -192,25 +192,25 @@ export const processesApi = {
                 .order('created_at', { ascending: false })
                 .limit(200); // Reducir límite para reducir egress
             
-            processes = result.data || [];
-            error = result.error;
-        } catch (err: any) {
-            // Si falla porque client_id no existe, intentar sin ese campo
-            if (err.message?.includes('client_id') || err.message?.includes('column') || err.code === 'PGRST116') {
+            // Verificar si hubo error de columna faltante directamente aquí
+            if (result.error && (result.error.message?.includes('client_id') || result.error.message?.includes('column') || result.error.code === 'PGRST116')) {
                 console.warn('⚠️ Columna client_id no existe, cargando procesos sin ese campo');
-                const result = await supabase
+                const fallbackResult = await supabase
                     .from('processes')
                     .select('id, title, description, salary_range, experience_level, seniority, flyer_url, flyer_position, service_order_code, start_date, end_date, status, vacancies, google_drive_folder_id, google_drive_folder_name, published_date, need_identified_date, is_bulk_process, bulk_config, hired_candidate_ids, closed_at, created_at')
                     .eq('app_name', APP_NAME)
-                    .eq('is_bulk_process', false) // Excluir procesos masivos
+                    .eq('is_bulk_process', false)
                     .order('created_at', { ascending: false })
                     .limit(200);
                 
+                processes = fallbackResult.data || [];
+                error = fallbackResult.error;
+            } else {
                 processes = result.data || [];
                 error = result.error;
-            } else {
-                error = err;
             }
+        } catch (err: any) {
+            error = err;
         }
         
         if (error) throw error;
@@ -1079,23 +1079,23 @@ export const processesApi = {
                 .eq('is_bulk_process', true) // Solo procesos masivos
                 .order('created_at', { ascending: false });
             
-            processes = result.data || [];
-            error = result.error;
-        } catch (err: any) {
-            // Si falla porque is_bulk_process no existe, intentar sin ese campo
-            if (err.message?.includes('is_bulk_process') || err.message?.includes('column') || err.code === 'PGRST116') {
-                console.warn('⚠️ Columna is_bulk_process no existe, cargando todos los procesos');
-                const result = await supabase
+            // Verificar si hubo error de columna faltante directamente aquí
+            if (result.error && (result.error.message?.includes('client_id') || result.error.message?.includes('is_bulk_process') || result.error.message?.includes('column') || result.error.code === 'PGRST116')) {
+                console.warn('⚠️ Columna client_id o is_bulk_process no existe, cargando con fallback');
+                const fallbackResult = await supabase
                     .from('processes')
-                    .select('id, title, description, salary_range, experience_level, seniority, flyer_url, flyer_position, service_order_code, start_date, end_date, status, vacancies, google_drive_folder_id, google_drive_folder_name, published_date, need_identified_date, client_id, bulk_config, hired_candidate_ids, closed_at, created_at')
+                    .select('id, title, description, salary_range, experience_level, seniority, flyer_url, flyer_position, service_order_code, start_date, end_date, status, vacancies, google_drive_folder_id, google_drive_folder_name, published_date, need_identified_date, bulk_config, hired_candidate_ids, closed_at, created_at')
                     .eq('app_name', APP_NAME)
                     .order('created_at', { ascending: false });
                 
+                processes = fallbackResult.data || [];
+                error = fallbackResult.error;
+            } else {
                 processes = result.data || [];
                 error = result.error;
-            } else {
-                error = err;
             }
+        } catch (err: any) {
+            error = err;
         }
         
         if (error) throw error;
