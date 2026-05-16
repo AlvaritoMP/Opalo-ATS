@@ -1509,50 +1509,6 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                             return null;
                                         })}
                                         <td className="px-3 py-3 whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
-                                                    <td key="schedule" className="px-3 py-3 whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
-                                                        <div className="relative">
-                                                            <button onClick={() => setQuickScheduleCandidate(quickScheduleCandidate === candidate.id ? null : candidate.id)} className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-primary-600 hover:text-primary-700 hover:bg-primary-50 rounded transition-colors" title="Agendar entrevista rápidamente"><Calendar className="w-4 h-4" /></button>
-                                                            {quickScheduleCandidate === candidate.id && (
-                                                                <div className="absolute right-0 top-full mt-1 z-50 bg-white border border-gray-200 rounded-lg shadow-lg p-3 min-w-[280px]">
-                                                                    <QuickScheduleInline candidateId={candidate.id} candidateName={candidate.name} onSchedule={async (date, time, interviewerId) => { await handleQuickSchedule(date, time, interviewerId); setQuickScheduleCandidate(null); await loadCandidates(currentPage, true); }} onCancel={() => setQuickScheduleCandidate(null)} />
-                                                                </div>
-                                                            )}
-                                                        </div>
-                                                    </td>
-                                                );
-                                            }
-                                            if (colId === 'stage') {
-                                                return (
-                                                    <td key="stage" className="px-3 py-3 text-sm text-gray-500 whitespace-nowrap">{stage?.name || 'N/A'}</td>
-                                                );
-                                            }
-                                            if (colId.startsWith('custom_')) {
-                                                const customColId = colId.replace('custom_', '');
-                                                const col = customColumns.find(c => c.id === customColId);
-                                                if (!col) return null;
-                                                const value = getColumnValue(candidate.id, col.id);
-                                                return (
-                                                    <td key={col.id} className="px-3 py-3 text-sm whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
-                                                        {col.type === 'checkbox' ? (
-                                                            <input type="checkbox" checked={value === true} onChange={(e) => handleColumnValueChange(candidate.id, col.id, e.target.checked)} className="w-4 h-4 text-primary-600 rounded focus:ring-primary-500" />
-                                                        ) : col.type === 'select' && col.options ? (
-                                                            <select value={value || ''} onChange={(e) => handleColumnValueChange(candidate.id, col.id, e.target.value)} className="w-full px-2 py-1 text-xs border border-gray-300 rounded focus:ring-1 focus:ring-primary-500 focus:border-primary-500">
-                                                                <option value="">-</option>
-                                                                {col.options.map(opt => <option key={opt} value={opt}>{opt}</option>)}
-                                                            </select>
-                                                        ) : col.type === 'date' ? (
-                                                            <input type="date" value={value || ''} onChange={(e) => handleColumnValueChange(candidate.id, col.id, e.target.value)} className="w-full px-2 py-1 text-xs border border-gray-300 rounded focus:ring-1 focus:ring-primary-500 focus:border-primary-500" />
-                                                        ) : col.type === 'number' ? (
-                                                            <input type="number" value={value || ''} onChange={(e) => handleColumnValueChange(candidate.id, col.id, e.target.value ? parseFloat(e.target.value) : '')} className="w-full px-2 py-1 text-xs border border-gray-300 rounded focus:ring-1 focus:ring-primary-500 focus:border-primary-500" placeholder="-" />
-                                                        ) : (
-                                                            <input type="text" value={value || ''} onChange={(e) => handleColumnValueChange(candidate.id, col.id, e.target.value)} className="w-full px-2 py-1 text-xs border border-gray-300 rounded focus:ring-1 focus:ring-primary-500 focus:border-primary-500" placeholder="-" />
-                                                        )}
-                                                    </td>
-                                                );
-                                            }
-                                            return null;
-                                        })}
-                                        <td className="px-3 py-3 whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
                                             <div className="flex gap-2">
                                                 <button
                                                     onClick={() => updateCandidateStatus(candidate.id, {
