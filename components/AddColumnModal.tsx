@@ -20,7 +20,6 @@ export const AddColumnModal: React.FC<AddColumnModalProps> = ({
     const [name, setName] = useState('');
     const [type, setType] = useState<'text' | 'number' | 'checkbox' | 'date' | 'select'>('text');
     const [options, setOptions] = useState<string[]>(['']);
-    const [optionInput, setOptionInput] = useState('');
 
     const isEditing = !!editingColumn;
 
@@ -28,22 +27,18 @@ export const AddColumnModal: React.FC<AddColumnModalProps> = ({
         if (isOpen && editingColumn) {
             setName(editingColumn.name);
             setType(editingColumn.type);
-            setOptions(editingColumn.options?.length ? editingColumn.options : ['']);
+            setOptions(editingColumn.options?.length ? [...editingColumn.options] : ['']);
         } else if (isOpen) {
             setName('');
             setType('text');
             setOptions(['']);
-            setOptionInput('');
         }
     }, [isOpen, editingColumn]);
 
     if (!isOpen) return null;
 
     const handleAddOption = () => {
-        if (optionInput.trim()) {
-            setOptions([...options, optionInput.trim()]);
-            setOptionInput('');
-        }
+        setOptions(prev => [...prev, '']);
     };
 
     const handleRemoveOption = (index: number) => {
@@ -58,11 +53,19 @@ export const AddColumnModal: React.FC<AddColumnModalProps> = ({
             return;
         }
 
+        if (type === 'select') {
+            const validOptions = options.map(o => o.trim()).filter(Boolean);
+            if (validOptions.length === 0) {
+                alert('Agregue al menos una opción para la lista desplegable');
+                return;
+            }
+        }
+
         const column: CustomColumn = {
             id: editingColumn?.id || `col_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
             name: name.trim(),
             type,
-            ...(type === 'select' && options.filter(o => o.trim()).length > 0 && { options: options.filter(o => o.trim()) }),
+            ...(type === 'select' && { options: options.map(o => o.trim()).filter(Boolean) }),
         };
 
         if (isEditing && onEdit) {
@@ -74,7 +77,6 @@ export const AddColumnModal: React.FC<AddColumnModalProps> = ({
         setName('');
         setType('text');
         setOptions(['']);
-        setOptionInput('');
         onClose();
     };
 
@@ -114,7 +116,13 @@ export const AddColumnModal: React.FC<AddColumnModalProps> = ({
                         </label>
                         <select
                             value={type}
-                            onChange={(e) => setType(e.target.value as CustomColumn['type'])}
+                            onChange={(e) => {
+                                const newType = e.target.value as CustomColumn['type'];
+                                setType(newType);
+                                if (newType === 'select' && options.length === 0) {
+                                    setOptions(['']);
+                                }
+                            }}
                             required
                             className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
                         >
