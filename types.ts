@@ -82,6 +82,7 @@ export interface BulkProcessConfig {
     customColumns?: CustomColumn[]; // Columnas personalizadas para la tabla de alta densidad
     hiddenColumns?: string[]; // IDs de columnas ocultas
     columnOrder?: string[]; // Orden de columnas (base + custom_*)
+    pinnedColumns?: string[]; // Columnas inmovilizadas al hacer scroll horizontal
 }
 
 // Pregunta "killer" para filtrado automático en procesos masivos

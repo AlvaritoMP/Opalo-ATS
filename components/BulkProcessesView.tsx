@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useAppState } from '../App';
 import { bulkCandidatesApi, BulkCandidate } from '../lib/api/bulkCandidates';
 import { processesApi } from '../lib/api/processes';
-import { Check, X, Loader2, Send, Archive, Search, ChevronDown, ChevronUp, Plus, Edit, Trash2, ArrowLeft, MessageCircle, Phone, Upload, Filter, Mail, Calendar, Settings, ArrowUp, ArrowDown } from 'lucide-react';
+import { Check, X, Loader2, Send, Archive, Search, ChevronDown, ChevronUp, Plus, Edit, Trash2, ArrowLeft, MessageCircle, Phone, Upload, Filter, Mail, Calendar, Settings, ArrowUp, ArrowDown, Pin } from 'lucide-react';
 import { Process, CustomColumn, BulkProcessConfig } from '../types';
 import {
     BASE_COLUMNS,
@@ -23,7 +23,14 @@ import {
     getDisplayEmail,
     resolveStandardFieldValue,
     isPlaceholderImportEmail,
+    repairDateColumnValues,
+    COMPACT_TD_CLASS,
+    COMPACT_TH_CLASS,
+    getStickyColumnStyle,
+    CHECKBOX_COL_WIDTH,
 } from '../lib/bulkTableColumns';
+import { getCellMetaStorageKey, BulkCellMeta, BulkCellMetaStore } from '../lib/bulkCellMeta';
+import { BulkCellContextMenu } from './BulkCellContextMenu';
 import { BulkProcessEditorModal } from './BulkProcessEditorModal';
 import { BulkProcessImportModal } from './BulkProcessImportModal';
 import { BulkWhatsAppModal } from './BulkWhatsAppModal';
@@ -35,6 +42,24 @@ import { AddColumnModal } from './AddColumnModal';
 import { TableTemplateModal } from './TableTemplateModal';
 
 interface BulkProcessesViewProps {}
+
+type CellCoord = { candidateId: string; colId: string };
+
+const toCellKey = (c: CellCoord) => `${c.candidateId}::${c.colId}`;
+
+const parseCellKey = (key: string): CellCoord => {
+    const sep = key.indexOf('::');
+    return { candidateId: key.slice(0, sep), colId: key.slice(sep + 2) };
+};
+
+const getCellFromElement = (el: EventTarget | null): CellCoord | null => {
+    const td = (el as HTMLElement | null)?.closest?.('[data-cell-row]') as HTMLElement | null;
+    if (!td) return null;
+    const candidateId = td.getAttribute('data-cell-row');
+    const colId = td.getAttribute('data-cell-col');
+    if (!candidateId || !colId) return null;
+    return { candidateId, colId };
+};
 
 // Función helper para formatear tiempo relativo
 const formatTimeAgo = (dateString?: string): string => {
@@ -330,15 +355,23 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
     const [showTemplateModal, setShowTemplateModal] = useState(false);
     const [showColumnConfig, setShowColumnConfig] = useState(false);
     const [hiddenColumns, setHiddenColumns] = useState<string[]>([]);
+    const [pinnedColumns, setPinnedColumns] = useState<string[]>(['name']);
     const [columnOrder, setColumnOrder] = useState<string[]>(DEFAULT_COLUMN_ORDER);
     const [draggedColumn, setDraggedColumn] = useState<string | null>(null);
     const [columnValues, setColumnValues] = useState<Record<string, Record<string, any>>>({});
+    const [cellMeta, setCellMeta] = useState<BulkCellMetaStore>({});
+    const [cellContextMenu, setCellContextMenu] = useState<{ x: number; y: number; candidateId: string; colId: string } | null>(null);
     const [quickScheduleCandidate, setQuickScheduleCandidate] = useState<string | null>(null);
     const [columnFilters, setColumnFilters] = useState<Record<string, string>>({});
     const [sortColumn, setSortColumn] = useState<string | null>(null);
     const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
-    const [activeCell, setActiveCell] = useState<{ candidateId: string; colId: string } | null>(null);
+    const [activeCell, setActiveCell] = useState<CellCoord | null>(null);
+    const [selectedCells, setSelectedCells] = useState<Set<string>>(new Set());
+    const [selectionAnchor, setSelectionAnchor] = useState<CellCoord | null>(null);
     const tableContainerRef = useRef<HTMLDivElement>(null);
+    const isDraggingCells = useRef(false);
+    const dragAnchorCell = useRef<CellCoord | null>(null);
+    const didDragSelect = useRef(false);
 
     const pageSize = 50;
 
@@ -384,11 +417,20 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
         const cols = config?.customColumns || [];
         setCustomColumns(cols);
         setHiddenColumns(config?.hiddenColumns || []);
+        setPinnedColumns(config?.pinnedColumns?.length ? config.pinnedColumns : ['name']);
         setColumnOrder(resolveColumnOrder(config, cols));
         setColumnFilters({});
 
         const savedValues = localStorage.getItem(getColumnValuesStorageKey(process.id));
-        setColumnValues(savedValues ? JSON.parse(savedValues) : {});
+        const parsedValues = savedValues ? JSON.parse(savedValues) : {};
+        const repairedValues = repairDateColumnValues(parsedValues, cols);
+        setColumnValues(repairedValues);
+        if (repairedValues !== parsedValues && Object.keys(repairedValues).length > 0) {
+            localStorage.setItem(getColumnValuesStorageKey(process.id), JSON.stringify(repairedValues));
+        }
+
+        const savedMeta = localStorage.getItem(getCellMetaStorageKey(process.id));
+        setCellMeta(savedMeta ? JSON.parse(savedMeta) : {});
 
         // Si Score IA está oculto, desactivar filtro automático en BD (evita estados inconsistentes)
         if (config && !isScoreIaColumnVisible(config) && config.autoFilterEnabled) {
@@ -954,7 +996,10 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
     };
 
     const handleStartEdit = (candidateId: string, field: string, currentValue: any) => {
-        setActiveCell({ candidateId, colId: field.startsWith('custom_') ? field : field });
+        const colId = field.startsWith('custom_') ? field : field;
+        setActiveCell({ candidateId, colId });
+        setSelectionAnchor({ candidateId, colId });
+        setSelectedCells(new Set([toCellKey({ candidateId, colId })]));
         setEditingCell({ candidateId, field });
         if (field.startsWith('custom_')) {
             const colId = field.replace('custom_', '');
@@ -1046,66 +1091,6 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
         });
     }, [customColumns, applyOptimisticUpdate, syncCustomFieldFromStandard]);
 
-    const handleBulkPaste = useCallback(async (e: ClipboardEvent) => {
-        if (!activeCell || editingCell) return;
-        const target = e.target as HTMLElement;
-        if (['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName)) return;
-
-        const text = e.clipboardData?.getData('text/plain');
-        if (!text?.trim()) return;
-
-        e.preventDefault();
-        const grid = parseClipboardGrid(text);
-        if (grid.length === 0) return;
-
-        const startColIdx = visibleColumns.indexOf(activeCell.colId);
-        if (startColIdx === -1) return;
-
-        let targetCandidateIds: string[];
-        if (selectedIds.size > 0) {
-            targetCandidateIds = candidates.filter(c => selectedIds.has(c.id)).map(c => c.id);
-        } else {
-            const startIdx = candidates.findIndex(c => c.id === activeCell.candidateId);
-            if (startIdx === -1) return;
-            targetCandidateIds = candidates.slice(startIdx).map(c => c.id);
-        }
-
-        const rowCount = Math.min(grid.length, targetCandidateIds.length);
-        let pastedCells = 0;
-
-        for (let r = 0; r < rowCount; r++) {
-            const rowValues = grid[r];
-            for (let c = 0; c < rowValues.length; c++) {
-                const colIdx = startColIdx + c;
-                if (colIdx >= visibleColumns.length) break;
-                const colId = visibleColumns[colIdx];
-                if (!isPasteEditableColumn(colId)) continue;
-                await setCellValue(targetCandidateIds[r], colId, rowValues[c]);
-                pastedCells++;
-            }
-        }
-
-        if (pastedCells > 0) {
-            actions.showToast(`Pegado en ${rowCount} fila(s)`, 'success', 2000);
-        }
-    }, [activeCell, editingCell, visibleColumns, selectedIds, candidates, setCellValue, actions]);
-
-    useEffect(() => {
-        document.addEventListener('paste', handleBulkPaste);
-        return () => document.removeEventListener('paste', handleBulkPaste);
-    }, [handleBulkPaste]);
-
-    const handleCellClick = (e: React.MouseEvent, candidateId: string, colId: string) => {
-        e.stopPropagation();
-        setActiveCell({ candidateId, colId });
-    };
-
-    const isActiveCell = (candidateId: string, colId: string) =>
-        activeCell?.candidateId === candidateId && activeCell?.colId === colId;
-
-    const cellFocusClass = (candidateId: string, colId: string) =>
-        isActiveCell(candidateId, colId) ? 'ring-2 ring-primary-400 ring-inset bg-primary-50/40' : '';
-
     const toggleColumnVisibility = async (colId: string) => {
         const isHiding = !hiddenColumns.includes(colId);
         const newHidden = isHiding
@@ -1124,6 +1109,70 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
 
         await persistBulkConfig(updates);
     };
+
+    const togglePinColumn = async (colId: string) => {
+        const isPinned = pinnedColumns.includes(colId);
+        const newPinned = isPinned
+            ? pinnedColumns.filter(id => id !== colId)
+            : [...pinnedColumns, colId];
+        setPinnedColumns(newPinned);
+        await persistBulkConfig({ pinnedColumns: newPinned });
+    };
+
+    const applyCellMeta = useCallback((candidateIds: string[], colIds: string[], patch: Partial<BulkCellMeta>) => {
+        if (!process?.id) return;
+        setCellMeta(prev => {
+            const next = { ...prev };
+            candidateIds.forEach(cId => {
+                colIds.forEach(colId => {
+                    if (!next[cId]) next[cId] = {};
+                    const current = { ...next[cId][colId] };
+                    if (patch.bgColor !== undefined) {
+                        if (patch.bgColor) current.bgColor = patch.bgColor;
+                        else delete current.bgColor;
+                    }
+                    if (patch.comment !== undefined) {
+                        if (patch.comment) current.comment = patch.comment;
+                        else delete current.comment;
+                    }
+                    if (Object.keys(current).length === 0) {
+                        delete next[cId][colId];
+                        if (Object.keys(next[cId]).length === 0) delete next[cId];
+                    } else {
+                        next[cId][colId] = current;
+                    }
+                });
+            });
+            localStorage.setItem(getCellMetaStorageKey(process.id), JSON.stringify(next));
+            return next;
+        });
+    }, [process?.id]);
+
+    const getCellMetaFor = useCallback((candidateId: string, colId: string): BulkCellMeta | undefined => {
+        return cellMeta[candidateId]?.[colId];
+    }, [cellMeta]);
+
+    const buildTdStyle = useCallback((candidateId: string, colId: string): React.CSSProperties | undefined => {
+        const meta = getCellMetaFor(candidateId, colId);
+        return getStickyColumnStyle(colId, visibleColumns, pinnedColumns, false, meta?.bgColor);
+    }, [getCellMetaFor, visibleColumns, pinnedColumns]);
+
+    const buildThStyle = useCallback((colId: string): React.CSSProperties | undefined => {
+        return getStickyColumnStyle(colId, visibleColumns, pinnedColumns, true);
+    }, [visibleColumns, pinnedColumns]);
+
+    const buildCheckboxStyle = useCallback((isHeader: boolean): React.CSSProperties | undefined => {
+        return getStickyColumnStyle('checkbox', visibleColumns, pinnedColumns, isHeader);
+    }, [visibleColumns, pinnedColumns]);
+
+    const handleTableContextMenu = useCallback((e: React.MouseEvent) => {
+        if (editingCell) return;
+        const coord = getCellFromElement(e.target);
+        if (!coord) return;
+        e.preventDefault();
+        e.stopPropagation();
+        setCellContextMenu({ x: e.clientX, y: e.clientY, ...coord });
+    }, [editingCell]);
 
     const handleDragStart = (e: React.DragEvent, colId: string) => {
         setDraggedColumn(colId);
@@ -1286,6 +1335,388 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
         });
     };
 
+    const displayCandidates = useMemo(() => {
+        return sortCandidates(candidates.filter(candidate => {
+            const optimistic = optimisticUpdates.get(candidate.id);
+            const displayCandidate = optimistic ? { ...candidate, ...optimistic } : candidate;
+
+            if (columnFilters.name && !displayCandidate.name.toLowerCase().includes(columnFilters.name.toLowerCase())) {
+                return false;
+            }
+            if (columnFilters.dni && !(displayCandidate.dni || '').toLowerCase().includes(columnFilters.dni.toLowerCase())) {
+                return false;
+            }
+            if (columnFilters.email && !(displayCandidate.email || '').toLowerCase().includes(columnFilters.email.toLowerCase())) {
+                return false;
+            }
+            if (scoreIaColumnVisible && columnFilters.scoreIa) {
+                const minScore = parseFloat(columnFilters.scoreIa);
+                if (isNaN(minScore) || (displayCandidate.scoreIa ?? 0) < minScore) {
+                    return false;
+                }
+            }
+            if (columnFilters.phone && !(displayCandidate.phone || '').includes(columnFilters.phone)) {
+                return false;
+            }
+            if (columnFilters.source) {
+                const sourceVal = resolveStandardFieldValue('source', candidate.id, displayCandidate, columnValues, customColumns);
+                if (!sourceVal.toLowerCase().includes(columnFilters.source.toLowerCase())) return false;
+            }
+            if (columnFilters.province) {
+                const provinceVal = resolveStandardFieldValue('province', candidate.id, displayCandidate, columnValues, customColumns);
+                if (!provinceVal.toLowerCase().includes(columnFilters.province.toLowerCase())) return false;
+            }
+            if (columnFilters.district) {
+                const districtVal = resolveStandardFieldValue('district', candidate.id, displayCandidate, columnValues, customColumns);
+                if (!districtVal.toLowerCase().includes(columnFilters.district.toLowerCase())) return false;
+            }
+            if (!passesCustomColumnFilters(candidate.id)) {
+                return false;
+            }
+            return true;
+        }));
+    }, [
+        candidates, columnFilters, optimisticUpdates, scoreIaColumnVisible, columnValues,
+        customColumns, sortColumn, sortDirection, process?.stages,
+    ]);
+
+    const getCellIndices = useCallback((candidateId: string, colId: string) => ({
+        rowIdx: displayCandidates.findIndex(c => c.id === candidateId),
+        colIdx: visibleColumns.indexOf(colId),
+    }), [displayCandidates, visibleColumns]);
+
+    const getCellAt = useCallback((rowIdx: number, colIdx: number): CellCoord | null => {
+        if (rowIdx < 0 || rowIdx >= displayCandidates.length) return null;
+        if (colIdx < 0 || colIdx >= visibleColumns.length) return null;
+        return { candidateId: displayCandidates[rowIdx].id, colId: visibleColumns[colIdx] };
+    }, [displayCandidates, visibleColumns]);
+
+    const buildCellRange = useCallback((anchor: CellCoord, target: CellCoord): Set<string> => {
+        const a = getCellIndices(anchor.candidateId, anchor.colId);
+        const b = getCellIndices(target.candidateId, target.colId);
+        if (a.rowIdx < 0 || b.rowIdx < 0 || a.colIdx < 0 || b.colIdx < 0) {
+            return new Set([toCellKey(target)]);
+        }
+        const minRow = Math.min(a.rowIdx, b.rowIdx);
+        const maxRow = Math.max(a.rowIdx, b.rowIdx);
+        const minCol = Math.min(a.colIdx, b.colIdx);
+        const maxCol = Math.max(a.colIdx, b.colIdx);
+        const cells = new Set<string>();
+        for (let r = minRow; r <= maxRow; r++) {
+            for (let c = minCol; c <= maxCol; c++) {
+                const coord = getCellAt(r, c);
+                if (coord) cells.add(toCellKey(coord));
+            }
+        }
+        return cells;
+    }, [getCellIndices, getCellAt]);
+
+    const scrollCellIntoView = useCallback((coord: CellCoord) => {
+        const container = tableContainerRef.current;
+        if (!container) return;
+        const el = container.querySelector(
+            `[data-cell-row="${coord.candidateId}"][data-cell-col="${coord.colId}"]`
+        ) as HTMLElement | null;
+        el?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    }, []);
+
+    const focusTable = useCallback(() => {
+        tableContainerRef.current?.focus();
+    }, []);
+
+    const selectSingleCell = useCallback((coord: CellCoord) => {
+        setActiveCell(coord);
+        setSelectionAnchor(coord);
+        setSelectedCells(new Set([toCellKey(coord)]));
+        focusTable();
+    }, [focusTable]);
+
+    const applyCellSelection = useCallback((
+        coord: CellCoord,
+        e: { shiftKey: boolean; ctrlKey: boolean; metaKey: boolean },
+        anchor: CellCoord | null
+    ) => {
+        const key = toCellKey(coord);
+        if (e.shiftKey && anchor) {
+            setActiveCell(coord);
+            setSelectedCells(buildCellRange(anchor, coord));
+        } else if (e.ctrlKey || e.metaKey) {
+            setActiveCell(coord);
+            setSelectionAnchor(coord);
+            setSelectedCells(prev => {
+                const next = new Set(prev);
+                if (next.has(key)) next.delete(key);
+                else next.add(key);
+                return next;
+            });
+        } else {
+            selectSingleCell(coord);
+        }
+        focusTable();
+    }, [buildCellRange, selectSingleCell, focusTable]);
+
+    const cellDataAttrs = (candidateId: string, colId: string) => ({
+        'data-cell-row': candidateId,
+        'data-cell-col': colId,
+    });
+
+    const beginEditCell = useCallback((candidateId: string, colId: string) => {
+        const candidate = displayCandidates.find(c => c.id === candidateId);
+        if (!candidate) return;
+        const optimistic = optimisticUpdates.get(candidateId);
+        const displayCandidate = optimistic ? { ...candidate, ...optimistic } : candidate;
+
+        if (colId.startsWith('custom_')) {
+            const customColId = colId.replace('custom_', '');
+            handleStartEdit(candidateId, colId, getColumnValue(candidateId, customColId, displayCandidate));
+            return;
+        }
+        if (!isPasteEditableColumn(colId)) return;
+
+        const fieldValues: Record<string, string> = {
+            name: displayCandidate.name,
+            dni: displayCandidate.dni || '',
+            email: getDisplayEmail(displayCandidate.email) ?? '',
+            phone: displayCandidate.phone || '',
+            source: resolveStandardFieldValue('source', candidateId, displayCandidate, columnValues, customColumns),
+            province: resolveStandardFieldValue('province', candidateId, displayCandidate, columnValues, customColumns),
+            district: resolveStandardFieldValue('district', candidateId, displayCandidate, columnValues, customColumns),
+        };
+        handleStartEdit(candidateId, colId, fieldValues[colId] ?? '');
+    }, [displayCandidates, optimisticUpdates, columnValues, customColumns]);
+
+    const moveActiveCell = useCallback((
+        dRow: number,
+        dCol: number,
+        extendSelection: boolean
+    ) => {
+        if (displayCandidates.length === 0 || visibleColumns.length === 0) return;
+
+        let base = activeCell;
+        if (!base) {
+            base = { candidateId: displayCandidates[0].id, colId: visibleColumns[0] };
+        }
+
+        const { rowIdx, colIdx } = getCellIndices(base.candidateId, base.colId);
+        const next = getCellAt(rowIdx + dRow, colIdx + dCol);
+        if (!next) return;
+
+        const anchor = selectionAnchor || base;
+        setActiveCell(next);
+        if (extendSelection) {
+            setSelectedCells(buildCellRange(anchor, next));
+        } else {
+            setSelectionAnchor(next);
+            setSelectedCells(new Set([toCellKey(next)]));
+        }
+        scrollCellIntoView(next);
+        focusTable();
+    }, [
+        activeCell, selectionAnchor, displayCandidates, visibleColumns,
+        getCellIndices, getCellAt, buildCellRange, scrollCellIntoView, focusTable,
+    ]);
+
+    useEffect(() => {
+        const stopDrag = () => {
+            isDraggingCells.current = false;
+            dragAnchorCell.current = null;
+        };
+        document.addEventListener('mouseup', stopDrag);
+        return () => document.removeEventListener('mouseup', stopDrag);
+    }, []);
+
+    const handleTableMouseDown = useCallback((e: React.MouseEvent) => {
+        if (editingCell || e.button !== 0) return;
+        const coord = getCellFromElement(e.target);
+        if (!coord) return;
+        if ((e.target as HTMLElement).closest('input, select, textarea, button, a')) return;
+
+        e.stopPropagation();
+        if (e.shiftKey || e.ctrlKey || e.metaKey) return;
+
+        isDraggingCells.current = true;
+        didDragSelect.current = false;
+        dragAnchorCell.current = coord;
+        selectSingleCell(coord);
+    }, [editingCell, selectSingleCell]);
+
+    const handleTableMouseOver = useCallback((e: React.MouseEvent) => {
+        if (!isDraggingCells.current || !dragAnchorCell.current || editingCell) return;
+        if (e.buttons !== 1) return;
+        const coord = getCellFromElement(e.target);
+        if (!coord) return;
+
+        didDragSelect.current = true;
+        setActiveCell(coord);
+        setSelectedCells(buildCellRange(dragAnchorCell.current, coord));
+    }, [editingCell, buildCellRange]);
+
+    const handleTableCellClick = useCallback((e: React.MouseEvent) => {
+        const coord = getCellFromElement(e.target);
+        if (!coord) return;
+        if ((e.target as HTMLElement).closest('input, select, textarea, button, a')) return;
+
+        e.stopPropagation();
+        if (didDragSelect.current) {
+            didDragSelect.current = false;
+            focusTable();
+            return;
+        }
+
+        applyCellSelection(coord, e, selectionAnchor);
+    }, [applyCellSelection, selectionAnchor, focusTable]);
+
+    const handleTableKeyDown = useCallback((e: React.KeyboardEvent) => {
+        if (editingCell) return;
+        const target = e.target as HTMLElement;
+        if (['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName)) return;
+
+        if (!activeCell && displayCandidates.length > 0 && visibleColumns.length > 0) {
+            if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Tab', 'Enter'].includes(e.key)) {
+                selectSingleCell({ candidateId: displayCandidates[0].id, colId: visibleColumns[0] });
+                e.preventDefault();
+            }
+            return;
+        }
+        if (!activeCell) return;
+
+        const extend = e.shiftKey;
+
+        switch (e.key) {
+            case 'ArrowUp':
+                e.preventDefault();
+                moveActiveCell(-1, 0, extend);
+                break;
+            case 'ArrowDown':
+                e.preventDefault();
+                moveActiveCell(1, 0, extend);
+                break;
+            case 'ArrowLeft':
+                e.preventDefault();
+                moveActiveCell(0, -1, extend);
+                break;
+            case 'ArrowRight':
+                e.preventDefault();
+                moveActiveCell(0, 1, extend);
+                break;
+            case 'Tab': {
+                e.preventDefault();
+                moveActiveCell(0, e.shiftKey ? -1 : 1, false);
+                break;
+            }
+            case 'Enter':
+                e.preventDefault();
+                beginEditCell(activeCell.candidateId, activeCell.colId);
+                break;
+            case 'Escape':
+                setSelectedCells(new Set());
+                setSelectionAnchor(null);
+                break;
+            default:
+                break;
+        }
+    }, [
+        editingCell, activeCell, displayCandidates, visibleColumns,
+        selectSingleCell, moveActiveCell, beginEditCell,
+    ]);
+
+    const isActiveCell = (candidateId: string, colId: string) =>
+        activeCell?.candidateId === candidateId && activeCell?.colId === colId;
+
+    const isCellSelected = (candidateId: string, colId: string) =>
+        selectedCells.has(toCellKey({ candidateId, colId }));
+
+    const cellFocusClass = (candidateId: string, colId: string) => {
+        if (isActiveCell(candidateId, colId)) {
+            return 'ring-2 ring-primary-600 ring-inset relative z-[2]';
+        }
+        if (isCellSelected(candidateId, colId)) {
+            return 'ring-1 ring-primary-300 ring-inset';
+        }
+        return '';
+    };
+
+    const renderCellCommentIndicator = (candidateId: string, colId: string) => {
+        const comment = getCellMetaFor(candidateId, colId)?.comment;
+        if (!comment) return null;
+        return (
+            <span
+                className="absolute top-0 right-0 w-2 h-2 bg-amber-400 rounded-bl-sm pointer-events-none"
+                title={comment}
+            />
+        );
+    };
+
+    const tdProps = (candidateId: string, colId: string, extra = '') => {
+        const meta = getCellMetaFor(candidateId, colId);
+        return {
+            ...cellDataAttrs(candidateId, colId),
+            className: `${COMPACT_TD_CLASS} relative ${cellFocusClass(candidateId, colId)} ${extra}`.trim(),
+            style: buildTdStyle(candidateId, colId),
+            title: meta?.comment || undefined,
+        };
+    };
+
+    const handleBulkPaste = useCallback(async (e: ClipboardEvent) => {
+        if (!activeCell || editingCell) return;
+        const target = e.target as HTMLElement;
+        if (['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName)) return;
+
+        const text = e.clipboardData?.getData('text/plain');
+        if (!text?.trim()) return;
+
+        e.preventDefault();
+        const grid = parseClipboardGrid(text);
+        if (grid.length === 0) return;
+
+        const startColIdx = (() => {
+            if (selectedCells.size > 0) {
+                const colIndices = Array.from(selectedCells)
+                    .map(k => visibleColumns.indexOf(parseCellKey(k).colId))
+                    .filter(i => i >= 0);
+                if (colIndices.length > 0) return Math.min(...colIndices);
+            }
+            return visibleColumns.indexOf(activeCell.colId);
+        })();
+        if (startColIdx === -1) return;
+
+        let targetCandidateIds: string[];
+        if (selectedCells.size > 0) {
+            const rowIds = new Set(Array.from(selectedCells).map(k => parseCellKey(k).candidateId));
+            targetCandidateIds = displayCandidates.filter(c => rowIds.has(c.id)).map(c => c.id);
+        } else if (selectedIds.size > 0) {
+            targetCandidateIds = displayCandidates.filter(c => selectedIds.has(c.id)).map(c => c.id);
+        } else {
+            const startIdx = displayCandidates.findIndex(c => c.id === activeCell.candidateId);
+            if (startIdx === -1) return;
+            targetCandidateIds = displayCandidates.slice(startIdx).map(c => c.id);
+        }
+
+        const rowCount = Math.min(grid.length, targetCandidateIds.length);
+        let pastedCells = 0;
+
+        for (let r = 0; r < rowCount; r++) {
+            const rowValues = grid[r];
+            for (let c = 0; c < rowValues.length; c++) {
+                const colIdx = startColIdx + c;
+                if (colIdx >= visibleColumns.length) break;
+                const colId = visibleColumns[colIdx];
+                if (!isPasteEditableColumn(colId)) continue;
+                await setCellValue(targetCandidateIds[r], colId, rowValues[c]);
+                pastedCells++;
+            }
+        }
+
+        if (pastedCells > 0) {
+            actions.showToast(`Pegado en ${rowCount} fila(s)`, 'success', 2000);
+        }
+    }, [activeCell, editingCell, visibleColumns, selectedIds, selectedCells, displayCandidates, setCellValue, actions]);
+
+    useEffect(() => {
+        document.addEventListener('paste', handleBulkPaste);
+        return () => document.removeEventListener('paste', handleBulkPaste);
+    }, [handleBulkPaste]);
+
     return (
         <div className="h-full flex flex-col bg-white">
             <div className="border-b bg-white p-4 space-y-4">
@@ -1425,23 +1856,33 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                             Columnas
                                         </button>
                                         {showColumnConfig && (
-                                            <div className="absolute right-0 mt-2 w-56 bg-white border border-gray-200 rounded-lg shadow-xl z-50 p-2 max-h-96 overflow-y-auto">
-                                                <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2 px-2">Mostrar/Ocultar</div>
+                                            <div className="absolute right-0 mt-2 w-64 bg-white border border-gray-200 rounded-lg shadow-xl z-50 p-2 max-h-96 overflow-y-auto">
+                                                <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1 px-2">Columnas</div>
+                                                <p className="text-[10px] text-gray-400 px-2 mb-2">📌 = fijar al hacer scroll horizontal</p>
                                                 {allColumnIds.map(colId => {
                                                     const colName = getColumnLabel(colId, customColumns);
                                                     const isCustom = colId.startsWith('custom_');
                                                     const customColId = isCustom ? colId.replace('custom_', '') : null;
+                                                    const isPinned = pinnedColumns.includes(colId);
 
                                                     return (
-                                                        <div key={colId} className="flex items-center gap-1 px-2 py-1.5 hover:bg-gray-50 rounded">
+                                                        <div key={colId} className="flex items-center gap-1 px-2 py-1 hover:bg-gray-50 rounded">
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => togglePinColumn(colId)}
+                                                                className={`p-0.5 rounded shrink-0 ${isPinned ? 'text-primary-600 bg-primary-50' : 'text-gray-300 hover:text-gray-500'}`}
+                                                                title={isPinned ? 'Desfijar columna' : 'Fijar columna'}
+                                                            >
+                                                                <Pin className="w-3.5 h-3.5" />
+                                                            </button>
                                                             <label className="flex items-center gap-2 flex-1 cursor-pointer min-w-0">
                                                                 <input
                                                                     type="checkbox"
                                                                     checked={!hiddenColumns.includes(colId)}
                                                                     onChange={() => toggleColumnVisibility(colId)}
-                                                                    className="w-4 h-4 text-primary-600 rounded focus:ring-primary-500"
+                                                                    className="w-3.5 h-3.5 text-primary-600 rounded focus:ring-primary-500"
                                                                 />
-                                                                <span className="text-sm text-gray-700 truncate" title={colName}>{colName}</span>
+                                                                <span className="text-xs text-gray-700 truncate" title={colName}>{colName}</span>
                                                             </label>
                                                             {isCustom && customColId && (
                                                                 <div className="flex gap-0.5 shrink-0">
@@ -1523,19 +1964,28 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                             onClick={() => setQuickScheduleCandidate(null)}
                         />
                     )}
-                    <p className="text-xs text-gray-500 px-1 pb-2 shrink-0">
-                        Clic en una celda editable + selecciona filas (checkbox) + Ctrl+V para pegar datos desde Excel u otras tablas. Doble clic para editar una celda. Usa el desplegable en la columna <strong>Etapa</strong> para mover candidatos entre etapas.
+                    <p className="text-[10px] text-gray-500 px-1 pb-1 shrink-0">
+                        Flechas · Shift+arrastrar selección · Ctrl+clic múltiple · Clic derecho: color/comentario · 📌 Fijar columnas en menú Columnas · Enter editar · Ctrl+V pegar
                     </p>
-                    <div ref={tableContainerRef} className="flex-1 overflow-x-auto overflow-y-auto" style={{ minHeight: 0 }} tabIndex={-1}>
-                        <table className="w-full" style={{ tableLayout: 'auto', width: '100%' }}>
+                    <div
+                        ref={tableContainerRef}
+                        className="flex-1 overflow-x-auto overflow-y-auto outline-none focus:ring-2 focus:ring-primary-300 focus:ring-inset rounded"
+                        style={{ minHeight: 0 }}
+                        tabIndex={0}
+                        onKeyDown={handleTableKeyDown}
+                    >
+                        <table className="w-full border-collapse" style={{ tableLayout: 'fixed', width: 'max-content', minWidth: '100%' }}>
                             <thead className="bg-gray-50 sticky top-0 z-10">
                             <tr>
-                                <th className="px-2 py-3 text-left whitespace-nowrap" style={{ width: '40px' }}>
+                                <th
+                                    className={`${COMPACT_TH_CLASS} bg-gray-50`}
+                                    style={{ width: CHECKBOX_COL_WIDTH, ...buildCheckboxStyle(true) }}
+                                >
                                     <input
                                         type="checkbox"
                                         checked={selectedIds.size === candidates.length && candidates.length > 0}
                                         onChange={toggleSelectAll}
-                                        className="w-4 h-4 text-primary-600 rounded focus:ring-primary-500"
+                                        className="w-3.5 h-3.5 text-primary-600 rounded focus:ring-primary-500"
                                     />
                                 </th>
                                 {visibleColumns.map(colId => {
@@ -1547,7 +1997,8 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                         onDragLeave: handleDragLeave,
                                         onDrop: (e: React.DragEvent<HTMLTableCellElement>) => handleDrop(e, colId),
                                         onDragEnd: handleDragEnd,
-                                        className: "px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap cursor-move transition-colors"
+                                        className: `${COMPACT_TH_CLASS} cursor-move transition-colors bg-gray-50`,
+                                        style: buildThStyle(colId),
                                     };
 
                                     if (colId === 'name') {
@@ -1712,7 +2163,8 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                         return (
                                             <th
                                                 {...commonProps}
-                                                className="px-3 py-3 text-left text-xs font-medium text-gray-500 normal-case tracking-wider whitespace-nowrap cursor-move transition-colors"
+                                                className={`${COMPACT_TH_CLASS} normal-case cursor-move transition-colors bg-gray-50`}
+                                                style={buildThStyle(colId)}
                                                 style={{ minWidth: '120px' }}
                                             >
                                                 <div className="flex flex-col gap-1">
@@ -1756,51 +2208,17 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                     }
                                     return null;
                                 })}
-                                <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap" style={{ minWidth: '120px' }}>Acciones</th>
+                                <th className={`${COMPACT_TH_CLASS} bg-gray-50`} style={{ minWidth: '88px' }}>Acciones</th>
                             </tr>
                         </thead>
-                        <tbody className="bg-white divide-y divide-gray-200">
-                            {sortCandidates(candidates.filter(candidate => {
-                                // Aplicar filtros de columnas
-                                const optimistic = optimisticUpdates.get(candidate.id);
-                                const displayCandidate = optimistic ? { ...candidate, ...optimistic } : candidate;
-                                
-                                if (columnFilters.name && !displayCandidate.name.toLowerCase().includes(columnFilters.name.toLowerCase())) {
-                                    return false;
-                                }
-                                if (columnFilters.dni && !(displayCandidate.dni || '').toLowerCase().includes(columnFilters.dni.toLowerCase())) {
-                                    return false;
-                                }
-                                if (columnFilters.email && !(displayCandidate.email || '').toLowerCase().includes(columnFilters.email.toLowerCase())) {
-                                    return false;
-                                }
-                                if (scoreIaColumnVisible && columnFilters.scoreIa) {
-                                    const minScore = parseFloat(columnFilters.scoreIa);
-                                    if (isNaN(minScore) || (displayCandidate.scoreIa ?? 0) < minScore) {
-                                        return false;
-                                    }
-                                }
-                                if (columnFilters.phone && !(displayCandidate.phone || '').includes(columnFilters.phone)) {
-                                    return false;
-                                }
-                                if (columnFilters.source) {
-                                    const sourceVal = resolveStandardFieldValue('source', candidate.id, displayCandidate, columnValues, customColumns);
-                                    if (!sourceVal.toLowerCase().includes(columnFilters.source.toLowerCase())) return false;
-                                }
-                                if (columnFilters.province) {
-                                    const provinceVal = resolveStandardFieldValue('province', candidate.id, displayCandidate, columnValues, customColumns);
-                                    if (!provinceVal.toLowerCase().includes(columnFilters.province.toLowerCase())) return false;
-                                }
-                                if (columnFilters.district) {
-                                    const districtVal = resolveStandardFieldValue('district', candidate.id, displayCandidate, columnValues, customColumns);
-                                    if (!districtVal.toLowerCase().includes(columnFilters.district.toLowerCase())) return false;
-                                }
-                                if (!passesCustomColumnFilters(candidate.id)) {
-                                    return false;
-                                }
-
-                                return true;
-                            })).map(candidate => {
+                        <tbody
+                            className="bg-white divide-y divide-gray-100"
+                            onMouseDown={handleTableMouseDown}
+                            onMouseOver={handleTableMouseOver}
+                            onClick={handleTableCellClick}
+                            onContextMenu={handleTableContextMenu}
+                        >
+                            {displayCandidates.map(candidate => {
                                 const isSelected = selectedIds.has(candidate.id);
                                 const optimistic = optimisticUpdates.get(candidate.id);
                                 const displayCandidate = optimistic ? { ...candidate, ...optimistic } : candidate;
@@ -1815,23 +2233,28 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                         className={`hover:bg-gray-50 cursor-pointer ${isSelected ? 'bg-primary-50' : ''}`}
                                         onClick={() => openDrawer(candidate)}
                                     >
-                                        <td className="px-2 py-3 whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
+                                        <td
+                                            className={`${COMPACT_TD_CLASS} bg-white`}
+                                            style={buildCheckboxStyle(false)}
+                                            onClick={(e) => e.stopPropagation()}
+                                        >
                                             <input
                                                 type="checkbox"
                                                 checked={isSelected}
                                                 onChange={() => toggleSelection(candidate.id)}
-                                                className="w-4 h-4 text-primary-600 rounded focus:ring-primary-500"
+                                                className="w-3.5 h-3.5 text-primary-600 rounded focus:ring-primary-500"
                                             />
                                         </td>
                                         {visibleColumns.map(colId => {
                                             if (colId === 'name') {
                                                 return (
-                                                    <td key="name" className={`px-3 py-3 whitespace-nowrap ${cellFocusClass(candidate.id, 'name')}`} onClick={(e) => handleCellClick(e, candidate.id, 'name')}>
+                                                    <td key="name" {...tdProps(candidate.id, 'name')}>
+                                                        {renderCellCommentIndicator(candidate.id, 'name')}
                                                         {editingCell?.candidateId === candidate.id && editingCell?.field === 'name' ? (
-                                                            <input type="text" value={editValue} onChange={(e) => setEditValue(e.target.value)} onBlur={() => handleSaveEdit(candidate.id, 'name')} onKeyDown={(e) => { if (e.key === 'Enter') handleSaveEdit(candidate.id, 'name'); if (e.key === 'Escape') handleCancelEdit(); }} autoFocus className="w-full px-2 py-1 border border-primary-500 rounded focus:ring-2 focus:ring-primary-500" />
+                                                            <input type="text" value={editValue} onChange={(e) => setEditValue(e.target.value)} onBlur={() => handleSaveEdit(candidate.id, 'name')} onKeyDown={(e) => { if (e.key === 'Enter') handleSaveEdit(candidate.id, 'name'); if (e.key === 'Escape') handleCancelEdit(); }} autoFocus className="w-full px-1 py-0.5 text-xs border border-primary-500 rounded focus:ring-1 focus:ring-primary-500" />
                                                         ) : (
                                                             <MetadataTooltip metadata={displayCandidate.metadataIa || ''} scoreIa={scoreIaColumnVisible ? displayCandidate.scoreIa : undefined}>
-                                                                <span className="font-medium text-gray-900 cursor-help hover:bg-gray-50 px-1 py-0.5 rounded" onDoubleClick={() => handleStartEdit(candidate.id, 'name', displayCandidate.name)} title="Doble clic para editar">{displayCandidate.name}</span>
+                                                                <span className="cursor-help hover:underline decoration-dotted" onDoubleClick={() => handleStartEdit(candidate.id, 'name', displayCandidate.name)} title="Doble clic para editar">{displayCandidate.name}</span>
                                                             </MetadataTooltip>
                                                         )}
                                                     </td>
@@ -1839,7 +2262,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                             }
                                             if (colId === 'dni') {
                                                 return (
-                                                    <td key="dni" className={`px-3 py-3 text-sm whitespace-nowrap ${cellFocusClass(candidate.id, 'dni')}`} onClick={(e) => handleCellClick(e, candidate.id, 'dni')}>
+                                                    <td key="dni" {...tdProps(candidate.id, 'dni')}>
                                                         {editingCell?.candidateId === candidate.id && editingCell?.field === 'dni' ? (
                                                             <input type="text" value={editValue} onChange={(e) => setEditValue(e.target.value)} onBlur={() => handleSaveEdit(candidate.id, 'dni')} onKeyDown={(e) => { if (e.key === 'Enter') handleSaveEdit(candidate.id, 'dni'); if (e.key === 'Escape') handleCancelEdit(); }} autoFocus className="w-full px-2 py-1 border border-primary-500 rounded focus:ring-2 focus:ring-primary-500" />
                                                         ) : (
@@ -1850,7 +2273,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                             }
                                             if (colId === 'email') {
                                                 return (
-                                                    <td key="email" className={`px-3 py-3 text-sm text-gray-500 whitespace-nowrap ${cellFocusClass(candidate.id, 'email')}`} onClick={(e) => handleCellClick(e, candidate.id, 'email')}>
+                                                    <td key="email" {...tdProps(candidate.id, 'email')}>
                                                         {editingCell?.candidateId === candidate.id && editingCell?.field === 'email' ? (
                                                             <input type="email" value={editValue} onChange={(e) => setEditValue(e.target.value)} onBlur={() => handleSaveEdit(candidate.id, 'email')} onKeyDown={(e) => { if (e.key === 'Enter') handleSaveEdit(candidate.id, 'email'); if (e.key === 'Escape') handleCancelEdit(); }} autoFocus className="w-full px-2 py-1 border border-primary-500 rounded focus:ring-2 focus:ring-primary-500" />
                                                         ) : displayEmail ? (
@@ -1863,7 +2286,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                             }
                                             if (colId === 'scoreIa') {
                                                 return (
-                                                    <td key="scoreIa" className="px-3 py-3 text-sm whitespace-nowrap">
+                                                    <td key="scoreIa" {...tdProps(candidate.id, 'scoreIa')}>
                                                         {displayCandidate.scoreIa !== undefined ? (
                                                             <span className={`font-semibold ${displayCandidate.scoreIa >= 70 ? 'text-green-600' : displayCandidate.scoreIa >= 50 ? 'text-yellow-600' : 'text-red-600'}`}>{displayCandidate.scoreIa}</span>
                                                         ) : (
@@ -1874,22 +2297,22 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                             }
                                             if (colId === 'status') {
                                                 return (
-                                                    <td key="status" className="px-3 py-3 text-sm whitespace-nowrap">
+                                                    <td key="status" {...tdProps(candidate.id, 'status')}>
                                                         {(() => {
                                                             if (displayCandidate.scoreIa === undefined) return <span className="text-gray-400">-</span>;
                                                             if (shouldApplyScoreAutoFilter(process?.bulkConfig)) {
-                                                                return <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">✅ Apto</span>;
+                                                                return <span className="inline-flex items-center px-1 py-0 rounded text-xs bg-green-100 text-green-800">✅ Apto</span>;
                                                             }
-                                                            if (displayCandidate.scoreIa >= 70) return <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">✅ Alto</span>;
-                                                            else if (displayCandidate.scoreIa >= 50) return <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">⚠️ Medio</span>;
-                                                            else return <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-red-100 text-red-800">❌ Bajo</span>;
+                                                            if (displayCandidate.scoreIa >= 70) return <span className="inline-flex items-center px-1 py-0 rounded text-xs bg-green-100 text-green-800">✅ Alto</span>;
+                                                            else if (displayCandidate.scoreIa >= 50) return <span className="inline-flex items-center px-1 py-0 rounded text-xs bg-yellow-100 text-yellow-800">⚠️ Medio</span>;
+                                                            else return <span className="inline-flex items-center px-1 py-0 rounded text-xs bg-red-100 text-red-800">❌ Bajo</span>;
                                                         })()}
                                                     </td>
                                                 );
                                             }
                                             if (colId === 'phone') {
                                                 return (
-                                                    <td key="phone" className={`px-3 py-3 text-sm text-gray-500 whitespace-nowrap ${cellFocusClass(candidate.id, 'phone')}`} onClick={(e) => handleCellClick(e, candidate.id, 'phone')}>
+                                                    <td key="phone" {...tdProps(candidate.id, 'phone')}>
                                                         {editingCell?.candidateId === candidate.id && editingCell?.field === 'phone' ? (
                                                             <input type="tel" value={editValue} onChange={(e) => setEditValue(e.target.value)} onBlur={() => handleSaveEdit(candidate.id, 'phone')} onKeyDown={(e) => { if (e.key === 'Enter') handleSaveEdit(candidate.id, 'phone'); if (e.key === 'Escape') handleCancelEdit(); }} autoFocus className="w-full px-2 py-1 border border-primary-500 rounded focus:ring-2 focus:ring-primary-500" />
                                                         ) : (
@@ -1900,7 +2323,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                             }
                                             if (colId === 'source') {
                                                 return (
-                                                    <td key="source" className={`px-3 py-3 text-sm text-gray-500 whitespace-nowrap ${cellFocusClass(candidate.id, 'source')}`} onClick={(e) => handleCellClick(e, candidate.id, 'source')}>
+                                                    <td key="source" {...tdProps(candidate.id, 'source')}>
                                                         {editingCell?.candidateId === candidate.id && editingCell?.field === 'source' ? (
                                                             <input type="text" value={editValue} onChange={(e) => setEditValue(e.target.value)} onBlur={() => handleSaveEdit(candidate.id, 'source')} onKeyDown={(e) => { if (e.key === 'Enter') handleSaveEdit(candidate.id, 'source'); if (e.key === 'Escape') handleCancelEdit(); }} autoFocus className="w-full px-2 py-1 border border-primary-500 rounded focus:ring-2 focus:ring-primary-500" />
                                                         ) : (
@@ -1911,7 +2334,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                             }
                                             if (colId === 'province') {
                                                 return (
-                                                    <td key="province" className={`px-3 py-3 text-sm text-gray-500 whitespace-nowrap ${cellFocusClass(candidate.id, 'province')}`} onClick={(e) => handleCellClick(e, candidate.id, 'province')}>
+                                                    <td key="province" {...tdProps(candidate.id, 'province')}>
                                                         {editingCell?.candidateId === candidate.id && editingCell?.field === 'province' ? (
                                                             <input type="text" value={editValue} onChange={(e) => setEditValue(e.target.value)} onBlur={() => handleSaveEdit(candidate.id, 'province')} onKeyDown={(e) => { if (e.key === 'Enter') handleSaveEdit(candidate.id, 'province'); if (e.key === 'Escape') handleCancelEdit(); }} autoFocus className="w-full px-2 py-1 border border-primary-500 rounded focus:ring-2 focus:ring-primary-500" />
                                                         ) : (
@@ -1922,7 +2345,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                             }
                                             if (colId === 'district') {
                                                 return (
-                                                    <td key="district" className={`px-3 py-3 text-sm text-gray-500 whitespace-nowrap ${cellFocusClass(candidate.id, 'district')}`} onClick={(e) => handleCellClick(e, candidate.id, 'district')}>
+                                                    <td key="district" {...tdProps(candidate.id, 'district')}>
                                                         {editingCell?.candidateId === candidate.id && editingCell?.field === 'district' ? (
                                                             <input type="text" value={editValue} onChange={(e) => setEditValue(e.target.value)} onBlur={() => handleSaveEdit(candidate.id, 'district')} onKeyDown={(e) => { if (e.key === 'Enter') handleSaveEdit(candidate.id, 'district'); if (e.key === 'Escape') handleCancelEdit(); }} autoFocus className="w-full px-2 py-1 border border-primary-500 rounded focus:ring-2 focus:ring-primary-500" />
                                                         ) : (
@@ -1933,7 +2356,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                             }
                                             if (colId === 'lastInteraction') {
                                                 return (
-                                                    <td key="lastInteraction" className="px-3 py-3 text-sm text-gray-600 whitespace-nowrap">
+                                                    <td key="lastInteraction" {...tdProps(candidate.id, 'lastInteraction')}>
                                                         {displayCandidate.lastWhatsAppInteractionAt ? (
                                                             <span className="text-xs" title={new Date(displayCandidate.lastWhatsAppInteractionAt).toLocaleString('es-PE')}>{formatTimeAgo(displayCandidate.lastWhatsAppInteractionAt)}</span>
                                                         ) : (
@@ -1944,7 +2367,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                             }
                                             if (colId === 'contact') {
                                                 return (
-                                                    <td key="contact" className="px-3 py-3 whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
+                                                    <td key="contact" {...tdProps(candidate.id, 'contact')}>
                                                         <div className="flex gap-2 items-center">
                                                             {displayCandidate.phone && (
                                                                 <>
@@ -1960,11 +2383,11 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                             }
                                             if (colId === 'nextInterview') {
                                                 return (
-                                                    <td key="nextInterview" className="px-3 py-3 text-sm text-gray-600 whitespace-nowrap">
+                                                    <td key="nextInterview" {...tdProps(candidate.id, 'nextInterview')}>
                                                         {displayCandidate.nextInterviewAt ? (
                                                             <div className="flex flex-col">
-                                                                <span className="text-xs font-medium text-gray-900">{new Date(displayCandidate.nextInterviewAt).toLocaleDateString('es-PE', { day: '2-digit', month: 'short', weekday: 'short' })}</span>
-                                                                <span className="text-xs text-gray-500">{new Date(displayCandidate.nextInterviewAt).toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' })}</span>
+                                                                <span className="text-xs text-gray-900">{new Date(displayCandidate.nextInterviewAt).toLocaleDateString('es-PE', { day: '2-digit', month: 'short' })}</span>
+                                                                <span className="text-[10px] text-gray-500">{new Date(displayCandidate.nextInterviewAt).toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' })}</span>
                                                             </div>
                                                         ) : (
                                                             <span className="text-gray-400 text-xs">-</span>
@@ -1974,7 +2397,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                             }
                                             if (colId === 'schedule') {
                                                 return (
-                                                    <td key="schedule" className="px-3 py-3 whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
+                                                    <td key="schedule" {...tdProps(candidate.id, 'schedule')}>
                                                         <div className="relative">
                                                             <button onClick={() => setQuickScheduleCandidate(quickScheduleCandidate === candidate.id ? null : candidate.id)} className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-primary-600 hover:text-primary-700 hover:bg-primary-50 rounded transition-colors" title="Agendar entrevista rápidamente"><Calendar className="w-4 h-4" /></button>
                                                             {quickScheduleCandidate === candidate.id && (
@@ -1988,13 +2411,13 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                             }
                                             if (colId === 'stage') {
                                                 return (
-                                                    <td key="stage" className="px-3 py-3 text-sm whitespace-nowrap" onClick={(e) => e.stopPropagation()} onMouseDown={(e) => e.stopPropagation()}>
+                                                    <td key="stage" {...tdProps(candidate.id, 'stage')}>
                                                         <select
                                                             value={displayCandidate.stageId}
                                                             onChange={(e) => updateCandidateStatus(candidate.id, { stageId: e.target.value }, candidate.stageId)}
                                                             onClick={(e) => e.stopPropagation()}
                                                             onMouseDown={(e) => e.stopPropagation()}
-                                                            className="text-sm border border-primary-300 rounded px-2 py-1.5 focus:ring-2 focus:ring-primary-500 focus:border-primary-500 bg-white min-w-[140px] cursor-pointer"
+                                                            className="text-xs border border-primary-300 rounded px-1 py-0.5 focus:ring-1 focus:ring-primary-500 focus:border-primary-500 bg-white min-w-[100px] max-w-[120px] cursor-pointer"
                                                             title="Selecciona la etapa del candidato"
                                                         >
                                                             {process?.stages.map(s => (
@@ -2014,9 +2437,9 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                                 return (
                                                     <td
                                                         key={col.id}
-                                                        className={`px-3 py-3 text-sm whitespace-nowrap ${cellFocusClass(candidate.id, colId)}`}
-                                                        onClick={(e) => handleCellClick(e, candidate.id, colId)}
+                                                        {...tdProps(candidate.id, colId)}
                                                     >
+                                                        {renderCellCommentIndicator(candidate.id, colId)}
                                                         {isEditing ? (
                                                             col.type === 'checkbox' ? (
                                                                 <select
@@ -2072,7 +2495,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                             }
                                             return null;
                                         })}
-                                        <td className="px-3 py-3 whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
+                                        <td className={`${COMPACT_TD_CLASS} bg-white`} onClick={(e) => e.stopPropagation()}>
                                             <div className="flex gap-2">
                                                 <button
                                                     onClick={() => updateCandidateStatus(candidate.id, {
@@ -2169,6 +2592,21 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                 />
             )}
 
+            {cellContextMenu && (
+                <BulkCellContextMenu
+                    x={cellContextMenu.x}
+                    y={cellContextMenu.y}
+                    candidateId={cellContextMenu.candidateId}
+                    colId={cellContextMenu.colId}
+                    meta={getCellMetaFor(cellContextMenu.candidateId, cellContextMenu.colId)}
+                    selectedCellKeys={Array.from(selectedCells)}
+                    onClose={() => setCellContextMenu(null)}
+                    onApply={(candidateIds, colIds, patch) => {
+                        applyCellMeta(candidateIds, colIds, patch);
+                    }}
+                />
+            )}
+
             {showImportModal && process && (
                 <BulkProcessImportModal
                     process={process}
@@ -2177,7 +2615,12 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                         setShowImportModal(false);
                         if (process?.id) {
                             const savedValues = localStorage.getItem(getColumnValuesStorageKey(process.id));
-                            setColumnValues(savedValues ? JSON.parse(savedValues) : {});
+                            const parsedValues = savedValues ? JSON.parse(savedValues) : {};
+                            const repairedValues = repairDateColumnValues(parsedValues, customColumns);
+                            setColumnValues(repairedValues);
+                            if (repairedValues !== parsedValues) {
+                                localStorage.setItem(getColumnValuesStorageKey(process.id), JSON.stringify(repairedValues));
+                            }
                         }
                         loadCandidates(0, true);
                     }}

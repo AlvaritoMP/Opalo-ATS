@@ -25,6 +25,79 @@ export const BASE_COLUMNS: BaseColumn[] = [
 
 export const DEFAULT_COLUMN_ORDER = BASE_COLUMNS.map(c => c.id);
 
+/** Ancho estimado para columnas sticky (px) */
+export const CHECKBOX_COL_WIDTH = 32;
+
+export const COLUMN_WIDTHS: Record<string, number> = {
+    name: 130,
+    dni: 72,
+    email: 140,
+    scoreIa: 64,
+    status: 72,
+    phone: 96,
+    source: 88,
+    province: 88,
+    district: 88,
+    lastInteraction: 96,
+    contact: 72,
+    nextInterview: 100,
+    schedule: 56,
+    stage: 120,
+};
+
+export const COMPACT_TD_CLASS = 'px-1.5 py-0.5 text-xs text-gray-700 whitespace-nowrap leading-tight';
+export const COMPACT_TH_CLASS = 'px-1.5 py-1 text-left text-xs font-medium text-gray-500 uppercase tracking-wide whitespace-nowrap';
+
+export function getColumnWidth(colId: string): number {
+    if (colId.startsWith('custom_')) return 100;
+    return COLUMN_WIDTHS[colId] ?? 96;
+}
+
+/** Calcula `left` para position:sticky. null = no sticky */
+export function getStickyLeftOffset(
+    target: 'checkbox' | string,
+    visibleColumns: string[],
+    pinnedColumns: string[]
+): number | null {
+    if (target === 'checkbox') return 0;
+    if (!pinnedColumns.includes(target)) return null;
+
+    let left = CHECKBOX_COL_WIDTH;
+    for (const colId of visibleColumns) {
+        if (colId === target) break;
+        if (pinnedColumns.includes(colId)) {
+            left += getColumnWidth(colId);
+        }
+    }
+    return left;
+}
+
+export function getStickyColumnStyle(
+    target: 'checkbox' | string,
+    visibleColumns: string[],
+    pinnedColumns: string[],
+    isHeader: boolean,
+    bgColor?: string
+): { position: 'sticky'; left: number; zIndex: number; minWidth: number; maxWidth: number; backgroundColor: string; boxShadow?: string } | undefined {
+    const left = getStickyLeftOffset(target, visibleColumns, pinnedColumns);
+    if (left === null && target !== 'checkbox') return undefined;
+    const offset = target === 'checkbox' ? 0 : left!;
+    const isPinned = target === 'checkbox' || pinnedColumns.includes(target);
+    if (!isPinned && target !== 'checkbox') return undefined;
+
+    return {
+        position: 'sticky',
+        left: offset,
+        zIndex: isHeader ? (target === 'checkbox' ? 25 : 20) : (target === 'checkbox' ? 15 : 10),
+        minWidth: target === 'checkbox' ? CHECKBOX_COL_WIDTH : getColumnWidth(target),
+        maxWidth: target === 'checkbox' ? CHECKBOX_COL_WIDTH : getColumnWidth(target),
+        backgroundColor: bgColor ?? (isHeader ? '#f9fafb' : '#ffffff'),
+        boxShadow: isPinned && (target !== 'checkbox' || pinnedColumns.length > 0)
+            ? '2px 0 4px -2px rgba(0,0,0,0.12)'
+            : undefined,
+    };
+}
+
 export const IMPORT_FIELD_ALIASES: Record<string, string> = {
     name: 'name',
     nombre: 'name',
@@ -195,40 +268,117 @@ export function getColumnValuesStorageKey(processId: string): string {
     return `bulkColumnValues_${processId}`;
 }
 
-/** Formato de visualización: DD/MM/AAAA */
-export function formatBulkDate(value: string | undefined | null): string {
-    if (!value) return '';
+const EXCEL_EPOCH_UTC_MS = Date.UTC(1899, 11, 30);
+
+function formatDateParts(day: number, month: number, year: number): string {
+    return `${String(day).padStart(2, '0')}/${String(month).padStart(2, '0')}/${year}`;
+}
+
+function isLikelyExcelSerial(n: number): boolean {
+    return Number.isFinite(n) && n >= 1 && n <= 60000;
+}
+
+/** Convierte número serial de Excel (días desde 30/12/1899) a Date UTC */
+export function excelSerialToDate(serial: number): Date {
+    return new Date(EXCEL_EPOCH_UTC_MS + Math.round(serial) * 86400000);
+}
+
+type BulkDateInput = string | number | Date | undefined | null;
+
+/** Formato de visualización: DD/MM/AAAA. Soporta seriales de Excel y fechas corruptas. */
+export function formatBulkDate(value: BulkDateInput): string {
+    if (value === undefined || value === null || value === '') return '';
+
+    if (value instanceof Date && !isNaN(value.getTime())) {
+        return formatDateParts(value.getUTCDate(), value.getUTCMonth() + 1, value.getUTCFullYear());
+    }
+
+    if (typeof value === 'number' && isLikelyExcelSerial(value)) {
+        const d = excelSerialToDate(value);
+        return formatDateParts(d.getUTCDate(), d.getUTCMonth() + 1, d.getUTCFullYear());
+    }
 
     const trimmed = String(value).trim();
     if (!trimmed) return '';
 
+    // Corregir fechas corruptas: 01/01/33970 (serial de Excel usado como año)
+    const corrupted = trimmed.match(/^(\d{1,2})\/(\d{1,2})\/(\d{5,})$/);
+    if (corrupted) {
+        const serial = parseInt(corrupted[3], 10);
+        if (isLikelyExcelSerial(serial)) {
+            const d = excelSerialToDate(serial);
+            return formatDateParts(d.getUTCDate(), d.getUTCMonth() + 1, d.getUTCFullYear());
+        }
+    }
+
+    // Serial de Excel como texto (ej. "33970" o "33970.0")
+    if (/^\d{4,5}(\.0+)?$/.test(trimmed)) {
+        const serial = Math.round(parseFloat(trimmed));
+        if (isLikelyExcelSerial(serial)) {
+            const d = excelSerialToDate(serial);
+            return formatDateParts(d.getUTCDate(), d.getUTCMonth() + 1, d.getUTCFullYear());
+        }
+    }
+
     const ddmmyyyy = trimmed.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
     if (ddmmyyyy) {
         const [, day, month, year] = ddmmyyyy;
-        return `${day.padStart(2, '0')}/${month.padStart(2, '0')}/${year}`;
+        const y = parseInt(year, 10);
+        if (y >= 1900 && y <= 2100) {
+            return formatDateParts(parseInt(day, 10), parseInt(month, 10), y);
+        }
     }
 
     const iso = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})/);
     if (iso) {
         const [, year, month, day] = iso;
-        return `${day}/${month}/${year}`;
+        return formatDateParts(parseInt(day, 10), parseInt(month, 10), parseInt(year, 10));
     }
 
     const parsed = new Date(trimmed);
     if (!isNaN(parsed.getTime())) {
-        const day = String(parsed.getDate()).padStart(2, '0');
-        const month = String(parsed.getMonth() + 1).padStart(2, '0');
-        const year = parsed.getFullYear();
-        return `${day}/${month}/${year}`;
+        const y = parsed.getFullYear();
+        if (y >= 1900 && y <= 2100) {
+            return formatDateParts(parsed.getDate(), parsed.getMonth() + 1, y);
+        }
     }
 
     return trimmed;
 }
 
-/** Normaliza entrada del usuario a DD/MM/AAAA */
-export function normalizeBulkDateInput(value: string): string {
-    if (!value.trim()) return '';
-    return formatBulkDate(value.trim());
+/** Normaliza entrada del usuario o importación a DD/MM/AAAA */
+export function normalizeBulkDateInput(value: BulkDateInput): string {
+    if (value === undefined || value === null) return '';
+    if (typeof value === 'string' && !value.trim()) return '';
+    return formatBulkDate(value);
+}
+
+/** Repara fechas almacenadas en columnValues para columnas tipo date */
+export function repairDateColumnValues(
+    columnValues: Record<string, Record<string, any>>,
+    customColumns: CustomColumn[]
+): Record<string, Record<string, any>> {
+    const dateCols = customColumns.filter(c => c.type === 'date');
+    if (dateCols.length === 0) return columnValues;
+
+    let changed = false;
+    const repaired: Record<string, Record<string, any>> = {};
+
+    for (const [candidateId, values] of Object.entries(columnValues)) {
+        const row = { ...values };
+        for (const col of dateCols) {
+            const raw = row[col.id];
+            if (raw === undefined || raw === null || raw === '') continue;
+            const fixed = normalizeBulkDateInput(raw);
+            if (fixed && fixed !== raw) {
+                row[col.id] = fixed;
+                changed = true;
+            }
+        }
+        repaired[candidateId] = row;
+    }
+
+    return changed ? repaired : columnValues;
 }
 
 /** Columnas donde se permite pegar desde portapapeles */
@@ -268,7 +418,7 @@ export function parseCustomCellInput(rawValue: string, col: CustomColumn): any {
     if (col.type === 'checkbox') {
         return ['true', '1', 'si', 'sí', 'yes', 's'].includes(trimmed.toLowerCase());
     }
-    if (col.type === 'date') return normalizeBulkDateInput(formatBulkDate(trimmed));
+    if (col.type === 'date') return normalizeBulkDateInput(trimmed);
     if (col.type === 'select' && col.options?.length) {
         const match = col.options.find(o => o.toLowerCase() === trimmed.toLowerCase());
         return match ?? trimmed;

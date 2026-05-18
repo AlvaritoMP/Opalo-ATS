@@ -59,7 +59,18 @@ const parseRow = (
     const customValues: Record<string, any> = {};
 
     headers.forEach((header, index) => {
-        const rawValue = (values[index] ?? '').toString().trim().replace(/^"|"$/g, '');
+        const cellValue = values[index];
+        if (cellValue === undefined || cellValue === null || cellValue === '') return;
+
+        const customColByHeader = customColumns.find(c => c.name.toLowerCase() === header.trim().toLowerCase());
+        if (customColByHeader?.type === 'date') {
+            customValues[customColByHeader.id] = normalizeBulkDateInput(cellValue);
+            return;
+        }
+
+        const rawValue = typeof cellValue === 'string'
+            ? cellValue.trim().replace(/^"|"$/g, '')
+            : cellValue;
         if (rawValue === '') return;
 
         // Priorizar columnas personalizadas, excepto campos que deben ir siempre a BD
@@ -76,9 +87,9 @@ const parseRow = (
             } else if (customCol.type === 'checkbox') {
                 customValues[customCol.id] = ['true', '1', 'si', 'sí', 'yes'].includes(rawValue.toLowerCase());
             } else if (customCol.type === 'date') {
-                customValues[customCol.id] = normalizeBulkDateInput(formatBulkDate(rawValue));
+                customValues[customCol.id] = normalizeBulkDateInput(rawValue);
             } else {
-                customValues[customCol.id] = rawValue;
+                customValues[customCol.id] = typeof rawValue === 'string' ? rawValue : String(rawValue);
             }
             return;
         }
@@ -87,7 +98,7 @@ const parseRow = (
             if (mappedField === 'age' && !isNaN(Number(rawValue))) {
                 candidate[mappedField] = Number(rawValue);
             } else {
-                candidate[mappedField] = rawValue;
+                candidate[mappedField] = typeof rawValue === 'string' ? rawValue : String(rawValue);
             }
             // Mantener copia en columna personalizada homónima si existe
             if (isDbPriorityField) {
@@ -116,14 +127,14 @@ const parseCSV = (csvText: string, customColumns: { name: string; id: string; ty
 };
 
 const parseExcel = (data: ArrayBuffer, customColumns: { name: string; id: string; type: string }[]): ParsedRow[] => {
-    const workbook = XLSX.read(data, { type: 'array' });
+    const workbook = XLSX.read(data, { type: 'array', cellDates: true });
     const firstSheetName = workbook.SheetNames[0];
     const worksheet = workbook.Sheets[firstSheetName];
-    const jsonData = XLSX.utils.sheet_to_json<Record<string, any>>(worksheet, { defval: '' });
+    const jsonData = XLSX.utils.sheet_to_json<Record<string, any>>(worksheet, { defval: '', raw: true });
 
     return jsonData.map(row => {
         const headers = Object.keys(row);
-        const values = headers.map(h => String(row[h] ?? '').trim());
+        const values = headers.map(h => row[h] ?? '');
         return parseRow(headers, values, customColumns);
     });
 };
