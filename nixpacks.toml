@@ -11,5 +11,5 @@ cmds = ["npm run build"]
 # Las variables de entorno VITE_* se pasan automáticamente desde Easypanel
 
 [start]
-cmd = "caddy run --config /app/Caddyfile --adapter caddyfile --watch"
+cmd = "PORT=80 caddy run --config /app/Caddyfile --adapter caddyfile"
 
