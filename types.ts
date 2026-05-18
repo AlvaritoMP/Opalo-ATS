@@ -63,6 +63,14 @@ export interface Process {
     closedAt?: string; // Fecha y hora en que se cerró el proceso
 }
 
+// Columna personalizada para la tabla de alta densidad en procesos masivos
+export interface CustomColumn {
+    id: string;
+    name: string;
+    type: 'text' | 'number' | 'checkbox' | 'date' | 'select';
+    options?: string[];
+}
+
 // Configuración para procesos masivos
 export interface BulkProcessConfig {
     killerQuestions?: KillerQuestion[]; // Preguntas automáticas que filtran candidatos
@@ -71,6 +79,9 @@ export interface BulkProcessConfig {
     whatsappEnabled?: boolean; // Habilitar acceso rápido a WhatsApp
     whatsappMessageTemplate?: string; // Plantilla de mensaje para WhatsApp
     autoFilterEnabled?: boolean; // Activar filtrado automático basado en killer questions y score
+    customColumns?: CustomColumn[]; // Columnas personalizadas para la tabla de alta densidad
+    hiddenColumns?: string[]; // IDs de columnas ocultas
+    columnOrder?: string[]; // Orden de columnas (base + custom_*)
 }
 
 // Pregunta "killer" para filtrado automático en procesos masivos

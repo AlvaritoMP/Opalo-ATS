@@ -3,6 +3,12 @@ import { useAppState } from '../App';
 import { Upload, FileText, X, Loader2, Download } from 'lucide-react';
 import { Candidate, Process } from '../types';
 import * as XLSX from 'xlsx';
+import {
+    getImportHeaders,
+    mapImportHeader,
+    getColumnValuesStorageKey,
+    OPTIONAL_IMPORT_FIELDS,
+} from '../lib/bulkTableColumns';
 
 interface BulkProcessImportModalProps {
     process: Process;
@@ -10,16 +16,20 @@ interface BulkProcessImportModalProps {
     onImportComplete: () => void;
 }
 
-// Función para parsear CSV correctamente (maneja comas dentro de valores entre comillas)
+interface ParsedRow {
+    candidate: Partial<Candidate>;
+    customValues: Record<string, any>;
+}
+
 const parseCSVLine = (line: string): string[] => {
     const result: string[] = [];
     let current = '';
     let inQuotes = false;
-    
+
     for (let i = 0; i < line.length; i++) {
         const char = line[i];
         const nextChar = line[i + 1];
-        
+
         if (char === '"') {
             if (inQuotes && nextChar === '"') {
                 current += '"';
@@ -38,83 +48,85 @@ const parseCSVLine = (line: string): string[] => {
     return result;
 };
 
-// CSV parser
-const parseCSV = (csvText: string): Omit<Candidate, 'id' | 'history' | 'processId' | 'stageId' | 'attachments'>[] => {
+const parseRow = (
+    headers: string[],
+    values: string[],
+    customColumns: { name: string; id: string; type: string }[]
+): ParsedRow => {
+    const candidate: Record<string, any> = {};
+    const customValues: Record<string, any> = {};
+
+    headers.forEach((header, index) => {
+        const rawValue = (values[index] || '').trim().replace(/^"|"$/g, '');
+        if (!rawValue) return;
+
+        const mappedField = mapImportHeader(header);
+        if (mappedField) {
+            if (mappedField === 'age' && !isNaN(Number(rawValue))) {
+                candidate[mappedField] = Number(rawValue);
+            } else {
+                candidate[mappedField] = rawValue;
+            }
+            return;
+        }
+
+        const customCol = customColumns.find(
+            c => c.name.toLowerCase() === header.trim().toLowerCase()
+        );
+        if (customCol) {
+            if (customCol.type === 'number' && !isNaN(Number(rawValue))) {
+                customValues[customCol.id] = Number(rawValue);
+            } else if (customCol.type === 'checkbox') {
+                customValues[customCol.id] = ['true', '1', 'si', 'sí', 'yes'].includes(rawValue.toLowerCase());
+            } else {
+                customValues[customCol.id] = rawValue;
+            }
+        }
+    });
+
+    return { candidate, customValues };
+};
+
+const parseCSV = (csvText: string, customColumns: { name: string; id: string; type: string }[]): ParsedRow[] => {
     const lines = csvText.split('\n').filter(line => line.trim() !== '');
     if (lines.length < 2) return [];
 
     const headers = parseCSVLine(lines[0]).map(h => h.trim().replace(/^"|"$/g, ''));
-    const candidates: Omit<Candidate, 'id' | 'history' | 'processId' | 'stageId' | 'attachments'>[] = [];
+    const rows: ParsedRow[] = [];
 
     for (let i = 1; i < lines.length; i++) {
         const values = parseCSVLine(lines[i]).map(v => v.trim().replace(/^"|"$/g, ''));
-        const candidate: any = {};
-        headers.forEach((header, index) => {
-            const value = values[index] || '';
-            const cleanValue = value.trim() === '' ? undefined : value.trim();
-            
-            if (header === 'age' && cleanValue && !isNaN(Number(cleanValue))) {
-                candidate[header] = Number(cleanValue);
-            } else if (cleanValue !== undefined) {
-                candidate[header] = cleanValue;
-            }
-        });
-        candidates.push(candidate);
+        rows.push(parseRow(headers, values, customColumns));
     }
-    return candidates;
+
+    return rows;
 };
 
-// Excel parser
-const parseExcel = (data: ArrayBuffer): Omit<Candidate, 'id' | 'history' | 'processId' | 'stageId' | 'attachments'>[] => {
+const parseExcel = (data: ArrayBuffer, customColumns: { name: string; id: string; type: string }[]): ParsedRow[] => {
     const workbook = XLSX.read(data, { type: 'array' });
     const firstSheetName = workbook.SheetNames[0];
     const worksheet = workbook.Sheets[firstSheetName];
-    const jsonData = XLSX.utils.sheet_to_json(worksheet, { defval: '' });
-    
-    const candidates: Omit<Candidate, 'id' | 'history' | 'processId' | 'stageId' | 'attachments'>[] = [];
-    
-    jsonData.forEach((row: any) => {
-        const candidate: any = {};
-        Object.keys(row).forEach(key => {
-            const normalizedKey = key.trim().toLowerCase();
-            const value = row[key];
-            
-            if (normalizedKey === 'age' && value !== '' && !isNaN(Number(value))) {
-                candidate['age'] = Number(value);
-            } else {
-                const keyMapping: { [key: string]: string } = {
-                    'name': 'name', 'nombre': 'name',
-                    'email': 'email', 'correo': 'email',
-                    'phone': 'phone', 'teléfono': 'phone', 'telefono': 'phone',
-                    'phone2': 'phone2', 'teléfono 2': 'phone2', 'telefono2': 'phone2',
-                    'description': 'description', 'descripción': 'description',
-                    'source': 'source', 'fuente': 'source',
-                    'salaryexpectation': 'salaryExpectation', 'expectativa salarial': 'salaryExpectation',
-                    'agreedSalary': 'agreedSalary', 'salario acordado': 'agreedSalary',
-                    'dni': 'dni',
-                    'linkedinurl': 'linkedinUrl', 'linkedin': 'linkedinUrl',
-                    'address': 'address', 'dirección': 'address', 'direccion': 'address',
-                    'province': 'province', 'provincia': 'province',
-                    'district': 'district', 'distrito': 'district',
-                };
-                
-                const mappedKey = keyMapping[normalizedKey];
-                if (mappedKey && value !== '') {
-                    candidate[mappedKey] = value;
-                }
-            }
-        });
-        candidates.push(candidate);
+    const jsonData = XLSX.utils.sheet_to_json<Record<string, any>>(worksheet, { defval: '' });
+
+    return jsonData.map(row => {
+        const headers = Object.keys(row);
+        const values = headers.map(h => String(row[h] ?? '').trim());
+        return parseRow(headers, values, customColumns);
     });
-    
-    return candidates;
 };
 
 export const BulkProcessImportModal: React.FC<BulkProcessImportModalProps> = ({ process, onClose, onImportComplete }) => {
-    const { state, actions } = useAppState();
+    const { actions } = useAppState();
     const [file, setFile] = useState<File | null>(null);
     const [isImporting, setIsImporting] = useState(false);
     const [importResult, setImportResult] = useState<{ success: number; failed: number; errors: string[] } | null>(null);
+
+    const importHeaders = getImportHeaders(process.bulkConfig);
+    const customColumns = (process.bulkConfig?.customColumns || []).map(c => ({
+        id: c.id,
+        name: c.name,
+        type: c.type,
+    }));
 
     const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         const selectedFile = e.target.files?.[0];
@@ -125,64 +137,31 @@ export const BulkProcessImportModal: React.FC<BulkProcessImportModalProps> = ({ 
     };
 
     const handleDownloadTemplate = () => {
-        // Crear plantilla Excel con columnas predefinidas y ejemplos
-        const templateData = [
-            {
-                'name': 'Juan Pérez',
-                'email': 'juan.perez@example.com',
-                'phone': '987654321',
-                'description': 'Desarrollador con 5 años de experiencia',
-                'source': 'LinkedIn',
-                'salaryExpectation': '50000',
-                'age': '30',
-                'dni': '12345678',
-                'linkedinUrl': 'https://linkedin.com/in/juanperez',
-                'address': 'Lima',
-                'province': 'LIMA',
-                'district': 'MIRAFLORES'
-            },
-            {
-                'name': 'María González',
-                'email': 'maria.gonzalez@example.com',
-                'phone': '987654322',
-                'description': 'Ingeniera de Software especializada en React',
-                'source': 'Referencia',
-                'salaryExpectation': '60000',
-                'age': '28',
-                'dni': '87654321',
-                'linkedinUrl': 'https://linkedin.com/in/mariagonzalez',
-                'address': 'Arequipa',
-                'province': 'AREQUIPA',
-                'district': 'YANAHUARA'
-            }
-        ];
+        const templateRow: Record<string, string> = {};
 
-        // Crear workbook
+        importHeaders.forEach(({ header, isCustom }) => {
+            if (isCustom) {
+                templateRow[header] = 'Ejemplo';
+            } else if (header === 'name') {
+                templateRow[header] = 'Juan Pérez';
+            } else if (header === 'email') {
+                templateRow[header] = 'juan.perez@example.com';
+            } else if (header === 'phone') {
+                templateRow[header] = '987654321';
+            } else if (header === 'dni') {
+                templateRow[header] = '12345678';
+            } else {
+                templateRow[header] = '';
+            }
+        });
+
         const wb = XLSX.utils.book_new();
-        const ws = XLSX.utils.json_to_sheet(templateData);
-        
-        // Ajustar ancho de columnas
-        const colWidths = [
-            { wch: 20 }, // name
-            { wch: 30 }, // email
-            { wch: 15 }, // phone
-            { wch: 40 }, // description
-            { wch: 15 }, // source
-            { wch: 18 }, // salaryExpectation
-            { wch: 5 },  // age
-            { wch: 12 }, // dni
-            { wch: 40 }, // linkedinUrl
-            { wch: 20 }, // address
-            { wch: 15 }, // province
-            { wch: 15 }  // district
-        ];
-        ws['!cols'] = colWidths;
-        
+        const ws = XLSX.utils.json_to_sheet([templateRow]);
+        ws['!cols'] = importHeaders.map(h => ({ wch: Math.max(h.header.length + 4, 15) }));
         XLSX.utils.book_append_sheet(wb, ws, 'Candidatos');
-        
-        // Descargar archivo con nombre basado en el proceso
+
         const processName = process.title.replace(/[^a-z0-9]/gi, '_').substring(0, 30);
-        XLSX.writeFile(wb, `Plantilla_Importacion_${processName}.xlsx`);
+        XLSX.writeFile(wb, `Plantilla_${processName}.xlsx`);
     };
 
     const handleImport = async () => {
@@ -198,25 +177,25 @@ export const BulkProcessImportModal: React.FC<BulkProcessImportModalProps> = ({ 
 
         const firstStageId = process.stages[0].id;
         const isExcel = file.name.endsWith('.xlsx') || file.name.endsWith('.xls');
-        
+
         setIsImporting(true);
         setImportResult(null);
-        
+
         const reader = new FileReader();
         reader.onload = async (event) => {
-            let parsedCandidates: Omit<Candidate, 'id' | 'history' | 'processId' | 'stageId' | 'attachments'>[] = [];
+            let parsedRows: ParsedRow[] = [];
+
             try {
                 if (isExcel) {
-                    const arrayBuffer = event.target?.result as ArrayBuffer;
-                    parsedCandidates = parseExcel(arrayBuffer);
+                    parsedRows = parseExcel(event.target?.result as ArrayBuffer, customColumns);
                 } else {
-                    const text = event.target?.result as string;
-                    parsedCandidates = parseCSV(text);
+                    parsedRows = parseCSV(event.target?.result as string, customColumns);
                 }
-                
+
                 let successCount = 0;
                 const errors: string[] = [];
-                
+                const columnValuesUpdates: Record<string, Record<string, any>> = {};
+
                 const cleanValue = (value: any): any => {
                     if (value === undefined || value === null || value === '') return undefined;
                     if (typeof value === 'string') {
@@ -225,101 +204,93 @@ export const BulkProcessImportModal: React.FC<BulkProcessImportModalProps> = ({ 
                     }
                     return value;
                 };
-                
-                const cleanLocationValue = (value: any): string | undefined => {
-                    const cleaned = cleanValue(value);
-                    if (cleaned === undefined) return undefined;
-                    return cleaned && cleaned.trim() ? cleaned.trim() : undefined;
-                };
-                
-                for (let index = 0; index < parsedCandidates.length; index++) {
-                    const candidateData = parsedCandidates[index];
+
+                for (let index = 0; index < parsedRows.length; index++) {
+                    const { candidate: candidateData, customValues } = parsedRows[index];
                     const rowNumber = index + 2;
-                    
+
                     const name = cleanValue(candidateData.name);
                     const email = cleanValue(candidateData.email);
-                    
+
                     if (!name || !email) {
                         errors.push(`Fila ${rowNumber}: Faltan campos requeridos (nombre: "${name || 'vacío'}", email: "${email || 'vacío'}")`);
                         continue;
                     }
-                    
+
                     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
                     if (!emailRegex.test(email)) {
                         errors.push(`Fila ${rowNumber} (${name}): Email inválido "${email}"`);
                         continue;
                     }
-                    
+
                     try {
                         const cleanCandidateData: any = {
-                            name: name,
-                            email: email,
+                            name,
+                            email,
                             processId: process.id,
                             stageId: firstStageId,
                             attachments: [],
                         };
-                        
-                        const optionalFields = [
-                            'phone', 'phone2', 'description', 'source', 'salaryExpectation', 
-                            'agreedSalary', 'age', 'dni', 'linkedinUrl', 'address'
-                        ];
-                        
-                        optionalFields.forEach(field => {
-                            const cleaned = cleanValue(candidateData[field]);
+
+                        OPTIONAL_IMPORT_FIELDS.forEach(field => {
+                            const cleaned = cleanValue((candidateData as any)[field]);
                             if (cleaned !== undefined) {
                                 cleanCandidateData[field] = cleaned;
                             }
                         });
-                        
-                        const province = cleanLocationValue(candidateData.province);
-                        const district = cleanLocationValue(candidateData.district);
-                        if (province !== undefined) {
-                            cleanCandidateData.province = province;
-                        }
-                        if (district !== undefined) {
-                            cleanCandidateData.district = district;
-                        }
-                        
-                        await actions.addCandidate(cleanCandidateData);
+
+                        const newCandidate = await actions.addCandidate(cleanCandidateData);
                         successCount++;
+
+                        if (Object.keys(customValues).length > 0 && newCandidate?.id) {
+                            columnValuesUpdates[newCandidate.id] = customValues;
+                        }
                     } catch (error: any) {
-                        const errorMsg = error?.message || 'Error desconocido';
-                        errors.push(`Fila ${rowNumber} (${name || 'sin nombre'}): ${errorMsg}`);
-                        console.error(`Error creando candidato ${name} (fila ${rowNumber}):`, error);
+                        errors.push(`Fila ${rowNumber} (${name}): ${error?.message || 'Error desconocido'}`);
                     }
                 }
-                
-                setImportResult({ 
-                    success: successCount, 
-                    failed: parsedCandidates.length - successCount,
-                    errors: errors.slice(0, 10)
+
+                if (Object.keys(columnValuesUpdates).length > 0) {
+                    const storageKey = getColumnValuesStorageKey(process.id);
+                    const existing = localStorage.getItem(storageKey);
+                    const currentValues = existing ? JSON.parse(existing) : {};
+                    localStorage.setItem(storageKey, JSON.stringify({ ...currentValues, ...columnValuesUpdates }));
+                }
+
+                setImportResult({
+                    success: successCount,
+                    failed: parsedRows.length - successCount,
+                    errors: errors.slice(0, 10),
                 });
-                
+
                 if (successCount > 0) {
                     actions.showToast(`${successCount} candidato(s) importado(s) exitosamente`, 'success', 5000);
                     onImportComplete();
                 }
             } catch (error) {
-                console.error("Failed to parse or import file", error);
                 const errorMsg = error instanceof Error ? error.message : 'Error desconocido';
                 actions.showToast(`Error al importar: ${errorMsg}`, 'error', 5000);
-                setImportResult({ 
-                    success: 0, 
-                    failed: parsedCandidates.length,
-                    errors: [`Error al parsear el archivo: ${errorMsg}`]
+                setImportResult({
+                    success: 0,
+                    failed: parsedRows.length,
+                    errors: [`Error al parsear el archivo: ${errorMsg}`],
                 });
             } finally {
                 setIsImporting(false);
                 setFile(null);
             }
         };
-        
+
         if (isExcel) {
             reader.readAsArrayBuffer(file);
         } else {
             reader.readAsText(file);
         }
     };
+
+    const requiredHeaders = importHeaders.filter(h => h.field === 'name' || h.field === 'email');
+    const optionalHeaders = importHeaders.filter(h => h.field !== 'name' && h.field !== 'email' && !h.isCustom);
+    const customHeaders = importHeaders.filter(h => h.isCustom);
 
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
@@ -328,10 +299,7 @@ export const BulkProcessImportModal: React.FC<BulkProcessImportModalProps> = ({ 
                     <h2 className="text-xl font-semibold text-gray-900">
                         Importar Candidatos - {process.title}
                     </h2>
-                    <button
-                        onClick={onClose}
-                        className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
-                    >
+                    <button onClick={onClose} className="p-2 hover:bg-gray-100 rounded-lg transition-colors">
                         <X className="w-5 h-5 text-gray-500" />
                     </button>
                 </div>
@@ -339,11 +307,11 @@ export const BulkProcessImportModal: React.FC<BulkProcessImportModalProps> = ({ 
                 <div className="p-6 space-y-6">
                     <div>
                         <p className="text-sm text-gray-600 mb-4">
-                            Sube un archivo CSV o Excel (.xlsx) con datos de candidatos. La primera fila debe contener encabezados.
+                            La plantilla se genera según las columnas configuradas en la Tabla de Alta Densidad de este proceso.
                         </p>
                         <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-md">
                             <div className="flex items-center justify-between mb-2">
-                                <p className="text-xs text-blue-800 font-medium">📄 Plantilla Predefinida</p>
+                                <p className="text-xs text-blue-800 font-medium">Plantilla dinámica del proceso</p>
                                 <button
                                     onClick={handleDownloadTemplate}
                                     className="flex items-center gap-1 px-3 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors"
@@ -353,12 +321,23 @@ export const BulkProcessImportModal: React.FC<BulkProcessImportModalProps> = ({ 
                                 </button>
                             </div>
                             <p className="text-xs text-blue-700">
-                                Descarga la plantilla Excel con el formato correcto y ejemplos de datos
+                                Columnas incluidas: {importHeaders.map(h => h.header).join(', ') || 'name, email'}
                             </p>
                         </div>
                         <p className="text-xs text-gray-500 mb-4">
-                            <strong>Campos requeridos:</strong> name, email<br />
-                            <strong>Campos opcionales:</strong> phone, description, source, salaryExpectation, agreedSalary, age, dni, linkedinUrl, address, province, district
+                            <strong>Requeridos:</strong> {requiredHeaders.map(h => h.header).join(', ') || 'name, email'}
+                            {optionalHeaders.length > 0 && (
+                                <>
+                                    <br />
+                                    <strong>Opcionales:</strong> {optionalHeaders.map(h => h.header).join(', ')}
+                                </>
+                            )}
+                            {customHeaders.length > 0 && (
+                                <>
+                                    <br />
+                                    <strong>Personalizadas:</strong> {customHeaders.map(h => h.header).join(', ')}
+                                </>
+                            )}
                         </p>
                     </div>
 
@@ -371,10 +350,7 @@ export const BulkProcessImportModal: React.FC<BulkProcessImportModalProps> = ({ 
                                         <FileText className="mx-auto h-12 w-12 text-gray-400" />
                                         <p className="font-medium text-primary-600">{file.name}</p>
                                         <p className="text-xs text-gray-500">{(file.size / 1024).toFixed(2)} KB</p>
-                                        <button
-                                            onClick={() => setFile(null)}
-                                            className="mt-2 text-sm text-red-600 hover:text-red-700"
-                                        >
+                                        <button onClick={() => setFile(null)} className="mt-2 text-sm text-red-600 hover:text-red-700">
                                             Quitar archivo
                                         </button>
                                     </>
@@ -399,7 +375,7 @@ export const BulkProcessImportModal: React.FC<BulkProcessImportModalProps> = ({ 
                         <div className={`p-4 rounded-lg ${importResult.failed > 0 ? 'bg-yellow-50 border border-yellow-200' : 'bg-green-50 border border-green-200'}`}>
                             <p className="font-medium text-sm mb-2">
                                 {importResult.success > 0 && <span className="text-green-700">✅ {importResult.success} candidato(s) importado(s) exitosamente</span>}
-                                {importResult.failed > 0 && <span className="text-yellow-700">⚠️ {importResult.failed} candidato(s) fallaron</span>}
+                                {importResult.failed > 0 && <span className="text-yellow-700"> ⚠️ {importResult.failed} candidato(s) fallaron</span>}
                             </p>
                             {importResult.errors.length > 0 && (
                                 <div className="mt-2 max-h-40 overflow-y-auto">

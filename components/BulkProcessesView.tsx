@@ -3,7 +3,15 @@ import { useAppState } from '../App';
 import { bulkCandidatesApi, BulkCandidate } from '../lib/api/bulkCandidates';
 import { processesApi } from '../lib/api/processes';
 import { Check, X, Loader2, Send, Archive, Search, ChevronDown, ChevronUp, Plus, Edit, Trash2, ArrowLeft, MessageCircle, Phone, Upload, Filter, Mail, Calendar, Settings, ArrowUp, ArrowDown } from 'lucide-react';
-import { Process } from '../types';
+import { Process, CustomColumn, BulkProcessConfig } from '../types';
+import {
+    BASE_COLUMNS,
+    DEFAULT_COLUMN_ORDER,
+    buildAllColumnIds,
+    getColumnLabel,
+    getColumnValuesStorageKey,
+    resolveColumnOrder,
+} from '../lib/bulkTableColumns';
 import { BulkProcessEditorModal } from './BulkProcessEditorModal';
 import { BulkProcessImportModal } from './BulkProcessImportModal';
 import { BulkWhatsAppModal } from './BulkWhatsAppModal';
@@ -303,44 +311,15 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
     const [showBulkScheduleModal, setShowBulkScheduleModal] = useState(false);
     const [editingCell, setEditingCell] = useState<{ candidateId: string; field: string } | null>(null);
     const [editValue, setEditValue] = useState('');
-    interface CustomColumn {
-        id: string;
-        name: string;
-        type: 'text' | 'number' | 'checkbox' | 'date' | 'select';
-        options?: string[]; // Para tipo 'select'
-    }
-
-    const [customColumns, setCustomColumns] = useState<CustomColumn[]>(() => {
-        const saved = localStorage.getItem('bulkProcessesCustomColumns');
-        if (saved) {
-            try {
-                const parsed = JSON.parse(saved);
-                // Si es un array de strings (formato antiguo), convertir a formato nuevo
-                if (parsed.length > 0 && typeof parsed[0] === 'string') {
-                    return parsed.map((name: string, index: number) => ({
-                        id: `col_${index}_${Date.now()}`,
-                        name,
-                        type: 'text' as const,
-                    }));
-                }
-                return parsed;
-            } catch {
-                return [];
-            }
-        }
-        return [];
-    });
+    const [customColumns, setCustomColumns] = useState<CustomColumn[]>([]);
     const [showAddColumnModal, setShowAddColumnModal] = useState(false);
+    const [editingColumn, setEditingColumn] = useState<CustomColumn | null>(null);
     const [showTemplateModal, setShowTemplateModal] = useState(false);
     const [showColumnConfig, setShowColumnConfig] = useState(false);
-    const [hiddenColumns, setHiddenColumns] = useState<string[]>(() => {
-        const saved = localStorage.getItem('bulkProcessesHiddenColumns');
-        return saved ? JSON.parse(saved) : [];
-    });
-    const [columnValues, setColumnValues] = useState<Record<string, Record<string, any>>>(() => {
-        const saved = localStorage.getItem('bulkProcessesColumnValues');
-        return saved ? JSON.parse(saved) : {};
-    });
+    const [hiddenColumns, setHiddenColumns] = useState<string[]>([]);
+    const [columnOrder, setColumnOrder] = useState<string[]>(DEFAULT_COLUMN_ORDER);
+    const [draggedColumn, setDraggedColumn] = useState<string | null>(null);
+    const [columnValues, setColumnValues] = useState<Record<string, Record<string, any>>>({});
     const [quickScheduleCandidate, setQuickScheduleCandidate] = useState<string | null>(null);
     const [columnFilters, setColumnFilters] = useState<Record<string, string>>({});
     const [sortColumn, setSortColumn] = useState<string | null>(null);
@@ -352,6 +331,42 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
         if (!selectedProcess) return undefined;
         return bulkProcesses.find(p => p.id === selectedProcess);
     }, [selectedProcess, bulkProcesses]);
+
+    const baseColumns = BASE_COLUMNS;
+    const allColumnIds = useMemo(
+        () => buildAllColumnIds(customColumns),
+        [customColumns]
+    );
+
+    const persistBulkConfig = useCallback(async (updates: Partial<BulkProcessConfig>) => {
+        if (!process) return;
+        const newBulkConfig: BulkProcessConfig = {
+            ...process.bulkConfig,
+            ...updates,
+        };
+        try {
+            await processesApi.update(process.id, { bulkConfig: newBulkConfig });
+            setBulkProcesses(prev => prev.map(p =>
+                p.id === process.id ? { ...p, bulkConfig: newBulkConfig } : p
+            ));
+        } catch (error) {
+            console.error('Error guardando configuración de tabla:', error);
+            actions.showToast('Error al guardar configuración de columnas', 'error', 3000);
+        }
+    }, [process, actions]);
+
+    useEffect(() => {
+        if (!process) return;
+
+        const config = process.bulkConfig;
+        const cols = config?.customColumns || [];
+        setCustomColumns(cols);
+        setHiddenColumns(config?.hiddenColumns || []);
+        setColumnOrder(resolveColumnOrder(config, cols));
+
+        const savedValues = localStorage.getItem(getColumnValuesStorageKey(process.id));
+        setColumnValues(savedValues ? JSON.parse(savedValues) : {});
+    }, [process?.id, process?.bulkConfig]);
 
     // Cargar procesos masivos
     const loadBulkProcesses = useCallback(async () => {
@@ -814,18 +829,50 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
         setEditingProcess(null);
     };
 
-    const handleAddColumn = (column: CustomColumn) => {
+    const handleAddColumn = async (column: CustomColumn) => {
         const newColumns = [...customColumns, column];
+        const newOrder = [...columnOrder, `custom_${column.id}`];
         setCustomColumns(newColumns);
-        localStorage.setItem('bulkProcessesCustomColumns', JSON.stringify(newColumns));
+        setColumnOrder(newOrder);
+        await persistBulkConfig({ customColumns: newColumns, columnOrder: newOrder });
+        actions.showToast('Columna agregada', 'success', 2000);
     };
 
-    const handleLoadTemplate = (columns: CustomColumn[]) => {
+    const handleEditColumn = async (column: CustomColumn) => {
+        const newColumns = customColumns.map(c => c.id === column.id ? column : c);
+        setCustomColumns(newColumns);
+        await persistBulkConfig({ customColumns: newColumns });
+        setEditingColumn(null);
+        actions.showToast('Columna actualizada', 'success', 2000);
+    };
+
+    const handleDeleteColumn = async (columnId: string) => {
+        if (!confirm('¿Eliminar esta columna personalizada?')) return;
+        const colKey = `custom_${columnId}`;
+        const newColumns = customColumns.filter(c => c.id !== columnId);
+        const newOrder = columnOrder.filter(id => id !== colKey);
+        const newHidden = hiddenColumns.filter(id => id !== colKey);
+        setCustomColumns(newColumns);
+        setColumnOrder(newOrder);
+        setHiddenColumns(newHidden);
+        await persistBulkConfig({
+            customColumns: newColumns,
+            columnOrder: newOrder,
+            hiddenColumns: newHidden,
+        });
+        actions.showToast('Columna eliminada', 'success', 2000);
+    };
+
+    const handleLoadTemplate = async (columns: CustomColumn[]) => {
+        const newOrder = [...DEFAULT_COLUMN_ORDER, ...columns.map(c => `custom_${c.id}`)];
         setCustomColumns(columns);
-        localStorage.setItem('bulkProcessesCustomColumns', JSON.stringify(columns));
+        setColumnOrder(newOrder);
+        await persistBulkConfig({ customColumns: columns, columnOrder: newOrder });
+        actions.showToast('Plantilla aplicada', 'success', 2000);
     };
 
     const handleColumnValueChange = (candidateId: string, columnId: string, value: any) => {
+        if (!process) return;
         setColumnValues(prev => {
             const newValues = {
                 ...prev,
@@ -834,9 +881,49 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                     [columnId]: value,
                 },
             };
-            localStorage.setItem('bulkProcessesColumnValues', JSON.stringify(newValues));
+            localStorage.setItem(getColumnValuesStorageKey(process.id), JSON.stringify(newValues));
             return newValues;
         });
+    };
+
+    const toggleColumnVisibility = async (colId: string) => {
+        const newHidden = hiddenColumns.includes(colId)
+            ? hiddenColumns.filter(id => id !== colId)
+            : [...hiddenColumns, colId];
+        setHiddenColumns(newHidden);
+        await persistBulkConfig({ hiddenColumns: newHidden });
+    };
+
+    const handleDragStart = (e: React.DragEvent, colId: string) => {
+        setDraggedColumn(colId);
+        e.dataTransfer.effectAllowed = 'move';
+    };
+
+    const handleDragOver = (e: React.DragEvent) => {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+    };
+
+    const handleDragLeave = () => {};
+
+    const handleDrop = async (e: React.DragEvent, targetColId: string) => {
+        e.preventDefault();
+        if (!draggedColumn || draggedColumn === targetColId) return;
+
+        const newOrder = [...columnOrder];
+        const fromIndex = newOrder.indexOf(draggedColumn);
+        const toIndex = newOrder.indexOf(targetColId);
+        if (fromIndex === -1 || toIndex === -1) return;
+
+        newOrder.splice(fromIndex, 1);
+        newOrder.splice(toIndex, 0, draggedColumn);
+        setColumnOrder(newOrder);
+        setDraggedColumn(null);
+        await persistBulkConfig({ columnOrder: newOrder });
+    };
+
+    const handleDragEnd = () => {
+        setDraggedColumn(null);
     };
 
     const getColumnValue = (candidateId: string, columnId: string): any => {
@@ -1060,25 +1147,48 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                             <div className="absolute right-0 mt-2 w-56 bg-white border border-gray-200 rounded-lg shadow-xl z-50 p-2 max-h-96 overflow-y-auto">
                                                 <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2 px-2">Mostrar/Ocultar</div>
                                                 {allColumnIds.map(colId => {
-                                                    let colName = colId;
-                                                    if (colId.startsWith('custom_')) {
-                                                        const customCol = customColumns.find(c => c.id === colId.replace('custom_', ''));
-                                                        colName = customCol ? customCol.name : colId;
-                                                    } else {
-                                                        const baseCol = baseColumns.find(c => c.id === colId);
-                                                        colName = baseCol ? baseCol.label : colId;
-                                                    }
-                                                    
+                                                    const colName = getColumnLabel(colId, customColumns);
+                                                    const isCustom = colId.startsWith('custom_');
+                                                    const customColId = isCustom ? colId.replace('custom_', '') : null;
+
                                                     return (
-                                                        <label key={colId} className="flex items-center gap-2 px-2 py-1.5 hover:bg-gray-50 rounded cursor-pointer">
-                                                            <input
-                                                                type="checkbox"
-                                                                checked={!hiddenColumns.includes(colId)}
-                                                                onChange={() => toggleColumnVisibility(colId)}
-                                                                className="w-4 h-4 text-primary-600 rounded focus:ring-primary-500"
-                                                            />
-                                                            <span className="text-sm text-gray-700 truncate" title={colName}>{colName}</span>
-                                                        </label>
+                                                        <div key={colId} className="flex items-center gap-1 px-2 py-1.5 hover:bg-gray-50 rounded">
+                                                            <label className="flex items-center gap-2 flex-1 cursor-pointer min-w-0">
+                                                                <input
+                                                                    type="checkbox"
+                                                                    checked={!hiddenColumns.includes(colId)}
+                                                                    onChange={() => toggleColumnVisibility(colId)}
+                                                                    className="w-4 h-4 text-primary-600 rounded focus:ring-primary-500"
+                                                                />
+                                                                <span className="text-sm text-gray-700 truncate" title={colName}>{colName}</span>
+                                                            </label>
+                                                            {isCustom && customColId && (
+                                                                <div className="flex gap-0.5 shrink-0">
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() => {
+                                                                            const col = customColumns.find(c => c.id === customColId);
+                                                                            if (col) {
+                                                                                setEditingColumn(col);
+                                                                                setShowAddColumnModal(true);
+                                                                            }
+                                                                        }}
+                                                                        className="p-1 text-gray-500 hover:text-primary-600 hover:bg-primary-50 rounded"
+                                                                        title="Editar columna"
+                                                                    >
+                                                                        <Edit className="w-3.5 h-3.5" />
+                                                                    </button>
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() => handleDeleteColumn(customColId)}
+                                                                        className="p-1 text-gray-500 hover:text-red-600 hover:bg-red-50 rounded"
+                                                                        title="Eliminar columna"
+                                                                    >
+                                                                        <Trash2 className="w-3.5 h-3.5" />
+                                                                    </button>
+                                                                </div>
+                                                            )}
+                                                        </div>
                                                     );
                                                 })}
                                             </div>
@@ -1668,8 +1778,13 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
             {showAddColumnModal && (
                 <AddColumnModal
                     isOpen={showAddColumnModal}
-                    onClose={() => setShowAddColumnModal(false)}
+                    onClose={() => {
+                        setShowAddColumnModal(false);
+                        setEditingColumn(null);
+                    }}
                     onAdd={handleAddColumn}
+                    editingColumn={editingColumn}
+                    onEdit={handleEditColumn}
                 />
             )}
 
