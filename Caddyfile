@@ -1,4 +1,4 @@
-:{$PORT:80} {
+:{$PORT:3000} {
 	root * /app/dist
 	encode gzip zstd
 
