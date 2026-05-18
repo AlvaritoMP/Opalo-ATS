@@ -144,3 +144,39 @@ export function mapImportHeader(header: string): string | null {
 export function getColumnValuesStorageKey(processId: string): string {
     return `bulkColumnValues_${processId}`;
 }
+
+/** Formato de visualización: DD/MM/AAAA */
+export function formatBulkDate(value: string | undefined | null): string {
+    if (!value) return '';
+
+    const trimmed = String(value).trim();
+    if (!trimmed) return '';
+
+    const ddmmyyyy = trimmed.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+    if (ddmmyyyy) {
+        const [, day, month, year] = ddmmyyyy;
+        return `${day.padStart(2, '0')}/${month.padStart(2, '0')}/${year}`;
+    }
+
+    const iso = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (iso) {
+        const [, year, month, day] = iso;
+        return `${day}/${month}/${year}`;
+    }
+
+    const parsed = new Date(trimmed);
+    if (!isNaN(parsed.getTime())) {
+        const day = String(parsed.getDate()).padStart(2, '0');
+        const month = String(parsed.getMonth() + 1).padStart(2, '0');
+        const year = parsed.getFullYear();
+        return `${day}/${month}/${year}`;
+    }
+
+    return trimmed;
+}
+
+/** Normaliza entrada del usuario a DD/MM/AAAA */
+export function normalizeBulkDateInput(value: string): string {
+    if (!value.trim()) return '';
+    return formatBulkDate(value.trim());
+}

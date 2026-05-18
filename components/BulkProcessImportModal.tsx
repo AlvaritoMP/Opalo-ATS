@@ -8,6 +8,8 @@ import {
     mapImportHeader,
     getColumnValuesStorageKey,
     OPTIONAL_IMPORT_FIELDS,
+    formatBulkDate,
+    normalizeBulkDateInput,
 } from '../lib/bulkTableColumns';
 
 interface BulkProcessImportModalProps {
@@ -78,6 +80,8 @@ const parseRow = (
                 customValues[customCol.id] = Number(rawValue);
             } else if (customCol.type === 'checkbox') {
                 customValues[customCol.id] = ['true', '1', 'si', 'sí', 'yes'].includes(rawValue.toLowerCase());
+            } else if (customCol.type === 'date') {
+                customValues[customCol.id] = normalizeBulkDateInput(formatBulkDate(rawValue));
             } else {
                 customValues[customCol.id] = rawValue;
             }
@@ -139,9 +143,18 @@ export const BulkProcessImportModal: React.FC<BulkProcessImportModalProps> = ({ 
     const handleDownloadTemplate = () => {
         const templateRow: Record<string, string> = {};
 
-        importHeaders.forEach(({ header, isCustom }) => {
-            if (isCustom) {
-                templateRow[header] = 'Ejemplo';
+        importHeaders.forEach(({ header, isCustom, columnId }) => {
+            if (isCustom && columnId) {
+                const col = customColumns.find(c => c.id === columnId);
+                if (col?.type === 'date') {
+                    templateRow[header] = '18/05/2026';
+                } else if (col?.type === 'checkbox') {
+                    templateRow[header] = 'Sí';
+                } else if (col?.type === 'number') {
+                    templateRow[header] = '100';
+                } else {
+                    templateRow[header] = 'Ejemplo';
+                }
             } else if (header === 'name') {
                 templateRow[header] = 'Juan Pérez';
             } else if (header === 'email') {

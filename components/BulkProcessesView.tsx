@@ -11,6 +11,8 @@ import {
     getColumnLabel,
     getColumnValuesStorageKey,
     resolveColumnOrder,
+    formatBulkDate,
+    normalizeBulkDateInput,
 } from '../lib/bulkTableColumns';
 import { BulkProcessEditorModal } from './BulkProcessEditorModal';
 import { BulkProcessImportModal } from './BulkProcessImportModal';
@@ -960,6 +962,9 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                 if (String(cellValue || '') !== filterValue) return false;
             } else if (col.type === 'number') {
                 if (!String(cellValue ?? '').includes(filterValue)) return false;
+            } else if (col.type === 'date') {
+                const formatted = formatBulkDate(String(cellValue || ''));
+                if (!formatted.toLowerCase().includes(filterValue.toLowerCase())) return false;
             } else {
                 if (!String(cellValue || '').toLowerCase().includes(filterValue.toLowerCase())) return false;
             }
@@ -1236,21 +1241,6 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                         </div>
                         
                         <div className="space-y-3">
-                            {/* Información de filtrado automático */}
-                            {process?.bulkConfig?.autoFilterEnabled && process?.bulkConfig?.scoreThreshold !== undefined && (
-                                <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg">
-                                    <div className="flex items-center gap-2 text-sm">
-                                        <Filter className="w-4 h-4 text-blue-600" />
-                                        <span className="font-medium text-blue-800">
-                                            Filtrado Automático Activo:
-                                        </span>
-                                        <span className="text-blue-700">
-                                            Solo se muestran candidatos con Score IA ≥ {process.bulkConfig.scoreThreshold}
-                                        </span>
-                                    </div>
-                                </div>
-                            )}
-                            
                             <div className="flex gap-4 items-end">
                                 {process && (
                                     <div className="flex-1">
@@ -1472,7 +1462,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                                     ) : (
                                                         <input
                                                             type="text"
-                                                            placeholder={col.type === 'number' ? 'Filtrar...' : col.type === 'date' ? 'AAAA-MM-DD' : 'Filtrar...'}
+                                                            placeholder={col.type === 'number' ? 'Filtrar...' : col.type === 'date' ? 'DD/MM/AAAA' : 'Filtrar...'}
                                                             value={columnFilters[filterKey] || ''}
                                                             onChange={(e) => setColumnFilters({ ...columnFilters, [filterKey]: e.target.value })}
                                                             className="text-xs px-2 py-1 border border-gray-300 rounded focus:ring-1 focus:ring-primary-500 focus:border-primary-500 font-normal normal-case"
@@ -1687,7 +1677,14 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                                                 {col.options.map(opt => <option key={opt} value={opt}>{opt}</option>)}
                                                             </select>
                                                         ) : col.type === 'date' ? (
-                                                            <input type="date" value={value || ''} onChange={(e) => handleColumnValueChange(candidate.id, col.id, e.target.value)} className="w-full px-2 py-1 text-xs border border-gray-300 rounded focus:ring-1 focus:ring-primary-500 focus:border-primary-500" />
+                                                            <input
+                                                                type="text"
+                                                                value={formatBulkDate(value) || ''}
+                                                                placeholder="DD/MM/AAAA"
+                                                                onChange={(e) => handleColumnValueChange(candidate.id, col.id, e.target.value)}
+                                                                onBlur={(e) => handleColumnValueChange(candidate.id, col.id, normalizeBulkDateInput(e.target.value))}
+                                                                className="w-full px-2 py-1 text-xs border border-gray-300 rounded focus:ring-1 focus:ring-primary-500 focus:border-primary-500"
+                                                            />
                                                         ) : col.type === 'number' ? (
                                                             <input type="number" value={value || ''} onChange={(e) => handleColumnValueChange(candidate.id, col.id, e.target.value ? parseFloat(e.target.value) : '')} className="w-full px-2 py-1 text-xs border border-gray-300 rounded focus:ring-1 focus:ring-primary-500 focus:border-primary-500" placeholder="-" />
                                                         ) : (
