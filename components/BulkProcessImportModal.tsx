@@ -131,6 +131,34 @@ const rowHasData = (
     return Object.keys(customValues).length > 0;
 };
 
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+/** Supabase exige email NOT NULL: usar placeholder único si falta o es inválido */
+const resolveImportEmail = (
+    email: string | undefined,
+    rowNumber: number,
+    name: string,
+    dni?: string,
+    phone?: string
+): { email: string; usedPlaceholder: boolean } => {
+    if (email && EMAIL_REGEX.test(email)) {
+        return { email, usedPlaceholder: false };
+    }
+
+    const slug = (dni || phone || name || 'candidato')
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-|-$/g, '')
+        .slice(0, 40) || 'candidato';
+
+    return {
+        email: `sin-email.${slug}.fila${rowNumber}@import.opalo`,
+        usedPlaceholder: true,
+    };
+};
+
 export const BulkProcessImportModal: React.FC<BulkProcessImportModalProps> = ({ process, onClose, onImportComplete }) => {
     const { actions } = useAppState();
     const [file, setFile] = useState<File | null>(null);
@@ -247,23 +275,28 @@ export const BulkProcessImportModal: React.FC<BulkProcessImportModalProps> = ({ 
                         `Candidato ${rowNumber - 1}`;
 
                     const email = cleanValue(candidateData.email);
-                    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+                    const dni = cleanValue(candidateData.dni);
+                    const phone = cleanValue(candidateData.phone);
+                    const { email: resolvedEmail } = resolveImportEmail(
+                        email,
+                        rowNumber,
+                        name,
+                        dni,
+                        phone
+                    );
 
-                    if (email && !emailRegex.test(email)) {
-                        errors.push(`Fila ${rowNumber} (${name}): Email inválido "${email}" — se importó sin email`);
+                    if (email && !EMAIL_REGEX.test(email)) {
+                        errors.push(`Fila ${rowNumber} (${name}): Email inválido "${email}" — se usó email temporal`);
                     }
 
                     try {
                         const cleanCandidateData: any = {
                             name,
+                            email: resolvedEmail,
                             processId: process.id,
                             stageId: firstStageId,
                             attachments: [],
                         };
-
-                        if (email && emailRegex.test(email)) {
-                            cleanCandidateData.email = email;
-                        }
 
                         OPTIONAL_IMPORT_FIELDS.forEach(field => {
                             const cleaned = cleanValue((candidateData as any)[field]);
@@ -358,7 +391,8 @@ export const BulkProcessImportModal: React.FC<BulkProcessImportModalProps> = ({ 
                             </p>
                         </div>
                         <p className="text-xs text-gray-500 mb-4">
-                            Cada fila debe tener al menos un dato (nombre, teléfono, DNI, email u otra columna). Las demás celdas pueden quedar vacías.
+                            Cada fila debe tener al menos un dato. Las celdas vacías son válidas.
+                            Si falta el email, se genera uno temporal que puedes editar después en la tabla.
                             {optionalHeaders.length > 0 && (
                                 <>
                                     <br />
