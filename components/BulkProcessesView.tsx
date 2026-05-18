@@ -356,7 +356,13 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
     }, [process, actions]);
 
     useEffect(() => {
-        if (!process) return;
+        if (!process) {
+            setCustomColumns([]);
+            setHiddenColumns([]);
+            setColumnOrder(DEFAULT_COLUMN_ORDER);
+            setColumnValues({});
+            return;
+        }
 
         const config = process.bulkConfig;
         const cols = config?.customColumns || [];
@@ -366,7 +372,12 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
 
         const savedValues = localStorage.getItem(getColumnValuesStorageKey(process.id));
         setColumnValues(savedValues ? JSON.parse(savedValues) : {});
-    }, [process?.id, process?.bulkConfig]);
+    }, [process?.id]);
+
+    const visibleColumns = useMemo(
+        () => columnOrder.filter(colId => !hiddenColumns.includes(colId)),
+        [columnOrder, hiddenColumns]
+    );
 
     // Cargar procesos masivos
     const loadBulkProcesses = useCallback(async () => {
@@ -1269,7 +1280,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                         className="w-4 h-4 text-primary-600 rounded focus:ring-primary-500"
                                     />
                                 </th>
-                                {columnOrder.filter(colId => !hiddenColumns.includes(colId)).map(colId => {
+                                {visibleColumns.map(colId => {
                                     const commonProps = {
                                         key: colId,
                                         draggable: true,
@@ -1457,7 +1468,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                                 className="w-4 h-4 text-primary-600 rounded focus:ring-primary-500"
                                             />
                                         </td>
-                                        {columnOrder.filter(colId => !hiddenColumns.includes(colId)).map(colId => {
+                                        {visibleColumns.map(colId => {
                                             if (colId === 'name') {
                                                 return (
                                                     <td key="name" className="px-3 py-3 whitespace-nowrap">
