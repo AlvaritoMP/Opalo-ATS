@@ -1525,21 +1525,6 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
         return () => document.removeEventListener('mouseup', stopDrag);
     }, []);
 
-    const handleTableMouseDown = useCallback((e: React.MouseEvent) => {
-        if (editingCell || e.button !== 0) return;
-        const coord = getCellFromElement(e.target);
-        if (!coord) return;
-        if ((e.target as HTMLElement).closest('input, select, textarea, button, a')) return;
-
-        e.stopPropagation();
-        if (e.shiftKey || e.ctrlKey || e.metaKey) return;
-
-        isDraggingCells.current = true;
-        didDragSelect.current = false;
-        dragAnchorCell.current = coord;
-        selectSingleCell(coord);
-    }, [editingCell, selectSingleCell]);
-
     const handleTableMouseOver = useCallback((e: React.MouseEvent) => {
         if (!isDraggingCells.current || !dragAnchorCell.current || editingCell) return;
         if (e.buttons !== 1) return;
@@ -1550,21 +1535,6 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
         setActiveCell(coord);
         setSelectedCells(buildCellRange(dragAnchorCell.current, coord));
     }, [editingCell, buildCellRange]);
-
-    const handleTableCellClick = useCallback((e: React.MouseEvent) => {
-        const coord = getCellFromElement(e.target);
-        if (!coord) return;
-        if ((e.target as HTMLElement).closest('input, select, textarea, button, a')) return;
-
-        e.stopPropagation();
-        if (didDragSelect.current) {
-            didDragSelect.current = false;
-            focusTable();
-            return;
-        }
-
-        applyCellSelection(coord, e, selectionAnchor);
-    }, [applyCellSelection, selectionAnchor, focusTable]);
 
     const handleTableKeyDown = useCallback((e: React.KeyboardEvent) => {
         if (editingCell) return;
@@ -1649,16 +1619,51 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
 
     const tdProps = (candidateId: string, colId: string, extra = '') => {
         const meta = getCellMetaFor(candidateId, colId);
+        const coord = { candidateId, colId };
         return {
             ...cellDataAttrs(candidateId, colId),
             className: `${COMPACT_TD_CLASS} relative ${cellFocusClass(candidateId, colId)} ${extra}`.trim(),
             style: buildTdStyle(candidateId, colId),
             title: meta?.comment || undefined,
+            onMouseDown: (e: React.MouseEvent) => {
+                e.stopPropagation();
+                if (editingCell || e.button !== 0) return;
+                if ((e.target as HTMLElement).closest('input, select, textarea, button, a')) return;
+                if (e.shiftKey || e.ctrlKey || e.metaKey) return;
+                isDraggingCells.current = true;
+                didDragSelect.current = false;
+                dragAnchorCell.current = coord;
+                selectSingleCell(coord);
+            },
+            onClick: (e: React.MouseEvent) => {
+                e.stopPropagation();
+                if ((e.target as HTMLElement).closest('input, select, textarea, button, a')) return;
+                if (didDragSelect.current) {
+                    didDragSelect.current = false;
+                    focusTable();
+                    return;
+                }
+                applyCellSelection(coord, e, selectionAnchor);
+            },
+            onDoubleClick: (e: React.MouseEvent) => e.stopPropagation(),
         };
     };
 
+    const sortSelectedCellKeys = useCallback((keys: string[]) => {
+        return [...keys].sort((a, b) => {
+            const ca = parseCellKey(a);
+            const cb = parseCellKey(b);
+            const ra = displayCandidates.findIndex(c => c.id === ca.candidateId);
+            const rb = displayCandidates.findIndex(c => c.id === cb.candidateId);
+            if (ra !== rb) return ra - rb;
+            return visibleColumns.indexOf(ca.colId) - visibleColumns.indexOf(cb.colId);
+        });
+    }, [displayCandidates, visibleColumns]);
+
     const handleBulkPaste = useCallback(async (e: ClipboardEvent) => {
-        if (!activeCell || editingCell) return;
+        if (editingCell) return;
+        if (selectedCells.size === 0 && !activeCell) return;
+
         const target = e.target as HTMLElement;
         if (['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName)) return;
 
@@ -1669,22 +1674,60 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
         const grid = parseClipboardGrid(text);
         if (grid.length === 0) return;
 
-        const startColIdx = (() => {
-            if (selectedCells.size > 0) {
-                const colIndices = Array.from(selectedCells)
-                    .map(k => visibleColumns.indexOf(parseCellKey(k).colId))
-                    .filter(i => i >= 0);
-                if (colIndices.length > 0) return Math.min(...colIndices);
+        const flatValues = grid.flat();
+        let pastedCells = 0;
+
+        if (selectedCells.size > 0) {
+            const sortedKeys = sortSelectedCellKeys(Array.from(selectedCells));
+            const rowIndices = sortedKeys.map(k => displayCandidates.findIndex(c => c.id === parseCellKey(k).candidateId));
+            const colIndices = sortedKeys.map(k => visibleColumns.indexOf(parseCellKey(k).colId));
+            const minR = Math.min(...rowIndices);
+            const maxR = Math.max(...rowIndices);
+            const minC = Math.min(...colIndices);
+            const maxC = Math.max(...colIndices);
+            const rectRows = maxR - minR + 1;
+            const rectCols = maxC - minC + 1;
+            const isFullRect = sortedKeys.length === rectRows * rectCols;
+
+            if (isFullRect && grid.length === rectRows && (grid[0]?.length ?? 0) === rectCols) {
+                for (let r = 0; r < grid.length; r++) {
+                    for (let c = 0; c < grid[r].length; c++) {
+                        const candidateId = displayCandidates[minR + r]?.id;
+                        const colId = visibleColumns[minC + c];
+                        if (!candidateId || !colId || !isPasteEditableColumn(colId)) continue;
+                        await setCellValue(candidateId, colId, grid[r][c]);
+                        pastedCells++;
+                    }
+                }
+            } else if (flatValues.length === 1) {
+                for (const key of sortedKeys) {
+                    const { candidateId, colId } = parseCellKey(key);
+                    if (!isPasteEditableColumn(colId)) continue;
+                    await setCellValue(candidateId, colId, flatValues[0]);
+                    pastedCells++;
+                }
+            } else {
+                for (let i = 0; i < sortedKeys.length; i++) {
+                    const { candidateId, colId } = parseCellKey(sortedKeys[i]);
+                    if (!isPasteEditableColumn(colId)) continue;
+                    await setCellValue(candidateId, colId, flatValues[Math.min(i, flatValues.length - 1)]);
+                    pastedCells++;
+                }
             }
-            return visibleColumns.indexOf(activeCell.colId);
-        })();
+
+            if (pastedCells > 0) {
+                actions.showToast(`Pegado en ${pastedCells} celda(s)`, 'success', 2000);
+            }
+            return;
+        }
+
+        if (!activeCell) return;
+
+        const startColIdx = visibleColumns.indexOf(activeCell.colId);
         if (startColIdx === -1) return;
 
         let targetCandidateIds: string[];
-        if (selectedCells.size > 0) {
-            const rowIds = new Set(Array.from(selectedCells).map(k => parseCellKey(k).candidateId));
-            targetCandidateIds = displayCandidates.filter(c => rowIds.has(c.id)).map(c => c.id);
-        } else if (selectedIds.size > 0) {
+        if (selectedIds.size > 0) {
             targetCandidateIds = displayCandidates.filter(c => selectedIds.has(c.id)).map(c => c.id);
         } else {
             const startIdx = displayCandidates.findIndex(c => c.id === activeCell.candidateId);
@@ -1693,7 +1736,6 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
         }
 
         const rowCount = Math.min(grid.length, targetCandidateIds.length);
-        let pastedCells = 0;
 
         for (let r = 0; r < rowCount; r++) {
             const rowValues = grid[r];
@@ -1708,9 +1750,9 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
         }
 
         if (pastedCells > 0) {
-            actions.showToast(`Pegado en ${rowCount} fila(s)`, 'success', 2000);
+            actions.showToast(`Pegado en ${pastedCells} celda(s)`, 'success', 2000);
         }
-    }, [activeCell, editingCell, visibleColumns, selectedIds, selectedCells, displayCandidates, setCellValue, actions]);
+    }, [activeCell, editingCell, visibleColumns, selectedIds, selectedCells, displayCandidates, setCellValue, actions, sortSelectedCellKeys]);
 
     useEffect(() => {
         document.addEventListener('paste', handleBulkPaste);
@@ -1965,7 +2007,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                         />
                     )}
                     <p className="text-[10px] text-gray-500 px-1 pb-1 shrink-0">
-                        Flechas · Shift+arrastrar selección · Ctrl+clic múltiple · Clic derecho: color/comentario · 📌 Fijar columnas en menú Columnas · Enter editar · Ctrl+V pegar
+                        Flechas · Shift+arrastrar selección · Ctrl+clic múltiple · Clic derecho: color/comentario · Enter/doble clic editar · Ctrl+V pegar en celdas seleccionadas · Doble clic en fila abre detalle
                     </p>
                     <div
                         ref={tableContainerRef}
@@ -2164,8 +2206,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                             <th
                                                 {...commonProps}
                                                 className={`${COMPACT_TH_CLASS} normal-case cursor-move transition-colors bg-gray-50`}
-                                                style={buildThStyle(colId)}
-                                                style={{ minWidth: '120px' }}
+                                                style={{ ...buildThStyle(colId), minWidth: '120px' }}
                                             >
                                                 <div className="flex flex-col gap-1">
                                                     <span className="normal-case">{col.name}</span>
@@ -2213,9 +2254,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                         </thead>
                         <tbody
                             className="bg-white divide-y divide-gray-100"
-                            onMouseDown={handleTableMouseDown}
                             onMouseOver={handleTableMouseOver}
-                            onClick={handleTableCellClick}
                             onContextMenu={handleTableContextMenu}
                         >
                             {displayCandidates.map(candidate => {
@@ -2230,8 +2269,8 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                 return (
                                     <tr
                                         key={candidate.id}
-                                        className={`hover:bg-gray-50 cursor-pointer ${isSelected ? 'bg-primary-50' : ''}`}
-                                        onClick={() => openDrawer(candidate)}
+                                        className={`hover:bg-gray-50 ${isSelected ? 'bg-primary-50' : ''}`}
+                                        onDoubleClick={() => openDrawer(candidate)}
                                     >
                                         <td
                                             className={`${COMPACT_TD_CLASS} bg-white`}
