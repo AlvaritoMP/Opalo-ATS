@@ -1,7 +1,5 @@
 import { supabase } from '../supabase';
 import { APP_NAME } from '../appConfig';
-import { shouldApplyScoreAutoFilter } from '../bulkTableColumns';
-import type { BulkProcessConfig } from '../../types';
 
 // Tipo ligero para la vista masiva (solo campos necesarios)
 export interface BulkCandidate {
@@ -10,6 +8,7 @@ export interface BulkCandidate {
     phone?: string;
     email?: string;
     dni?: string;
+    age?: number;
     scoreIa?: number;
     metadataIa?: string;
     stageId: string;
@@ -37,7 +36,6 @@ export const bulkCandidatesApi = {
      * @param page - Número de página (0-indexed)
      * @param pageSize - Tamaño de página (default: 50)
      * @param filters - Filtros opcionales (stageId, search, etc.)
-     * @param bulkConfig - Configuración del proceso masivo para filtrado automático
      */
     async getCandidates(
         processId?: string,
@@ -48,8 +46,7 @@ export const bulkCandidatesApi = {
             search?: string;
             archived?: boolean;
             discarded?: boolean;
-        },
-        bulkConfig?: Pick<BulkProcessConfig, 'scoreThreshold' | 'autoFilterEnabled' | 'hiddenColumns'>
+        }
     ): Promise<BulkCandidatesResult> {
         const from = page * pageSize;
         const to = from + pageSize - 1;
@@ -57,7 +54,7 @@ export const bulkCandidatesApi = {
         // Construir query base
         let query = supabase
             .from('candidates')
-            .select('id, name, email, phone, dni, score_ia, metadata_ia, stage_id, process_id, last_whatsapp_interaction_at', { count: 'exact' })
+            .select('id, name, email, phone, dni, age, score_ia, metadata_ia, stage_id, process_id, last_whatsapp_interaction_at', { count: 'exact' })
             .eq('app_name', APP_NAME)
             .eq('archived', filters?.archived ?? false)
             .eq('discarded', filters?.discarded ?? false)
@@ -78,10 +75,8 @@ export const bulkCandidatesApi = {
             query = query.or(`name.ilike.%${filters.search}%,phone.ilike.%${filters.search}%`);
         }
 
-        // Filtrado automático por score: solo si la columna Score IA está visible en el proceso.
-        if (shouldApplyScoreAutoFilter(bulkConfig)) {
-            query = query.or(`score_ia.is.null,score_ia.gte.${bulkConfig!.scoreThreshold}`);
-        }
+        // El filtrado por score IA es solo visual (columna/filtros de tabla).
+        // Nunca excluir candidatos en servidor por score_ia: los importados suelen tener NULL.
 
         const { data, error, count } = await query;
 
@@ -122,6 +117,7 @@ export const bulkCandidatesApi = {
                 email: c.email || undefined,
                 phone: c.phone || undefined,
                 dni: c.dni || undefined,
+                age: c.age ?? undefined,
                 scoreIa: c.score_ia || undefined,
                 metadataIa: c.metadata_ia || undefined,
                 stageId: c.stage_id,

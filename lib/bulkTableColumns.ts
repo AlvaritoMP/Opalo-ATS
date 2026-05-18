@@ -113,17 +113,6 @@ export function shouldApplyScoreAutoFilter(bulkConfig?: BulkProcessConfig): bool
     return !!(bulkConfig?.autoFilterEnabled && bulkConfig.scoreThreshold !== undefined);
 }
 
-export function getScoreFilterConfig(
-    bulkConfig?: BulkProcessConfig
-): { scoreThreshold?: number; autoFilterEnabled?: boolean; hiddenColumns?: string[] } | undefined {
-    if (!bulkConfig || !shouldApplyScoreAutoFilter(bulkConfig)) return undefined;
-    return {
-        scoreThreshold: bulkConfig.scoreThreshold,
-        autoFilterEnabled: bulkConfig.autoFilterEnabled,
-        hiddenColumns: bulkConfig.hiddenColumns,
-    };
-}
-
 export function getImportHeaders(
     bulkConfig?: BulkProcessConfig
 ): { header: string; field: string; isCustom: boolean; columnId?: string }[] {
@@ -205,4 +194,49 @@ export function formatBulkDate(value: string | undefined | null): string {
 export function normalizeBulkDateInput(value: string): string {
     if (!value.trim()) return '';
     return formatBulkDate(value.trim());
+}
+
+/** Columnas donde se permite pegar desde portapapeles */
+export function isPasteEditableColumn(colId: string): boolean {
+    if (colId.startsWith('custom_')) return true;
+    return ['name', 'dni', 'email', 'phone'].includes(colId);
+}
+
+/** Parsea texto copiado de Excel/Sheets (TSV) o una columna simple */
+export function parseClipboardGrid(text: string): string[][] {
+    return text
+        .replace(/\r\n/g, '\n')
+        .replace(/\r/g, '\n')
+        .split('\n')
+        .filter(row => row.length > 0)
+        .map(row => row.split('\t'));
+}
+
+export function formatCustomCellDisplay(value: any, col: CustomColumn): string {
+    if (col.type === 'checkbox') {
+        if (value === true) return 'Sí';
+        if (value === false) return 'No';
+        return '-';
+    }
+    if (col.type === 'date') return formatBulkDate(value) || '-';
+    if (value === undefined || value === null || value === '') return '-';
+    return String(value);
+}
+
+export function parseCustomCellInput(rawValue: string, col: CustomColumn): any {
+    const trimmed = rawValue.trim();
+    if (!trimmed) return '';
+    if (col.type === 'number') {
+        const n = Number(trimmed);
+        return isNaN(n) ? trimmed : n;
+    }
+    if (col.type === 'checkbox') {
+        return ['true', '1', 'si', 'sí', 'yes', 's'].includes(trimmed.toLowerCase());
+    }
+    if (col.type === 'date') return normalizeBulkDateInput(formatBulkDate(trimmed));
+    if (col.type === 'select' && col.options?.length) {
+        const match = col.options.find(o => o.toLowerCase() === trimmed.toLowerCase());
+        return match ?? trimmed;
+    }
+    return trimmed;
 }

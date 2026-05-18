@@ -59,19 +59,10 @@ const parseRow = (
     const customValues: Record<string, any> = {};
 
     headers.forEach((header, index) => {
-        const rawValue = (values[index] || '').trim().replace(/^"|"$/g, '');
-        if (!rawValue) return;
+        const rawValue = (values[index] ?? '').toString().trim().replace(/^"|"$/g, '');
+        if (rawValue === '') return;
 
-        const mappedField = mapImportHeader(header);
-        if (mappedField) {
-            if (mappedField === 'age' && !isNaN(Number(rawValue))) {
-                candidate[mappedField] = Number(rawValue);
-            } else {
-                candidate[mappedField] = rawValue;
-            }
-            return;
-        }
-
+        // Priorizar columnas personalizadas del proceso (ej. "Edad" no debe ir al campo age de BD)
         const customCol = customColumns.find(
             c => c.name.toLowerCase() === header.trim().toLowerCase()
         );
@@ -84,6 +75,16 @@ const parseRow = (
                 customValues[customCol.id] = normalizeBulkDateInput(formatBulkDate(rawValue));
             } else {
                 customValues[customCol.id] = rawValue;
+            }
+            return;
+        }
+
+        const mappedField = mapImportHeader(header);
+        if (mappedField) {
+            if (mappedField === 'age' && !isNaN(Number(rawValue))) {
+                candidate[mappedField] = Number(rawValue);
+            } else {
+                candidate[mappedField] = rawValue;
             }
         }
     });
