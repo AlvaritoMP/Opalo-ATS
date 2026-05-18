@@ -361,6 +361,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
             setHiddenColumns([]);
             setColumnOrder(DEFAULT_COLUMN_ORDER);
             setColumnValues({});
+            setColumnFilters({});
             return;
         }
 
@@ -369,6 +370,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
         setCustomColumns(cols);
         setHiddenColumns(config?.hiddenColumns || []);
         setColumnOrder(resolveColumnOrder(config, cols));
+        setColumnFilters({});
 
         const savedValues = localStorage.getItem(getColumnValuesStorageKey(process.id));
         setColumnValues(savedValues ? JSON.parse(savedValues) : {});
@@ -941,6 +943,30 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
         return columnValues[candidateId]?.[columnId] ?? (columnValues[candidateId]?.[columnId] === false ? false : '');
     };
 
+    const getCustomFilterKey = (columnId: string) => `custom_${columnId}`;
+
+    const passesCustomColumnFilters = (candidateId: string): boolean => {
+        for (const col of customColumns) {
+            const filterValue = columnFilters[getCustomFilterKey(col.id)];
+            if (!filterValue) continue;
+
+            const cellValue = getColumnValue(candidateId, col.id);
+
+            if (col.type === 'checkbox') {
+                const isChecked = cellValue === true;
+                if (filterValue === 'true' && !isChecked) return false;
+                if (filterValue === 'false' && isChecked) return false;
+            } else if (col.type === 'select') {
+                if (String(cellValue || '') !== filterValue) return false;
+            } else if (col.type === 'number') {
+                if (!String(cellValue ?? '').includes(filterValue)) return false;
+            } else {
+                if (!String(cellValue || '').toLowerCase().includes(filterValue.toLowerCase())) return false;
+            }
+        }
+        return true;
+    };
+
     const handleSort = (column: string) => {
         if (sortColumn === column) {
             // Si ya está ordenando por esta columna, cambiar dirección
@@ -1411,9 +1437,49 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                         const customColId = colId.replace('custom_', '');
                                         const col = customColumns.find(c => c.id === customColId);
                                         if (!col) return null;
+                                        const filterKey = getCustomFilterKey(col.id);
                                         return (
-                                            <th {...commonProps} style={{ minWidth: '120px' }}>
-                                                {col.name}
+                                            <th
+                                                {...commonProps}
+                                                className="px-3 py-3 text-left text-xs font-medium text-gray-500 normal-case tracking-wider whitespace-nowrap cursor-move transition-colors"
+                                                style={{ minWidth: '120px' }}
+                                            >
+                                                <div className="flex flex-col gap-1">
+                                                    <span className="normal-case">{col.name}</span>
+                                                    {col.type === 'select' && col.options ? (
+                                                        <select
+                                                            value={columnFilters[filterKey] || ''}
+                                                            onChange={(e) => setColumnFilters({ ...columnFilters, [filterKey]: e.target.value })}
+                                                            className="text-xs px-2 py-1 border border-gray-300 rounded focus:ring-1 focus:ring-primary-500 focus:border-primary-500 font-normal normal-case"
+                                                            onClick={(e) => e.stopPropagation()}
+                                                        >
+                                                            <option value="">Todos</option>
+                                                            {col.options.map(opt => (
+                                                                <option key={opt} value={opt}>{opt}</option>
+                                                            ))}
+                                                        </select>
+                                                    ) : col.type === 'checkbox' ? (
+                                                        <select
+                                                            value={columnFilters[filterKey] || ''}
+                                                            onChange={(e) => setColumnFilters({ ...columnFilters, [filterKey]: e.target.value })}
+                                                            className="text-xs px-2 py-1 border border-gray-300 rounded focus:ring-1 focus:ring-primary-500 focus:border-primary-500 font-normal normal-case"
+                                                            onClick={(e) => e.stopPropagation()}
+                                                        >
+                                                            <option value="">Todos</option>
+                                                            <option value="true">Sí</option>
+                                                            <option value="false">No</option>
+                                                        </select>
+                                                    ) : (
+                                                        <input
+                                                            type="text"
+                                                            placeholder={col.type === 'number' ? 'Filtrar...' : col.type === 'date' ? 'AAAA-MM-DD' : 'Filtrar...'}
+                                                            value={columnFilters[filterKey] || ''}
+                                                            onChange={(e) => setColumnFilters({ ...columnFilters, [filterKey]: e.target.value })}
+                                                            className="text-xs px-2 py-1 border border-gray-300 rounded focus:ring-1 focus:ring-primary-500 focus:border-primary-500 font-normal normal-case"
+                                                            onClick={(e) => e.stopPropagation()}
+                                                        />
+                                                    )}
+                                                </div>
                                             </th>
                                         );
                                     }
@@ -1446,7 +1512,10 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                 if (columnFilters.phone && !(displayCandidate.phone || '').includes(columnFilters.phone)) {
                                     return false;
                                 }
-                                
+                                if (!passesCustomColumnFilters(candidate.id)) {
+                                    return false;
+                                }
+
                                 return true;
                             })).map(candidate => {
                                 const stage = process?.stages.find(s => s.id === candidate.stageId);
