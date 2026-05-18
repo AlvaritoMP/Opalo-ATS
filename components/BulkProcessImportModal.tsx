@@ -119,6 +119,18 @@ const parseExcel = (data: ArrayBuffer, customColumns: { name: string; id: string
     });
 };
 
+const rowHasData = (
+    candidateData: Partial<Candidate>,
+    customValues: Record<string, any>,
+    cleanValue: (value: any) => any
+): boolean => {
+    const fields = ['name', 'email', 'phone', 'phone2', 'dni', 'description', ...OPTIONAL_IMPORT_FIELDS];
+    if (fields.some(field => cleanValue((candidateData as any)[field]) !== undefined)) {
+        return true;
+    }
+    return Object.keys(customValues).length > 0;
+};
+
 export const BulkProcessImportModal: React.FC<BulkProcessImportModalProps> = ({ process, onClose, onImportComplete }) => {
     const { actions } = useAppState();
     const [file, setFile] = useState<File | null>(null);
@@ -206,6 +218,7 @@ export const BulkProcessImportModal: React.FC<BulkProcessImportModalProps> = ({ 
                 }
 
                 let successCount = 0;
+                let skippedEmptyRows = 0;
                 const errors: string[] = [];
                 const columnValuesUpdates: Record<string, Record<string, any>> = {};
 
@@ -222,28 +235,35 @@ export const BulkProcessImportModal: React.FC<BulkProcessImportModalProps> = ({ 
                     const { candidate: candidateData, customValues } = parsedRows[index];
                     const rowNumber = index + 2;
 
-                    const name = cleanValue(candidateData.name);
-                    const email = cleanValue(candidateData.email);
-
-                    if (!name || !email) {
-                        errors.push(`Fila ${rowNumber}: Faltan campos requeridos (nombre: "${name || 'vacío'}", email: "${email || 'vacío'}")`);
+                    if (!rowHasData(candidateData, customValues, cleanValue)) {
+                        skippedEmptyRows++;
                         continue;
                     }
 
+                    const name =
+                        cleanValue(candidateData.name) ||
+                        cleanValue(candidateData.dni) ||
+                        cleanValue(candidateData.phone) ||
+                        `Candidato ${rowNumber - 1}`;
+
+                    const email = cleanValue(candidateData.email);
                     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-                    if (!emailRegex.test(email)) {
-                        errors.push(`Fila ${rowNumber} (${name}): Email inválido "${email}"`);
-                        continue;
+
+                    if (email && !emailRegex.test(email)) {
+                        errors.push(`Fila ${rowNumber} (${name}): Email inválido "${email}" — se importó sin email`);
                     }
 
                     try {
                         const cleanCandidateData: any = {
                             name,
-                            email,
                             processId: process.id,
                             stageId: firstStageId,
                             attachments: [],
                         };
+
+                        if (email && emailRegex.test(email)) {
+                            cleanCandidateData.email = email;
+                        }
 
                         OPTIONAL_IMPORT_FIELDS.forEach(field => {
                             const cleaned = cleanValue((candidateData as any)[field]);
@@ -272,7 +292,7 @@ export const BulkProcessImportModal: React.FC<BulkProcessImportModalProps> = ({ 
 
                 setImportResult({
                     success: successCount,
-                    failed: parsedRows.length - successCount,
+                    failed: parsedRows.length - successCount - skippedEmptyRows,
                     errors: errors.slice(0, 10),
                 });
 
@@ -301,7 +321,6 @@ export const BulkProcessImportModal: React.FC<BulkProcessImportModalProps> = ({ 
         }
     };
 
-    const requiredHeaders = importHeaders.filter(h => h.field === 'name' || h.field === 'email');
     const optionalHeaders = importHeaders.filter(h => h.field !== 'name' && h.field !== 'email' && !h.isCustom);
     const customHeaders = importHeaders.filter(h => h.isCustom);
 
@@ -321,6 +340,7 @@ export const BulkProcessImportModal: React.FC<BulkProcessImportModalProps> = ({ 
                     <div>
                         <p className="text-sm text-gray-600 mb-4">
                             La plantilla se genera según las columnas configuradas en la Tabla de Alta Densidad de este proceso.
+                            Las celdas vacías son válidas: solo se importan los datos que existan en cada fila.
                         </p>
                         <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-md">
                             <div className="flex items-center justify-between mb-2">
@@ -338,11 +358,11 @@ export const BulkProcessImportModal: React.FC<BulkProcessImportModalProps> = ({ 
                             </p>
                         </div>
                         <p className="text-xs text-gray-500 mb-4">
-                            <strong>Requeridos:</strong> {requiredHeaders.map(h => h.header).join(', ') || 'name, email'}
+                            Cada fila debe tener al menos un dato (nombre, teléfono, DNI, email u otra columna). Las demás celdas pueden quedar vacías.
                             {optionalHeaders.length > 0 && (
                                 <>
                                     <br />
-                                    <strong>Opcionales:</strong> {optionalHeaders.map(h => h.header).join(', ')}
+                                    <strong>Columnas opcionales:</strong> {optionalHeaders.map(h => h.header).join(', ')}
                                 </>
                             )}
                             {customHeaders.length > 0 && (
