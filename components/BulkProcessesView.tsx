@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useAppState } from '../App';
 import { bulkCandidatesApi, BulkCandidate } from '../lib/api/bulkCandidates';
-import { candidatesApi } from '../lib/api/candidates';
 import { processesApi } from '../lib/api/processes';
 import { Check, X, Loader2, Send, Archive, Search, ChevronDown, ChevronUp, Plus, Edit, Trash2, ArrowLeft, MessageCircle, Phone, Upload, Filter, Mail, Calendar, Settings, ArrowUp, ArrowDown } from 'lucide-react';
 import { Process, CustomColumn, BulkProcessConfig } from '../types';
@@ -21,6 +20,9 @@ import {
     isPasteEditableColumn,
     formatCustomCellDisplay,
     parseCustomCellInput,
+    getDisplayEmail,
+    resolveStandardFieldValue,
+    isPlaceholderImportEmail,
 } from '../lib/bulkTableColumns';
 import { BulkProcessEditorModal } from './BulkProcessEditorModal';
 import { BulkProcessImportModal } from './BulkProcessImportModal';
@@ -507,21 +509,28 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
         setCandidates(prev => prev.map(c => c.id === candidateId ? { ...c, ...updates } : c));
     }, []);
 
-    const updateCandidateStatus = useCallback(async (candidateId: string, updates: { stageId?: string; discarded?: boolean; archived?: boolean }) => {
+    const updateCandidateStatus = useCallback(async (candidateId: string, updates: { stageId?: string; discarded?: boolean; archived?: boolean }, previousStageId?: string) => {
         applyOptimisticUpdate(candidateId, updates);
         try {
-            await bulkCandidatesApi.updateCandidate(candidateId, updates);
+            await bulkCandidatesApi.updateCandidate(candidateId, updates, {
+                previousStageId,
+                movedBy: state.currentUser?.id,
+            });
             setOptimisticUpdates(prev => {
                 const newMap = new Map(prev);
                 newMap.delete(candidateId);
                 return newMap;
             });
+            if (updates.stageId && previousStageId && updates.stageId !== previousStageId) {
+                const stageName = process?.stages.find(s => s.id === updates.stageId)?.name;
+                actions.showToast(`Movido a: ${stageName || 'nueva etapa'}`, 'success', 2000);
+            }
         } catch (error) {
             console.error('Error actualizando candidato:', error);
             loadCandidates(currentPage, true);
             actions.showToast('Error al actualizar candidato', 'error', 3000);
         }
-    }, [applyOptimisticUpdate, loadCandidates, currentPage, actions]);
+    }, [applyOptimisticUpdate, loadCandidates, currentPage, actions, state.currentUser?.id, process?.stages]);
 
     const handleBulkApprove = useCallback(async () => {
         if (selectedIds.size === 0) return;
@@ -965,7 +974,20 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
         setEditValue('');
     };
 
-    const handleSaveEdit = async (candidateId: string, field: string) => {
+    const syncCustomFieldFromStandard = useCallback((candidateId: string, field: 'source' | 'province' | 'district', value: string) => {
+        const homonymCol = customColumns.find(c => mapImportHeader(c.name.toLowerCase()) === field);
+        if (!homonymCol || !process?.id) return;
+        setColumnValues(prev => {
+            const newValues = {
+                ...prev,
+                [candidateId]: { ...(prev[candidateId] || {}), [homonymCol.id]: value },
+            };
+            localStorage.setItem(getColumnValuesStorageKey(process.id), JSON.stringify(newValues));
+            return newValues;
+        });
+    }, [customColumns, process?.id]);
+
+    const handleSaveEdit = (candidateId: string, field: string) => {
         if (field.startsWith('custom_')) {
             const colId = field.replace('custom_', '');
             const col = customColumns.find(c => c.id === colId);
@@ -977,18 +999,30 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
             return;
         }
 
-        const updates: Record<string, string | undefined> = {
-            [field]: editValue.trim() || undefined,
-        };
-        try {
-            await candidatesApi.update(candidateId, updates);
-            applyOptimisticUpdate(candidateId, updates as Partial<BulkCandidate>);
-        } catch (error) {
-            console.error('Error guardando celda:', error);
-            actions.showToast('Error al guardar cambios', 'error', 3000);
+        const trimmed = editValue.trim();
+        if (field === 'email' && !trimmed) {
+            setEditingCell(null);
+            setEditValue('');
+            return;
         }
+
+        const updates: Record<string, string | undefined> = {
+            [field]: trimmed || undefined,
+        };
+
+        applyOptimisticUpdate(candidateId, updates as Partial<BulkCandidate>);
         setEditingCell(null);
         setEditValue('');
+
+        if (field === 'source' || field === 'province' || field === 'district') {
+            syncCustomFieldFromStandard(candidateId, field, trimmed);
+        }
+
+        bulkCandidatesApi.patchFields(candidateId, updates).catch(error => {
+            console.error('Error guardando celda:', error);
+            loadCandidates(currentPage, true);
+            actions.showToast('Error al guardar cambios', 'error', 3000);
+        });
     };
 
     const setCellValue = useCallback(async (candidateId: string, colId: string, rawValue: string) => {
@@ -1003,13 +1037,14 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
         }
 
         const value = rawValue.trim() || undefined;
-        try {
-            await candidatesApi.update(candidateId, { [colId]: value });
-            applyOptimisticUpdate(candidateId, { [colId]: value } as Partial<BulkCandidate>);
-        } catch (error) {
-            console.error('Error pegando valor:', error);
+        applyOptimisticUpdate(candidateId, { [colId]: value } as Partial<BulkCandidate>);
+        if (colId === 'source' || colId === 'province' || colId === 'district') {
+            syncCustomFieldFromStandard(candidateId, colId, rawValue.trim());
         }
-    }, [customColumns, applyOptimisticUpdate]);
+        bulkCandidatesApi.patchFields(candidateId, { [colId]: value }).catch(error => {
+            console.error('Error pegando valor:', error);
+        });
+    }, [customColumns, applyOptimisticUpdate, syncCustomFieldFromStandard]);
 
     const handleBulkPaste = useCallback(async (e: ClipboardEvent) => {
         if (!activeCell || editingCell) return;
@@ -1127,8 +1162,12 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
         if (stored !== undefined && stored !== '') return stored;
         if (stored === false) return false;
         const col = customColumns.find(c => c.id === columnId);
-        if (col && candidate?.age != null && mapImportHeader(col.name.toLowerCase()) === 'age') {
-            return candidate.age;
+        if (col && candidate) {
+            const mapped = mapImportHeader(col.name.toLowerCase());
+            if (mapped === 'age' && candidate.age != null) return candidate.age;
+            if (mapped === 'source' && candidate.source) return candidate.source;
+            if (mapped === 'province' && candidate.province) return candidate.province;
+            if (mapped === 'district' && candidate.district) return candidate.district;
         }
         return '';
     };
@@ -1203,6 +1242,18 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                 case 'phone':
                     valueA = (candidateA.phone || '').toLowerCase();
                     valueB = (candidateB.phone || '').toLowerCase();
+                    break;
+                case 'source':
+                    valueA = (candidateA.source || '').toLowerCase();
+                    valueB = (candidateB.source || '').toLowerCase();
+                    break;
+                case 'province':
+                    valueA = (candidateA.province || '').toLowerCase();
+                    valueB = (candidateB.province || '').toLowerCase();
+                    break;
+                case 'district':
+                    valueA = (candidateA.district || '').toLowerCase();
+                    valueB = (candidateB.district || '').toLowerCase();
                     break;
                 case 'lastInteraction':
                     valueA = candidateA.lastWhatsAppInteractionAt ? new Date(candidateA.lastWhatsAppInteractionAt).getTime() : 0;
@@ -1473,7 +1524,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                         />
                     )}
                     <p className="text-xs text-gray-500 px-1 pb-2 shrink-0">
-                        Clic en una celda editable + selecciona filas (checkbox) + Ctrl+V para pegar datos desde Excel u otras tablas. Doble clic para editar una celda.
+                        Clic en una celda editable + selecciona filas (checkbox) + Ctrl+V para pegar datos desde Excel u otras tablas. Doble clic para editar una celda. Usa el desplegable en la columna <strong>Etapa</strong> para mover candidatos entre etapas.
                     </p>
                     <div ref={tableContainerRef} className="flex-1 overflow-x-auto overflow-y-auto" style={{ minHeight: 0 }} tabIndex={-1}>
                         <table className="w-full" style={{ tableLayout: 'auto', width: '100%' }}>
@@ -1570,6 +1621,45 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                                         {sortColumn === 'phone' ? (sortDirection === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />) : <div className="w-3 h-3 opacity-30"><ArrowUp className="w-3 h-3" /></div>}
                                                     </button>
                                                     <input type="text" placeholder="Filtrar..." value={columnFilters.phone || ''} onChange={(e) => setColumnFilters({ ...columnFilters, phone: e.target.value })} className="text-xs px-2 py-1 border border-gray-300 rounded focus:ring-1 focus:ring-primary-500 focus:border-primary-500 font-normal normal-case" onClick={(e) => e.stopPropagation()} />
+                                                </div>
+                                            </th>
+                                        );
+                                    }
+                                    if (colId === 'source') {
+                                        return (
+                                            <th {...commonProps} style={{ minWidth: '120px' }}>
+                                                <div className="flex flex-col gap-1">
+                                                    <button onClick={() => handleSort('source')} className="flex items-center gap-1 hover:text-primary-600 transition-colors">
+                                                        <span>Fuente</span>
+                                                        {sortColumn === 'source' ? (sortDirection === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />) : <div className="w-3 h-3 opacity-30"><ArrowUp className="w-3 h-3" /></div>}
+                                                    </button>
+                                                    <input type="text" placeholder="Filtrar..." value={columnFilters.source || ''} onChange={(e) => setColumnFilters({ ...columnFilters, source: e.target.value })} className="text-xs px-2 py-1 border border-gray-300 rounded focus:ring-1 focus:ring-primary-500 focus:border-primary-500 font-normal normal-case" onClick={(e) => e.stopPropagation()} />
+                                                </div>
+                                            </th>
+                                        );
+                                    }
+                                    if (colId === 'province') {
+                                        return (
+                                            <th {...commonProps} style={{ minWidth: '120px' }}>
+                                                <div className="flex flex-col gap-1">
+                                                    <button onClick={() => handleSort('province')} className="flex items-center gap-1 hover:text-primary-600 transition-colors">
+                                                        <span>Provincia</span>
+                                                        {sortColumn === 'province' ? (sortDirection === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />) : <div className="w-3 h-3 opacity-30"><ArrowUp className="w-3 h-3" /></div>}
+                                                    </button>
+                                                    <input type="text" placeholder="Filtrar..." value={columnFilters.province || ''} onChange={(e) => setColumnFilters({ ...columnFilters, province: e.target.value })} className="text-xs px-2 py-1 border border-gray-300 rounded focus:ring-1 focus:ring-primary-500 focus:border-primary-500 font-normal normal-case" onClick={(e) => e.stopPropagation()} />
+                                                </div>
+                                            </th>
+                                        );
+                                    }
+                                    if (colId === 'district') {
+                                        return (
+                                            <th {...commonProps} style={{ minWidth: '120px' }}>
+                                                <div className="flex flex-col gap-1">
+                                                    <button onClick={() => handleSort('district')} className="flex items-center gap-1 hover:text-primary-600 transition-colors">
+                                                        <span>Distrito</span>
+                                                        {sortColumn === 'district' ? (sortDirection === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />) : <div className="w-3 h-3 opacity-30"><ArrowUp className="w-3 h-3" /></div>}
+                                                    </button>
+                                                    <input type="text" placeholder="Filtrar..." value={columnFilters.district || ''} onChange={(e) => setColumnFilters({ ...columnFilters, district: e.target.value })} className="text-xs px-2 py-1 border border-gray-300 rounded focus:ring-1 focus:ring-primary-500 focus:border-primary-500 font-normal normal-case" onClick={(e) => e.stopPropagation()} />
                                                 </div>
                                             </th>
                                         );
@@ -1693,16 +1783,31 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                 if (columnFilters.phone && !(displayCandidate.phone || '').includes(columnFilters.phone)) {
                                     return false;
                                 }
+                                if (columnFilters.source) {
+                                    const sourceVal = resolveStandardFieldValue('source', candidate.id, displayCandidate, columnValues, customColumns);
+                                    if (!sourceVal.toLowerCase().includes(columnFilters.source.toLowerCase())) return false;
+                                }
+                                if (columnFilters.province) {
+                                    const provinceVal = resolveStandardFieldValue('province', candidate.id, displayCandidate, columnValues, customColumns);
+                                    if (!provinceVal.toLowerCase().includes(columnFilters.province.toLowerCase())) return false;
+                                }
+                                if (columnFilters.district) {
+                                    const districtVal = resolveStandardFieldValue('district', candidate.id, displayCandidate, columnValues, customColumns);
+                                    if (!districtVal.toLowerCase().includes(columnFilters.district.toLowerCase())) return false;
+                                }
                                 if (!passesCustomColumnFilters(candidate.id)) {
                                     return false;
                                 }
 
                                 return true;
                             })).map(candidate => {
-                                const stage = process?.stages.find(s => s.id === candidate.stageId);
                                 const isSelected = selectedIds.has(candidate.id);
                                 const optimistic = optimisticUpdates.get(candidate.id);
                                 const displayCandidate = optimistic ? { ...candidate, ...optimistic } : candidate;
+                                const displayEmail = getDisplayEmail(displayCandidate.email);
+                                const displaySource = resolveStandardFieldValue('source', candidate.id, displayCandidate, columnValues, customColumns);
+                                const displayProvince = resolveStandardFieldValue('province', candidate.id, displayCandidate, columnValues, customColumns);
+                                const displayDistrict = resolveStandardFieldValue('district', candidate.id, displayCandidate, columnValues, customColumns);
 
                                 return (
                                     <tr
@@ -1748,10 +1853,10 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                                     <td key="email" className={`px-3 py-3 text-sm text-gray-500 whitespace-nowrap ${cellFocusClass(candidate.id, 'email')}`} onClick={(e) => handleCellClick(e, candidate.id, 'email')}>
                                                         {editingCell?.candidateId === candidate.id && editingCell?.field === 'email' ? (
                                                             <input type="email" value={editValue} onChange={(e) => setEditValue(e.target.value)} onBlur={() => handleSaveEdit(candidate.id, 'email')} onKeyDown={(e) => { if (e.key === 'Enter') handleSaveEdit(candidate.id, 'email'); if (e.key === 'Escape') handleCancelEdit(); }} autoFocus className="w-full px-2 py-1 border border-primary-500 rounded focus:ring-2 focus:ring-primary-500" />
-                                                        ) : displayCandidate.email ? (
-                                                            <a href={`mailto:${displayCandidate.email}`} onClick={(e) => e.stopPropagation()} onDoubleClick={(e) => { e.preventDefault(); handleStartEdit(candidate.id, 'email', displayCandidate.email || ''); }} className="text-blue-600 hover:text-blue-700 hover:underline" title="Doble clic para editar">{displayCandidate.email}</a>
+                                                        ) : displayEmail ? (
+                                                            <a href={`mailto:${displayEmail}`} onClick={(e) => e.stopPropagation()} onDoubleClick={(e) => { e.preventDefault(); handleStartEdit(candidate.id, 'email', displayEmail); }} className="text-blue-600 hover:text-blue-700 hover:underline" title="Doble clic para editar">{displayEmail}</a>
                                                         ) : (
-                                                            <span className="text-gray-400 hover:bg-gray-50 px-1 py-0.5 rounded cursor-pointer" onDoubleClick={() => handleStartEdit(candidate.id, 'email', '')} title="Doble clic para editar">N/A</span>
+                                                            <span className="text-gray-400 hover:bg-gray-50 px-1 py-0.5 rounded cursor-pointer" onDoubleClick={() => handleStartEdit(candidate.id, 'email', '')} title="Doble clic para editar">{displayCandidate.email && isPlaceholderImportEmail(displayCandidate.email) ? 'Sin email' : 'N/A'}</span>
                                                         )}
                                                     </td>
                                                 );
@@ -1789,6 +1894,39 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                                             <input type="tel" value={editValue} onChange={(e) => setEditValue(e.target.value)} onBlur={() => handleSaveEdit(candidate.id, 'phone')} onKeyDown={(e) => { if (e.key === 'Enter') handleSaveEdit(candidate.id, 'phone'); if (e.key === 'Escape') handleCancelEdit(); }} autoFocus className="w-full px-2 py-1 border border-primary-500 rounded focus:ring-2 focus:ring-primary-500" />
                                                         ) : (
                                                             <span className="hover:bg-gray-50 px-1 py-0.5 rounded cursor-pointer" onDoubleClick={() => handleStartEdit(candidate.id, 'phone', displayCandidate.phone || '')} title="Doble clic para editar">{displayCandidate.phone || 'N/A'}</span>
+                                                        )}
+                                                    </td>
+                                                );
+                                            }
+                                            if (colId === 'source') {
+                                                return (
+                                                    <td key="source" className={`px-3 py-3 text-sm text-gray-500 whitespace-nowrap ${cellFocusClass(candidate.id, 'source')}`} onClick={(e) => handleCellClick(e, candidate.id, 'source')}>
+                                                        {editingCell?.candidateId === candidate.id && editingCell?.field === 'source' ? (
+                                                            <input type="text" value={editValue} onChange={(e) => setEditValue(e.target.value)} onBlur={() => handleSaveEdit(candidate.id, 'source')} onKeyDown={(e) => { if (e.key === 'Enter') handleSaveEdit(candidate.id, 'source'); if (e.key === 'Escape') handleCancelEdit(); }} autoFocus className="w-full px-2 py-1 border border-primary-500 rounded focus:ring-2 focus:ring-primary-500" />
+                                                        ) : (
+                                                            <span className="hover:bg-gray-50 px-1 py-0.5 rounded cursor-pointer" onDoubleClick={() => handleStartEdit(candidate.id, 'source', displaySource)} title="Doble clic para editar">{displaySource || '-'}</span>
+                                                        )}
+                                                    </td>
+                                                );
+                                            }
+                                            if (colId === 'province') {
+                                                return (
+                                                    <td key="province" className={`px-3 py-3 text-sm text-gray-500 whitespace-nowrap ${cellFocusClass(candidate.id, 'province')}`} onClick={(e) => handleCellClick(e, candidate.id, 'province')}>
+                                                        {editingCell?.candidateId === candidate.id && editingCell?.field === 'province' ? (
+                                                            <input type="text" value={editValue} onChange={(e) => setEditValue(e.target.value)} onBlur={() => handleSaveEdit(candidate.id, 'province')} onKeyDown={(e) => { if (e.key === 'Enter') handleSaveEdit(candidate.id, 'province'); if (e.key === 'Escape') handleCancelEdit(); }} autoFocus className="w-full px-2 py-1 border border-primary-500 rounded focus:ring-2 focus:ring-primary-500" />
+                                                        ) : (
+                                                            <span className="hover:bg-gray-50 px-1 py-0.5 rounded cursor-pointer" onDoubleClick={() => handleStartEdit(candidate.id, 'province', displayProvince)} title="Doble clic para editar">{displayProvince || '-'}</span>
+                                                        )}
+                                                    </td>
+                                                );
+                                            }
+                                            if (colId === 'district') {
+                                                return (
+                                                    <td key="district" className={`px-3 py-3 text-sm text-gray-500 whitespace-nowrap ${cellFocusClass(candidate.id, 'district')}`} onClick={(e) => handleCellClick(e, candidate.id, 'district')}>
+                                                        {editingCell?.candidateId === candidate.id && editingCell?.field === 'district' ? (
+                                                            <input type="text" value={editValue} onChange={(e) => setEditValue(e.target.value)} onBlur={() => handleSaveEdit(candidate.id, 'district')} onKeyDown={(e) => { if (e.key === 'Enter') handleSaveEdit(candidate.id, 'district'); if (e.key === 'Escape') handleCancelEdit(); }} autoFocus className="w-full px-2 py-1 border border-primary-500 rounded focus:ring-2 focus:ring-primary-500" />
+                                                        ) : (
+                                                            <span className="hover:bg-gray-50 px-1 py-0.5 rounded cursor-pointer" onDoubleClick={() => handleStartEdit(candidate.id, 'district', displayDistrict)} title="Doble clic para editar">{displayDistrict || '-'}</span>
                                                         )}
                                                     </td>
                                                 );
@@ -1850,7 +1988,20 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                             }
                                             if (colId === 'stage') {
                                                 return (
-                                                    <td key="stage" className="px-3 py-3 text-sm text-gray-500 whitespace-nowrap">{stage?.name || 'N/A'}</td>
+                                                    <td key="stage" className="px-3 py-3 text-sm whitespace-nowrap" onClick={(e) => e.stopPropagation()} onMouseDown={(e) => e.stopPropagation()}>
+                                                        <select
+                                                            value={displayCandidate.stageId}
+                                                            onChange={(e) => updateCandidateStatus(candidate.id, { stageId: e.target.value }, candidate.stageId)}
+                                                            onClick={(e) => e.stopPropagation()}
+                                                            onMouseDown={(e) => e.stopPropagation()}
+                                                            className="text-sm border border-primary-300 rounded px-2 py-1.5 focus:ring-2 focus:ring-primary-500 focus:border-primary-500 bg-white min-w-[140px] cursor-pointer"
+                                                            title="Selecciona la etapa del candidato"
+                                                        >
+                                                            {process?.stages.map(s => (
+                                                                <option key={s.id} value={s.id}>{s.name}</option>
+                                                            ))}
+                                                        </select>
+                                                    </td>
                                                 );
                                             }
                                             if (colId.startsWith('custom_')) {
@@ -1926,7 +2077,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                                 <button
                                                     onClick={() => updateCandidateStatus(candidate.id, {
                                                         stageId: process?.stages[process.stages.length - 1]?.id,
-                                                    })}
+                                                    }, candidate.stageId)}
                                                     className="p-1 text-green-600 hover:bg-green-50 rounded transition-colors"
                                                     title="Aprobar"
                                                 >
@@ -2024,6 +2175,10 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                     onClose={() => setShowImportModal(false)}
                     onImportComplete={() => {
                         setShowImportModal(false);
+                        if (process?.id) {
+                            const savedValues = localStorage.getItem(getColumnValuesStorageKey(process.id));
+                            setColumnValues(savedValues ? JSON.parse(savedValues) : {});
+                        }
                         loadCandidates(0, true);
                     }}
                 />

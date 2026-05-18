@@ -13,6 +13,9 @@ export const BASE_COLUMNS: BaseColumn[] = [
     { id: 'scoreIa', label: 'Score IA' },
     { id: 'status', label: 'Status' },
     { id: 'phone', label: 'Teléfono', importKey: 'phone' },
+    { id: 'source', label: 'Fuente', importKey: 'source' },
+    { id: 'province', label: 'Provincia', importKey: 'province' },
+    { id: 'district', label: 'Distrito', importKey: 'district' },
     { id: 'lastInteraction', label: 'Última Interacción' },
     { id: 'contact', label: 'Contacto' },
     { id: 'nextInterview', label: 'Próxima Entrevista' },
@@ -156,6 +159,38 @@ export function mapImportHeader(header: string): string | null {
     return IMPORT_FIELD_ALIASES[normalized] || null;
 }
 
+/** Campos estándar que deben persistir en BD aunque exista columna personalizada con el mismo nombre */
+export const DB_PRIORITY_IMPORT_FIELDS = ['source', 'province', 'district'] as const;
+export type DbPriorityImportField = typeof DB_PRIORITY_IMPORT_FIELDS[number];
+
+export function isPlaceholderImportEmail(email?: string | null): boolean {
+    if (!email) return false;
+    return /@import\.opalo$/i.test(email) || /^sin-email\./i.test(email);
+}
+
+export function getDisplayEmail(email?: string | null): string | null {
+    if (!email || isPlaceholderImportEmail(email)) return null;
+    return email;
+}
+
+export function resolveStandardFieldValue(
+    field: DbPriorityImportField,
+    candidateId: string,
+    candidate: { source?: string; province?: string; district?: string },
+    columnValues: Record<string, Record<string, any>>,
+    customColumns: { id: string; name: string }[]
+): string {
+    const dbValue = candidate[field];
+    if (dbValue) return dbValue;
+    for (const col of customColumns) {
+        if (mapImportHeader(col.name.toLowerCase()) === field) {
+            const stored = columnValues[candidateId]?.[col.id];
+            if (stored !== undefined && stored !== null && stored !== '') return String(stored);
+        }
+    }
+    return '';
+}
+
 export function getColumnValuesStorageKey(processId: string): string {
     return `bulkColumnValues_${processId}`;
 }
@@ -199,7 +234,7 @@ export function normalizeBulkDateInput(value: string): string {
 /** Columnas donde se permite pegar desde portapapeles */
 export function isPasteEditableColumn(colId: string): boolean {
     if (colId.startsWith('custom_')) return true;
-    return ['name', 'dni', 'email', 'phone'].includes(colId);
+    return ['name', 'dni', 'email', 'phone', 'source', 'province', 'district'].includes(colId);
 }
 
 /** Parsea texto copiado de Excel/Sheets (TSV) o una columna simple */

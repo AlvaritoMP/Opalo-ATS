@@ -8,6 +8,9 @@ export interface BulkCandidate {
     phone?: string;
     email?: string;
     dni?: string;
+    source?: string;
+    province?: string;
+    district?: string;
     age?: number;
     scoreIa?: number;
     metadataIa?: string;
@@ -54,7 +57,7 @@ export const bulkCandidatesApi = {
         // Construir query base
         let query = supabase
             .from('candidates')
-            .select('id, name, email, phone, dni, age, score_ia, metadata_ia, stage_id, process_id, last_whatsapp_interaction_at', { count: 'exact' })
+            .select('id, name, email, phone, dni, age, source, province, district, score_ia, metadata_ia, stage_id, process_id, last_whatsapp_interaction_at', { count: 'exact' })
             .eq('app_name', APP_NAME)
             .eq('archived', filters?.archived ?? false)
             .eq('discarded', filters?.discarded ?? false)
@@ -117,6 +120,9 @@ export const bulkCandidatesApi = {
                 email: c.email || undefined,
                 phone: c.phone || undefined,
                 dni: c.dni || undefined,
+                source: c.source || undefined,
+                province: c.province || undefined,
+                district: c.district || undefined,
                 age: c.age ?? undefined,
                 scoreIa: c.score_ia || undefined,
                 metadataIa: c.metadata_ia || undefined,
@@ -161,7 +167,7 @@ export const bulkCandidatesApi = {
         discarded?: boolean;
         discardReason?: string;
         archived?: boolean;
-    }): Promise<void> {
+    }, context?: { previousStageId?: string; movedBy?: string }): Promise<void> {
         const dbUpdates: any = {};
         
         if (updates.stageId !== undefined) dbUpdates.stage_id = updates.stageId;
@@ -184,6 +190,63 @@ export const bulkCandidatesApi = {
             .eq('app_name', APP_NAME);
 
         if (error) throw error;
+
+        if (updates.stageId && context?.previousStageId && updates.stageId !== context.previousStageId) {
+            await supabase.from('candidate_history').insert({
+                candidate_id: candidateId,
+                stage_id: updates.stageId,
+                moved_at: new Date().toISOString(),
+                moved_by: context.movedBy || null,
+                app_name: APP_NAME,
+            });
+        }
+    },
+
+    /**
+     * Actualización ligera de campos editables en la tabla (sin getById)
+     */
+    async patchFields(candidateId: string, updates: {
+        name?: string;
+        email?: string;
+        phone?: string;
+        dni?: string;
+        source?: string;
+        province?: string;
+        district?: string;
+    }): Promise<void> {
+        const dbUpdates: Record<string, string | null> = {};
+        if (updates.name !== undefined) dbUpdates.name = updates.name;
+        if (updates.email !== undefined) dbUpdates.email = updates.email;
+        if (updates.phone !== undefined) dbUpdates.phone = updates.phone || null;
+        if (updates.dni !== undefined) dbUpdates.dni = updates.dni || null;
+        if (updates.source !== undefined) dbUpdates.source = updates.source || null;
+
+        const locationFields: Record<string, string | null> = {};
+        if (updates.province !== undefined) locationFields.province = updates.province || null;
+        if (updates.district !== undefined) locationFields.district = updates.district || null;
+
+        if (Object.keys(dbUpdates).length > 0) {
+            const { error } = await supabase
+                .from('candidates')
+                .update(dbUpdates)
+                .eq('id', candidateId)
+                .eq('app_name', APP_NAME);
+            if (error) throw error;
+        }
+
+        if (Object.keys(locationFields).length > 0) {
+            const { error: locationError } = await supabase
+                .from('candidates')
+                .update(locationFields)
+                .eq('id', candidateId)
+                .eq('app_name', APP_NAME);
+            if (locationError) {
+                const msg = locationError.message || '';
+                if (!msg.includes('schema cache') && !msg.includes('Could not find') && !msg.includes('column')) {
+                    throw locationError;
+                }
+            }
+        }
     },
 
     /**

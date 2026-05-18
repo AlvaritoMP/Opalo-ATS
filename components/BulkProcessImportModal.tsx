@@ -3,13 +3,13 @@ import { useAppState } from '../App';
 import { Upload, FileText, X, Loader2, Download } from 'lucide-react';
 import { Candidate, Process } from '../types';
 import * as XLSX from 'xlsx';
-import {
-    getImportHeaders,
+import { getImportHeaders,
     mapImportHeader,
     getColumnValuesStorageKey,
     OPTIONAL_IMPORT_FIELDS,
     formatBulkDate,
     normalizeBulkDateInput,
+    DB_PRIORITY_IMPORT_FIELDS,
 } from '../lib/bulkTableColumns';
 
 interface BulkProcessImportModalProps {
@@ -62,10 +62,14 @@ const parseRow = (
         const rawValue = (values[index] ?? '').toString().trim().replace(/^"|"$/g, '');
         if (rawValue === '') return;
 
-        // Priorizar columnas personalizadas del proceso (ej. "Edad" no debe ir al campo age de BD)
-        const customCol = customColumns.find(
-            c => c.name.toLowerCase() === header.trim().toLowerCase()
-        );
+        // Priorizar columnas personalizadas, excepto campos que deben ir siempre a BD
+        const mappedField = mapImportHeader(header);
+        const isDbPriorityField = mappedField && (DB_PRIORITY_IMPORT_FIELDS as readonly string[]).includes(mappedField);
+
+        const customCol = !isDbPriorityField
+            ? customColumns.find(c => c.name.toLowerCase() === header.trim().toLowerCase())
+            : undefined;
+
         if (customCol) {
             if (customCol.type === 'number' && !isNaN(Number(rawValue))) {
                 customValues[customCol.id] = Number(rawValue);
@@ -79,12 +83,16 @@ const parseRow = (
             return;
         }
 
-        const mappedField = mapImportHeader(header);
         if (mappedField) {
             if (mappedField === 'age' && !isNaN(Number(rawValue))) {
                 candidate[mappedField] = Number(rawValue);
             } else {
                 candidate[mappedField] = rawValue;
+            }
+            // Mantener copia en columna personalizada homónima si existe
+            if (isDbPriorityField) {
+                const homonymCol = customColumns.find(c => c.name.toLowerCase() === header.trim().toLowerCase());
+                if (homonymCol) customValues[homonymCol.id] = rawValue;
             }
         }
     });
