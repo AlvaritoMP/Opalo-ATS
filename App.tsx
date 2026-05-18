@@ -48,7 +48,7 @@ interface AppActions {
     deleteProcess: (processId: string) => Promise<void>;
     reloadProcesses: () => Promise<void>;
     reloadCandidates: () => Promise<void>;
-    addCandidate: (candidateData: Omit<Candidate, 'id' | 'history'>) => Promise<Candidate>;
+    addCandidate: (candidateData: Omit<Candidate, 'id' | 'history'>, options?: { skipGoogleDrive?: boolean; silent?: boolean }) => Promise<Candidate>;
     updateCandidate: (candidateData: Candidate, movedBy?: string) => Promise<void>;
     deleteCandidate: (candidateId: string) => Promise<void>;
     moveCandidateToProcess: (candidateId: string, targetProcessId: string) => Promise<void>;
@@ -1097,8 +1097,10 @@ const App: React.FC = () => {
                 throw error; // Re-lanzar el error para que el componente pueda manejarlo
             }
         },
-        addCandidate: async (candidateData) => {
-            const loadingToastId = showToastHelper('Creando candidato...', 'loading', 0);
+        addCandidate: async (candidateData, options) => {
+            const silent = options?.silent ?? false;
+            const skipGoogleDrive = options?.skipGoogleDrive ?? false;
+            const loadingToastId = silent ? null : showToastHelper('Creando candidato...', 'loading', 0);
             try {
                 // Si Google Drive está conectado y el proceso tiene carpeta, crear carpeta del candidato
                 let folderId = candidateData.googleDriveFolderId;
@@ -1109,7 +1111,7 @@ const App: React.FC = () => {
                 const process = state.processes.find(p => p.id === candidateData.processId);
                 const processHasFolder = process?.googleDriveFolderId;
                 
-                if (isGoogleDriveConnected && googleDriveConfig && processHasFolder) {
+                if (!skipGoogleDrive && isGoogleDriveConnected && googleDriveConfig && processHasFolder) {
                     try {
                         hideToastHelper(loadingToastId);
                         const folderToastId = showToastHelper('Verificando carpeta en Google Drive...', 'loading', 0);
@@ -1174,14 +1176,14 @@ const App: React.FC = () => {
                     setState(s => ({ ...s, candidates: [...s.candidates, newCandidate] }));
                 }
                 
-                hideToastHelper(loadingToastId);
-                showToastHelper('Candidato creado exitosamente', 'success');
+                if (loadingToastId) hideToastHelper(loadingToastId);
+                if (!silent) showToastHelper('Candidato creado exitosamente', 'success');
                 
                 // Retornar el candidato final para que pueda ser usado por quien llama
                 return finalCandidate;
             } catch (error: any) {
                 console.error('Error adding candidate:', error);
-                hideToastHelper(loadingToastId);
+                if (loadingToastId) hideToastHelper(loadingToastId);
                 
                 // Verificar si es un error de permisos
                 const errorMessage = error.message || 'No se pudo crear el candidato en la base de datos.';

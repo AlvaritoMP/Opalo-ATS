@@ -98,6 +98,32 @@ export function getColumnLabel(
     return BASE_COLUMNS.find(c => c.id === colId)?.label || colId;
 }
 
+export function isColumnVisible(colId: string, bulkConfig?: BulkProcessConfig): boolean {
+    const hiddenColumns = new Set(bulkConfig?.hiddenColumns || []);
+    return !hiddenColumns.has(colId);
+}
+
+export function isScoreIaColumnVisible(bulkConfig?: BulkProcessConfig): boolean {
+    return isColumnVisible('scoreIa', bulkConfig);
+}
+
+/** Filtrado automático por score IA: solo aplica si la columna Score IA está visible. */
+export function shouldApplyScoreAutoFilter(bulkConfig?: BulkProcessConfig): boolean {
+    if (!isScoreIaColumnVisible(bulkConfig)) return false;
+    return !!(bulkConfig?.autoFilterEnabled && bulkConfig.scoreThreshold !== undefined);
+}
+
+export function getScoreFilterConfig(
+    bulkConfig?: BulkProcessConfig
+): { scoreThreshold?: number; autoFilterEnabled?: boolean; hiddenColumns?: string[] } | undefined {
+    if (!bulkConfig || !shouldApplyScoreAutoFilter(bulkConfig)) return undefined;
+    return {
+        scoreThreshold: bulkConfig.scoreThreshold,
+        autoFilterEnabled: bulkConfig.autoFilterEnabled,
+        hiddenColumns: bulkConfig.hiddenColumns,
+    };
+}
+
 export function getImportHeaders(
     bulkConfig?: BulkProcessConfig
 ): { header: string; field: string; isCustom: boolean; columnId?: string }[] {

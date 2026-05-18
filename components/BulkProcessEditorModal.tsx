@@ -3,6 +3,7 @@ import { useAppState } from '../App';
 import { Process, Stage, ProcessStatus, BulkProcessConfig, KillerQuestion } from '../types';
 import { X, Plus, Trash2, GripVertical, Settings, Filter, Brain, MessageCircle } from 'lucide-react';
 import { processesApi } from '../lib/api/processes';
+import { isScoreIaColumnVisible } from '../lib/bulkTableColumns';
 
 interface BulkProcessEditorModalProps {
     process: Process | null;
@@ -31,6 +32,8 @@ export const BulkProcessEditorModal: React.FC<BulkProcessEditorModalProps> = ({ 
     });
     
     const [killerQuestions, setKillerQuestions] = useState<KillerQuestion[]>(process?.bulkConfig?.killerQuestions || []);
+
+    const scoreIaColumnVisible = isScoreIaColumnVisible(bulkConfig);
 
     const handleAddStage = () => {
         setStages([...stages, { id: `new-${Date.now()}`, name: '' }]);
@@ -232,7 +235,8 @@ export const BulkProcessEditorModal: React.FC<BulkProcessEditorModalProps> = ({ 
                         </div>
                     ) : (
                         <div className="space-y-6">
-                            {/* Score Threshold */}
+                            {/* Score Threshold — solo si la columna Score IA está visible en la tabla */}
+                            {scoreIaColumnVisible && (
                             <div>
                                 <label className="block text-sm font-medium text-gray-700 mb-1">
                                     Puntaje de Corte (Score Threshold)
@@ -249,6 +253,7 @@ export const BulkProcessEditorModal: React.FC<BulkProcessEditorModalProps> = ({ 
                                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
                                 />
                             </div>
+                            )}
 
                             {/* Prompt de IA */}
                             <div>
@@ -381,6 +386,7 @@ export const BulkProcessEditorModal: React.FC<BulkProcessEditorModalProps> = ({ 
                             </div>
 
                             {/* Filtrado Automático */}
+                            {scoreIaColumnVisible && (
                             <div>
                                 <label className="flex items-center gap-2">
                                     <input
@@ -390,13 +396,14 @@ export const BulkProcessEditorModal: React.FC<BulkProcessEditorModalProps> = ({ 
                                         className="w-4 h-4 text-primary-600 rounded focus:ring-primary-500"
                                     />
                                     <span className="text-sm font-medium text-gray-700">
-                                        Activar filtrado automático
+                                        Activar filtrado automático por Score IA
                                     </span>
                                 </label>
                                 <p className="text-xs text-gray-500 mt-1 ml-6">
-                                    Los candidatos se filtrarán automáticamente según las Killer Questions y el Score Threshold
+                                    Los candidatos se filtrarán automáticamente según el Score Threshold configurado
                                 </p>
                             </div>
+                            )}
                         </div>
                     )}
                 </div>

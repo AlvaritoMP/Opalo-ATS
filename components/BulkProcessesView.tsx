@@ -13,6 +13,9 @@ import {
     resolveColumnOrder,
     formatBulkDate,
     normalizeBulkDateInput,
+    isScoreIaColumnVisible,
+    shouldApplyScoreAutoFilter,
+    getScoreFilterConfig,
 } from '../lib/bulkTableColumns';
 import { BulkProcessEditorModal } from './BulkProcessEditorModal';
 import { BulkProcessImportModal } from './BulkProcessImportModal';
@@ -85,6 +88,7 @@ const CandidateDrawer: React.FC<{
 
     const displayCandidate = fullCandidate || candidate;
     const stage = process?.stages.find(s => s.id === candidate.stageId);
+    const showScoreIa = isScoreIaColumnVisible(process?.bulkConfig);
 
     return (
         <div className="fixed inset-0 z-50 flex">
@@ -117,7 +121,7 @@ const CandidateDrawer: React.FC<{
                                     <label className="text-sm font-medium text-gray-500">Etapa</label>
                                     <p className="text-gray-900">{stage?.name || 'N/A'}</p>
                                 </div>
-                                {displayCandidate.scoreIa !== undefined && (
+                                {showScoreIa && displayCandidate.scoreIa !== undefined && (
                                     <div>
                                         <label className="text-sm font-medium text-gray-500">Score IA</label>
                                         <p className="text-gray-900">{displayCandidate.scoreIa}</p>
@@ -383,6 +387,11 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
         [columnOrder, hiddenColumns]
     );
 
+    const scoreIaColumnVisible = useMemo(
+        () => isScoreIaColumnVisible(process?.bulkConfig),
+        [process?.bulkConfig]
+    );
+
     // Cargar procesos masivos
     const loadBulkProcesses = useCallback(async () => {
         setIsLoadingProcesses(true);
@@ -433,10 +442,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                     archived: false,
                     discarded: false,
                 },
-                bulkConfig ? {
-                    scoreThreshold: bulkConfig.scoreThreshold,
-                    autoFilterEnabled: bulkConfig.autoFilterEnabled,
-                } : undefined
+                getScoreFilterConfig(bulkConfig)
             );
 
             if (reset) {
@@ -453,7 +459,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
         } finally {
             setIsLoading(false);
         }
-    }, [selectedProcess, selectedStage, searchQuery, actions]);
+    }, [selectedProcess, selectedStage, searchQuery, process?.bulkConfig, actions]);
 
     useEffect(() => {
         loadCandidates(0, true);
@@ -902,11 +908,21 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
     };
 
     const toggleColumnVisibility = async (colId: string) => {
-        const newHidden = hiddenColumns.includes(colId)
-            ? hiddenColumns.filter(id => id !== colId)
-            : [...hiddenColumns, colId];
+        const isHiding = !hiddenColumns.includes(colId);
+        const newHidden = isHiding
+            ? [...hiddenColumns, colId]
+            : hiddenColumns.filter(id => id !== colId);
         setHiddenColumns(newHidden);
-        await persistBulkConfig({ hiddenColumns: newHidden });
+
+        const updates: Partial<BulkProcessConfig> = { hiddenColumns: newHidden };
+        if (colId === 'scoreIa' && isHiding) {
+            setColumnFilters(prev => {
+                const { scoreIa: _, ...rest } = prev;
+                return rest;
+            });
+        }
+
+        await persistBulkConfig(updates);
     };
 
     const handleDragStart = (e: React.DragEvent, colId: string) => {
@@ -1493,7 +1509,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                 if (columnFilters.email && !(displayCandidate.email || '').toLowerCase().includes(columnFilters.email.toLowerCase())) {
                                     return false;
                                 }
-                                if (columnFilters.scoreIa) {
+                                if (scoreIaColumnVisible && columnFilters.scoreIa) {
                                     const minScore = parseFloat(columnFilters.scoreIa);
                                     if (isNaN(minScore) || (displayCandidate.scoreIa ?? 0) < minScore) {
                                         return false;
@@ -1534,7 +1550,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                                         {editingCell?.candidateId === candidate.id && editingCell?.field === 'name' ? (
                                                             <input type="text" value={editValue} onChange={(e) => setEditValue(e.target.value)} onBlur={() => handleSaveEdit(candidate.id, 'name')} onKeyDown={(e) => { if (e.key === 'Enter') handleSaveEdit(candidate.id, 'name'); if (e.key === 'Escape') handleCancelEdit(); }} autoFocus className="w-full px-2 py-1 border border-primary-500 rounded focus:ring-2 focus:ring-primary-500" />
                                                         ) : (
-                                                            <MetadataTooltip metadata={displayCandidate.metadataIa || ''} scoreIa={displayCandidate.scoreIa}>
+                                                            <MetadataTooltip metadata={displayCandidate.metadataIa || ''} scoreIa={scoreIaColumnVisible ? displayCandidate.scoreIa : undefined}>
                                                                 <span className="font-medium text-gray-900 cursor-help hover:bg-gray-50 px-1 py-0.5 rounded" onDoubleClick={() => handleStartEdit(candidate.id, 'name', displayCandidate.name)} title="Doble clic para editar">{displayCandidate.name}</span>
                                                             </MetadataTooltip>
                                                         )}
@@ -1580,10 +1596,10 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                                 return (
                                                     <td key="status" className="px-3 py-3 text-sm whitespace-nowrap">
                                                         {(() => {
-                                                            const scoreThreshold = process?.bulkConfig?.scoreThreshold;
-                                                            const autoFilterEnabled = process?.bulkConfig?.autoFilterEnabled;
                                                             if (displayCandidate.scoreIa === undefined) return <span className="text-gray-400">-</span>;
-                                                            if (autoFilterEnabled && scoreThreshold !== undefined) return <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">✅ Apto</span>;
+                                                            if (shouldApplyScoreAutoFilter(process?.bulkConfig)) {
+                                                                return <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">✅ Apto</span>;
+                                                            }
                                                             if (displayCandidate.scoreIa >= 70) return <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">✅ Alto</span>;
                                                             else if (displayCandidate.scoreIa >= 50) return <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">⚠️ Medio</span>;
                                                             else return <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-red-100 text-red-800">❌ Bajo</span>;
@@ -1738,16 +1754,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
 
                     {!isLoading && candidates.length === 0 && (
                         <div className="text-center py-12">
-                            {process?.bulkConfig?.autoFilterEnabled && process?.bulkConfig?.scoreThreshold !== undefined ? (
-                                <div className="space-y-2">
-                                    <p className="text-gray-500">No hay candidatos que cumplan con los filtros automáticos</p>
-                                    <p className="text-sm text-gray-400">
-                                        Score mínimo requerido: {process.bulkConfig.scoreThreshold}
-                                    </p>
-                                </div>
-                            ) : (
-                                <p className="text-gray-500">No hay candidatos para mostrar</p>
-                            )}
+                            <p className="text-gray-500">No hay candidatos para mostrar</p>
                         </div>
                     )}
 

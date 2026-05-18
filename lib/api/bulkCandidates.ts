@@ -1,5 +1,7 @@
 import { supabase } from '../supabase';
 import { APP_NAME } from '../appConfig';
+import { shouldApplyScoreAutoFilter } from '../bulkTableColumns';
+import type { BulkProcessConfig } from '../../types';
 
 // Tipo ligero para la vista masiva (solo campos necesarios)
 export interface BulkCandidate {
@@ -47,10 +49,7 @@ export const bulkCandidatesApi = {
             archived?: boolean;
             discarded?: boolean;
         },
-        bulkConfig?: {
-            scoreThreshold?: number;
-            autoFilterEnabled?: boolean;
-        }
+        bulkConfig?: Pick<BulkProcessConfig, 'scoreThreshold' | 'autoFilterEnabled' | 'hiddenColumns'>
     ): Promise<BulkCandidatesResult> {
         const from = page * pageSize;
         const to = from + pageSize - 1;
@@ -79,11 +78,9 @@ export const bulkCandidatesApi = {
             query = query.or(`name.ilike.%${filters.search}%,phone.ilike.%${filters.search}%`);
         }
 
-        // Aplicar filtrado automático si está habilitado
-        if (bulkConfig?.autoFilterEnabled && bulkConfig?.scoreThreshold !== undefined) {
-            // Solo traer candidatos con score >= threshold
-            // Si score_ia es NULL, no se incluyen (solo candidatos evaluados)
-            query = query.gte('score_ia', bulkConfig.scoreThreshold);
+        // Filtrado automático por score: solo si la columna Score IA está visible en el proceso.
+        if (shouldApplyScoreAutoFilter(bulkConfig)) {
+            query = query.or(`score_ia.is.null,score_ia.gte.${bulkConfig!.scoreThreshold}`);
         }
 
         const { data, error, count } = await query;

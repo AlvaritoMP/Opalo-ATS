@@ -237,6 +237,7 @@ export const BulkProcessImportModal: React.FC<BulkProcessImportModalProps> = ({ 
         const reader = new FileReader();
         reader.onload = async (event) => {
             let parsedRows: ParsedRow[] = [];
+            let importToastId: string | null = null;
 
             try {
                 if (isExcel) {
@@ -244,6 +245,8 @@ export const BulkProcessImportModal: React.FC<BulkProcessImportModalProps> = ({ 
                 } else {
                     parsedRows = parseCSV(event.target?.result as string, customColumns);
                 }
+
+                importToastId = actions.showToast('Importando candidatos...', 'loading', 0);
 
                 let successCount = 0;
                 let skippedEmptyRows = 0;
@@ -305,7 +308,10 @@ export const BulkProcessImportModal: React.FC<BulkProcessImportModalProps> = ({ 
                             }
                         });
 
-                        const newCandidate = await actions.addCandidate(cleanCandidateData);
+                        const newCandidate = await actions.addCandidate(cleanCandidateData, {
+                            skipGoogleDrive: true,
+                            silent: true,
+                        });
                         successCount++;
 
                         if (Object.keys(customValues).length > 0 && newCandidate?.id) {
@@ -342,6 +348,7 @@ export const BulkProcessImportModal: React.FC<BulkProcessImportModalProps> = ({ 
                     errors: [`Error al parsear el archivo: ${errorMsg}`],
                 });
             } finally {
+                if (importToastId) actions.hideToast(importToastId);
                 setIsImporting(false);
                 setFile(null);
             }
