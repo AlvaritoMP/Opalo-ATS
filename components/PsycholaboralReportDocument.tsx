@@ -15,9 +15,12 @@ import {
     mergePsycholaboralInventory,
 } from '../lib/psycholaboralUtils';
 
-/** Imagen de fondo profesional por defecto (equipo / crecimiento) — Unsplash, usable con CORS. */
+/** Imagen de acento muy baja altura si no hay foto de proceso/settings (opcional). */
 export const DEFAULT_PSYCHOLABORAL_HERO =
-    'https://images.unsplash.com/photo-1522071820081-009f0129c71c?w=1400&q=85&auto=format&fit=crop';
+    'https://images.unsplash.com/photo-1522071820081-009f0129c71c?w=900&q=80&auto=format&fit=crop';
+
+/** Ancho lógico A4 (~210mm @ 96dpi). */
+const PAGE_W = 794;
 
 export interface PsycholaboralReportDocumentProps {
     candidate: Pick<Candidate, 'name' | 'dni' | 'age' | 'avatarUrl'>;
@@ -29,12 +32,9 @@ export interface PsycholaboralReportDocumentProps {
     companyName?: string;
     primaryColor?: string;
     accentColor?: string;
-    /** Prioridad: settings → imagen del proceso → predeterminada */
     heroImageUrl?: string | null;
     introText?: string | null;
-    /** Frase de cierre motivador (si no hay, texto predeterminado). */
     closingText?: string | null;
-    /** Leyenda legal/confidencialidad debajo del cierre (p. ej. desde Configuración → pie de página). */
     footerLegalText?: string | null;
 }
 
@@ -93,172 +93,181 @@ export const PsycholaboralReportDocument = React.forwardRef<
         ? formatearFechaPeruana(evaluation.reportDate)
         : formatearFechaPeruana();
 
-    const resolvedHero =
+    const resolvedHeroAccent =
         (heroImageUrl && heroImageUrl.trim()) ||
         (process?.flyerUrl && process.flyerUrl.trim()) ||
         DEFAULT_PSYCHOLABORAL_HERO;
 
     const resolvedIntro =
         (introText && introText.trim()) ||
-        'Un informe claro y objetivo para conocer el potencial del candidato. Le invitamos a revisarlo por completo: cada sección aporta contexto valioso para una decisión informada y justa.';
+        'Documento sintético para apoyar una decisión informada. Revise todas las áreas antes de cerrar valoración.';
 
     const closingLine =
         (closingText && closingText.trim()) ||
-        'Gracias por dedicar tiempo a este informe — la trayectoria profesional de cada persona merece esta mirada con rigor y empatía.';
+        'Documento elaborado con criterios técnicos; combine este resultado con otros insumos de selección.';
 
     return (
         <div
             ref={ref}
             style={{
-                width: '794px',
+                width: PAGE_W,
+                maxWidth: PAGE_W,
+                minHeight: 0,
                 fontFamily: "'Segoe UI', system-ui, -apple-system, sans-serif",
                 color: '#1e293b',
-                background: '#f1f5f9',
-                lineHeight: 1.5,
+                background: '#ffffff',
+                lineHeight: 1.35,
+                boxSizing: 'border-box',
+                display: 'flex',
+                flexDirection: 'column',
             }}
         >
-            {/* Hero visual con imagen + gradiente */}
-            <header style={{ position: 'relative', overflow: 'hidden' }}>
+            {/* Barra superior: logo Opalo visible + titular */}
+            <header
+                style={{
+                    flexShrink: 0,
+                    display: 'flex',
+                    alignItems: 'stretch',
+                    gap: 0,
+                    borderBottom: `3px solid ${primaryColor}`,
+                    minHeight: 68,
+                    background: `linear-gradient(90deg, ${primaryColor}12 0%, #fff 28%, ${accentColor}08 100%)`,
+                }}
+            >
                 <div
                     style={{
-                        position: 'relative',
-                        minHeight: 220,
-                        backgroundImage: `linear-gradient(105deg, ${primaryColor}e6 0%, ${accentColor}cc 42%, rgba(15,23,42,0.78) 100%), url(${resolvedHero})`,
+                        width: '28%',
+                        minWidth: 200,
+                        backgroundImage: `linear-gradient(165deg, ${primaryColor}d9 0%, ${accentColor}b8 85%), url(${resolvedHeroAccent})`,
                         backgroundSize: 'cover',
                         backgroundPosition: 'center center',
-                        padding: '36px 40px 44px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        padding: 10,
                     }}
                 >
                     <div
                         style={{
-                            position: 'absolute',
-                            inset: 0,
-                            background:
-                                'radial-gradient(ellipse 80% 60% at 100% 0%, rgba(255,255,255,0.2) 0%, transparent 55%)',
-                            pointerEvents: 'none',
+                            background: '#ffffff',
+                            borderRadius: 8,
+                            padding: '8px 12px',
+                            boxShadow: '0 4px 14px rgba(0,0,0,0.12)',
                         }}
-                    />
-                    <div style={{ position: 'relative', zIndex: 1, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 16 }}>
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                            {logoUrl && (
-                                <img
-                                    src={logoUrl}
-                                    alt=""
-                                    style={{ height: 38, marginBottom: 14, filter: 'brightness(0) invert(1)', objectFit: 'contain' }}
-                                    crossOrigin="anonymous"
-                                />
-                            )}
-                            <p
+                    >
+                        {logoUrl ? (
+                            <img
+                                src={logoUrl}
+                                alt=""
                                 style={{
-                                    color: 'rgba(255,255,255,0.9)',
-                                    fontSize: 11,
-                                    letterSpacing: '0.18em',
-                                    textTransform: 'uppercase',
-                                    margin: '0 0 10px',
-                                    fontWeight: 600,
+                                    height: 36,
+                                    maxWidth: 160,
+                                    width: 'auto',
+                                    display: 'block',
+                                    objectFit: 'contain',
                                 }}
-                            >
-                                {companyName}
-                            </p>
-                            <h1
-                                style={{
-                                    color: '#fff',
-                                    fontSize: 28,
-                                    fontWeight: 800,
-                                    margin: 0,
-                                    lineHeight: 1.15,
-                                    maxWidth: 460,
-                                    textShadow: '0 2px 24px rgba(0,0,0,0.25)',
-                                }}
-                            >
-                                Informe de Evaluación Psicolaboral
-                            </h1>
-                            <p
-                                style={{
-                                    margin: '14px 0 0',
-                                    color: 'rgba(255,255,255,0.92)',
-                                    fontSize: 13,
-                                    maxWidth: 420,
-                                    lineHeight: 1.55,
-                                }}
-                            >
-                                {candidate.name}
-                                <span style={{ opacity: 0.85 }}> · </span>
-                                {position || 'Evaluación integral'}
-                            </p>
-                        </div>
-                        <span
-                            style={{
-                                background: suitStyle.bg,
-                                color: suitStyle.text,
-                                padding: '12px 22px',
-                                borderRadius: 999,
-                                fontWeight: 800,
-                                fontSize: 13,
-                                letterSpacing: '0.06em',
-                                boxShadow: '0 8px 24px rgba(0,0,0,0.2)',
-                                flexShrink: 0,
-                            }}
-                        >
-                            {suitStyle.label}
-                        </span>
+                                crossOrigin="anonymous"
+                            />
+                        ) : (
+                            <span style={{ fontSize: 16, fontWeight: 800, color: primaryColor }}>{companyName}</span>
+                        )}
                     </div>
                 </div>
-
-                {/* Mensaje motivador + transición suave al cuerpo */}
                 <div
                     style={{
-                        margin: '0 24px 0',
-                        marginTop: -20,
-                        position: 'relative',
-                        zIndex: 2,
-                        background: '#fff',
-                        borderRadius: 14,
-                        padding: '18px 22px',
-                        boxShadow: '0 12px 40px rgba(15,23,42,0.12)',
-                        border: '1px solid rgba(226,232,240,0.9)',
+                        flex: 1,
+                        padding: '10px 14px',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        justifyContent: 'center',
+                        gap: 4,
                     }}
                 >
-                    <p style={{ margin: 0, fontSize: 13, color: '#475569', lineHeight: 1.65, fontStyle: 'italic' }}>
-                        “{resolvedIntro}”
-                    </p>
-                    <div
+                    <p
                         style={{
-                            marginTop: 12,
-                            height: 3,
-                            borderRadius: 2,
-                            background: `linear-gradient(90deg, ${primaryColor}, ${accentColor})`,
-                            opacity: 0.85,
+                            margin: 0,
+                            fontSize: 9,
+                            letterSpacing: '0.12em',
+                            textTransform: 'uppercase',
+                            color: '#64748b',
+                            fontWeight: 700,
                         }}
-                    />
+                    >
+                        {companyName}
+                    </p>
+                    <h1
+                        style={{
+                            margin: 0,
+                            fontSize: 15,
+                            fontWeight: 800,
+                            color: '#0f172a',
+                            lineHeight: 1.2,
+                        }}
+                    >
+                        INFORME DE EVALUACIÓN PSICOLABORAL
+                    </h1>
+                    <p style={{ margin: 0, fontSize: 10, color: '#475569', fontWeight: 600 }}>
+                        {candidate.name} · {position || 'Evaluación'} · {reportDate}
+                    </p>
+                    <p style={{ margin: 0, fontSize: 9, color: '#64748b', fontStyle: 'italic', lineHeight: 1.4 }}>
+                        {resolvedIntro}
+                    </p>
+                </div>
+                <div style={{ alignSelf: 'center', paddingRight: 12, flexShrink: 0 }}>
+                    <span
+                        style={{
+                            display: 'block',
+                            background: suitStyle.bg,
+                            color: suitStyle.text,
+                            padding: '8px 12px',
+                            borderRadius: 8,
+                            fontWeight: 800,
+                            fontSize: 11,
+                            textAlign: 'center',
+                            lineHeight: 1.15,
+                            maxWidth: 120,
+                            boxSizing: 'border-box',
+                            border: `1px solid ${suitStyle.text}33`,
+                        }}
+                    >
+                        {suitStyle.label}
+                    </span>
                 </div>
             </header>
 
-            <main style={{ padding: '28px 32px 40px' }}>
-                {/* Tarjeta candidato */}
+            <main
+                style={{
+                    flex: '0 0 auto',
+                    padding: '8px 10px 10px',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 6,
+                    fontSize: 9,
+                }}
+            >
+                {/* Fila datos + foto */}
                 <section
                     style={{
-                        background: '#fff',
-                        borderRadius: 16,
-                        boxShadow: '0 4px 24px rgba(15,23,42,0.08)',
-                        padding: 24,
                         display: 'flex',
-                        gap: 24,
-                        marginBottom: 24,
+                        gap: 8,
+                        alignItems: 'stretch',
+                        background: '#f8fafc',
+                        border: '1px solid #e2e8f0',
+                        borderRadius: 8,
+                        padding: 8,
                     }}
                 >
                     <div
                         style={{
-                            width: 88,
-                            height: 88,
-                            borderRadius: 12,
-                            background: `linear-gradient(145deg, ${primaryColor}22, ${accentColor}33)`,
+                            width: 52,
+                            height: 52,
+                            borderRadius: 6,
+                            overflow: 'hidden',
+                            flexShrink: 0,
+                            background: `#e2e8f0`,
                             display: 'flex',
                             alignItems: 'center',
                             justifyContent: 'center',
-                            flexShrink: 0,
-                            overflow: 'hidden',
-                            border: `2px solid ${primaryColor}33`,
                         }}
                     >
                         {candidate.avatarUrl ? (
@@ -269,280 +278,279 @@ export const PsycholaboralReportDocument = React.forwardRef<
                                 crossOrigin="anonymous"
                             />
                         ) : (
-                            <span style={{ fontSize: 32, fontWeight: 700, color: primaryColor }}>
+                            <span style={{ fontSize: 20, fontWeight: 700, color: primaryColor }}>
                                 {candidate.name.charAt(0).toUpperCase()}
                             </span>
                         )}
                     </div>
-                    <div style={{ flex: 1, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px 24px' }}>
+                    <div
+                        style={{
+                            flex: 1,
+                            display: 'grid',
+                            gridTemplateColumns: 'repeat(4, minmax(0, 1fr))',
+                            gap: '4px 10px',
+                        }}
+                    >
                         {[
                             ['Nombre', candidate.name],
                             ['DNI', candidate.dni || '—'],
-                            ['Edad', candidate.age ? `${candidate.age} años` : '—'],
+                            ['Edad', candidate.age ? `${candidate.age}` : '—'],
                             ['Puesto', position],
-                            ['Fecha del informe', reportDate],
-                        ].map(([label, value]) => (
-                            <div key={String(label)}>
-                                <p style={{ margin: 0, fontSize: 10, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                                    {label}
-                                </p>
-                                <p style={{ margin: '2px 0 0', fontSize: 14, fontWeight: 600 }}>{value}</p>
+                        ].map(([k, v]) => (
+                            <div key={String(k)}>
+                                <div style={{ fontSize: 7, color: '#64748b', textTransform: 'uppercase', fontWeight: 700 }}>
+                                    {k}
+                                </div>
+                                <div style={{ fontSize: 9, fontWeight: 600 }}>{String(v)}</div>
                             </div>
                         ))}
                     </div>
                 </section>
 
-                {/* Nivel intelectual */}
-                <SectionBlock title="Nivel intelectual" number={1} color={primaryColor}>
-                    <div style={{ display: 'flex', gap: 6, marginBottom: 16 }}>
-                        {inventory.intellectualLevels.map((level, i) => {
-                            const active = level.id === evaluation.intellectualLevelId;
-                            return (
-                                <div
-                                    key={level.id}
-                                    style={{
-                                        flex: 1,
-                                        textAlign: 'center',
-                                        padding: '10px 4px',
-                                        borderRadius: 10,
-                                        background: active ? primaryColor : '#f1f5f9',
-                                        color: active ? '#fff' : '#64748b',
-                                        fontSize: 9,
-                                        fontWeight: active ? 700 : 500,
-                                        boxShadow: active ? `0 4px 12px ${primaryColor}55` : 'none',
-                                    }}
-                                >
-                                    <div style={{ fontSize: 10, marginBottom: 2 }}>{level.name}</div>
-                                    <div style={{ opacity: active ? 1 : 0.7, fontSize: 8 }}>{level.scoreRange}</div>
-                                </div>
-                            );
-                        })}
-                    </div>
-                    <div
-                        style={{
-                            background: `linear-gradient(90deg, ${primaryColor}11, ${accentColor}11)`,
-                            borderLeft: `4px solid ${primaryColor}`,
-                            padding: 16,
-                            borderRadius: '0 12px 12px 0',
-                            fontSize: 13,
-                            color: '#334155',
-                        }}
-                    >
-                        {intellectual?.interpretation}
-                    </div>
-                </SectionBlock>
-
-                {/* Personalidad */}
-                <SectionBlock title="Recursos de personalidad" number={2} color={accentColor}>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                        {inventory.personalityTraits.map(trait => {
-                            const rating = evaluation.personality.find(p => p.traitId === trait.id);
-                            const level = rating?.level || 'promedio';
-                            return (
-                                <div
-                                    key={trait.id}
-                                    style={{
-                                        border: '1px solid #e2e8f0',
-                                        borderRadius: 12,
-                                        padding: 14,
-                                        background: '#fff',
-                                    }}
-                                >
-                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
-                                        <div>
-                                            <strong style={{ fontSize: 13 }}>{trait.name}</strong>
-                                            <p style={{ margin: '4px 0 0', fontSize: 11, color: '#64748b' }}>{trait.definition}</p>
-                                        </div>
-                                        <span
-                                            style={{
-                                                background: LEVEL_COLORS[level] + '22',
-                                                color: LEVEL_COLORS[level],
-                                                padding: '4px 12px',
-                                                borderRadius: 999,
-                                                fontSize: 11,
-                                                fontWeight: 700,
-                                                textTransform: 'capitalize',
-                                                flexShrink: 0,
-                                            }}
-                                        >
-                                            {level}
-                                        </span>
+                <div
+                    style={{
+                        display: 'grid',
+                        gridTemplateColumns: '1fr 1fr',
+                        gap: 8,
+                        alignItems: 'start',
+                        minHeight: 0,
+                    }}
+                >
+                    {/* Columna izquierda */}
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6, minWidth: 0 }}>
+                        <BlockTitle n={1} title="Nivel intelectual" color={primaryColor} />
+                        <div style={{ display: 'flex', gap: 3 }}>
+                            {inventory.intellectualLevels.map(level => {
+                                const active = level.id === evaluation.intellectualLevelId;
+                                return (
+                                    <div
+                                        key={level.id}
+                                        style={{
+                                            flex: 1,
+                                            textAlign: 'center',
+                                            padding: '4px 2px',
+                                            borderRadius: 4,
+                                            background: active ? primaryColor : '#f1f5f9',
+                                            color: active ? '#fff' : '#64748b',
+                                            fontSize: 7,
+                                            fontWeight: active ? 700 : 600,
+                                            lineHeight: 1.2,
+                                        }}
+                                    >
+                                        <div>{level.name}</div>
+                                        <div style={{ fontSize: 6, opacity: 0.9 }}>{level.scoreRange}</div>
                                     </div>
-                                    {rating?.observations && (
-                                        <p style={{ margin: 0, fontSize: 11, color: '#475569', fontStyle: 'italic' }}>
-                                            {rating.observations}
-                                        </p>
-                                    )}
-                                </div>
-                            );
-                        })}
-                    </div>
-                </SectionBlock>
-
-                {/* Competencias */}
-                <SectionBlock title="Competencias psicolaborales" number={3} color={primaryColor}>
-                    <div
-                        style={{
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: 16,
-                            marginBottom: 20,
-                            padding: 16,
-                            background: `linear-gradient(135deg, ${primaryColor}15, ${accentColor}15)`,
-                            borderRadius: 12,
-                        }}
-                    >
+                                );
+                            })}
+                        </div>
                         <div
                             style={{
-                                width: 72,
-                                height: 72,
-                                borderRadius: '50%',
-                                background: `conic-gradient(${primaryColor} ${percentage * 3.6}deg, #e2e8f0 0deg)`,
+                                fontSize: 8,
+                                color: '#334155',
+                                borderLeft: `3px solid ${primaryColor}`,
+                                padding: '6px 8px',
+                                background: '#fafafa',
+                                lineHeight: 1.38,
+                            }}
+                        >
+                            {intellectual?.interpretation}
+                        </div>
+
+                        <BlockTitle n={2} title="Recursos de personalidad" color={accentColor} />
+                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 8 }}>
+                            <thead>
+                                <tr style={{ background: '#f1f5f9' }}>
+                                    <th style={{ padding: '3px', textAlign: 'left', border: '1px solid #e2e8f0' }}>
+                                        Rasgo
+                                    </th>
+                                    <th style={{ padding: '3px', textAlign: 'center', border: '1px solid #e2e8f0' }}>
+                                        Nivel
+                                    </th>
+                                    <th style={{ padding: '3px', textAlign: 'left', border: '1px solid #e2e8f0' }}>
+                                        Obs.
+                                    </th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {inventory.personalityTraits.map(trait => {
+                                    const rating = evaluation.personality.find(p => p.traitId === trait.id);
+                                    const level = rating?.level || 'promedio';
+                                    return (
+                                        <tr key={trait.id}>
+                                            <td
+                                                style={{
+                                                    padding: '3px',
+                                                    border: '1px solid #e2e8f0',
+                                                    verticalAlign: 'top',
+                                                }}
+                                            >
+                                                <strong>{trait.name}</strong>
+                                                <div style={{ fontSize: 7, color: '#64748b' }}>{trait.definition}</div>
+                                            </td>
+                                            <td
+                                                style={{
+                                                    padding: '3px',
+                                                    border: '1px solid #e2e8f0',
+                                                    textAlign: 'center',
+                                                    color: LEVEL_COLORS[level],
+                                                    fontWeight: 700,
+                                                    textTransform: 'capitalize',
+                                                }}
+                                            >
+                                                {level}
+                                            </td>
+                                            <td style={{ padding: '3px', border: '1px solid #e2e8f0', fontSize: 7 }}>
+                                                {rating?.observations || '—'}
+                                            </td>
+                                        </tr>
+                                    );
+                                })}
+                            </tbody>
+                        </table>
+                    </div>
+
+                    {/* Columna derecha */}
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6, minWidth: 0 }}>
+                        <BlockTitle n={3} title="Competencias psicolaborales" color={primaryColor} />
+                        <div
+                            style={{
                                 display: 'flex',
                                 alignItems: 'center',
-                                justifyContent: 'center',
-                                flexShrink: 0,
+                                gap: 10,
+                                padding: '6px 10px',
+                                background: `#f8fafc`,
+                                borderRadius: 6,
+                                border: `1px solid ${primaryColor}33`,
                             }}
                         >
                             <div
                                 style={{
-                                    width: 56,
-                                    height: 56,
+                                    width: 44,
+                                    height: 44,
                                     borderRadius: '50%',
-                                    background: '#fff',
+                                    background: `conic-gradient(${primaryColor} ${percentage * 3.6}deg, #e2e8f0 0deg)`,
+                                    flexShrink: 0,
                                     display: 'flex',
                                     alignItems: 'center',
                                     justifyContent: 'center',
-                                    fontWeight: 800,
-                                    fontSize: 18,
-                                    color: primaryColor,
                                 }}
                             >
-                                {percentage}%
+                                <div
+                                    style={{
+                                        width: 34,
+                                        height: 34,
+                                        borderRadius: '50%',
+                                        background: '#fff',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        fontWeight: 800,
+                                        fontSize: 11,
+                                        color: primaryColor,
+                                    }}
+                                >
+                                    {percentage}%
+                                </div>
+                            </div>
+                            <div>
+                                <div style={{ fontWeight: 700, fontSize: 9 }}>{totalObtained} / {totalExpected}</div>
+                                <div style={{ fontSize: 7, color: '#64748b' }}>Pts. obt. vs esperado · escala 1–9</div>
                             </div>
                         </div>
-                        <div>
-                            <p style={{ margin: 0, fontSize: 14, fontWeight: 700 }}>Competencias alcanzadas</p>
-                            <p style={{ margin: '4px 0 0', fontSize: 12, color: '#64748b' }}>
-                                Puntaje obtenido: <strong>{totalObtained}</strong> / esperado: <strong>{totalExpected}</strong>
-                            </p>
-                            <p style={{ margin: '4px 0 0', fontSize: 10, color: '#94a3b8' }}>
-                                Escala: 1–3 Bajo · 4–6 Promedio · 7–9 Alto
-                            </p>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+                            {competencies.map(comp => {
+                                const rating = evaluation.competencies.find(r => r.competencyId === comp.id);
+                                const obtained = rating?.obtainedScore ?? 0;
+                                const pct = Math.min(100, (obtained / 9) * 100);
+                                const levelLabel = getCompetencyLevelLabel(obtained);
+                                const barColor =
+                                    obtained <= 3 ? '#f97316' : obtained <= 6 ? '#3b82f6' : '#10b981';
+                                return (
+                                    <div key={comp.id}>
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 6 }}>
+                                            <span style={{ fontSize: 8, fontWeight: 600 }}>
+                                                {comp.name}: <span style={{ fontWeight: 400, fontSize: 7 }}>{comp.definition}</span>
+                                            </span>
+                                            <span style={{ fontSize: 7, color: barColor, fontWeight: 700, whiteSpace: 'nowrap' }}>
+                                                {obtained} / {comp.expectedScore} ({levelLabel})
+                                            </span>
+                                        </div>
+                                        <div style={{ height: 4, background: '#e2e8f0', borderRadius: 3, overflow: 'hidden', marginTop: 2 }}>
+                                            <div
+                                                style={{
+                                                    width: `${pct}%`,
+                                                    height: '100%',
+                                                    background: barColor,
+                                                }}
+                                            />
+                                        </div>
+                                        {rating?.observations ? (
+                                            <div style={{ fontSize: 7, color: '#64748b', marginTop: 1 }}>{rating.observations}</div>
+                                        ) : null}
+                                    </div>
+                                );
+                            })}
+                        </div>
+
+                        <BlockTitle n={4} title="Conclusiones" color={accentColor} />
+                        <div
+                            style={{
+                                fontSize: 8,
+                                lineHeight: 1.43,
+                                color: '#334155',
+                                padding: '8px 10px',
+                                borderLeft: `3px solid ${accentColor}`,
+                                background: '#fafafa',
+                                textAlign: 'justify',
+                                border: '1px solid #e2e8f0',
+                                borderLeftWidth: 3,
+                            }}
+                        >
+                            {evaluation.conclusions || 'Sin conclusiones registradas.'}
                         </div>
                     </div>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-                        {competencies.map(comp => {
-                            const rating = evaluation.competencies.find(r => r.competencyId === comp.id);
-                            const obtained = rating?.obtainedScore ?? 0;
-                            const pct = comp.expectedScore > 0 ? Math.min(100, (obtained / 9) * 100) : 0;
-                            const levelLabel = getCompetencyLevelLabel(obtained);
-                            const barColor =
-                                obtained <= 3 ? '#f97316' : obtained <= 6 ? '#3b82f6' : '#10b981';
-                            return (
-                                <div key={comp.id}>
-                                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
-                                        <span style={{ fontSize: 12, fontWeight: 600 }}>{comp.name}</span>
-                                        <span style={{ fontSize: 11, color: barColor, fontWeight: 700 }}>
-                                            {obtained}/{comp.expectedScore} esp. · {levelLabel}
-                                        </span>
-                                    </div>
-                                    <div style={{ height: 8, background: '#e2e8f0', borderRadius: 4, overflow: 'hidden' }}>
-                                        <div
-                                            style={{
-                                                width: `${pct}%`,
-                                                height: '100%',
-                                                background: barColor,
-                                                borderRadius: 4,
-                                            }}
-                                        />
-                                    </div>
-                                    {rating?.observations && (
-                                        <p style={{ margin: '4px 0 0', fontSize: 10, color: '#64748b' }}>
-                                            {rating.observations}
-                                        </p>
-                                    )}
-                                </div>
-                            );
-                        })}
-                    </div>
-                </SectionBlock>
-
-                {/* Conclusiones */}
-                <SectionBlock title="Conclusiones" number={4} color={accentColor}>
-                    <blockquote
-                        style={{
-                            margin: 0,
-                            padding: 20,
-                            background: '#fff',
-                            borderLeft: `5px solid ${accentColor}`,
-                            borderRadius: '0 12px 12px 0',
-                            fontSize: 13,
-                            color: '#334155',
-                            lineHeight: 1.7,
-                            boxShadow: 'inset 0 0 0 1px #e2e8f0',
-                        }}
-                    >
-                        {evaluation.conclusions || 'Sin conclusiones registradas.'}
-                    </blockquote>
-                </SectionBlock>
+                </div>
             </main>
 
             <footer
                 style={{
-                    padding: '20px 32px 28px',
-                    fontSize: 10,
-                    color: '#94a3b8',
-                    borderTop: '1px solid #e2e8f0',
-                    background: `linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%)`,
+                    flexShrink: 0,
+                    padding: '6px 12px',
+                    fontSize: 7,
+                    color: '#64748b',
+                    borderTop: `1px solid #e2e8f0`,
+                    background: '#f8fafc',
                 }}
             >
-                <p style={{ margin: '0 0 10px', fontSize: 12, color: '#64748b', lineHeight: 1.6, textAlign: 'center' }}>
-                    {closingLine}
-                </p>
-                <p style={{ margin: 0, textAlign: 'center' }}>
-                    {['Documento confidencial', footerLegalText?.trim(), companyName, `Generado el ${reportDate}`]
-                        .filter(Boolean)
-                        .join(' · ')}
-                </p>
+                <div style={{ textAlign: 'center', marginBottom: 4, fontWeight: 600, fontSize: 8 }}>{closingLine}</div>
+                <div style={{ textAlign: 'center' }}>
+                    {['Confidencial', footerLegalText?.trim(), companyName, `Emitido ${reportDate}`].filter(Boolean).join(' · ')}
+                </div>
             </footer>
         </div>
     );
 });
 
-function SectionBlock({
-    title,
-    number,
-    color,
-    children,
-}: {
-    title: string;
-    number: number;
-    color: string;
-    children: React.ReactNode;
-}) {
+function BlockTitle({ n, title, color }: { n: number; title: string; color: string }) {
     return (
-        <section style={{ marginBottom: 24 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
-                <span
-                    style={{
-                        width: 28,
-                        height: 28,
-                        borderRadius: 8,
-                        background: color,
-                        color: '#fff',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        fontSize: 13,
-                        fontWeight: 800,
-                    }}
-                >
-                    {number}
-                </span>
-                <h2 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: '#0f172a' }}>{title}</h2>
-            </div>
-            {children}
-        </section>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span
+                style={{
+                    width: 18,
+                    height: 18,
+                    borderRadius: 5,
+                    background: color,
+                    color: '#fff',
+                    fontSize: 10,
+                    fontWeight: 800,
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                }}
+            >
+                {n}
+            </span>
+            <strong style={{ fontSize: 9, color: '#0f172a' }}>{title}</strong>
+        </div>
     );
 }

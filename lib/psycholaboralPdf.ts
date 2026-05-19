@@ -1,12 +1,13 @@
 import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
 
+/** Genera PDF de una única página A4 escalando todo el contenido si hace falta. */
 export async function captureElementToPdf(element: HTMLElement): Promise<Blob> {
     const canvas = await html2canvas(element, {
-        scale: 2.25,
+        scale: 2,
         useCORS: true,
         allowTaint: true,
-        backgroundColor: '#f8fafc',
+        backgroundColor: '#ffffff',
         logging: false,
         width: element.scrollWidth,
         height: element.scrollHeight,
@@ -18,21 +19,25 @@ export async function captureElementToPdf(element: HTMLElement): Promise<Blob> {
     const pdf = new jsPDF('p', 'mm', 'a4');
     const pageWidth = pdf.internal.pageSize.getWidth();
     const pageHeight = pdf.internal.pageSize.getHeight();
-    const imgWidth = pageWidth;
-    const imgHeight = (canvas.height * imgWidth) / canvas.width;
 
-    let heightLeft = imgHeight;
-    let position = 0;
+    const marginMm = 6;
+    const maxW = pageWidth - marginMm * 2;
+    const maxH = pageHeight - marginMm * 2;
 
-    pdf.addImage(imgData, 'PNG', 0, position, imgWidth, imgHeight, undefined, 'FAST');
-    heightLeft -= pageHeight;
+    const cw = canvas.width;
+    const ch = canvas.height;
 
-    while (heightLeft > 0) {
-        position = heightLeft - imgHeight;
-        pdf.addPage();
-        pdf.addImage(imgData, 'PNG', 0, position, imgWidth, imgHeight, undefined, 'FAST');
-        heightLeft -= pageHeight;
+    let drawW = maxW;
+    let drawH = (ch * drawW) / cw;
+    if (drawH > maxH) {
+        drawH = maxH;
+        drawW = (cw * drawH) / ch;
     }
+
+    const x = marginMm + (maxW - drawW) / 2;
+    const y = marginMm + (maxH - drawH) / 2;
+
+    pdf.addImage(imgData, 'PNG', x, y, drawW, drawH, undefined, 'FAST');
 
     return pdf.output('blob');
 }
