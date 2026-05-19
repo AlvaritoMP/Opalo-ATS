@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useAppState } from '../App';
 import { bulkCandidatesApi, BulkCandidate } from '../lib/api/bulkCandidates';
 import { processesApi } from '../lib/api/processes';
-import { Check, X, Loader2, Send, Archive, Search, ChevronDown, ChevronUp, Plus, Edit, Trash2, ArrowLeft, MessageCircle, Phone, Upload, Filter, Mail, Calendar, Settings, ArrowUp, ArrowDown, Pin, FileText, BookOpen, Paperclip } from 'lucide-react';
+import { Check, X, Loader2, Send, Archive, Search, ChevronDown, ChevronUp, Plus, Edit, Trash2, ArrowLeft, MessageCircle, Phone, Upload, Filter, Mail, Calendar, Settings, ArrowUp, ArrowDown, Pin, FileText, BookOpen, Paperclip, ClipboardList } from 'lucide-react';
 import { Process, CustomColumn, BulkProcessConfig } from '../types';
 import {
     BASE_COLUMNS,
@@ -41,6 +41,7 @@ import { BulkScheduleModal } from './BulkScheduleModal';
 import { AddColumnModal } from './AddColumnModal';
 import { TableTemplateModal } from './TableTemplateModal';
 import { PsycholaboralReportModal } from './PsycholaboralReportModal';
+import { PsycholaboralBulkEvaluateModal } from './PsycholaboralBulkEvaluateModal';
 import { PsycholaboralInventoryModal } from './PsycholaboralInventoryModal';
 import { psycholaboralApi } from '../lib/api/psycholaboral';
 import { createDefaultPsycholaboralInventory } from '../lib/psycholaboralDefaults';
@@ -303,8 +304,22 @@ const BulkActionsFAB: React.FC<{
     onEmail: () => void;
     onBulkSchedule: () => void;
     onPsychReport?: () => void;
+    onPsychBulkEvaluate?: () => void;
     showPsychReport?: boolean;
-}> = ({ selectedIds, onApprove, onReject, onArchive, onWebhook, onDelete, onWhatsApp, onEmail, onBulkSchedule, onPsychReport, showPsychReport }) => {
+}> = ({
+    selectedIds,
+    onApprove,
+    onReject,
+    onArchive,
+    onWebhook,
+    onDelete,
+    onWhatsApp,
+    onEmail,
+    onBulkSchedule,
+    onPsychReport,
+    onPsychBulkEvaluate,
+    showPsychReport,
+}) => {
     const [isOpen, setIsOpen] = useState(false);
     if (selectedIds.length === 0) return null;
     return (
@@ -326,6 +341,11 @@ const BulkActionsFAB: React.FC<{
                     {showPsychReport && onPsychReport && (
                     <button onClick={() => { onPsychReport(); setIsOpen(false); }} className="flex items-center gap-2 px-4 py-2 bg-teal-600 text-white rounded-lg shadow-lg hover:bg-teal-700 transition-colors">
                         <FileText className="w-4 h-4" /> Informe Psicolaboral ({selectedIds.length})
+                    </button>
+                    )}
+                    {showPsychReport && onPsychBulkEvaluate && (
+                    <button onClick={() => { onPsychBulkEvaluate(); setIsOpen(false); }} className="flex items-center gap-2 px-4 py-2 bg-cyan-700 text-white rounded-lg shadow-lg hover:bg-cyan-800 transition-colors">
+                        <ClipboardList className="w-4 h-4" /> Evaluación masiva ({selectedIds.length})
                     </button>
                     )}
                     <button onClick={() => { onWhatsApp(); setIsOpen(false); }} className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg shadow-lg hover:bg-green-700 transition-colors">
@@ -403,6 +423,8 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
     const [showPsychReportModal, setShowPsychReportModal] = useState(false);
     const [showPsychInventoryModal, setShowPsychInventoryModal] = useState(false);
     const [psychReportCandidates, setPsychReportCandidates] = useState<BulkCandidate[]>([]);
+    const [showPsychBulkModal, setShowPsychBulkModal] = useState(false);
+    const [psychBulkCandidates, setPsychBulkCandidates] = useState<BulkCandidate[]>([]);
     const [attachmentCounts, setAttachmentCounts] = useState<Record<string, number>>({});
     const [showProcessDocsModal, setShowProcessDocsModal] = useState(false);
     const [docsModalProcess, setDocsModalProcess] = useState<Process | null>(null);
@@ -445,6 +467,12 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
         if (!process || list.length === 0) return;
         setPsychReportCandidates(list);
         setShowPsychReportModal(true);
+    }, [process]);
+
+    const openPsychBulkEvaluate = useCallback((list: BulkCandidate[]) => {
+        if (!process || list.length === 0) return;
+        setPsychBulkCandidates(list);
+        setShowPsychBulkModal(true);
     }, [process]);
 
     const baseColumns = BASE_COLUMNS;
@@ -1970,6 +1998,22 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                                         actions.showToast('Seleccione al menos un candidato', 'error', 3000);
                                                         return;
                                                     }
+                                                    openPsychBulkEvaluate(sel);
+                                                }}
+                                                className="flex items-center gap-2 px-4 py-2 bg-cyan-700 text-white rounded-lg hover:bg-cyan-800 transition-colors"
+                                                title="Cuadrícula de valores para varios candidatos"
+                                            >
+                                                <ClipboardList className="w-4 h-4" />
+                                                Evaluación masiva
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={() => {
+                                                    const sel = candidates.filter(c => selectedIds.has(c.id));
+                                                    if (sel.length === 0) {
+                                                        actions.showToast('Seleccione al menos un candidato', 'error', 3000);
+                                                        return;
+                                                    }
                                                     openPsychReport(sel);
                                                 }}
                                                 className="flex items-center gap-2 px-4 py-2 bg-teal-600 text-white rounded-lg hover:bg-teal-700 transition-colors"
@@ -2700,6 +2744,9 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                 onPsychReport={() =>
                     openPsychReport(candidates.filter(c => selectedIds.has(c.id)))
                 }
+                onPsychBulkEvaluate={() =>
+                    openPsychBulkEvaluate(candidates.filter(c => selectedIds.has(c.id)))
+                }
             />
 
             <CandidateDrawer
@@ -2857,6 +2904,19 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                         setPsychReportCandidates([]);
                     }}
                     candidates={psychReportCandidates}
+                    process={process}
+                    inventory={psychInventory}
+                />
+            )}
+
+            {showPsychBulkModal && process && psychBulkCandidates.length > 0 && (
+                <PsycholaboralBulkEvaluateModal
+                    isOpen={showPsychBulkModal}
+                    onClose={() => {
+                        setShowPsychBulkModal(false);
+                        setPsychBulkCandidates([]);
+                    }}
+                    candidates={psychBulkCandidates}
                     process={process}
                     inventory={psychInventory}
                 />
