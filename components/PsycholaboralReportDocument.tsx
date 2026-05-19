@@ -15,8 +15,11 @@ import {
     mergePsycholaboralInventory,
 } from '../lib/psycholaboralUtils';
 
-/** Ancho lógico tipo A4 ancho (~210mm); el PDF escala manteniendo proporción para caber en 1 página. */
-const PAGE_W = 794;
+/**
+ * Ancho CSS alineado a A4 apaisado: mismo DPI de referencia que 794≈210mm, escalado √2 al largo 297mm.
+ * El pdf usa `orientation: landscape` para que ese ancho coincida mejor con la hoja física.
+ */
+const PAGE_W = Math.round((794 * 297) / 210);
 
 export interface PsycholaboralReportDocumentProps {
     candidate: Pick<Candidate, 'name' | 'dni' | 'age' | 'avatarUrl'>;
@@ -62,8 +65,8 @@ const LEVEL_SHORT: Record<PersonalityLevel, string> = {
 function clampInterpretation(raw: string | undefined): string {
     if (!raw) return '—';
     const t = raw.replace(/\s+/g, ' ').trim();
-    if (t.length <= 240) return t;
-    return `${t.slice(0, 237)}…`;
+    if (t.length <= 320) return t;
+    return `${t.slice(0, 317)}…`;
 }
 
 export const PsycholaboralReportDocument = React.forwardRef<
@@ -113,18 +116,18 @@ export const PsycholaboralReportDocument = React.forwardRef<
         (introTextProp && introTextProp.trim()) ||
         'Resultado sintético; complementar con otros criterios de selección.';
     const shortIntro =
-        introOverlay.length > 95 ? `${introOverlay.slice(0, 92).trim()}…` : introOverlay;
+        introOverlay.length > 130 ? `${introOverlay.slice(0, 127).trim()}…` : introOverlay;
 
     const closingLine =
         (closingText && closingText.trim()) || 'Combinar con otros insumos técnicos y de proceso.';
 
     const fs = {
-        nano: 5.5,
-        micro: 6,
-        sm: 6.75,
-        body: 7.25,
-        title: 11,
-        sub: 7.75,
+        nano: 6,
+        micro: 6.5,
+        sm: 7,
+        body: 7.5,
+        title: 12,
+        sub: 8,
     } as const;
 
     return (
@@ -162,8 +165,8 @@ export const PsycholaboralReportDocument = React.forwardRef<
                             src={headerLogoSrc}
                             alt=""
                             style={{
-                                height: 22,
-                                maxWidth: 100,
+                                height: 24,
+                                maxWidth: 120,
                                 width: 'auto',
                                 display: 'block',
                                 objectFit: 'contain',
@@ -283,28 +286,28 @@ export const PsycholaboralReportDocument = React.forwardRef<
                     </div>
                 </section>
 
+                {/* Tres columnas (apaisado): menos altura vertical, más lectura lateral */}
                 <div
                     style={{
                         display: 'grid',
-                        gridTemplateColumns: '1fr 1fr',
-                        gap: 5,
+                        gridTemplateColumns: 'minmax(0, 0.88fr) minmax(0, 1.12fr) minmax(0, 1fr)',
+                        gap: 6,
                         alignItems: 'start',
                         minHeight: 0,
                     }}
                 >
-                    {/* Columna izquierda */}
+                    {/* 1 · Nivel intelectual */}
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0 }}>
                         <BlockTitle n={1} title="Nivel intelectual" color={primaryColor} compact />
-                        <div style={{ display: 'flex', gap: 2 }}>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                             {inventory.intellectualLevels.map(level => {
                                 const active = level.id === evaluation.intellectualLevelId;
                                 return (
                                     <div
                                         key={level.id}
                                         style={{
-                                            flex: 1,
                                             textAlign: 'center',
-                                            padding: '2px 1px',
+                                            padding: '3px 2px',
                                             borderRadius: 2,
                                             background: active ? primaryColor : '#f1f5f9',
                                             color: active ? '#fff' : '#64748b',
@@ -314,7 +317,7 @@ export const PsycholaboralReportDocument = React.forwardRef<
                                         }}
                                     >
                                         <div>{level.name}</div>
-                                        <div style={{ fontSize: 5.5, opacity: 0.92 }}>{level.scoreRange}</div>
+                                        <div style={{ fontSize: fs.nano, opacity: 0.92 }}>{level.scoreRange}</div>
                                     </div>
                                 );
                             })}
@@ -324,23 +327,27 @@ export const PsycholaboralReportDocument = React.forwardRef<
                                 fontSize: fs.sm,
                                 color: '#334155',
                                 borderLeft: `2px solid ${primaryColor}`,
-                                padding: '3px 5px',
+                                padding: '4px 6px',
                                 background: '#fafafa',
-                                lineHeight: 1.26,
-                                maxHeight: 44,
+                                lineHeight: 1.28,
+                                flex: '1 1 auto',
+                                minHeight: 0,
                                 overflow: 'hidden',
                             }}
                         >
                             {clampInterpretation(intellectual?.interpretation)}
                         </div>
+                    </div>
 
+                    {/* 2 · Personalidad */}
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0 }}>
                         <BlockTitle n={2} title="Personalidad" color={accentColor} compact />
                         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: fs.micro }}>
                             <thead>
                                 <tr style={{ background: '#f1f5f9' }}>
                                     <th
                                         style={{
-                                            padding: '1px 3px',
+                                            padding: '2px 4px',
                                             textAlign: 'left',
                                             border: '1px solid #e2e8f0',
                                             fontSize: fs.nano,
@@ -350,18 +357,18 @@ export const PsycholaboralReportDocument = React.forwardRef<
                                     </th>
                                     <th
                                         style={{
-                                            padding: '1px 2px',
+                                            padding: '2px 3px',
                                             textAlign: 'center',
                                             border: '1px solid #e2e8f0',
-                                            width: 44,
+                                            width: 40,
                                             fontSize: fs.nano,
                                         }}
                                     >
-                                        Nivel
+                                        Niv.
                                     </th>
                                     <th
                                         style={{
-                                            padding: '1px 3px',
+                                            padding: '2px 4px',
                                             textAlign: 'left',
                                             border: '1px solid #e2e8f0',
                                             fontSize: fs.nano,
@@ -379,7 +386,7 @@ export const PsycholaboralReportDocument = React.forwardRef<
                                         <tr key={trait.id}>
                                             <td
                                                 style={{
-                                                    padding: '1px 3px',
+                                                    padding: '2px 4px',
                                                     border: '1px solid #e2e8f0',
                                                     verticalAlign: 'top',
                                                     lineHeight: 1.12,
@@ -391,7 +398,7 @@ export const PsycholaboralReportDocument = React.forwardRef<
                                             </td>
                                             <td
                                                 style={{
-                                                    padding: '1px 2px',
+                                                    padding: '2px 3px',
                                                     border: '1px solid #e2e8f0',
                                                     textAlign: 'center',
                                                     color: LEVEL_COLORS[level],
@@ -402,9 +409,9 @@ export const PsycholaboralReportDocument = React.forwardRef<
                                             >
                                                 {LEVEL_SHORT[level]}
                                             </td>
-                                            <td style={{ padding: '1px 3px', border: '1px solid #e2e8f0', fontSize: fs.nano }}>
+                                            <td style={{ padding: '2px 4px', border: '1px solid #e2e8f0', fontSize: fs.nano }}>
                                                 {rating?.observations?.trim()
-                                                    ? truncate(rating.observations, 72)
+                                                    ? truncate(rating.observations, 110)
                                                     : '—'}
                                             </td>
                                         </tr>
@@ -414,12 +421,12 @@ export const PsycholaboralReportDocument = React.forwardRef<
                         </table>
                     </div>
 
-                    {/* Columna derecha */}
+                    {/* 3 · Competencias + 4 · Conclusiones */}
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0 }}>
                         <BlockTitle n={3} title="Competencias" color={primaryColor} compact />
                         <div
                             style={{
-                                padding: '3px 5px',
+                                padding: '3px 6px',
                                 background: `#f8fafc`,
                                 borderRadius: 2,
                                 border: `1px solid ${primaryColor}40`,
@@ -430,13 +437,13 @@ export const PsycholaboralReportDocument = React.forwardRef<
                         >
                             {percentage}% cumplimiento · {totalObtained}/{totalExpected} pts. (esp. máx.)
                         </div>
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
                             {competencies.map(comp => {
                                 const rating = evaluation.competencies.find(r => r.competencyId === comp.id);
                                 const obtained = rating?.obtainedScore ?? 0;
                                 const levelLabel = getCompetencyLevelLabel(obtained);
                                 return (
-                                    <div key={comp.id} style={{ lineHeight: 1.12 }}>
+                                    <div key={comp.id} style={{ lineHeight: 1.15 }}>
                                         <div style={{ fontSize: fs.micro, fontWeight: 600 }}>
                                             <span>{comp.name}</span>
                                             <span style={{ fontWeight: 500, fontSize: fs.nano, color: '#475569' }}>
@@ -445,8 +452,8 @@ export const PsycholaboralReportDocument = React.forwardRef<
                                             </span>
                                         </div>
                                         {rating?.observations?.trim() ? (
-                                            <div style={{ fontSize: fs.nano, color: '#64748b', marginTop: 0 }}>
-                                                {truncate(rating.observations, 90)}
+                                            <div style={{ fontSize: fs.nano, color: '#64748b', marginTop: 1 }}>
+                                                {truncate(rating.observations, 130)}
                                             </div>
                                         ) : null}
                                     </div>
@@ -458,15 +465,17 @@ export const PsycholaboralReportDocument = React.forwardRef<
                         <div
                             style={{
                                 fontSize: fs.micro,
-                                lineHeight: 1.26,
+                                lineHeight: 1.3,
                                 color: '#334155',
-                                padding: '4px 5px',
+                                padding: '5px 6px',
                                 borderLeft: `2px solid ${accentColor}`,
                                 background: '#fafafa',
                                 textAlign: 'justify',
                                 border: '1px solid #e2e8f0',
                                 borderLeftWidth: 2,
-                                maxHeight: 120,
+                                flex: '1 1 auto',
+                                minHeight: 72,
+                                maxHeight: 200,
                                 overflow: 'hidden',
                             }}
                         >

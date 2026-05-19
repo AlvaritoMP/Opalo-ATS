@@ -1,7 +1,7 @@
 import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
 
-/** Genera PDF de una única página A4 escalando todo el contenido si hace falta. */
+/** Una sola página A4 en horizontal — escala todo el contenido para encajar mejor el aspect ratio. */
 export async function captureElementToPdf(element: HTMLElement): Promise<Blob> {
     const canvas = await html2canvas(element, {
         scale: 2,
@@ -16,7 +16,7 @@ export async function captureElementToPdf(element: HTMLElement): Promise<Blob> {
     });
 
     const imgData = canvas.toDataURL('image/png', 1.0);
-    const pdf = new jsPDF('p', 'mm', 'a4');
+    const pdf = new jsPDF('l', 'mm', 'a4');
     const pageWidth = pdf.internal.pageSize.getWidth();
     const pageHeight = pdf.internal.pageSize.getHeight();
 
