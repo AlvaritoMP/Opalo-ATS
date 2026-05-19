@@ -71,6 +71,90 @@ export interface CustomColumn {
     options?: string[];
 }
 
+// --- Informes psicolaborales ---
+
+export type IntellectualLevelId =
+    | 'inferior'
+    | 'normal_inferior'
+    | 'normal_promedio'
+    | 'normal_superior'
+    | 'superior';
+
+export type PersonalityLevel = 'bajo' | 'promedio' | 'alto';
+
+export type PsycholaboralSuitability = 'apto' | 'no_apto' | 'apto_reservas';
+
+export interface IntellectualLevelDefinition {
+    id: IntellectualLevelId;
+    name: string;
+    scoreRange: string;
+    interpretation: string;
+}
+
+export interface PersonalityTraitDefinition {
+    id: string;
+    name: string;
+    definition: string;
+}
+
+export interface PsycholaboralCompetency {
+    id: string;
+    name: string;
+    definition: string;
+    expectedScore: number;
+}
+
+export interface PsycholaboralCompetencySet {
+    id: string;
+    name: string;
+    competencies: PsycholaboralCompetency[];
+}
+
+export interface ConclusionTemplate {
+    id: string;
+    name: string;
+    template: string;
+}
+
+export interface PsycholaboralInventory {
+    intellectualLevels: IntellectualLevelDefinition[];
+    personalityTraits: PersonalityTraitDefinition[];
+    competencySets: PsycholaboralCompetencySet[];
+    conclusionTemplates: ConclusionTemplate[];
+}
+
+export interface PsycholaboralProcessConfig {
+    enabled?: boolean;
+    competencySetId?: string;
+    competencies?: PsycholaboralCompetency[];
+    defaultPositionTitle?: string;
+    defaultConclusionTemplateId?: string;
+}
+
+export interface PsycholaboralPersonalityRating {
+    traitId: string;
+    level: PersonalityLevel;
+    observations: string;
+}
+
+export interface PsycholaboralCompetencyRating {
+    competencyId: string;
+    obtainedScore: number;
+    observations: string;
+}
+
+export interface PsycholaboralEvaluation {
+    intellectualLevelId: IntellectualLevelId;
+    intellectualScore?: number;
+    personality: PsycholaboralPersonalityRating[];
+    competencies: PsycholaboralCompetencyRating[];
+    conclusions: string;
+    suitabilityStatus?: PsycholaboralSuitability;
+    reportDate?: string;
+    evaluatedAt?: string;
+    positionApplied?: string;
+}
+
 // Configuración para procesos masivos
 export interface BulkProcessConfig {
     killerQuestions?: KillerQuestion[]; // Preguntas automáticas que filtran candidatos
@@ -83,6 +167,7 @@ export interface BulkProcessConfig {
     hiddenColumns?: string[]; // IDs de columnas ocultas
     columnOrder?: string[]; // Orden de columnas (base + custom_*)
     pinnedColumns?: string[]; // Columnas inmovilizadas al hacer scroll horizontal
+    psycholaboral?: PsycholaboralProcessConfig;
 }
 
 // Pregunta "killer" para filtrado automático en procesos masivos
@@ -158,6 +243,7 @@ export interface Candidate {
     criticalStageReviewedAt?: string; // Fecha en que un usuario revisó el candidato en etapa crítica (para ocultar alertas)
     metadataIa?: string; // Resumen/metadata generado por IA (OpenAI)
     scoreIa?: number; // Score/puntuación generado por IA
+    psycholaboralEvaluation?: PsycholaboralEvaluation;
 }
 
 export type UserRole = 'admin' | 'recruiter' | 'client' | 'viewer';
@@ -266,6 +352,7 @@ export interface AppSettings {
     candidateSources?: string[]; // Opciones configurables para el campo "fuentes" de candidatos
     provinces?: string[]; // Opciones configurables para el campo "provincia" de candidatos
     districts?: { [province: string]: string[] }; // Opciones configurables para el campo "distrito" de candidatos, organizadas por provincia
+    psycholaboralInventory?: PsycholaboralInventory;
 }
 
 export interface FormIntegration {

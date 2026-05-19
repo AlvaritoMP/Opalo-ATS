@@ -22,6 +22,11 @@ function dbToSettings(dbSettings: any): AppSettings {
         candidateSources: dbSettings.candidate_sources || undefined,
         provinces: dbSettings.provinces || undefined,
         districts: dbSettings.districts || undefined,
+        psycholaboralInventory: dbSettings.psycholaboral_inventory
+            ? typeof dbSettings.psycholaboral_inventory === 'string'
+                ? JSON.parse(dbSettings.psycholaboral_inventory)
+                : dbSettings.psycholaboral_inventory
+            : undefined,
     };
 }
 
@@ -59,6 +64,9 @@ function settingsToDb(settings: Partial<AppSettings>): any {
     if (settings.candidateSources !== undefined) dbSettings.candidate_sources = settings.candidateSources;
     if (settings.provinces !== undefined) dbSettings.provinces = settings.provinces;
     if (settings.districts !== undefined) dbSettings.districts = settings.districts;
+    if (settings.psycholaboralInventory !== undefined) {
+        dbSettings.psycholaboral_inventory = settings.psycholaboralInventory;
+    }
     return dbSettings;
 }
 

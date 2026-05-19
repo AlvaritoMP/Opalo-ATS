@@ -1,9 +1,13 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAppState } from '../App';
-import { Process, Stage, ProcessStatus, BulkProcessConfig, KillerQuestion } from '../types';
+import { Process, Stage, ProcessStatus, BulkProcessConfig, KillerQuestion, PsycholaboralInventory } from '../types';
 import { X, Plus, Trash2, GripVertical, Settings, Filter, Brain, MessageCircle } from 'lucide-react';
 import { processesApi } from '../lib/api/processes';
 import { isScoreIaColumnVisible } from '../lib/bulkTableColumns';
+import { psycholaboralApi } from '../lib/api/psycholaboral';
+import { createDefaultPsycholaboralInventory } from '../lib/psycholaboralDefaults';
+import { PsycholaboralConfigSection } from './PsycholaboralConfigSection';
+import { PsycholaboralInventoryModal } from './PsycholaboralInventoryModal';
 
 interface BulkProcessEditorModalProps {
     process: Process | null;
@@ -32,8 +36,14 @@ export const BulkProcessEditorModal: React.FC<BulkProcessEditorModalProps> = ({ 
     });
     
     const [killerQuestions, setKillerQuestions] = useState<KillerQuestion[]>(process?.bulkConfig?.killerQuestions || []);
+    const [psychInventory, setPsychInventory] = useState<PsycholaboralInventory>(createDefaultPsycholaboralInventory());
+    const [showPsychInventory, setShowPsychInventory] = useState(false);
 
     const scoreIaColumnVisible = isScoreIaColumnVisible(bulkConfig);
+
+    useEffect(() => {
+        psycholaboralApi.getInventory().then(setPsychInventory).catch(() => {});
+    }, []);
 
     const handleAddStage = () => {
         setStages([...stages, { id: `new-${Date.now()}`, name: '' }]);
@@ -385,6 +395,13 @@ export const BulkProcessEditorModal: React.FC<BulkProcessEditorModalProps> = ({ 
                                 </div>
                             </div>
 
+                            <PsycholaboralConfigSection
+                                bulkConfig={bulkConfig}
+                                setBulkConfig={setBulkConfig}
+                                inventory={psychInventory}
+                                onOpenInventory={() => setShowPsychInventory(true)}
+                            />
+
                             {/* Filtrado Automático */}
                             {scoreIaColumnVisible && (
                             <div>
@@ -424,6 +441,12 @@ export const BulkProcessEditorModal: React.FC<BulkProcessEditorModalProps> = ({ 
                     </button>
                 </div>
             </div>
+
+            <PsycholaboralInventoryModal
+                isOpen={showPsychInventory}
+                onClose={() => setShowPsychInventory(false)}
+                onSaved={setPsychInventory}
+            />
         </div>
     );
 };

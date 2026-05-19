@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useAppState } from '../App';
 import { bulkCandidatesApi, BulkCandidate } from '../lib/api/bulkCandidates';
 import { processesApi } from '../lib/api/processes';
-import { Check, X, Loader2, Send, Archive, Search, ChevronDown, ChevronUp, Plus, Edit, Trash2, ArrowLeft, MessageCircle, Phone, Upload, Filter, Mail, Calendar, Settings, ArrowUp, ArrowDown, Pin } from 'lucide-react';
+import { Check, X, Loader2, Send, Archive, Search, ChevronDown, ChevronUp, Plus, Edit, Trash2, ArrowLeft, MessageCircle, Phone, Upload, Filter, Mail, Calendar, Settings, ArrowUp, ArrowDown, Pin, FileText, BookOpen } from 'lucide-react';
 import { Process, CustomColumn, BulkProcessConfig } from '../types';
 import {
     BASE_COLUMNS,
@@ -40,6 +40,12 @@ import { QuickScheduleInline } from './QuickScheduleInline';
 import { BulkScheduleModal } from './BulkScheduleModal';
 import { AddColumnModal } from './AddColumnModal';
 import { TableTemplateModal } from './TableTemplateModal';
+import { PsycholaboralReportModal } from './PsycholaboralReportModal';
+import { PsycholaboralInventoryModal } from './PsycholaboralInventoryModal';
+import { psycholaboralApi } from '../lib/api/psycholaboral';
+import { createDefaultPsycholaboralInventory } from '../lib/psycholaboralDefaults';
+import { PsycholaboralInventory } from '../types';
+import { isPsycholaboralEnabled } from '../lib/psycholaboralUtils';
 
 interface BulkProcessesViewProps {}
 
@@ -90,7 +96,9 @@ const CandidateDrawer: React.FC<{
     onClose: () => void;
     onLoadDetails: (candidateId: string) => Promise<void>;
     process?: Process;
-}> = ({ candidate, isOpen, onClose, onLoadDetails, process }) => {
+    onPsychReport?: (candidate: BulkCandidate) => void;
+    showPsychReport?: boolean;
+}> = ({ candidate, isOpen, onClose, onLoadDetails, process, onPsychReport, showPsychReport }) => {
     const [isLoading, setIsLoading] = useState(false);
     const [fullCandidate, setFullCandidate] = useState<BulkCandidate | null>(null);
 
@@ -191,6 +199,16 @@ const CandidateDrawer: React.FC<{
                                     </div>
                                 </div>
                             )}
+                            {showPsychReport && onPsychReport && candidate && (
+                                <button
+                                    type="button"
+                                    onClick={() => onPsychReport(candidate)}
+                                    className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-teal-600 text-white rounded-lg hover:bg-teal-700 text-sm"
+                                >
+                                    <FileText className="w-4 h-4" />
+                                    Generar informe psicolaboral
+                                </button>
+                            )}
                             {displayCandidate.history && displayCandidate.history.length > 0 && (
                                 <div>
                                     <label className="text-sm font-medium text-gray-500">Historial</label>
@@ -282,7 +300,9 @@ const BulkActionsFAB: React.FC<{
     onWhatsApp: () => void;
     onEmail: () => void;
     onBulkSchedule: () => void;
-}> = ({ selectedIds, onApprove, onReject, onArchive, onWebhook, onDelete, onWhatsApp, onEmail, onBulkSchedule }) => {
+    onPsychReport?: () => void;
+    showPsychReport?: boolean;
+}> = ({ selectedIds, onApprove, onReject, onArchive, onWebhook, onDelete, onWhatsApp, onEmail, onBulkSchedule, onPsychReport, showPsychReport }) => {
     const [isOpen, setIsOpen] = useState(false);
     if (selectedIds.length === 0) return null;
     return (
@@ -301,6 +321,11 @@ const BulkActionsFAB: React.FC<{
                     <button onClick={() => { onBulkSchedule(); setIsOpen(false); }} className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg shadow-lg hover:bg-indigo-700 transition-colors">
                         <Calendar className="w-4 h-4" /> Agendar Entrevista ({selectedIds.length})
                     </button>
+                    {showPsychReport && onPsychReport && (
+                    <button onClick={() => { onPsychReport(); setIsOpen(false); }} className="flex items-center gap-2 px-4 py-2 bg-teal-600 text-white rounded-lg shadow-lg hover:bg-teal-700 transition-colors">
+                        <FileText className="w-4 h-4" /> Informe Psicolaboral ({selectedIds.length})
+                    </button>
+                    )}
                     <button onClick={() => { onWhatsApp(); setIsOpen(false); }} className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg shadow-lg hover:bg-green-700 transition-colors">
                         <MessageCircle className="w-4 h-4" /> WhatsApp ({selectedIds.length})
                     </button>
@@ -372,6 +397,10 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
     const isDraggingCells = useRef(false);
     const dragAnchorCell = useRef<CellCoord | null>(null);
     const didDragSelect = useRef(false);
+    const [psychInventory, setPsychInventory] = useState<PsycholaboralInventory>(createDefaultPsycholaboralInventory());
+    const [showPsychReportModal, setShowPsychReportModal] = useState(false);
+    const [showPsychInventoryModal, setShowPsychInventoryModal] = useState(false);
+    const [psychReportCandidates, setPsychReportCandidates] = useState<BulkCandidate[]>([]);
 
     const pageSize = 50;
 
@@ -379,6 +408,21 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
         if (!selectedProcess) return undefined;
         return bulkProcesses.find(p => p.id === selectedProcess);
     }, [selectedProcess, bulkProcesses]);
+
+    const psycholaboralActive = useMemo(
+        () => isPsycholaboralEnabled(process?.bulkConfig?.psycholaboral),
+        [process?.bulkConfig?.psycholaboral]
+    );
+
+    useEffect(() => {
+        psycholaboralApi.getInventory().then(setPsychInventory).catch(() => {});
+    }, []);
+
+    const openPsychReport = useCallback((list: BulkCandidate[]) => {
+        if (!process || list.length === 0) return;
+        setPsychReportCandidates(list);
+        setShowPsychReportModal(true);
+    }, [process]);
 
     const baseColumns = BASE_COLUMNS;
     const allColumnIds = useMemo(
@@ -1888,6 +1932,35 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                         <Settings className="w-4 h-4" />
                                         Plantillas
                                     </button>
+                                    {psycholaboralActive && (
+                                        <>
+                                            <button
+                                                type="button"
+                                                onClick={() => setShowPsychInventoryModal(true)}
+                                                className="flex items-center gap-2 px-4 py-2 bg-gray-100 text-gray-800 border border-gray-300 rounded-lg hover:bg-gray-200 transition-colors"
+                                                title="Inventario de definiciones y plantillas"
+                                            >
+                                                <BookOpen className="w-4 h-4" />
+                                                Inventario Psicolaboral
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={() => {
+                                                    const sel = candidates.filter(c => selectedIds.has(c.id));
+                                                    if (sel.length === 0) {
+                                                        actions.showToast('Seleccione al menos un candidato', 'error', 3000);
+                                                        return;
+                                                    }
+                                                    openPsychReport(sel);
+                                                }}
+                                                className="flex items-center gap-2 px-4 py-2 bg-teal-600 text-white rounded-lg hover:bg-teal-700 transition-colors"
+                                                title="Evaluar y generar informe PDF"
+                                            >
+                                                <FileText className="w-4 h-4" />
+                                                Informe Psicolaboral
+                                            </button>
+                                        </>
+                                    )}
                                     <div className="relative">
                                         <button
                                             onClick={() => setShowColumnConfig(!showColumnConfig)}
@@ -2604,6 +2677,10 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                 onWhatsApp={() => setShowWhatsAppModal(true)}
                 onEmail={() => setShowEmailModal(true)}
                 onBulkSchedule={() => setShowBulkScheduleModal(true)}
+                showPsychReport={psycholaboralActive}
+                onPsychReport={() =>
+                    openPsychReport(candidates.filter(c => selectedIds.has(c.id)))
+                }
             />
 
             <CandidateDrawer
@@ -2618,6 +2695,8 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                     setDrawerCandidate(details);
                 }}
                 process={process}
+                showPsychReport={psycholaboralActive}
+                onPsychReport={c => openPsychReport([c])}
             />
 
             {showProcessModal && (
@@ -2725,6 +2804,27 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                     onClose={() => setShowTemplateModal(false)}
                     currentColumns={customColumns}
                     onLoadTemplate={handleLoadTemplate}
+                />
+            )}
+
+            {showPsychInventoryModal && (
+                <PsycholaboralInventoryModal
+                    isOpen={showPsychInventoryModal}
+                    onClose={() => setShowPsychInventoryModal(false)}
+                    onSaved={setPsychInventory}
+                />
+            )}
+
+            {showPsychReportModal && process && psychReportCandidates.length > 0 && (
+                <PsycholaboralReportModal
+                    isOpen={showPsychReportModal}
+                    onClose={() => {
+                        setShowPsychReportModal(false);
+                        setPsychReportCandidates([]);
+                    }}
+                    candidates={psychReportCandidates}
+                    process={process}
+                    inventory={psychInventory}
                 />
             )}
         </div>
