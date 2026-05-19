@@ -15,11 +15,7 @@ import {
     mergePsycholaboralInventory,
 } from '../lib/psycholaboralUtils';
 
-/** Imagen de acento muy baja altura si no hay foto de proceso/settings (opcional). */
-export const DEFAULT_PSYCHOLABORAL_HERO =
-    'https://images.unsplash.com/photo-1522071820081-009f0129c71c?w=900&q=80&auto=format&fit=crop';
-
-/** Ancho lógico A4 (~210mm @ 96dpi). */
+/** Ancho lógico tipo A4 ancho (~210mm); el PDF escala manteniendo proporción para caber en 1 página. */
 const PAGE_W = 794;
 
 export interface PsycholaboralReportDocumentProps {
@@ -28,10 +24,14 @@ export interface PsycholaboralReportDocumentProps {
     evaluation: PsycholaboralEvaluation;
     competencies: PsycholaboralCompetency[];
     inventory: PsycholaboralInventory;
+    /** Logo "Powered by" (Opalo) — prioridad sobre logo de empresa. */
+    poweredByLogoUrl?: string | null;
+    /** Logo empresa (solo si no hay powered by). */
     logoUrl?: string;
     companyName?: string;
     primaryColor?: string;
     accentColor?: string;
+    /** Desactivados en layout compacto (ahorra altura vertical). */
     heroImageUrl?: string | null;
     introText?: string | null;
     closingText?: string | null;
@@ -43,15 +43,28 @@ const SUITABILITY_STYLES: Record<
     { bg: string; text: string; label: string }
 > = {
     apto: { bg: '#dcfce7', text: '#166534', label: 'APTO' },
-    apto_reservas: { bg: '#fef9c3', text: '#854d0e', label: 'APTO CON RESERVAS' },
+    apto_reservas: { bg: '#fef9c3', text: '#854d0e', label: 'RESERVAS' },
     no_apto: { bg: '#fee2e2', text: '#991b1b', label: 'NO APTO' },
 };
 
 const LEVEL_COLORS: Record<PersonalityLevel, string> = {
-    bajo: '#f97316',
-    promedio: '#3b82f6',
-    alto: '#10b981',
+    bajo: '#ea580c',
+    promedio: '#2563eb',
+    alto: '#059669',
 };
+
+const LEVEL_SHORT: Record<PersonalityLevel, string> = {
+    bajo: 'Baj.',
+    promedio: 'Prom.',
+    alto: 'Alt.',
+};
+
+function clampInterpretation(raw: string | undefined): string {
+    if (!raw) return '—';
+    const t = raw.replace(/\s+/g, ' ').trim();
+    if (t.length <= 240) return t;
+    return `${t.slice(0, 237)}…`;
+}
 
 export const PsycholaboralReportDocument = React.forwardRef<
     HTMLDivElement,
@@ -63,12 +76,12 @@ export const PsycholaboralReportDocument = React.forwardRef<
         evaluation,
         competencies,
         inventory: rawInventory,
+        poweredByLogoUrl,
         logoUrl,
         companyName = 'Opalo',
         primaryColor = '#0f766e',
-        accentColor = '#4f46e5',
-        heroImageUrl,
-        introText,
+        accentColor = '#4338ca',
+        introText: introTextProp,
         closingText,
         footerLegalText,
     },
@@ -93,18 +106,26 @@ export const PsycholaboralReportDocument = React.forwardRef<
         ? formatearFechaPeruana(evaluation.reportDate)
         : formatearFechaPeruana();
 
-    const resolvedHeroAccent =
-        (heroImageUrl && heroImageUrl.trim()) ||
-        (process?.flyerUrl && process.flyerUrl.trim()) ||
-        DEFAULT_PSYCHOLABORAL_HERO;
+    const headerLogoSrc = ((poweredByLogoUrl ?? '').trim() || (logoUrl ?? '').trim() || '').trim();
 
-    const resolvedIntro =
-        (introText && introText.trim()) ||
-        'Documento sintético para apoyar una decisión informada. Revise todas las áreas antes de cerrar valoración.';
+    /** Intro muy corto si lo configuran; si no, una sola línea para no ocupar bloque alto. */
+    const introOverlay =
+        (introTextProp && introTextProp.trim()) ||
+        'Resultado sintético; complementar con otros criterios de selección.';
+    const shortIntro =
+        introOverlay.length > 95 ? `${introOverlay.slice(0, 92).trim()}…` : introOverlay;
 
     const closingLine =
-        (closingText && closingText.trim()) ||
-        'Documento elaborado con criterios técnicos; combine este resultado con otros insumos de selección.';
+        (closingText && closingText.trim()) || 'Combinar con otros insumos técnicos y de proceso.';
+
+    const fs = {
+        nano: 5.5,
+        micro: 6,
+        sm: 6.75,
+        body: 7.25,
+        title: 11,
+        sub: 7.75,
+    } as const;
 
     return (
         <div
@@ -113,121 +134,79 @@ export const PsycholaboralReportDocument = React.forwardRef<
                 width: PAGE_W,
                 maxWidth: PAGE_W,
                 minHeight: 0,
-                fontFamily: "'Segoe UI', system-ui, -apple-system, sans-serif",
-                color: '#1e293b',
-                background: '#ffffff',
-                lineHeight: 1.35,
+                fontFamily: "'Segoe UI', system-ui, sans-serif",
+                color: '#0f172a',
+                background: '#fff',
+                lineHeight: 1.22,
                 boxSizing: 'border-box',
                 display: 'flex',
                 flexDirection: 'column',
+                overflow: 'hidden',
             }}
         >
-            {/* Barra superior: logo Opalo visible + titular */}
+            {/* Cabecera mínima: sin hero ni gradientes grandes */}
             <header
                 style={{
                     flexShrink: 0,
                     display: 'flex',
-                    alignItems: 'stretch',
-                    gap: 0,
-                    borderBottom: `3px solid ${primaryColor}`,
-                    minHeight: 68,
-                    background: `linear-gradient(90deg, ${primaryColor}12 0%, #fff 28%, ${accentColor}08 100%)`,
+                    alignItems: 'center',
+                    gap: 8,
+                    padding: '4px 8px',
+                    borderBottom: `2px solid ${primaryColor}`,
+                    background: '#fff',
                 }}
             >
-                <div
-                    style={{
-                        width: '28%',
-                        minWidth: 200,
-                        backgroundImage: `linear-gradient(165deg, ${primaryColor}d9 0%, ${accentColor}b8 85%), url(${resolvedHeroAccent})`,
-                        backgroundSize: 'cover',
-                        backgroundPosition: 'center center',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        padding: 10,
-                    }}
-                >
-                    <div
-                        style={{
-                            background: '#ffffff',
-                            borderRadius: 8,
-                            padding: '8px 12px',
-                            boxShadow: '0 4px 14px rgba(0,0,0,0.12)',
-                        }}
-                    >
-                        {logoUrl ? (
-                            <img
-                                src={logoUrl}
-                                alt=""
-                                style={{
-                                    height: 36,
-                                    maxWidth: 160,
-                                    width: 'auto',
-                                    display: 'block',
-                                    objectFit: 'contain',
-                                }}
-                                crossOrigin="anonymous"
-                            />
-                        ) : (
-                            <span style={{ fontSize: 16, fontWeight: 800, color: primaryColor }}>{companyName}</span>
-                        )}
-                    </div>
+                <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', minWidth: 72 }}>
+                    {headerLogoSrc ? (
+                        <img
+                            src={headerLogoSrc}
+                            alt=""
+                            style={{
+                                height: 22,
+                                maxWidth: 100,
+                                width: 'auto',
+                                display: 'block',
+                                objectFit: 'contain',
+                            }}
+                            crossOrigin="anonymous"
+                        />
+                    ) : (
+                        <span style={{ fontSize: fs.sub, fontWeight: 800, color: primaryColor }}>Opalo</span>
+                    )}
                 </div>
-                <div
-                    style={{
-                        flex: 1,
-                        padding: '10px 14px',
-                        display: 'flex',
-                        flexDirection: 'column',
-                        justifyContent: 'center',
-                        gap: 4,
-                    }}
-                >
+                <div style={{ flex: 1, minWidth: 0 }}>
+                    <h1 style={{ margin: 0, fontSize: fs.title, fontWeight: 800, lineHeight: 1.08 }}>
+                        INFORME PSICOLABORAL
+                    </h1>
+                    <p style={{ margin: '1px 0 0', fontSize: fs.sm, color: '#475569', fontWeight: 600 }}>
+                        {candidate.name} · {position || '—'} · {reportDate}
+                        {companyName ? ` · ${companyName}` : ''}
+                    </p>
                     <p
                         style={{
-                            margin: 0,
-                            fontSize: 9,
-                            letterSpacing: '0.12em',
-                            textTransform: 'uppercase',
+                            margin: '2px 0 0',
+                            fontSize: fs.micro,
                             color: '#64748b',
-                            fontWeight: 700,
+                            lineHeight: 1.25,
                         }}
                     >
-                        {companyName}
-                    </p>
-                    <h1
-                        style={{
-                            margin: 0,
-                            fontSize: 15,
-                            fontWeight: 800,
-                            color: '#0f172a',
-                            lineHeight: 1.2,
-                        }}
-                    >
-                        INFORME DE EVALUACIÓN PSICOLABORAL
-                    </h1>
-                    <p style={{ margin: 0, fontSize: 10, color: '#475569', fontWeight: 600 }}>
-                        {candidate.name} · {position || 'Evaluación'} · {reportDate}
-                    </p>
-                    <p style={{ margin: 0, fontSize: 9, color: '#64748b', fontStyle: 'italic', lineHeight: 1.4 }}>
-                        {resolvedIntro}
+                        {shortIntro}
                     </p>
                 </div>
-                <div style={{ alignSelf: 'center', paddingRight: 12, flexShrink: 0 }}>
+                <div style={{ flexShrink: 0 }}>
                     <span
                         style={{
                             display: 'block',
                             background: suitStyle.bg,
                             color: suitStyle.text,
-                            padding: '8px 12px',
-                            borderRadius: 8,
+                            padding: '3px 6px',
+                            borderRadius: 3,
                             fontWeight: 800,
-                            fontSize: 11,
+                            fontSize: fs.sm,
                             textAlign: 'center',
-                            lineHeight: 1.15,
-                            maxWidth: 120,
-                            boxSizing: 'border-box',
-                            border: `1px solid ${suitStyle.text}33`,
+                            lineHeight: 1.05,
+                            border: `1px solid ${suitStyle.text}40`,
+                            whiteSpace: 'nowrap',
                         }}
                     >
                         {suitStyle.label}
@@ -238,33 +217,32 @@ export const PsycholaboralReportDocument = React.forwardRef<
             <main
                 style={{
                     flex: '0 0 auto',
-                    padding: '8px 10px 10px',
+                    padding: '5px 6px 6px',
                     display: 'flex',
                     flexDirection: 'column',
-                    gap: 6,
-                    fontSize: 9,
+                    gap: 4,
+                    fontSize: fs.body,
                 }}
             >
-                {/* Fila datos + foto */}
                 <section
                     style={{
                         display: 'flex',
-                        gap: 8,
-                        alignItems: 'stretch',
+                        gap: 6,
+                        alignItems: 'center',
                         background: '#f8fafc',
                         border: '1px solid #e2e8f0',
-                        borderRadius: 8,
-                        padding: 8,
+                        borderRadius: 3,
+                        padding: '4px 6px',
                     }}
                 >
                     <div
                         style={{
-                            width: 52,
-                            height: 52,
-                            borderRadius: 6,
+                            width: 32,
+                            height: 32,
+                            borderRadius: 3,
                             overflow: 'hidden',
                             flexShrink: 0,
-                            background: `#e2e8f0`,
+                            background: '#e2e8f0',
                             display: 'flex',
                             alignItems: 'center',
                             justifyContent: 'center',
@@ -278,7 +256,7 @@ export const PsycholaboralReportDocument = React.forwardRef<
                                 crossOrigin="anonymous"
                             />
                         ) : (
-                            <span style={{ fontSize: 20, fontWeight: 700, color: primaryColor }}>
+                            <span style={{ fontSize: 13, fontWeight: 700, color: primaryColor }}>
                                 {candidate.name.charAt(0).toUpperCase()}
                             </span>
                         )}
@@ -288,20 +266,18 @@ export const PsycholaboralReportDocument = React.forwardRef<
                             flex: 1,
                             display: 'grid',
                             gridTemplateColumns: 'repeat(4, minmax(0, 1fr))',
-                            gap: '4px 10px',
+                            gap: '2px 6px',
                         }}
                     >
                         {[
                             ['Nombre', candidate.name],
                             ['DNI', candidate.dni || '—'],
                             ['Edad', candidate.age ? `${candidate.age}` : '—'],
-                            ['Puesto', position],
+                            ['Puesto', position || '—'],
                         ].map(([k, v]) => (
                             <div key={String(k)}>
-                                <div style={{ fontSize: 7, color: '#64748b', textTransform: 'uppercase', fontWeight: 700 }}>
-                                    {k}
-                                </div>
-                                <div style={{ fontSize: 9, fontWeight: 600 }}>{String(v)}</div>
+                                <div style={{ fontSize: fs.nano, color: '#64748b', fontWeight: 700 }}>{k}</div>
+                                <div style={{ fontSize: fs.sm, fontWeight: 600, lineHeight: 1.15 }}>{String(v)}</div>
                             </div>
                         ))}
                     </div>
@@ -311,15 +287,15 @@ export const PsycholaboralReportDocument = React.forwardRef<
                     style={{
                         display: 'grid',
                         gridTemplateColumns: '1fr 1fr',
-                        gap: 8,
+                        gap: 5,
                         alignItems: 'start',
                         minHeight: 0,
                     }}
                 >
                     {/* Columna izquierda */}
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6, minWidth: 0 }}>
-                        <BlockTitle n={1} title="Nivel intelectual" color={primaryColor} />
-                        <div style={{ display: 'flex', gap: 3 }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0 }}>
+                        <BlockTitle n={1} title="Nivel intelectual" color={primaryColor} compact />
+                        <div style={{ display: 'flex', gap: 2 }}>
                             {inventory.intellectualLevels.map(level => {
                                 const active = level.id === evaluation.intellectualLevelId;
                                 return (
@@ -328,45 +304,69 @@ export const PsycholaboralReportDocument = React.forwardRef<
                                         style={{
                                             flex: 1,
                                             textAlign: 'center',
-                                            padding: '4px 2px',
-                                            borderRadius: 4,
+                                            padding: '2px 1px',
+                                            borderRadius: 2,
                                             background: active ? primaryColor : '#f1f5f9',
                                             color: active ? '#fff' : '#64748b',
-                                            fontSize: 7,
+                                            fontSize: fs.nano,
                                             fontWeight: active ? 700 : 600,
-                                            lineHeight: 1.2,
+                                            lineHeight: 1.1,
                                         }}
                                     >
                                         <div>{level.name}</div>
-                                        <div style={{ fontSize: 6, opacity: 0.9 }}>{level.scoreRange}</div>
+                                        <div style={{ fontSize: 5.5, opacity: 0.92 }}>{level.scoreRange}</div>
                                     </div>
                                 );
                             })}
                         </div>
                         <div
                             style={{
-                                fontSize: 8,
+                                fontSize: fs.sm,
                                 color: '#334155',
-                                borderLeft: `3px solid ${primaryColor}`,
-                                padding: '6px 8px',
+                                borderLeft: `2px solid ${primaryColor}`,
+                                padding: '3px 5px',
                                 background: '#fafafa',
-                                lineHeight: 1.38,
+                                lineHeight: 1.26,
+                                maxHeight: 44,
+                                overflow: 'hidden',
                             }}
                         >
-                            {intellectual?.interpretation}
+                            {clampInterpretation(intellectual?.interpretation)}
                         </div>
 
-                        <BlockTitle n={2} title="Recursos de personalidad" color={accentColor} />
-                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 8 }}>
+                        <BlockTitle n={2} title="Personalidad" color={accentColor} compact />
+                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: fs.micro }}>
                             <thead>
                                 <tr style={{ background: '#f1f5f9' }}>
-                                    <th style={{ padding: '3px', textAlign: 'left', border: '1px solid #e2e8f0' }}>
+                                    <th
+                                        style={{
+                                            padding: '1px 3px',
+                                            textAlign: 'left',
+                                            border: '1px solid #e2e8f0',
+                                            fontSize: fs.nano,
+                                        }}
+                                    >
                                         Rasgo
                                     </th>
-                                    <th style={{ padding: '3px', textAlign: 'center', border: '1px solid #e2e8f0' }}>
+                                    <th
+                                        style={{
+                                            padding: '1px 2px',
+                                            textAlign: 'center',
+                                            border: '1px solid #e2e8f0',
+                                            width: 44,
+                                            fontSize: fs.nano,
+                                        }}
+                                    >
                                         Nivel
                                     </th>
-                                    <th style={{ padding: '3px', textAlign: 'left', border: '1px solid #e2e8f0' }}>
+                                    <th
+                                        style={{
+                                            padding: '1px 3px',
+                                            textAlign: 'left',
+                                            border: '1px solid #e2e8f0',
+                                            fontSize: fs.nano,
+                                        }}
+                                    >
                                         Obs.
                                     </th>
                                 </tr>
@@ -379,28 +379,33 @@ export const PsycholaboralReportDocument = React.forwardRef<
                                         <tr key={trait.id}>
                                             <td
                                                 style={{
-                                                    padding: '3px',
+                                                    padding: '1px 3px',
                                                     border: '1px solid #e2e8f0',
                                                     verticalAlign: 'top',
+                                                    lineHeight: 1.12,
+                                                    fontWeight: 600,
+                                                    fontSize: fs.micro,
                                                 }}
                                             >
-                                                <strong>{trait.name}</strong>
-                                                <div style={{ fontSize: 7, color: '#64748b' }}>{trait.definition}</div>
+                                                {trait.name}
                                             </td>
                                             <td
                                                 style={{
-                                                    padding: '3px',
+                                                    padding: '1px 2px',
                                                     border: '1px solid #e2e8f0',
                                                     textAlign: 'center',
                                                     color: LEVEL_COLORS[level],
                                                     fontWeight: 700,
-                                                    textTransform: 'capitalize',
+                                                    fontSize: fs.micro,
+                                                    whiteSpace: 'nowrap',
                                                 }}
                                             >
-                                                {level}
+                                                {LEVEL_SHORT[level]}
                                             </td>
-                                            <td style={{ padding: '3px', border: '1px solid #e2e8f0', fontSize: 7 }}>
-                                                {rating?.observations || '—'}
+                                            <td style={{ padding: '1px 3px', border: '1px solid #e2e8f0', fontSize: fs.nano }}>
+                                                {rating?.observations?.trim()
+                                                    ? truncate(rating.observations, 72)
+                                                    : '—'}
                                             </td>
                                         </tr>
                                     );
@@ -410,103 +415,64 @@ export const PsycholaboralReportDocument = React.forwardRef<
                     </div>
 
                     {/* Columna derecha */}
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6, minWidth: 0 }}>
-                        <BlockTitle n={3} title="Competencias psicolaborales" color={primaryColor} />
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0 }}>
+                        <BlockTitle n={3} title="Competencias" color={primaryColor} compact />
                         <div
                             style={{
-                                display: 'flex',
-                                alignItems: 'center',
-                                gap: 10,
-                                padding: '6px 10px',
+                                padding: '3px 5px',
                                 background: `#f8fafc`,
-                                borderRadius: 6,
-                                border: `1px solid ${primaryColor}33`,
+                                borderRadius: 2,
+                                border: `1px solid ${primaryColor}40`,
+                                fontSize: fs.sm,
+                                fontWeight: 700,
+                                lineHeight: 1.2,
                             }}
                         >
-                            <div
-                                style={{
-                                    width: 44,
-                                    height: 44,
-                                    borderRadius: '50%',
-                                    background: `conic-gradient(${primaryColor} ${percentage * 3.6}deg, #e2e8f0 0deg)`,
-                                    flexShrink: 0,
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    justifyContent: 'center',
-                                }}
-                            >
-                                <div
-                                    style={{
-                                        width: 34,
-                                        height: 34,
-                                        borderRadius: '50%',
-                                        background: '#fff',
-                                        display: 'flex',
-                                        alignItems: 'center',
-                                        justifyContent: 'center',
-                                        fontWeight: 800,
-                                        fontSize: 11,
-                                        color: primaryColor,
-                                    }}
-                                >
-                                    {percentage}%
-                                </div>
-                            </div>
-                            <div>
-                                <div style={{ fontWeight: 700, fontSize: 9 }}>{totalObtained} / {totalExpected}</div>
-                                <div style={{ fontSize: 7, color: '#64748b' }}>Pts. obt. vs esperado · escala 1–9</div>
-                            </div>
+                            {percentage}% cumplimiento · {totalObtained}/{totalExpected} pts. (esp. máx.)
                         </div>
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                             {competencies.map(comp => {
                                 const rating = evaluation.competencies.find(r => r.competencyId === comp.id);
                                 const obtained = rating?.obtainedScore ?? 0;
-                                const pct = Math.min(100, (obtained / 9) * 100);
                                 const levelLabel = getCompetencyLevelLabel(obtained);
-                                const barColor =
-                                    obtained <= 3 ? '#f97316' : obtained <= 6 ? '#3b82f6' : '#10b981';
                                 return (
-                                    <div key={comp.id}>
-                                        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 6 }}>
-                                            <span style={{ fontSize: 8, fontWeight: 600 }}>
-                                                {comp.name}: <span style={{ fontWeight: 400, fontSize: 7 }}>{comp.definition}</span>
-                                            </span>
-                                            <span style={{ fontSize: 7, color: barColor, fontWeight: 700, whiteSpace: 'nowrap' }}>
-                                                {obtained} / {comp.expectedScore} ({levelLabel})
+                                    <div key={comp.id} style={{ lineHeight: 1.12 }}>
+                                        <div style={{ fontSize: fs.micro, fontWeight: 600 }}>
+                                            <span>{comp.name}</span>
+                                            <span style={{ fontWeight: 500, fontSize: fs.nano, color: '#475569' }}>
+                                                {' · '}
+                                                {obtained}/9 · esp. {comp.expectedScore} ({levelLabel})
                                             </span>
                                         </div>
-                                        <div style={{ height: 4, background: '#e2e8f0', borderRadius: 3, overflow: 'hidden', marginTop: 2 }}>
-                                            <div
-                                                style={{
-                                                    width: `${pct}%`,
-                                                    height: '100%',
-                                                    background: barColor,
-                                                }}
-                                            />
-                                        </div>
-                                        {rating?.observations ? (
-                                            <div style={{ fontSize: 7, color: '#64748b', marginTop: 1 }}>{rating.observations}</div>
+                                        {rating?.observations?.trim() ? (
+                                            <div style={{ fontSize: fs.nano, color: '#64748b', marginTop: 0 }}>
+                                                {truncate(rating.observations, 90)}
+                                            </div>
                                         ) : null}
                                     </div>
                                 );
                             })}
                         </div>
 
-                        <BlockTitle n={4} title="Conclusiones" color={accentColor} />
+                        <BlockTitle n={4} title="Conclusiones" color={accentColor} compact />
                         <div
                             style={{
-                                fontSize: 8,
-                                lineHeight: 1.43,
+                                fontSize: fs.micro,
+                                lineHeight: 1.26,
                                 color: '#334155',
-                                padding: '8px 10px',
-                                borderLeft: `3px solid ${accentColor}`,
+                                padding: '4px 5px',
+                                borderLeft: `2px solid ${accentColor}`,
                                 background: '#fafafa',
                                 textAlign: 'justify',
                                 border: '1px solid #e2e8f0',
-                                borderLeftWidth: 3,
+                                borderLeftWidth: 2,
+                                maxHeight: 120,
+                                overflow: 'hidden',
                             }}
                         >
-                            {evaluation.conclusions || 'Sin conclusiones registradas.'}
+                            {evaluation.conclusions?.trim()
+                                ? evaluation.conclusions.trim()
+                                : 'Sin conclusiones registradas.'}
                         </div>
                     </div>
                 </div>
@@ -515,42 +481,51 @@ export const PsycholaboralReportDocument = React.forwardRef<
             <footer
                 style={{
                     flexShrink: 0,
-                    padding: '6px 12px',
-                    fontSize: 7,
+                    padding: '3px 6px',
+                    fontSize: fs.nano,
                     color: '#64748b',
-                    borderTop: `1px solid #e2e8f0`,
+                    borderTop: '1px solid #e2e8f0',
                     background: '#f8fafc',
+                    lineHeight: 1.2,
+                    textAlign: 'center',
                 }}
             >
-                <div style={{ textAlign: 'center', marginBottom: 4, fontWeight: 600, fontSize: 8 }}>{closingLine}</div>
-                <div style={{ textAlign: 'center' }}>
-                    {['Confidencial', footerLegalText?.trim(), companyName, `Emitido ${reportDate}`].filter(Boolean).join(' · ')}
-                </div>
+                <span style={{ fontWeight: 600 }}>{closingLine}</span>
+                {' · '}
+                {['Conf.', footerLegalText?.trim?.(), companyName, reportDate].filter(Boolean).join(' · ')}
             </footer>
         </div>
     );
 });
 
-function BlockTitle({ n, title, color }: { n: number; title: string; color: string }) {
+function truncate(s: string, maxLen: number): string {
+    const t = s.replace(/\s+/g, ' ').trim();
+    if (t.length <= maxLen) return t;
+    return `${t.slice(0, maxLen - 1)}…`;
+}
+
+function BlockTitle({ n, title, color, compact }: { n: number; title: string; color: string; compact?: boolean }) {
+    const chip = compact ? 14 : 18;
     return (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
             <span
                 style={{
-                    width: 18,
-                    height: 18,
-                    borderRadius: 5,
+                    width: chip,
+                    height: chip,
+                    borderRadius: 3,
                     background: color,
                     color: '#fff',
-                    fontSize: 10,
+                    fontSize: compact ? 8 : 10,
                     fontWeight: 800,
                     display: 'inline-flex',
                     alignItems: 'center',
                     justifyContent: 'center',
+                    flexShrink: 0,
                 }}
             >
                 {n}
             </span>
-            <strong style={{ fontSize: 9, color: '#0f172a' }}>{title}</strong>
+            <strong style={{ fontSize: 7.5, color: '#0f172a' }}>{title}</strong>
         </div>
     );
 }

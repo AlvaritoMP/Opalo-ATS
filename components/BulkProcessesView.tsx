@@ -1911,26 +1911,29 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                     </div>
                 ) : (
                     <>
-                        <div className="flex items-center gap-4">
-                            <button
-                                onClick={() => {
-                                    setSelectedProcess('');
-                                    setCandidates([]);
-                                    setSelectedStage('');
-                                    setSearchQuery('');
-                                }}
-                                className="flex items-center gap-2 text-sm text-gray-600 hover:text-gray-900"
-                            >
-                                <ArrowLeft className="w-4 h-4" />
-                                Volver a procesos
-                            </button>
-                            <div className="flex-1">
-                                <label className="block text-sm font-medium text-gray-700">
+                        <div className="flex flex-col gap-3 w-full min-w-0">
+                            <div className="flex items-center gap-3 min-w-0">
+                                <button
+                                    onClick={() => {
+                                        setSelectedProcess('');
+                                        setCandidates([]);
+                                        setSelectedStage('');
+                                        setSearchQuery('');
+                                    }}
+                                    className="flex items-center gap-2 text-sm text-gray-600 hover:text-gray-900 shrink-0"
+                                >
+                                    <ArrowLeft className="w-4 h-4" />
+                                    Volver a procesos
+                                </button>
+                                <label
+                                    className="block text-sm font-medium text-gray-700 truncate min-w-0"
+                                    title={process?.title}
+                                >
                                     Proceso: {process?.title}
                                 </label>
                             </div>
                             {process && (
-                                <>
+                                <div className="flex flex-wrap items-center gap-2 w-full min-w-0">
                                     <button
                                         onClick={() => handleEditProcess(process)}
                                         className="flex items-center gap-2 px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors"
@@ -1956,6 +1959,51 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                             </span>
                                         )}
                                     </button>
+                                    {psycholaboralActive && (
+                                        <>
+                                            <button
+                                                type="button"
+                                                onClick={() => setShowPsychInventoryModal(true)}
+                                                className="flex items-center gap-2 px-4 py-2 bg-gray-100 text-gray-800 border border-gray-300 rounded-lg hover:bg-gray-200 transition-colors"
+                                                title="Inventario de definiciones y plantillas"
+                                            >
+                                                <BookOpen className="w-4 h-4" />
+                                                Inventario Psicolaboral
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={() => {
+                                                    const sel = candidates.filter(c => selectedIds.has(c.id));
+                                                    if (sel.length === 0) {
+                                                        actions.showToast('Seleccione al menos un candidato', 'error', 3000);
+                                                        return;
+                                                    }
+                                                    openPsychBulkEvaluate(sel);
+                                                }}
+                                                className="flex items-center gap-2 px-4 py-2 bg-cyan-700 text-white rounded-lg hover:bg-cyan-800 transition-colors whitespace-nowrap"
+                                                title="Cuadrícula de valores para varios candidatos"
+                                            >
+                                                <ClipboardList className="w-4 h-4 shrink-0" />
+                                                Evaluación masiva
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={() => {
+                                                    const sel = candidates.filter(c => selectedIds.has(c.id));
+                                                    if (sel.length === 0) {
+                                                        actions.showToast('Seleccione al menos un candidato', 'error', 3000);
+                                                        return;
+                                                    }
+                                                    openPsychReport(sel);
+                                                }}
+                                                className="flex items-center gap-2 px-4 py-2 bg-teal-600 text-white rounded-lg hover:bg-teal-700 transition-colors whitespace-nowrap"
+                                                title="Evaluar y generar informe PDF"
+                                            >
+                                                <FileText className="w-4 h-4 shrink-0" />
+                                                Informe Psicolaboral
+                                            </button>
+                                        </>
+                                    )}
                                     <button
                                         onClick={() => setShowImportModal(true)}
                                         className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
@@ -1979,51 +2027,6 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                         <Settings className="w-4 h-4" />
                                         Plantillas
                                     </button>
-                                    {psycholaboralActive && (
-                                        <>
-                                            <button
-                                                type="button"
-                                                onClick={() => setShowPsychInventoryModal(true)}
-                                                className="flex items-center gap-2 px-4 py-2 bg-gray-100 text-gray-800 border border-gray-300 rounded-lg hover:bg-gray-200 transition-colors"
-                                                title="Inventario de definiciones y plantillas"
-                                            >
-                                                <BookOpen className="w-4 h-4" />
-                                                Inventario Psicolaboral
-                                            </button>
-                                            <button
-                                                type="button"
-                                                onClick={() => {
-                                                    const sel = candidates.filter(c => selectedIds.has(c.id));
-                                                    if (sel.length === 0) {
-                                                        actions.showToast('Seleccione al menos un candidato', 'error', 3000);
-                                                        return;
-                                                    }
-                                                    openPsychBulkEvaluate(sel);
-                                                }}
-                                                className="flex items-center gap-2 px-4 py-2 bg-cyan-700 text-white rounded-lg hover:bg-cyan-800 transition-colors"
-                                                title="Cuadrícula de valores para varios candidatos"
-                                            >
-                                                <ClipboardList className="w-4 h-4" />
-                                                Evaluación masiva
-                                            </button>
-                                            <button
-                                                type="button"
-                                                onClick={() => {
-                                                    const sel = candidates.filter(c => selectedIds.has(c.id));
-                                                    if (sel.length === 0) {
-                                                        actions.showToast('Seleccione al menos un candidato', 'error', 3000);
-                                                        return;
-                                                    }
-                                                    openPsychReport(sel);
-                                                }}
-                                                className="flex items-center gap-2 px-4 py-2 bg-teal-600 text-white rounded-lg hover:bg-teal-700 transition-colors"
-                                                title="Evaluar y generar informe PDF"
-                                            >
-                                                <FileText className="w-4 h-4" />
-                                                Informe Psicolaboral
-                                            </button>
-                                        </>
-                                    )}
                                     <div className="relative">
                                         <button
                                             onClick={() => setShowColumnConfig(!showColumnConfig)}
@@ -2094,7 +2097,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                             </div>
                                         )}
                                     </div>
-                                </>
+                                </div>
                             )}
                         </div>
                         

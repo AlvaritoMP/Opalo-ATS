@@ -27,17 +27,24 @@ export async function captureElementToPdf(element: HTMLElement): Promise<Blob> {
     const cw = canvas.width;
     const ch = canvas.height;
 
+    /** Redondear mm para evitar desbordes de coma flotante en algunos visores PDF */
     let drawW = maxW;
     let drawH = (ch * drawW) / cw;
     if (drawH > maxH) {
         drawH = maxH;
         drawW = (cw * drawH) / ch;
     }
+    drawW = Math.floor(drawW * 1000) / 1000;
+    drawH = Math.floor(drawH * 1000) / 1000;
 
     const x = marginMm + (maxW - drawW) / 2;
     const y = marginMm + (maxH - drawH) / 2;
 
     pdf.addImage(imgData, 'PNG', x, y, drawW, drawH, undefined, 'FAST');
+
+    while (pdf.getNumberOfPages() > 1) {
+        pdf.deletePage(pdf.getNumberOfPages());
+    }
 
     return pdf.output('blob');
 }
