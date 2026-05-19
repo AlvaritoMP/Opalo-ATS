@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useAppState } from '../App';
 import { bulkCandidatesApi, BulkCandidate } from '../lib/api/bulkCandidates';
 import { processesApi } from '../lib/api/processes';
-import { Check, X, Loader2, Send, Archive, Search, ChevronDown, ChevronUp, Plus, Edit, Trash2, ArrowLeft, MessageCircle, Phone, Upload, Filter, Mail, Calendar, Settings, ArrowUp, ArrowDown, Pin, FileText, BookOpen } from 'lucide-react';
+import { Check, X, Loader2, Send, Archive, Search, ChevronDown, ChevronUp, Plus, Edit, Trash2, ArrowLeft, MessageCircle, Phone, Upload, Filter, Mail, Calendar, Settings, ArrowUp, ArrowDown, Pin, FileText, BookOpen, Paperclip } from 'lucide-react';
 import { Process, CustomColumn, BulkProcessConfig } from '../types';
 import {
     BASE_COLUMNS,
@@ -46,6 +46,8 @@ import { psycholaboralApi } from '../lib/api/psycholaboral';
 import { createDefaultPsycholaboralInventory } from '../lib/psycholaboralDefaults';
 import { PsycholaboralInventory } from '../types';
 import { isPsycholaboralEnabled } from '../lib/psycholaboralUtils';
+import { BulkProcessCard } from './BulkProcessCard';
+import { BulkProcessAttachmentsModal } from './BulkProcessAttachmentsModal';
 
 interface BulkProcessesViewProps {}
 
@@ -401,6 +403,9 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
     const [showPsychReportModal, setShowPsychReportModal] = useState(false);
     const [showPsychInventoryModal, setShowPsychInventoryModal] = useState(false);
     const [psychReportCandidates, setPsychReportCandidates] = useState<BulkCandidate[]>([]);
+    const [attachmentCounts, setAttachmentCounts] = useState<Record<string, number>>({});
+    const [showProcessDocsModal, setShowProcessDocsModal] = useState(false);
+    const [docsModalProcess, setDocsModalProcess] = useState<Process | null>(null);
 
     const pageSize = 50;
 
@@ -417,6 +422,24 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
     useEffect(() => {
         psycholaboralApi.getInventory().then(setPsychInventory).catch(() => {});
     }, []);
+
+    useEffect(() => {
+        if (bulkProcesses.length === 0) return;
+        const loadCounts = async () => {
+            const counts: Record<string, number> = {};
+            await Promise.all(
+                bulkProcesses.map(async p => {
+                    try {
+                        counts[p.id] = await processesApi.getAttachmentsCount(p.id, p.googleDriveFolderId, state.settings?.googleDrive);
+                    } catch {
+                        counts[p.id] = p.attachments?.length ?? 0;
+                    }
+                })
+            );
+            setAttachmentCounts(counts);
+        };
+        loadCounts();
+    }, [bulkProcesses, state.settings?.googleDrive]);
 
     const openPsychReport = useCallback((list: BulkCandidate[]) => {
         if (!process || list.length === 0) return;
@@ -1842,39 +1865,18 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                         ) : (
                             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                                 {bulkProcesses.map(p => (
-                                    <div
+                                    <BulkProcessCard
                                         key={p.id}
-                                        className="border border-gray-200 rounded-lg p-4 hover:shadow-md transition-shadow cursor-pointer"
-                                        onClick={() => setSelectedProcess(p.id)}
-                                    >
-                                        <div className="flex items-start justify-between mb-2">
-                                            <h3 className="font-semibold text-gray-900">{p.title}</h3>
-                                            <div className="flex gap-1" onClick={(e) => e.stopPropagation()}>
-                                                <button
-                                                    onClick={() => handleEditProcess(p)}
-                                                    className="p-1 text-gray-600 hover:bg-gray-100 rounded transition-colors"
-                                                    title="Editar"
-                                                >
-                                                    <Edit className="w-4 h-4" />
-                                                </button>
-                                                <button
-                                                    onClick={() => handleDeleteProcess(p.id)}
-                                                    className="p-1 text-red-600 hover:bg-red-50 rounded transition-colors"
-                                                    title="Eliminar"
-                                                >
-                                                    <Trash2 className="w-4 h-4" />
-                                                </button>
-                                            </div>
-                                        </div>
-                                        {p.description && (
-                                            <p className="text-sm text-gray-600 mb-2 line-clamp-2">{p.description}</p>
-                                        )}
-                                        <div className="flex items-center gap-4 text-xs text-gray-500">
-                                            <span>{p.stages.length} etapas</span>
-                                            <span>{p.vacancies} vacante{p.vacancies !== 1 ? 's' : ''}</span>
-                                            <span className="capitalize">{p.status}</span>
-                                        </div>
-                                    </div>
+                                        process={p}
+                                        attachmentCount={attachmentCounts[p.id] ?? p.attachments?.length ?? 0}
+                                        onSelect={() => setSelectedProcess(p.id)}
+                                        onEdit={() => handleEditProcess(p)}
+                                        onDelete={() => handleDeleteProcess(p.id)}
+                                        onDocuments={() => {
+                                            setDocsModalProcess(p);
+                                            setShowProcessDocsModal(true);
+                                        }}
+                                    />
                                 ))}
                             </div>
                         )}
@@ -1908,6 +1910,23 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                     >
                                         <Settings className="w-4 h-4" />
                                         Editar Proceso
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            setDocsModalProcess(process);
+                                            setShowProcessDocsModal(true);
+                                        }}
+                                        className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 text-gray-800 rounded-lg hover:bg-gray-50 transition-colors"
+                                        title="Documentos del proceso"
+                                    >
+                                        <Paperclip className="w-4 h-4" />
+                                        Documentos
+                                        {(attachmentCounts[process.id] ?? 0) > 0 && (
+                                            <span className="ml-1 px-1.5 py-0.5 text-xs bg-primary-100 text-primary-700 rounded-full">
+                                                {attachmentCounts[process.id]}
+                                            </span>
+                                        )}
                                     </button>
                                     <button
                                         onClick={() => setShowImportModal(true)}
@@ -2812,6 +2831,21 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                     isOpen={showPsychInventoryModal}
                     onClose={() => setShowPsychInventoryModal(false)}
                     onSaved={setPsychInventory}
+                />
+            )}
+
+            {showProcessDocsModal && docsModalProcess && (
+                <BulkProcessAttachmentsModal
+                    isOpen={showProcessDocsModal}
+                    onClose={() => {
+                        setShowProcessDocsModal(false);
+                        setDocsModalProcess(null);
+                    }}
+                    processId={docsModalProcess.id}
+                    processTitle={docsModalProcess.title}
+                    initialAttachments={docsModalProcess.attachments}
+                    googleDriveFolderId={docsModalProcess.googleDriveFolderId}
+                    googleDriveConfig={state.settings?.googleDrive}
                 />
             )}
 

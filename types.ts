@@ -348,6 +348,12 @@ export interface AppSettings {
         accentColor?: string;  // hex
         coverTitle?: string;
         footerText?: string;
+        /** Imagen de portada del PDF psicolaboral (URL o data URL). Si no hay, se usa la imagen del proceso masivo o una predeterminada. */
+        psycholaboralHeroImageUrl?: string | null;
+        /** Texto breve bajo el título del informe (invita a leer; editable en Configuración). */
+        psycholaboralIntroText?: string | null;
+        /** Frase de cierre del PDF psicolaboral (antes del pie legal). */
+        psycholaboralClosingText?: string | null;
     };
     candidateSources?: string[]; // Opciones configurables para el campo "fuentes" de candidatos
     provinces?: string[]; // Opciones configurables para el campo "provincia" de candidatos

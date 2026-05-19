@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { X, ChevronLeft, ChevronRight, Download, Save, Loader2, RefreshCw } from 'lucide-react';
 import { useAppState } from '../App';
 import { BulkCandidate } from '../lib/api/bulkCandidates';
@@ -11,7 +11,8 @@ import {
     generateConclusionFromTemplate,
     mergePsycholaboralInventory,
 } from '../lib/psycholaboralUtils';
-import { generatePsycholaboralPdf, downloadPsycholaboralPdf } from '../lib/psycholaboralPdf';
+import { captureElementToPdf, downloadPsycholaboralPdf } from '../lib/psycholaboralPdf';
+import { PsycholaboralReportDocument } from './PsycholaboralReportDocument';
 
 interface Props {
     isOpen: boolean;
@@ -40,8 +41,11 @@ export const PsycholaboralReportModal: React.FC<Props> = ({
     const [selectedTemplateId, setSelectedTemplateId] = useState(
         process.bulkConfig?.psycholaboral?.defaultConclusionTemplateId || ''
     );
+    const reportRef = useRef<HTMLDivElement>(null);
 
     const candidate = candidates[index];
+    const primaryColor = state.settings?.reportTheme?.primaryColor || '#0f766e';
+    const accentColor = state.settings?.reportTheme?.accentColor || '#4f46e5';
 
     useEffect(() => {
         if (!isOpen || !candidate) return;
@@ -95,15 +99,9 @@ export const PsycholaboralReportModal: React.FC<Props> = ({
         setGenerating(true);
         try {
             await psycholaboralApi.saveEvaluation(candidate.id, evaluation);
-            const blob = await generatePsycholaboralPdf({
-                candidate,
-                process,
-                evaluation,
-                competencies,
-                inventory,
-                logoUrl: state.settings?.logoUrl,
-                companyName: state.settings?.appName,
-            });
+            if (!reportRef.current) throw new Error('No se pudo preparar el documento');
+            await new Promise(r => setTimeout(r, 400));
+            const blob = await captureElementToPdf(reportRef.current);
             const safeName = candidate.name.replace(/[^a-z0-9_-]/gi, '_');
             downloadPsycholaboralPdf(blob, `informe_psicolaboral_${safeName}.pdf`);
             actions.showToast('PDF generado', 'success', 2500);
@@ -425,6 +423,36 @@ export const PsycholaboralReportModal: React.FC<Props> = ({
                     </button>
                 </div>
             </div>
+
+            {evaluation && candidate && (
+                <div
+                    aria-hidden
+                    style={{
+                        position: 'fixed',
+                        left: -10000,
+                        top: 0,
+                        pointerEvents: 'none',
+                        zIndex: -1,
+                    }}
+                >
+                    <PsycholaboralReportDocument
+                        ref={reportRef}
+                        candidate={candidate}
+                        process={process}
+                        evaluation={evaluation}
+                        competencies={competencies}
+                        inventory={inventory}
+                        logoUrl={state.settings?.logoUrl}
+                        companyName={state.settings?.appName}
+                        primaryColor={primaryColor}
+                        accentColor={accentColor}
+                        heroImageUrl={state.settings?.reportTheme?.psycholaboralHeroImageUrl ?? null}
+                        introText={state.settings?.reportTheme?.psycholaboralIntroText ?? null}
+                        closingText={state.settings?.reportTheme?.psycholaboralClosingText ?? null}
+                        footerLegalText={state.settings?.reportTheme?.footerText ?? null}
+                    />
+                </div>
+            )}
         </div>
     );
 };

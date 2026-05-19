@@ -1,13 +1,22 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useAppState } from '../App';
-import { Process, Stage, ProcessStatus, BulkProcessConfig, KillerQuestion, PsycholaboralInventory } from '../types';
-import { X, Plus, Trash2, GripVertical, Settings, Filter, Brain, MessageCircle } from 'lucide-react';
+import { Process, Stage, ProcessStatus, BulkProcessConfig, KillerQuestion, PsycholaboralInventory, Attachment } from '../types';
+import { X, Plus, Trash2, GripVertical, Settings, Filter, Brain, MessageCircle, Upload, FileText } from 'lucide-react';
 import { processesApi } from '../lib/api/processes';
 import { isScoreIaColumnVisible } from '../lib/bulkTableColumns';
 import { psycholaboralApi } from '../lib/api/psycholaboral';
 import { createDefaultPsycholaboralInventory } from '../lib/psycholaboralDefaults';
 import { PsycholaboralConfigSection } from './PsycholaboralConfigSection';
 import { PsycholaboralInventoryModal } from './PsycholaboralInventoryModal';
+import { googleDriveService } from '../lib/googleDrive';
+
+const fileToBase64 = (file: File): Promise<string> =>
+    new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.readAsDataURL(file);
+        reader.onload = () => resolve(reader.result as string);
+        reader.onerror = reject;
+    });
 
 interface BulkProcessEditorModalProps {
     process: Process | null;
@@ -38,12 +47,46 @@ export const BulkProcessEditorModal: React.FC<BulkProcessEditorModalProps> = ({ 
     const [killerQuestions, setKillerQuestions] = useState<KillerQuestion[]>(process?.bulkConfig?.killerQuestions || []);
     const [psychInventory, setPsychInventory] = useState<PsycholaboralInventory>(createDefaultPsycholaboralInventory());
     const [showPsychInventory, setShowPsychInventory] = useState(false);
+    const [flyerUrl, setFlyerUrl] = useState(process?.flyerUrl || '');
+    const [flyerPosition, setFlyerPosition] = useState(process?.flyerPosition || 'center center');
+    const [attachments, setAttachments] = useState<Attachment[]>(process?.attachments || []);
+    const [isUploadingAttachment, setIsUploadingAttachment] = useState(false);
+    const flyerInputRef = useRef<HTMLInputElement>(null);
+    const attachmentInputRef = useRef<HTMLInputElement>(null);
 
     const scoreIaColumnVisible = isScoreIaColumnVisible(bulkConfig);
 
     useEffect(() => {
         psycholaboralApi.getInventory().then(setPsychInventory).catch(() => {});
     }, []);
+
+    useEffect(() => {
+        setTitle(process?.title || '');
+        setDescription(process?.description || '');
+        setStages(process?.stages?.length ? process.stages : [{ id: `new-${Date.now()}`, name: 'Postulación Inicial' }]);
+        setStatus(process?.status || 'en_proceso');
+        setVacancies(process?.vacancies || 1);
+        setBulkConfig(
+            process?.bulkConfig || {
+                killerQuestions: [],
+                aiPrompt: '',
+                scoreThreshold: 70,
+                whatsappEnabled: true,
+                whatsappMessageTemplate:
+                    'Hola {nombre}, nos interesa tu perfil para el puesto de {puesto}. ¿Tienes disponibilidad para una entrevista?',
+                autoFilterEnabled: true,
+            }
+        );
+        setKillerQuestions(process?.bulkConfig?.killerQuestions || []);
+        setFlyerUrl(process?.flyerUrl || '');
+        setFlyerPosition(process?.flyerPosition || 'center center');
+        setAttachments(process?.attachments || []);
+    }, [process?.id]);
+
+    useEffect(() => {
+        if (!process?.id) return;
+        processesApi.getAttachments(process.id).then(setAttachments).catch(() => {});
+    }, [process?.id]);
 
     const handleAddStage = () => {
         setStages([...stages, { id: `new-${Date.now()}`, name: '' }]);
@@ -61,6 +104,125 @@ export const BulkProcessEditorModal: React.FC<BulkProcessEditorModalProps> = ({ 
         setStages(newStages);
     };
 
+    const handleFlyerUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (file?.type.startsWith('image/')) {
+            const dataUrl = await fileToBase64(file);
+            setFlyerUrl(dataUrl);
+            setFlyerPosition('center center');
+        }
+        if (e.target) e.target.value = '';
+    };
+
+    const handleFlyerAreaClick = (e: React.MouseEvent<HTMLDivElement>) => {
+        if (!flyerUrl) return;
+        const rect = e.currentTarget.getBoundingClientRect();
+        const x = ((e.clientX - rect.left) / rect.width) * 100;
+        const y = ((e.clientY - rect.top) / rect.height) * 100;
+        setFlyerPosition(`${Math.max(0, Math.min(100, x))}% ${Math.max(0, Math.min(100, y))}%`);
+    };
+
+    const handleAttachmentUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+        if (isUploadingAttachment) {
+            if (e.target) e.target.value = '';
+            return;
+        }
+
+        setIsUploadingAttachment(true);
+        const loadingToastId = actions.showToast(`Subiendo ${file.name}...`, 'loading', 0);
+
+        try {
+            let attachmentUrl: string;
+            const gdc = state.settings?.googleDrive;
+            const folderId = process?.googleDriveFolderId;
+            if (gdc?.connected && gdc?.accessToken && folderId) {
+                try {
+                    googleDriveService.initialize(gdc);
+                    const uploaded = await googleDriveService.uploadFile(
+                        file,
+                        folderId,
+                        `proceso_masivo_${title || 'sin_titulo'}_${file.name}`
+                    );
+                    attachmentUrl =
+                        uploaded.webViewLink || `https://drive.google.com/file/d/${uploaded.id}/preview`;
+                } catch {
+                    attachmentUrl = await fileToBase64(file);
+                }
+            } else {
+                attachmentUrl = await fileToBase64(file);
+            }
+
+            const isExistingProcess =
+                !!process?.id && !process.id.startsWith('temp-');
+
+            if (isExistingProcess) {
+                const { attachmentsApi } = await import('../lib/api');
+                const saved = await attachmentsApi.create(
+                    {
+                        name: file.name,
+                        url: attachmentUrl,
+                        type: file.type,
+                        size: file.size,
+                        processId: process!.id,
+                    } as any,
+                    state.currentUser?.id
+                );
+                setAttachments(prev => [
+                    ...prev,
+                    {
+                        id: saved.id,
+                        name: saved.name,
+                        url: saved.url,
+                        type: saved.type,
+                        size: saved.size,
+                        uploadedAt: saved.uploadedAt,
+                    },
+                ]);
+                actions.showToast(`Documento "${file.name}" guardado`, 'success', 3000);
+            } else {
+                setAttachments(prev => [
+                    ...prev,
+                    {
+                        id: `temp-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+                        name: file.name,
+                        url: attachmentUrl,
+                        type: file.type,
+                        size: file.size,
+                        uploadedAt: new Date().toISOString(),
+                    },
+                ]);
+                actions.showToast(
+                    `Documento agregado — se guardará al crear el proceso`,
+                    'success',
+                    3500
+                );
+            }
+        } catch (error: any) {
+            console.error(error);
+            actions.showToast(error.message || 'Error al subir el documento', 'error', 5000);
+        } finally {
+            actions.hideToast(loadingToastId);
+            setIsUploadingAttachment(false);
+            if (e.target) e.target.value = '';
+        }
+    };
+
+    const handleDeleteAttachment = async (id: string) => {
+        const isPersisted = !!process?.id && !id.startsWith('temp-');
+        if (isPersisted) {
+            try {
+                const { attachmentsApi } = await import('../lib/api');
+                await attachmentsApi.delete(id);
+            } catch (error: any) {
+                actions.showToast(error.message || 'Error al eliminar documento', 'error', 4000);
+                return;
+            }
+        }
+        setAttachments(prev => prev.filter(a => a.id !== id));
+    };
+
     const handleSave = async () => {
         if (!title.trim()) {
             actions.showToast('El título es requerido', 'error', 3000);
@@ -74,16 +236,20 @@ export const BulkProcessEditorModal: React.FC<BulkProcessEditorModalProps> = ({ 
 
         setIsSaving(true);
         try {
-            const processData: Omit<Process, 'id'> = {
+            const stagesPayload = stages.map((s, index) => ({
+                id: s.id.startsWith('new-') ? `stage-${Date.now()}-${index}` : s.id,
+                name: s.name.trim(),
+            }));
+
+            const processPayload: Omit<Process, 'id'> = {
                 title: title.trim(),
                 description: description.trim(),
-                stages: stages.map((s, index) => ({
-                    id: s.id.startsWith('new-') ? `stage-${Date.now()}-${index}` : s.id,
-                    name: s.name.trim(),
-                })),
+                stages: stagesPayload,
                 status,
                 vacancies,
-                attachments: [],
+                attachments,
+                flyerUrl: flyerUrl || undefined,
+                flyerPosition: flyerPosition || undefined,
                 isBulkProcess: true,
                 bulkConfig: {
                     ...bulkConfig,
@@ -91,11 +257,11 @@ export const BulkProcessEditorModal: React.FC<BulkProcessEditorModalProps> = ({ 
                 },
             };
 
-            if (process) {
-                await processesApi.update({ ...process, ...processData });
+            if (process?.id) {
+                await processesApi.update(process.id, processPayload);
                 actions.showToast('Proceso masivo actualizado', 'success', 3000);
             } else {
-                await processesApi.create(processData);
+                await processesApi.create(processPayload);
                 actions.showToast('Proceso masivo creado', 'success', 3000);
             }
 
@@ -111,7 +277,7 @@ export const BulkProcessEditorModal: React.FC<BulkProcessEditorModalProps> = ({ 
 
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
-            <div className="bg-white rounded-lg shadow-xl w-full max-w-3xl max-h-[90vh] overflow-y-auto m-4">
+            <div className="bg-white rounded-lg shadow-xl w-full max-w-4xl max-h-[90vh] overflow-y-auto m-4">
                 <div className="sticky top-0 bg-white border-b px-6 py-4 flex items-center justify-between z-10">
                     <h2 className="text-xl font-semibold text-gray-900">
                         {process ? 'Editar Proceso Masivo' : 'Nuevo Proceso Masivo'}
@@ -177,6 +343,113 @@ export const BulkProcessEditorModal: React.FC<BulkProcessEditorModalProps> = ({ 
                                     rows={3}
                                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
                                 />
+                            </div>
+
+                            <div className="border border-gray-200 rounded-lg p-4 space-y-3">
+                                <label className="block text-sm font-medium text-gray-700">
+                                    Imagen de portada (tarjeta del proceso)
+                                </label>
+                                <p className="text-xs text-gray-500">
+                                    Como en procesos normales: se muestra en la tarjeta del proceso masivo. Clic en la vista previa para ajustar el encuadre.
+                                </p>
+                                {flyerUrl ? (
+                                    <div
+                                        role="button"
+                                        tabIndex={0}
+                                        onClick={handleFlyerAreaClick}
+                                        onKeyDown={ev => ev.key === 'Enter' && flyerInputRef.current?.click()}
+                                        className="h-36 rounded-lg border-2 border-dashed border-gray-300 cursor-crosshair overflow-hidden bg-gray-100"
+                                        style={{
+                                            backgroundImage: `url(${flyerUrl})`,
+                                            backgroundSize: 'cover',
+                                            backgroundPosition: flyerPosition,
+                                        }}
+                                    />
+                                ) : (
+                                    <div className="h-24 rounded-lg border-2 border-dashed border-gray-200 flex items-center justify-center text-sm text-gray-400">
+                                        Sin imagen — se usará una imagen predeterminada
+                                    </div>
+                                )}
+                                <div className="flex flex-wrap gap-2">
+                                    <input
+                                        type="file"
+                                        accept="image/*"
+                                        ref={flyerInputRef}
+                                        onChange={handleFlyerUpload}
+                                        className="hidden"
+                                    />
+                                    <button
+                                        type="button"
+                                        onClick={() => flyerInputRef.current?.click()}
+                                        className="flex items-center gap-2 px-3 py-2 text-sm bg-primary-600 text-white rounded-lg hover:bg-primary-700"
+                                    >
+                                        <Upload className="w-4 h-4" />
+                                        {flyerUrl ? 'Cambiar imagen' : 'Subir imagen'}
+                                    </button>
+                                    {flyerUrl && (
+                                        <button
+                                            type="button"
+                                            onClick={() => setFlyerUrl('')}
+                                            className="px-3 py-2 text-sm text-gray-600 border rounded-lg hover:bg-gray-50"
+                                        >
+                                            Quitar
+                                        </button>
+                                    )}
+                                </div>
+                            </div>
+
+                            <div className="border border-gray-200 rounded-lg p-4 space-y-3">
+                                <label className="block text-sm font-medium text-gray-700">
+                                    Documentación de consulta
+                                </label>
+                                <p className="text-xs text-gray-500">
+                                    Archivos que el equipo puede abrir o descargar desde la tarjeta del proceso (requisitos, formatos, etc.).
+                                    {state.settings?.googleDrive?.connected && process?.googleDriveFolderId
+                                        ? ' Se subirán a la carpeta de Google Drive del proceso cuando sea posible.'
+                                        : ''}
+                                </p>
+                                <input
+                                    type="file"
+                                    ref={attachmentInputRef}
+                                    onChange={handleAttachmentUpload}
+                                    className="hidden"
+                                />
+                                <button
+                                    type="button"
+                                    onClick={() => attachmentInputRef.current?.click()}
+                                    disabled={isUploadingAttachment}
+                                    className="flex items-center gap-2 px-3 py-2 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50"
+                                >
+                                    <FileText className="w-4 h-4" />
+                                    {isUploadingAttachment ? 'Subiendo...' : 'Agregar documento'}
+                                </button>
+                                {attachments.length > 0 && (
+                                    <ul className="divide-y divide-gray-100 border border-gray-100 rounded-lg max-h-40 overflow-y-auto">
+                                        {attachments.map(att => (
+                                            <li
+                                                key={att.id}
+                                                className="flex items-center justify-between gap-2 px-3 py-2 text-sm"
+                                            >
+                                                <a
+                                                    href={att.url}
+                                                    target="_blank"
+                                                    rel="noopener noreferrer"
+                                                    className="text-primary-600 truncate hover:underline"
+                                                >
+                                                    {att.name}
+                                                </a>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => handleDeleteAttachment(att.id)}
+                                                    className="p-1 text-red-600 hover:bg-red-50 rounded shrink-0"
+                                                    title="Eliminar"
+                                                >
+                                                    <Trash2 className="w-4 h-4" />
+                                                </button>
+                                            </li>
+                                        ))}
+                                    </ul>
+                                )}
                             </div>
 
                             <div>

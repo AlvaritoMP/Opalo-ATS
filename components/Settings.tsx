@@ -288,6 +288,90 @@ export const Settings: React.FC = () => {
                                 placeholder="Confidencial - Solo para uso interno"
                             />
                         </div>
+                        <div className="md:col-span-2 border-t border-gray-100 pt-4 mt-2">
+                            <h3 className="text-sm font-semibold text-gray-800 mb-2">Informe psicolaboral (PDF)</h3>
+                            <p className="text-xs text-gray-500 mb-3">
+                                Personalice la portada visual y el mensaje de apertura. Si no sube imagen, se usa la foto del proceso masivo o una imagen profesional predeterminada.
+                            </p>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700">Imagen de portada (opcional)</label>
+                                    <input
+                                        type="file"
+                                        accept="image/*"
+                                        className="mt-1 block w-full text-sm"
+                                        onChange={async e => {
+                                            const f = e.target.files?.[0];
+                                            if (!f || !f.type.startsWith('image/')) return;
+                                            const reader = new FileReader();
+                                            reader.onload = () => {
+                                                const dataUrl = reader.result as string;
+                                                setSettings({
+                                                    ...settings,
+                                                    reportTheme: {
+                                                        ...(settings.reportTheme || {}),
+                                                        psycholaboralHeroImageUrl: dataUrl,
+                                                    },
+                                                });
+                                            };
+                                            reader.readAsDataURL(f);
+                                            e.target.value = '';
+                                        }}
+                                    />
+                                    <button
+                                        type="button"
+                                        className="mt-2 text-xs text-red-600 hover:underline"
+                                        onClick={() =>
+                                            setSettings({
+                                                ...settings,
+                                                reportTheme: {
+                                                    ...(settings.reportTheme || {}),
+                                                    psycholaboralHeroImageUrl: undefined,
+                                                },
+                                            })
+                                        }
+                                    >
+                                        Quitar imagen de portada
+                                    </button>
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700">Mensaje de apertura (opcional)</label>
+                                    <textarea
+                                        rows={4}
+                                        value={settings.reportTheme?.psycholaboralIntroText || ''}
+                                        onChange={e =>
+                                            setSettings({
+                                                ...settings,
+                                                reportTheme: {
+                                                    ...(settings.reportTheme || {}),
+                                                    psycholaboralIntroText: e.target.value || undefined,
+                                                },
+                                            })
+                                        }
+                                        className="mt-1 block w-full input text-sm"
+                                        placeholder="Texto breve que invita a leer el informe completo..."
+                                    />
+                                </div>
+                                <div className="md:col-span-2">
+                                    <label className="block text-sm font-medium text-gray-700">Mensaje de cierre (opcional)</label>
+                                    <textarea
+                                        rows={2}
+                                        value={settings.reportTheme?.psycholaboralClosingText || ''}
+                                        onChange={e =>
+                                            setSettings({
+                                                ...settings,
+                                                reportTheme: {
+                                                    ...(settings.reportTheme || {}),
+                                                    psycholaboralClosingText: e.target.value || undefined,
+                                                },
+                                            })
+                                        }
+                                        className="mt-1 block w-full input text-sm"
+                                        placeholder="Frase breve antes del pie legal..."
+                                    />
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 </div>
 
