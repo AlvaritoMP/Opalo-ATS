@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useAppState } from '../App';
-import { Process, Stage, ProcessStatus, BulkProcessConfig, KillerQuestion, PsycholaboralInventory, Attachment } from '../types';
+import { Process, Stage, ProcessStatus, BulkProcessConfig, KillerQuestion, PsycholaboralInventory, Attachment, Client } from '../types';
 import { X, Plus, Trash2, GripVertical, Settings, Filter, Brain, MessageCircle, Upload, FileText } from 'lucide-react';
 import { processesApi } from '../lib/api/processes';
-import { processesApi } from '../lib/api/processes';
+import { clientsApi } from '../lib/api/clients';
 import { isScoreIaColumnVisible } from '../lib/bulkTableColumns';
 import { psycholaboralApi } from '../lib/api/psycholaboral';
 import { createDefaultPsycholaboralInventory } from '../lib/psycholaboralDefaults';
@@ -54,6 +54,9 @@ export const BulkProcessEditorModal: React.FC<BulkProcessEditorModalProps> = ({ 
     const [flyerPosition, setFlyerPosition] = useState(process?.flyerPosition || 'center center');
     const [attachments, setAttachments] = useState<Attachment[]>(process?.attachments || []);
     const [isUploadingAttachment, setIsUploadingAttachment] = useState(false);
+    const [clients, setClients] = useState<Client[]>([]);
+    const [selectedClientId, setSelectedClientId] = useState<string | undefined>(process?.clientId);
+    const [isLoadingClients, setIsLoadingClients] = useState(false);
     const flyerInputRef = useRef<HTMLInputElement>(null);
     const attachmentInputRef = useRef<HTMLInputElement>(null);
 
@@ -64,9 +67,18 @@ export const BulkProcessEditorModal: React.FC<BulkProcessEditorModalProps> = ({ 
     }, []);
 
     useEffect(() => {
+        setIsLoadingClients(true);
+        clientsApi.getAll()
+            .then(setClients)
+            .catch(err => console.warn('Error cargando clientes:', err))
+            .finally(() => setIsLoadingClients(false));
+    }, []);
+
+    useEffect(() => {
         if (!process?.id) {
             setTitle('');
             setDescription('');
+            setSelectedClientId(undefined);
             setStages([{ id: `new-${Date.now()}`, name: 'Postulación Inicial' }]);
             setStatus('en_proceso');
             setVacancies(1);
@@ -91,6 +103,7 @@ export const BulkProcessEditorModal: React.FC<BulkProcessEditorModalProps> = ({ 
             if (cancelled || !fresh) return;
             setTitle(fresh.title);
             setDescription(fresh.description);
+            setSelectedClientId(fresh.clientId);
             setStatus(fresh.status || 'en_proceso');
             setVacancies(fresh.vacancies || 1);
             setBulkConfig(
@@ -306,6 +319,7 @@ export const BulkProcessEditorModal: React.FC<BulkProcessEditorModalProps> = ({ 
                 attachments,
                 flyerUrl: flyerUrl || undefined,
                 flyerPosition: flyerPosition || undefined,
+                clientId: selectedClientId || undefined,
                 isBulkProcess: true,
                 bulkConfig: {
                     ...bulkConfig,
@@ -400,6 +414,31 @@ export const BulkProcessEditorModal: React.FC<BulkProcessEditorModalProps> = ({ 
                                     rows={3}
                                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
                                 />
+                            </div>
+
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">
+                                    Cliente
+                                </label>
+                                {isLoadingClients ? (
+                                    <p className="text-sm text-gray-500">Cargando clientes...</p>
+                                ) : (
+                                    <select
+                                        value={selectedClientId || ''}
+                                        onChange={(e) => setSelectedClientId(e.target.value || undefined)}
+                                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                                    >
+                                        <option value="">Sin cliente</option>
+                                        {clients.map(client => (
+                                            <option key={client.id} value={client.id}>
+                                                {client.razonSocial} (RUC: {client.ruc})
+                                            </option>
+                                        ))}
+                                    </select>
+                                )}
+                                <p className="mt-1 text-xs text-gray-500">
+                                    Selecciona el cliente al que pertenece este proceso. Puedes gestionar clientes en Configuración.
+                                </p>
                             </div>
 
                             <div className="border border-gray-200 rounded-lg p-4 space-y-3">
