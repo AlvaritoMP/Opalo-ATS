@@ -1,5 +1,121 @@
 import { BulkProcessConfig, CustomColumn } from '../types';
 
+const BULK_NAME_KEY_PREFIX = '__name__';
+
+/** Normaliza nombre de columna para claves estables (sin acentos, minúsculas) */
+export function normalizeColumnNameKey(name: string): string {
+    return name
+        .trim()
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/\s+/g, ' ');
+}
+
+/** Clave estable en bulk_column_values basada en el nombre de la columna */
+export function bulkColumnNameKey(name: string): string {
+    return `${BULK_NAME_KEY_PREFIX}${normalizeColumnNameKey(name)}`;
+}
+
+/** IDs de columna conocidos en plantillas guardadas en localStorage */
+function loadTemplateColumnIdToName(): Record<string, string> {
+    const out: Record<string, string> = {};
+    try {
+        const saved = localStorage.getItem('bulkProcessesTableTemplates');
+        if (!saved) return out;
+        const templates = JSON.parse(saved) as { columns?: { id: string; name: string }[] }[];
+        for (const t of templates) {
+            for (const c of t.columns || []) {
+                if (c.id && c.name) out[c.id] = c.name;
+            }
+        }
+    } catch {
+        /* ignore */
+    }
+    return out;
+}
+
+/** Mapa id → nombre para resolver valores guardados con IDs antiguos o de plantillas */
+export function buildLegacyColumnIdToName(
+    bulkConfig: BulkProcessConfig | undefined,
+    customColumns: CustomColumn[] = []
+): Record<string, string> {
+    const out: Record<string, string> = {
+        ...loadTemplateColumnIdToName(),
+        ...(bulkConfig?.columnKeyAliases || {}),
+    };
+    for (const col of customColumns) {
+        out[col.id] = col.name;
+    }
+    for (const col of bulkConfig?.customColumns || []) {
+        out[col.id] = col.name;
+    }
+    return out;
+}
+
+function isEmptyBulkValue(val: unknown): boolean {
+    return val === undefined || val === null || val === '';
+}
+
+/** Añade claves por nombre además del id de columna (persistencia estable) */
+export function enrichBulkColumnValuesForStorage(
+    values: Record<string, unknown>,
+    customColumns: CustomColumn[] = []
+): Record<string, unknown> {
+    const out: Record<string, unknown> = { ...values };
+    for (const col of customColumns) {
+        const v = values[col.id];
+        if (!isEmptyBulkValue(v) || v === false) {
+            out[col.id] = v;
+            out[bulkColumnNameKey(col.name)] = v;
+        }
+    }
+    for (const [key, val] of Object.entries(values)) {
+        if (key.startsWith(BULK_NAME_KEY_PREFIX)) continue;
+        const col = customColumns.find(c => c.id === key);
+        if (col && !isEmptyBulkValue(val)) {
+            out[bulkColumnNameKey(col.name)] = val;
+        }
+    }
+    return out;
+}
+
+/** Lee un valor de fila JSONB resolviendo id, nombre y IDs legacy */
+export function resolveColumnValueFromRow(
+    row: Record<string, unknown> | undefined,
+    col: CustomColumn,
+    legacyIdToName: Record<string, string> = {}
+): unknown {
+    if (!row) return undefined;
+
+    const idVal = row[col.id];
+    if (!isEmptyBulkValue(idVal) || idVal === false) return idVal;
+
+    const nameKey = bulkColumnNameKey(col.name);
+    const nameVal = row[nameKey];
+    if (!isEmptyBulkValue(nameVal) || nameVal === false) return nameVal;
+
+    const bare = normalizeColumnNameKey(col.name);
+    for (const [k, v] of Object.entries(row)) {
+        if (k.startsWith(BULK_NAME_KEY_PREFIX)) {
+            const nk = k.slice(BULK_NAME_KEY_PREFIX.length);
+            if (nk === bare && (!isEmptyBulkValue(v) || v === false)) return v;
+            continue;
+        }
+        if (normalizeColumnNameKey(k) === bare && (!isEmptyBulkValue(v) || v === false)) return v;
+    }
+
+    const currentIds = new Set([col.id]);
+    for (const [key, val] of Object.entries(row)) {
+        if (currentIds.has(key) || key.startsWith(BULK_NAME_KEY_PREFIX)) continue;
+        if (isEmptyBulkValue(val) && val !== false) continue;
+        const legacyName = legacyIdToName[key];
+        if (legacyName && normalizeColumnNameKey(legacyName) === bare) return val;
+    }
+
+    return undefined;
+}
+
 export interface BaseColumn {
     id: string;
     label: string;
@@ -277,43 +393,69 @@ export function getColumnValuesStorageKey(processId: string): string {
 export function mergeColumnValuesFromCandidates(
     prev: Record<string, Record<string, any>>,
     candidates: { id: string; bulkColumnValues?: Record<string, unknown> }[],
-    customColumns: CustomColumn[] = []
+    customColumns: CustomColumn[] = [],
+    legacyIdToName: Record<string, string> = {}
 ): Record<string, Record<string, any>> {
     const merged = { ...prev };
     for (const c of candidates) {
         if (!c.bulkColumnValues || Object.keys(c.bulkColumnValues).length === 0) continue;
-        merged[c.id] = { ...(merged[c.id] || {}), ...c.bulkColumnValues };
+        const normalized = normalizeBulkColumnValueKeys(
+            { [c.id]: c.bulkColumnValues as Record<string, any> },
+            customColumns,
+            legacyIdToName
+        );
+        merged[c.id] = { ...(merged[c.id] || {}), ...(normalized[c.id] || {}) };
     }
     return repairDateColumnValues(merged, customColumns);
 }
 
-/** Normaliza claves: si un valor está guardado por nombre de columna, lo mapea al id actual */
+/** Normaliza claves: nombre, IDs legacy y plantillas → id de columna actual */
 export function normalizeBulkColumnValueKeys(
     valuesByCandidate: Record<string, Record<string, any>>,
-    customColumns: CustomColumn[] = []
+    customColumns: CustomColumn[] = [],
+    legacyIdToName: Record<string, string> = {}
 ): Record<string, Record<string, any>> {
     if (customColumns.length === 0) return valuesByCandidate;
 
-    const nameToId = new Map(
-        customColumns.map(c => [c.name.toLowerCase().trim(), c.id])
-    );
-
+    const currentIds = new Set(customColumns.map(c => c.id));
     const normalized: Record<string, Record<string, any>> = {};
+
     for (const [candidateId, values] of Object.entries(valuesByCandidate)) {
         const row: Record<string, any> = { ...values };
-        for (const [key, val] of Object.entries(values)) {
-            const colId = nameToId.get(key.toLowerCase().trim());
-            if (colId && colId !== key && (row[colId] === undefined || row[colId] === '')) {
-                row[colId] = val;
+
+        for (const col of customColumns) {
+            const resolved = resolveColumnValueFromRow(values, col, legacyIdToName);
+            if (!isEmptyBulkValue(resolved) || resolved === false) {
+                row[col.id] = resolved;
+                row[bulkColumnNameKey(col.name)] = resolved;
             }
         }
-        for (const col of customColumns) {
-            if (row[col.id] !== undefined && row[col.id] !== '' && row[col.id] !== null) continue;
-            const byName = Object.entries(values).find(
-                ([k]) => k.toLowerCase().trim() === col.name.toLowerCase().trim()
+
+        for (const [key, val] of Object.entries(values)) {
+            if (isEmptyBulkValue(val) && val !== false) continue;
+            if (currentIds.has(key) || key.startsWith(BULK_NAME_KEY_PREFIX)) continue;
+
+            const legacyName = legacyIdToName[key];
+            if (legacyName) {
+                const col = customColumns.find(
+                    c => normalizeColumnNameKey(c.name) === normalizeColumnNameKey(legacyName)
+                );
+                if (col && (isEmptyBulkValue(row[col.id]) && row[col.id] !== false)) {
+                    row[col.id] = val;
+                    row[bulkColumnNameKey(col.name)] = val;
+                }
+                continue;
+            }
+
+            const colByBareName = customColumns.find(
+                c => normalizeColumnNameKey(c.name) === normalizeColumnNameKey(key)
             );
-            if (byName) row[col.id] = byName[1];
+            if (colByBareName && (isEmptyBulkValue(row[colByBareName.id]) && row[colByBareName.id] !== false)) {
+                row[colByBareName.id] = val;
+                row[bulkColumnNameKey(colByBareName.name)] = val;
+            }
         }
+
         normalized[candidateId] = row;
     }
     return normalized;

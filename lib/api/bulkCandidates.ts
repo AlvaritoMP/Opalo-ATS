@@ -1,5 +1,7 @@
 import { supabase } from '../supabase';
 import { APP_NAME } from '../appConfig';
+import type { CustomColumn } from '../../types';
+import { enrichBulkColumnValuesForStorage } from '../bulkTableColumns';
 
 /** Select mínimo — siempre disponible */
 const BULK_SELECT_BASE =
@@ -450,13 +452,19 @@ export const bulkCandidatesApi = {
 
     /**
      * Fusiona valores de columnas personalizadas en bulk_column_values (JSONB).
+     * @returns true si se escribió en BD; false si la columna no existe o no está soportada
      */
     async patchBulkColumnValues(
         candidateId: string,
-        values: Record<string, unknown>
-    ): Promise<void> {
-        if (Object.keys(values).length === 0) return;
-        if (!isBulkColumnValuesWriteSupported()) return;
+        values: Record<string, unknown>,
+        customColumns: CustomColumn[] = []
+    ): Promise<boolean> {
+        if (Object.keys(values).length === 0) return true;
+        if (!isBulkColumnValuesWriteSupported()) return false;
+
+        const enriched = customColumns.length > 0
+            ? enrichBulkColumnValuesForStorage(values, customColumns)
+            : values;
 
         const { data, error: fetchError } = await supabase
             .from('candidates')
@@ -468,13 +476,13 @@ export const bulkCandidatesApi = {
         if (fetchError) {
             if (isMissingColumnError(fetchError)) {
                 bulkColumnValuesWriteSupported = false;
-                return;
+                return false;
             }
             throw fetchError;
         }
 
         const current = (data?.bulk_column_values as Record<string, unknown>) || {};
-        const merged = { ...current, ...values };
+        const merged = { ...current, ...enriched };
 
         const { error } = await supabase
             .from('candidates')
@@ -485,26 +493,34 @@ export const bulkCandidatesApi = {
         if (error) {
             if (isMissingColumnError(error)) {
                 bulkColumnValuesWriteSupported = false;
-                return;
+                return false;
             }
             throw error;
         }
+        return true;
     },
 
     /**
      * Establece bulk_column_values para varios candidatos (p. ej. importación Excel).
      */
     async batchSetBulkColumnValues(
-        updates: Record<string, Record<string, unknown>>
+        updates: Record<string, Record<string, unknown>>,
+        customColumns: CustomColumn[] = []
     ): Promise<void> {
         const entries = Object.entries(updates);
         if (entries.length === 0) return;
 
-        await Promise.all(
+        const results = await Promise.all(
             entries.map(([candidateId, values]) =>
-                this.patchBulkColumnValues(candidateId, values)
+                this.patchBulkColumnValues(candidateId, values, customColumns)
             )
         );
+
+        if (results.every(r => !r)) {
+            throw new Error(
+                'No se pudieron guardar los valores de columnas. Ejecute MIGRATION_ADD_BULK_COLUMN_VALUES.sql en Supabase.'
+            );
+        }
     },
 
     /**

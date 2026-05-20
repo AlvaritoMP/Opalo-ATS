@@ -26,6 +26,9 @@ import {
     repairDateColumnValues,
     mergeColumnValuesFromCandidates,
     normalizeBulkColumnValueKeys,
+    buildLegacyColumnIdToName,
+    enrichBulkColumnValuesForStorage,
+    resolveColumnValueFromRow,
     formatBulkDateTime,
     isoToDatetimeLocalValue,
     datetimeLocalToIso,
@@ -471,9 +474,22 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
 
     const persistBulkConfig = useCallback(async (updates: Partial<BulkProcessConfig>) => {
         if (!process) return;
+        let mergedUpdates = { ...updates };
+        if (updates.customColumns) {
+            const aliases: Record<string, string> = {
+                ...(process.bulkConfig?.columnKeyAliases || {}),
+            };
+            for (const col of process.bulkConfig?.customColumns || []) {
+                aliases[col.id] = col.name;
+            }
+            for (const col of updates.customColumns) {
+                aliases[col.id] = col.name;
+            }
+            mergedUpdates = { ...mergedUpdates, columnKeyAliases: aliases };
+        }
         const newBulkConfig: BulkProcessConfig = {
             ...process.bulkConfig,
-            ...updates,
+            ...mergedUpdates,
         };
         try {
             await processesApi.update(process.id, { bulkConfig: newBulkConfig });
@@ -552,23 +568,57 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
         loadBulkProcesses();
     }, []);
 
+    const legacyColumnIdToName = useMemo(
+        () => buildLegacyColumnIdToName(process?.bulkConfig, customColumns),
+        [process?.bulkConfig, customColumns]
+    );
+
     const applyColumnValuesFromDb = useCallback((
         fromDb: Record<string, Record<string, unknown>>,
         cols: CustomColumn[]
     ) => {
-        const normalized = normalizeBulkColumnValueKeys(fromDb, cols);
+        const legacy = buildLegacyColumnIdToName(process?.bulkConfig, cols);
+        const normalized = normalizeBulkColumnValueKeys(fromDb, cols, legacy);
         setColumnValues(repairDateColumnValues(normalized, cols));
-    }, []);
+    }, [process?.bulkConfig]);
 
     const syncColumnValuesFromDatabase = useCallback(async (processId: string) => {
         const cols = process?.bulkConfig?.customColumns || [];
         try {
             const fromDb = await bulkCandidatesApi.loadAllBulkColumnValues(processId);
+            const legacy = buildLegacyColumnIdToName(process?.bulkConfig, cols);
             applyColumnValuesFromDb(fromDb, cols);
+
+            const repairs: Record<string, Record<string, unknown>> = {};
+            for (const [candidateId, raw] of Object.entries(fromDb)) {
+                let needsRepair = false;
+                for (const col of cols) {
+                    const resolved = resolveColumnValueFromRow(raw, col, legacy);
+                    if (resolved === undefined || resolved === '') continue;
+                    if (raw[col.id] === undefined || raw[col.id] === '') {
+                        needsRepair = true;
+                        break;
+                    }
+                }
+                if (needsRepair) {
+                    const normalized = normalizeBulkColumnValueKeys(
+                        { [candidateId]: raw as Record<string, any> },
+                        cols,
+                        legacy
+                    );
+                    repairs[candidateId] = enrichBulkColumnValuesForStorage(
+                        normalized[candidateId] || {},
+                        cols
+                    );
+                }
+            }
+            if (Object.keys(repairs).length > 0) {
+                void bulkCandidatesApi.batchSetBulkColumnValues(repairs, cols);
+            }
         } catch (error) {
             console.error('Error sincronizando columnas personalizadas:', error);
         }
-    }, [process?.bulkConfig?.customColumns, applyColumnValuesFromDb]);
+    }, [process?.bulkConfig, applyColumnValuesFromDb]);
 
     // Cargar candidatos
     const loadCandidates = useCallback(async (page: number = 0, reset: boolean = false) => {
@@ -601,7 +651,12 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
             if (reset) {
                 await syncColumnValuesFromDatabase(selectedProcess);
             } else {
-                setColumnValues(prev => mergeColumnValuesFromCandidates(prev, result.candidates, cols));
+                setColumnValues(prev => mergeColumnValuesFromCandidates(
+                    prev,
+                    result.candidates,
+                    cols,
+                    buildLegacyColumnIdToName(process?.bulkConfig, cols)
+                ));
             }
             setTotal(result.total);
             setHasMore(result.hasMore);
@@ -653,7 +708,9 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                     hasNew = true;
                 }
             }
-            if (hasNew) toMigrate[candidateId] = patch;
+            if (hasNew) {
+                toMigrate[candidateId] = enrichBulkColumnValuesForStorage(patch, customColumns);
+            }
         }
 
         if (Object.keys(toMigrate).length === 0) {
@@ -662,8 +719,16 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
             return;
         }
 
-        bulkCandidatesApi.batchSetBulkColumnValues(toMigrate)
+        bulkCandidatesApi.batchSetBulkColumnValues(toMigrate, customColumns)
             .then(async () => {
+                const verify = await bulkCandidatesApi.loadAllBulkColumnValues(process.id);
+                const hasData = Object.keys(toMigrate).some(id => {
+                    const row = verify[id];
+                    return row && Object.keys(row).length > 0;
+                });
+                if (!hasData) {
+                    throw new Error('Los datos no se guardaron en Supabase');
+                }
                 localStorage.removeItem(storageKey);
                 columnValuesMigratedRef.current = process.id;
                 await syncColumnValuesFromDatabase(process.id);
@@ -703,7 +768,13 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                 });
             });
             if (updated) {
-                void bulkCandidatesApi.batchSetBulkColumnValues(dbPatches);
+                const enrichedPatches = Object.fromEntries(
+                    Object.entries(dbPatches).map(([id, vals]) => [
+                        id,
+                        enrichBulkColumnValuesForStorage(vals, customColumns),
+                    ])
+                );
+                void bulkCandidatesApi.batchSetBulkColumnValues(enrichedPatches, customColumns);
                 return newValues;
             }
             return prev;
@@ -1164,15 +1235,18 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
     const handleColumnValueChange = (candidateId: string, columnId: string, value: any) => {
         if (!process) return;
         setColumnValues(prev => {
-            const candidatePatch = {
-                ...(prev[candidateId] || {}),
-                [columnId]: value,
-            };
+            const candidatePatch = enrichBulkColumnValuesForStorage(
+                {
+                    ...(prev[candidateId] || {}),
+                    [columnId]: value,
+                },
+                customColumns
+            );
             const newValues = {
                 ...prev,
                 [candidateId]: candidatePatch,
             };
-            void bulkCandidatesApi.patchBulkColumnValues(candidateId, candidatePatch);
+            void bulkCandidatesApi.patchBulkColumnValues(candidateId, candidatePatch, customColumns);
             return newValues;
         });
     };
@@ -1207,12 +1281,15 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
         const homonymCol = customColumns.find(c => mapImportHeader(c.name.toLowerCase()) === field);
         if (!homonymCol || !process?.id) return;
         setColumnValues(prev => {
-            const candidatePatch = { ...(prev[candidateId] || {}), [homonymCol.id]: value };
+            const candidatePatch = enrichBulkColumnValuesForStorage(
+                { ...(prev[candidateId] || {}), [homonymCol.id]: value },
+                customColumns
+            );
             const newValues = {
                 ...prev,
                 [candidateId]: candidatePatch,
             };
-            void bulkCandidatesApi.patchBulkColumnValues(candidateId, candidatePatch);
+            void bulkCandidatesApi.patchBulkColumnValues(candidateId, candidatePatch, customColumns);
             return newValues;
         });
     }, [customColumns, process?.id]);
@@ -1419,20 +1496,16 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
     };
 
     const getColumnValue = (candidateId: string, columnId: string, candidate?: BulkCandidate): any => {
-        const stored = columnValues[candidateId]?.[columnId];
-        if (stored !== undefined && stored !== '') return stored;
-        if (stored === false) return false;
-
-        const fromDb = candidate?.bulkColumnValues?.[columnId];
-        if (fromDb !== undefined && fromDb !== '') return fromDb;
-        if (fromDb === false) return false;
-
         const col = customColumns.find(c => c.id === columnId);
-        if (col && candidate?.bulkColumnValues) {
-            const byName = Object.entries(candidate.bulkColumnValues).find(
-                ([k]) => k.toLowerCase().trim() === col.name.toLowerCase().trim()
-            );
-            if (byName && byName[1] !== undefined && byName[1] !== '') return byName[1];
+        const row: Record<string, unknown> = {
+            ...(candidate?.bulkColumnValues || {}),
+            ...(columnValues[candidateId] || {}),
+        };
+
+        if (col) {
+            const resolved = resolveColumnValueFromRow(row, col, legacyColumnIdToName);
+            if (resolved !== undefined && resolved !== '') return resolved;
+            if (resolved === false) return false;
         }
 
         if (col && candidate) {

@@ -193,6 +193,8 @@ export interface BulkProcessConfig {
     stageColors?: Record<string, StageColorId>;
     /** Colores de etapas por nombre (respaldo si cambian los IDs) */
     stageColorsByName?: Record<string, StageColorId>;
+    /** ID de columna personalizada → nombre (para resolver valores guardados con IDs antiguos) */
+    columnKeyAliases?: Record<string, string>;
     psycholaboral?: PsycholaboralProcessConfig;
 }
 

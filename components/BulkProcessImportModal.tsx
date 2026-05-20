@@ -9,6 +9,8 @@ import { getImportHeaders,
     formatBulkDate,
     normalizeBulkDateInput,
     DB_PRIORITY_IMPORT_FIELDS,
+    enrichBulkColumnValuesForStorage,
+    isPlaceholderImportEmail,
 } from '../lib/bulkTableColumns';
 import { bulkCandidatesApi } from '../lib/api/bulkCandidates';
 
@@ -183,7 +185,7 @@ export const BulkProcessImportModal: React.FC<BulkProcessImportModalProps> = ({ 
     const { actions } = useAppState();
     const [file, setFile] = useState<File | null>(null);
     const [isImporting, setIsImporting] = useState(false);
-    const [importResult, setImportResult] = useState<{ success: number; failed: number; errors: string[] } | null>(null);
+    const [importResult, setImportResult] = useState<{ success: number; updated: number; failed: number; errors: string[] } | null>(null);
 
     const importHeaders = getImportHeaders(process.bulkConfig);
     const customColumns = (process.bulkConfig?.customColumns || []).map(c => ({
@@ -269,9 +271,26 @@ export const BulkProcessImportModal: React.FC<BulkProcessImportModalProps> = ({ 
                 importToastId = actions.showToast('Importando candidatos...', 'loading', 0);
 
                 let successCount = 0;
+                let updatedCount = 0;
                 let skippedEmptyRows = 0;
                 const errors: string[] = [];
                 const columnValuesUpdates: Record<string, Record<string, any>> = {};
+
+                const customColumnsFull = process.bulkConfig?.customColumns || [];
+                const existingCandidates = await bulkCandidatesApi.getAllCandidates(process.id);
+                const normalizeMatchKey = (s?: string) =>
+                    (s || '').trim().toLowerCase().replace(/\s+/g, '');
+
+                const byDni = new Map<string, typeof existingCandidates[0]>();
+                const byEmail = new Map<string, typeof existingCandidates[0]>();
+                const byPhone = new Map<string, typeof existingCandidates[0]>();
+                for (const c of existingCandidates) {
+                    if (c.dni) byDni.set(normalizeMatchKey(c.dni), c);
+                    if (c.email && !isPlaceholderImportEmail(c.email)) {
+                        byEmail.set(normalizeMatchKey(c.email), c);
+                    }
+                    if (c.phone) byPhone.set(normalizeMatchKey(c.phone), c);
+                }
 
                 const cleanValue = (value: any): any => {
                     if (value === undefined || value === null || value === '') return undefined;
@@ -312,6 +331,37 @@ export const BulkProcessImportModal: React.FC<BulkProcessImportModalProps> = ({ 
                         errors.push(`Fila ${rowNumber} (${name}): Email inválido "${email}" — se usó email temporal`);
                     }
 
+                    const existing =
+                        (dni ? byDni.get(normalizeMatchKey(dni)) : undefined) ||
+                        (email ? byEmail.get(normalizeMatchKey(email)) : undefined) ||
+                        (phone ? byPhone.get(normalizeMatchKey(phone)) : undefined);
+
+                    if (existing) {
+                        if (Object.keys(customValues).length > 0) {
+                            columnValuesUpdates[existing.id] = enrichBulkColumnValuesForStorage(
+                                customValues,
+                                customColumnsFull
+                            );
+                        }
+
+                        const standardUpdates: Record<string, string> = {};
+                        OPTIONAL_IMPORT_FIELDS.forEach(field => {
+                            const cleaned = cleanValue((candidateData as any)[field]);
+                            if (cleaned !== undefined) standardUpdates[field] = String(cleaned);
+                        });
+                        if (Object.keys(standardUpdates).length > 0) {
+                            try {
+                                await bulkCandidatesApi.patchFields(existing.id, standardUpdates);
+                            } catch (error: any) {
+                                errors.push(`Fila ${rowNumber} (${name}): ${error?.message || 'Error al actualizar'}`);
+                            }
+                        }
+
+                        updatedCount++;
+                        successCount++;
+                        continue;
+                    }
+
                     try {
                         const cleanCandidateData: any = {
                             name,
@@ -335,7 +385,10 @@ export const BulkProcessImportModal: React.FC<BulkProcessImportModalProps> = ({ 
                         successCount++;
 
                         if (Object.keys(customValues).length > 0 && newCandidate?.id) {
-                            columnValuesUpdates[newCandidate.id] = customValues;
+                            columnValuesUpdates[newCandidate.id] = enrichBulkColumnValuesForStorage(
+                                customValues,
+                                customColumnsFull
+                            );
                         }
                     } catch (error: any) {
                         errors.push(`Fila ${rowNumber} (${name}): ${error?.message || 'Error desconocido'}`);
@@ -343,17 +396,21 @@ export const BulkProcessImportModal: React.FC<BulkProcessImportModalProps> = ({ 
                 }
 
                 if (Object.keys(columnValuesUpdates).length > 0) {
-                    await bulkCandidatesApi.batchSetBulkColumnValues(columnValuesUpdates);
+                    await bulkCandidatesApi.batchSetBulkColumnValues(columnValuesUpdates, customColumnsFull);
                 }
 
                 setImportResult({
                     success: successCount,
+                    updated: updatedCount,
                     failed: parsedRows.length - successCount - skippedEmptyRows,
                     errors: errors.slice(0, 10),
                 });
 
                 if (successCount > 0) {
-                    actions.showToast(`${successCount} candidato(s) importado(s) exitosamente`, 'success', 5000);
+                    const msg = updatedCount > 0
+                        ? `${updatedCount} candidato(s) actualizado(s)${successCount > updatedCount ? `, ${successCount - updatedCount} nuevo(s)` : ''}`
+                        : `${successCount} candidato(s) importado(s) exitosamente`;
+                    actions.showToast(msg, 'success', 5000);
                     onImportComplete();
                 }
             } catch (error) {
@@ -361,6 +418,7 @@ export const BulkProcessImportModal: React.FC<BulkProcessImportModalProps> = ({ 
                 actions.showToast(`Error al importar: ${errorMsg}`, 'error', 5000);
                 setImportResult({
                     success: 0,
+                    updated: 0,
                     failed: parsedRows.length,
                     errors: [`Error al parsear el archivo: ${errorMsg}`],
                 });
@@ -398,6 +456,7 @@ export const BulkProcessImportModal: React.FC<BulkProcessImportModalProps> = ({ 
                         <p className="text-sm text-gray-600 mb-4">
                             La plantilla se genera según las columnas configuradas en la Tabla de Alta Densidad de este proceso.
                             Las celdas vacías son válidas: solo se importan los datos que existan en cada fila.
+                            Si un candidato ya existe (mismo DNI, email o teléfono), se actualizan sus columnas personalizadas en lugar de duplicarlo.
                         </p>
                         <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-md">
                             <div className="flex items-center justify-between mb-2">
@@ -465,8 +524,13 @@ export const BulkProcessImportModal: React.FC<BulkProcessImportModalProps> = ({ 
                     {importResult && (
                         <div className={`p-4 rounded-lg ${importResult.failed > 0 ? 'bg-yellow-50 border border-yellow-200' : 'bg-green-50 border border-green-200'}`}>
                             <p className="font-medium text-sm mb-2">
-                                {importResult.success > 0 && <span className="text-green-700">✅ {importResult.success} candidato(s) importado(s) exitosamente</span>}
-                                {importResult.failed > 0 && <span className="text-yellow-700"> ⚠️ {importResult.failed} candidato(s) fallaron</span>}
+                                {importResult.success > 0 && (
+                                    <span className="text-green-700">
+                                        ✅ {importResult.success} fila(s) procesada(s)
+                                        {importResult.updated > 0 && ` (${importResult.updated} actualizada(s))`}
+                                    </span>
+                                )}
+                                {importResult.failed > 0 && <span className="text-yellow-700"> ⚠️ {importResult.failed} fila(s) fallaron</span>}
                             </p>
                             {importResult.errors.length > 0 && (
                                 <div className="mt-2 max-h-40 overflow-y-auto">
