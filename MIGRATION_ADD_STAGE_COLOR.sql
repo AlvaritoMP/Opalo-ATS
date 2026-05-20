@@ -18,6 +18,9 @@ ADD COLUMN IF NOT EXISTS color TEXT DEFAULT NULL;
 
 COMMENT ON COLUMN stages.color IS 'Color de la etapa para identificación visual (blue, green, yellow, orange, red, purple, pink, cyan, indigo, slate).';
 
+-- Recargar el esquema de PostgREST para que la API reconozca la columna nueva
+NOTIFY pgrst, 'reload schema';
+
 SELECT column_name, data_type, column_default, is_nullable
 FROM information_schema.columns
 WHERE table_name = 'stages'

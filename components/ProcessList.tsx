@@ -3,6 +3,7 @@ import { useAppState } from '../App';
 import { Plus, MoreVertical, Eye, Edit, Trash2, Users, RefreshCw, Copy, Search, X, AlertTriangle } from 'lucide-react';
 import { ProcessEditorModal } from './ProcessEditorModal';
 import { Process, UserRole, ProcessStatus, Candidate } from '../types';
+import { processesApi } from '../lib/api/processes';
 
 // Función utility para detectar si un proceso tiene candidatos en etapas críticas (no revisados)
 const hasCandidatesInCriticalStages = (process: Process, candidates: Candidate[]): { hasCritical: boolean; count: number; stageNames: string[] } => {
@@ -250,8 +251,13 @@ export const ProcessList: React.FC = () => {
         }
     };
 
-    const handleEdit = (process: Process) => {
-        setEditingProcess(process);
+    const handleEdit = async (process: Process) => {
+        try {
+            const fresh = await processesApi.getById(process.id);
+            setEditingProcess(fresh || process);
+        } catch {
+            setEditingProcess(process);
+        }
         setIsEditorOpen(true);
     };
 

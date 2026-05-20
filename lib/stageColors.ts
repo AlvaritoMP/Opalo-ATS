@@ -1,4 +1,4 @@
-import { StageColorId } from '../types';
+import { StageColorId, Stage, BulkProcessConfig } from '../types';
 
 export const STAGE_COLOR_OPTIONS: StageColorId[] = [
     'blue',
@@ -66,4 +66,32 @@ export function getStageSelectClass(color?: StageColorId): string {
 export function suggestStageColor(stageIndex: number): StageColorId {
     const palette = STAGE_COLOR_OPTIONS.filter(c => c !== 'slate');
     return palette[stageIndex % palette.length];
+}
+
+export function buildStageColorMaps(stages: Stage[]): Pick<BulkProcessConfig, 'stageColors' | 'stageColorsByName'> {
+    const stageColors: Record<string, StageColorId> = {};
+    const stageColorsByName: Record<string, StageColorId> = {};
+    for (const stage of stages) {
+        if (!stage.color) continue;
+        if (stage.id) stageColors[stage.id] = stage.color;
+        if (stage.name.trim()) {
+            stageColorsByName[stage.name.trim().toLowerCase()] = stage.color;
+        }
+    }
+    return {
+        stageColors: Object.keys(stageColors).length > 0 ? stageColors : undefined,
+        stageColorsByName: Object.keys(stageColorsByName).length > 0 ? stageColorsByName : undefined,
+    };
+}
+
+/** Aplica colores guardados en bulkConfig cuando la columna DB no está disponible */
+export function applyStageColorsFromBulkConfig(stages: Stage[], bulkConfig?: BulkProcessConfig): Stage[] {
+    if (!bulkConfig?.stageColors && !bulkConfig?.stageColorsByName) return stages;
+    return stages.map(stage => ({
+        ...stage,
+        color:
+            stage.color ??
+            bulkConfig.stageColors?.[stage.id] ??
+            bulkConfig.stageColorsByName?.[stage.name.trim().toLowerCase()],
+    }));
 }

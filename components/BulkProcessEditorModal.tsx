@@ -3,6 +3,7 @@ import { useAppState } from '../App';
 import { Process, Stage, ProcessStatus, BulkProcessConfig, KillerQuestion, PsycholaboralInventory, Attachment } from '../types';
 import { X, Plus, Trash2, GripVertical, Settings, Filter, Brain, MessageCircle, Upload, FileText } from 'lucide-react';
 import { processesApi } from '../lib/api/processes';
+import { processesApi } from '../lib/api/processes';
 import { isScoreIaColumnVisible } from '../lib/bulkTableColumns';
 import { psycholaboralApi } from '../lib/api/psycholaboral';
 import { createDefaultPsycholaboralInventory } from '../lib/psycholaboralDefaults';
@@ -10,7 +11,7 @@ import { PsycholaboralConfigSection } from './PsycholaboralConfigSection';
 import { PsycholaboralInventoryModal } from './PsycholaboralInventoryModal';
 import { googleDriveService } from '../lib/googleDrive';
 import { StageColorPicker } from './StageColorPicker';
-import { suggestStageColor } from '../lib/stageColors';
+import { suggestStageColor, buildStageColorMaps } from '../lib/stageColors';
 
 const fileToBase64 = (file: File): Promise<string> =>
     new Promise((resolve, reject) => {
@@ -63,13 +64,13 @@ export const BulkProcessEditorModal: React.FC<BulkProcessEditorModalProps> = ({ 
     }, []);
 
     useEffect(() => {
-        setTitle(process?.title || '');
-        setDescription(process?.description || '');
-        setStages(process?.stages?.length ? process.stages : [{ id: `new-${Date.now()}`, name: 'Postulación Inicial' }]);
-        setStatus(process?.status || 'en_proceso');
-        setVacancies(process?.vacancies || 1);
-        setBulkConfig(
-            process?.bulkConfig || {
+        if (!process?.id) {
+            setTitle('');
+            setDescription('');
+            setStages([{ id: `new-${Date.now()}`, name: 'Postulación Inicial' }]);
+            setStatus('en_proceso');
+            setVacancies(1);
+            setBulkConfig({
                 killerQuestions: [],
                 aiPrompt: '',
                 scoreThreshold: 70,
@@ -77,12 +78,54 @@ export const BulkProcessEditorModal: React.FC<BulkProcessEditorModalProps> = ({ 
                 whatsappMessageTemplate:
                     'Hola {nombre}, nos interesa tu perfil para el puesto de {puesto}. ¿Tienes disponibilidad para una entrevista?',
                 autoFilterEnabled: true,
-            }
-        );
-        setKillerQuestions(process?.bulkConfig?.killerQuestions || []);
-        setFlyerUrl(process?.flyerUrl || '');
-        setFlyerPosition(process?.flyerPosition || 'center center');
-        setAttachments(process?.attachments || []);
+            });
+            setKillerQuestions([]);
+            setFlyerUrl('');
+            setFlyerPosition('center center');
+            setAttachments([]);
+            return;
+        }
+
+        let cancelled = false;
+        processesApi.getById(process.id).then(fresh => {
+            if (cancelled || !fresh) return;
+            setTitle(fresh.title);
+            setDescription(fresh.description);
+            setStatus(fresh.status || 'en_proceso');
+            setVacancies(fresh.vacancies || 1);
+            setBulkConfig(
+                fresh.bulkConfig || {
+                    killerQuestions: [],
+                    aiPrompt: '',
+                    scoreThreshold: 70,
+                    whatsappEnabled: true,
+                    whatsappMessageTemplate:
+                        'Hola {nombre}, nos interesa tu perfil para el puesto de {puesto}. ¿Tienes disponibilidad para una entrevista?',
+                    autoFilterEnabled: true,
+                }
+            );
+            setKillerQuestions(fresh.bulkConfig?.killerQuestions || []);
+            setFlyerUrl(fresh.flyerUrl || '');
+            setFlyerPosition(fresh.flyerPosition || 'center center');
+            setAttachments(fresh.attachments || []);
+            setStages(prev => {
+                const loaded = fresh.stages?.length
+                    ? fresh.stages
+                    : [{ id: `new-${Date.now()}`, name: 'Postulación Inicial' }];
+                return loaded.map(fs => {
+                    const local = prev.find(
+                        s =>
+                            s.id === fs.id ||
+                            s.name.trim().toLowerCase() === fs.name.trim().toLowerCase()
+                    );
+                    return local?.color ? { ...fs, color: local.color } : fs;
+                });
+            });
+        }).catch(err => {
+            console.warn('No se pudo recargar el proceso masivo desde la BD:', err);
+        });
+
+        return () => { cancelled = true; };
     }, [process?.id]);
 
     useEffect(() => {
@@ -247,7 +290,12 @@ export const BulkProcessEditorModal: React.FC<BulkProcessEditorModalProps> = ({ 
             const stagesPayload = stages.map((s, index) => ({
                 id: s.id.startsWith('new-') ? `stage-${Date.now()}-${index}` : s.id,
                 name: s.name.trim(),
+                color: s.color,
+                isCritical: s.isCritical,
+                requiredDocuments: s.requiredDocuments,
             }));
+
+            const stageColorMaps = buildStageColorMaps(stagesPayload);
 
             const processPayload: Omit<Process, 'id'> = {
                 title: title.trim(),
@@ -261,6 +309,7 @@ export const BulkProcessEditorModal: React.FC<BulkProcessEditorModalProps> = ({ 
                 isBulkProcess: true,
                 bulkConfig: {
                     ...bulkConfig,
+                    ...stageColorMaps,
                     killerQuestions: killerQuestions,
                 },
             };

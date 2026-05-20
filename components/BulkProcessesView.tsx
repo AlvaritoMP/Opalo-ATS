@@ -1007,8 +1007,13 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
         setShowProcessModal(true);
     };
 
-    const handleEditProcess = (process: Process) => {
-        setEditingProcess(process);
+    const handleEditProcess = async (process: Process) => {
+        try {
+            const fresh = await processesApi.getById(process.id);
+            setEditingProcess(fresh || process);
+        } catch {
+            setEditingProcess(process);
+        }
         setShowProcessModal(true);
     };
 
