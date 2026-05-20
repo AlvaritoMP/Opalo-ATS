@@ -274,23 +274,27 @@ export const UserEditorModal: React.FC<UserEditorModalProps> = ({ user, onClose 
             avatarUrl,
             permissions: useCustomPermissions ? permissions : undefined,
             visibleSections: useCustomSections ? visibleSections : undefined,
-            allowedClientIds: restrictClients ? allowedClientIds : null
+            allowedClientIds: restrictClients ? allowedClientIds : undefined
         };
 
         if (password) {
             userData.password = password;
         }
 
-        if (user) {
-            await actions.updateUser({ ...user, ...userData });
-        } else {
-            if (!password) {
-                alert("Password is required for new users.");
-                return;
+        try {
+            if (user) {
+                await actions.updateUser({ ...user, ...userData });
+            } else {
+                if (!password) {
+                    alert("Password is required for new users.");
+                    return;
+                }
+                await actions.addUser(userData as Omit<User, 'id'>);
             }
-            await actions.addUser(userData as Omit<User, 'id'>);
+            onClose();
+        } catch {
+            // El toast de error ya se muestra en App.tsx; mantener el modal abierto.
         }
-        onClose();
     };
 
     const roleOptions: { value: UserRole, label: string }[] = [

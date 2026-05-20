@@ -27,7 +27,10 @@ function userToDb(user: Partial<User>): any {
     if (user.avatarUrl !== undefined) dbUser.avatar_url = user.avatarUrl;
     if (user.permissions !== undefined) dbUser.permissions = user.permissions;
     if (user.visibleSections !== undefined) dbUser.visible_sections = user.visibleSections;
-    if (user.allowedClientIds !== undefined) dbUser.allowed_client_ids = user.allowedClientIds;
+    // No enviar null: PostgREST falla si la columna no existe o el valor es inválido
+    if (user.allowedClientIds !== undefined && user.allowedClientIds !== null) {
+        dbUser.allowed_client_ids = user.allowedClientIds;
+    }
     return dbUser;
 }
 
@@ -79,7 +82,10 @@ export const usersApi = {
     // Crear usuario (con app_name automático)
     async create(userData: Omit<User, 'id'>): Promise<User> {
         const dbData = userToDb(userData);
-        dbData.app_name = APP_NAME; // Asegurar que siempre se asigne el app_name
+        dbData.app_name = APP_NAME;
+        if (dbData.email) {
+            dbData.email = String(dbData.email).toLowerCase();
+        }
         const { data, error } = await supabase
             .from('users')
             .insert(dbData)
@@ -87,7 +93,20 @@ export const usersApi = {
             .single();
         
         if (error) throw error;
-        return dbToUser(data);
+        if (!data?.app_name || data.app_name !== APP_NAME) {
+            throw new Error(
+                `El usuario se guardó con app_name="${data?.app_name ?? 'null'}" en lugar de "${APP_NAME}". ` +
+                'Ejecuta MIGRATION_FIX_USERS_ANON_GRANTS.sql en Supabase.'
+            );
+        }
+        const verified = await this.getById(data.id);
+        if (!verified) {
+            throw new Error(
+                'El usuario se creó pero no es visible para esta aplicación. ' +
+                'Revisa app_name y las políticas RLS en Supabase.'
+            );
+        }
+        return verified;
     },
 
     // Actualizar usuario (solo de esta app)

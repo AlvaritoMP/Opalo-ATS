@@ -675,27 +675,43 @@ export const PsycholaboralReportDocument = React.forwardRef<
 });
 
 function BlockTitle({ n, title, color, compact }: { n: number; title: string; color: string; compact?: boolean }) {
-    const chip = compact ? 17 : 18;
+    /** Unos píxeles extra ayudan a que el rasterizado PDF no “corte” la caja de fuente */
+    const chip = compact ? 18 : 20;
+    const fontSize = compact ? 10 : 11;
     return (
         <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
             <span
                 style={{
+                    display: 'inline-table',
                     width: chip,
                     height: chip,
                     borderRadius: 3,
                     background: color,
-                    color: '#fff',
-                    fontSize: compact ? 9 : 10,
-                    fontWeight: 800,
-                    display: 'grid',
-                    placeItems: 'center',
-                    lineHeight: 1,
+                    verticalAlign: 'middle',
                     flexShrink: 0,
                     boxSizing: 'border-box',
                     overflow: 'hidden',
+                    tableLayout: 'fixed',
                 }}
             >
-                {n}
+                <span
+                    style={{
+                        display: 'table-cell',
+                        width: chip,
+                        height: chip,
+                        verticalAlign: 'middle',
+                        textAlign: 'center',
+                        color: '#fff',
+                        fontSize,
+                        fontWeight: 800,
+                        lineHeight: 1,
+                        padding: 0,
+                        margin: 0,
+                        fontFamily: 'system-ui, Segoe UI, Roboto, "Helvetica Neue", Arial, sans-serif',
+                    }}
+                >
+                    {n}
+                </span>
             </span>
             <strong style={{ fontSize: 9.25, color: '#0f172a', lineHeight: 1.25 }}>{title}</strong>
         </div>

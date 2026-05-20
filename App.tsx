@@ -1354,19 +1354,24 @@ const App: React.FC = () => {
             try {
                 const newUser = await usersApi.create(userData);
                 setState(s => ({ ...s, users: [...s.users, newUser] }));
-            } catch (error) {
+                showToastHelper('Usuario creado correctamente', 'success', 3000);
+            } catch (error: any) {
                 console.error('Error adding user:', error);
-                const newUser: User = { ...userData, id: `user-${Date.now()}` };
-                setState(s => ({ ...s, users: [...s.users, newUser] }));
+                const errorMessage = error?.message || 'No se pudo guardar el usuario en la base de datos.';
+                showToastHelper(`Error al crear usuario: ${errorMessage}`, 'error', 7000);
+                throw error;
             }
         },
         updateUser: async (userData) => {
             try {
                 const updated = await usersApi.update(userData.id, userData);
                 setState(s => ({ ...s, users: s.users.map(u => u.id === userData.id ? updated : u) }));
-            } catch (error) {
+                showToastHelper('Usuario actualizado correctamente', 'success', 3000);
+            } catch (error: any) {
                 console.error('Error updating user:', error);
-                setState(s => ({ ...s, users: s.users.map(u => u.id === userData.id ? userData : u) }));
+                const errorMessage = error?.message || 'No se pudo actualizar el usuario en la base de datos.';
+                showToastHelper(`Error al actualizar usuario: ${errorMessage}`, 'error', 7000);
+                throw error;
             }
         },
         deleteUser: async (userId) => {
