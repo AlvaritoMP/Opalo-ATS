@@ -141,6 +141,26 @@ export const bulkCandidatesApi = {
         };
     },
 
+    /** Todas las páginas (para exportación masiva). Respeta los mismos filtros que getCandidates. */
+    async getAllCandidates(
+        processId: string,
+        filters?: {
+            stageId?: string;
+            search?: string;
+            archived?: boolean;
+            discarded?: boolean;
+        }
+    ): Promise<BulkCandidate[]> {
+        const pageSize = 400;
+        const out: BulkCandidate[] = [];
+        for (let page = 0; page < 500; page++) {
+            const r = await this.getCandidates(processId, page, pageSize, filters);
+            out.push(...r.candidates);
+            if (!r.hasMore) break;
+        }
+        return out;
+    },
+
     /**
      * Registrar interacción por WhatsApp
      * @param candidateId - ID del candidato

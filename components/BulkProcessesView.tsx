@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useAppState } from '../App';
 import { bulkCandidatesApi, BulkCandidate } from '../lib/api/bulkCandidates';
 import { processesApi } from '../lib/api/processes';
-import { Check, X, Loader2, Send, Archive, Search, ChevronDown, ChevronUp, Plus, Edit, Trash2, ArrowLeft, MessageCircle, Phone, Upload, Filter, Mail, Calendar, Settings, ArrowUp, ArrowDown, Pin, FileText, BookOpen, Paperclip, ClipboardList } from 'lucide-react';
+import { Check, X, Loader2, Send, Archive, Search, ChevronDown, ChevronUp, Plus, Edit, Trash2, ArrowLeft, MessageCircle, Phone, Upload, Download, Filter, Mail, Calendar, Settings, ArrowUp, ArrowDown, Pin, FileText, BookOpen, Paperclip, ClipboardList } from 'lucide-react';
 import { Process, CustomColumn, BulkProcessConfig } from '../types';
 import {
     BASE_COLUMNS,
@@ -49,6 +49,7 @@ import { PsycholaboralInventory } from '../types';
 import { isPsycholaboralEnabled } from '../lib/psycholaboralUtils';
 import { BulkProcessCard } from './BulkProcessCard';
 import { BulkProcessAttachmentsModal } from './BulkProcessAttachmentsModal';
+import { BulkTableExportModal } from './BulkTableExportModal';
 
 interface BulkProcessesViewProps {}
 
@@ -428,6 +429,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
     const [attachmentCounts, setAttachmentCounts] = useState<Record<string, number>>({});
     const [showProcessDocsModal, setShowProcessDocsModal] = useState(false);
     const [docsModalProcess, setDocsModalProcess] = useState<Process | null>(null);
+    const [showExportModal, setShowExportModal] = useState(false);
 
     const pageSize = 50;
 
@@ -2012,6 +2014,15 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                         Importar desde Excel
                                     </button>
                                     <button
+                                        type="button"
+                                        onClick={() => setShowExportModal(true)}
+                                        className="flex items-center gap-2 px-4 py-2 bg-slate-700 text-white rounded-lg hover:bg-slate-800 transition-colors"
+                                        title="Exportar tabla personalizada para el cliente"
+                                    >
+                                        <Download className="w-4 h-4" />
+                                        Exportar tabla
+                                    </button>
+                                    <button
                                         onClick={() => setShowAddColumnModal(true)}
                                         className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
                                         title="Agregar columna personalizada"
@@ -2873,6 +2884,22 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                     onClose={() => setShowTemplateModal(false)}
                     currentColumns={customColumns}
                     onLoadTemplate={handleLoadTemplate}
+                />
+            )}
+
+            {showExportModal && process && (
+                <BulkTableExportModal
+                    isOpen={showExportModal}
+                    onClose={() => setShowExportModal(false)}
+                    process={process}
+                    columnOrder={columnOrder}
+                    visibleColumns={visibleColumns}
+                    customColumns={customColumns}
+                    columnValues={columnValues as Record<string, Record<string, unknown>>}
+                    displayCandidates={displayCandidates}
+                    hasMore={hasMore}
+                    total={total}
+                    searchQuery={searchQuery}
                 />
             )}
 

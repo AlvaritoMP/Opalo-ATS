@@ -1,0 +1,163 @@
+import { BulkCandidate } from './api/bulkCandidates';
+import { BulkProcessConfig, CustomColumn, Process } from '../types';
+import {
+    formatCustomCellDisplay,
+    getDisplayEmail,
+    isPlaceholderImportEmail,
+    mapImportHeader,
+    resolveStandardFieldValue,
+    shouldApplyScoreAutoFilter,
+} from './bulkTableColumns';
+
+export type BulkExportScope = 'current_view' | 'full_process';
+
+/** Escapa campo para TSV/CSV cuando hay tabuladores o saltos de línea */
+export function escapeDelimitedField(value: string, delimiter: string): string {
+    const needsQuote =
+        value.includes(delimiter) || value.includes('\t') || value.includes('\n') || value.includes('\r') || value.includes('"');
+    if (!needsQuote) return value;
+    return `"${value.replace(/"/g, '""')}"`;
+}
+
+function getCustomStoredValue(
+    candidateId: string,
+    columnId: string,
+    candidate: BulkCandidate | undefined,
+    columnValues: Record<string, Record<string, unknown>>,
+    customColumns: CustomColumn[]
+): unknown {
+    const stored = columnValues[candidateId]?.[columnId];
+    if (stored !== undefined && stored !== '') return stored;
+    if (stored === false) return false;
+    const col = customColumns.find(c => c.id === columnId);
+    if (col && candidate) {
+        const mapped = mapImportHeader(col.name.toLowerCase());
+        if (mapped === 'age' && candidate.age != null) return candidate.age;
+        if (mapped === 'source' && candidate.source) return candidate.source;
+        if (mapped === 'province' && candidate.province) return candidate.province;
+        if (mapped === 'district' && candidate.district) return candidate.district;
+    }
+    return '';
+}
+
+export function getBulkExportCellValue(
+    colId: string,
+    candidate: BulkCandidate,
+    opts: {
+        columnValues: Record<string, Record<string, unknown>>;
+        customColumns: CustomColumn[];
+        process?: Process;
+        bulkConfig?: BulkProcessConfig;
+    }
+): string {
+    const { columnValues, customColumns, process, bulkConfig } = opts;
+    const stages = process?.stages ?? [];
+
+    if (colId === 'name') return candidate.name || '';
+    if (colId === 'dni') return candidate.dni || '';
+    if (colId === 'email') {
+        const em = getDisplayEmail(candidate.email);
+        return em || '';
+    }
+    if (colId === 'scoreIa') {
+        return candidate.scoreIa !== undefined && candidate.scoreIa !== null ? String(candidate.scoreIa) : '';
+    }
+    if (colId === 'status') {
+        if (candidate.scoreIa === undefined || candidate.scoreIa === null) return '';
+        if (shouldApplyScoreAutoFilter(bulkConfig)) return 'Apto (filtro automático)';
+        if (candidate.scoreIa >= 70) return 'Alto';
+        if (candidate.scoreIa >= 50) return 'Medio';
+        return 'Bajo';
+    }
+    if (colId === 'phone') return candidate.phone || '';
+    if (colId === 'source') {
+        return resolveStandardFieldValue('source', candidate.id, candidate, columnValues, customColumns) || '';
+    }
+    if (colId === 'province') {
+        return resolveStandardFieldValue('province', candidate.id, candidate, columnValues, customColumns) || '';
+    }
+    if (colId === 'district') {
+        return resolveStandardFieldValue('district', candidate.id, candidate, columnValues, customColumns) || '';
+    }
+    if (colId === 'lastInteraction') {
+        if (!candidate.lastWhatsAppInteractionAt) return '';
+        try {
+            return new Date(candidate.lastWhatsAppInteractionAt).toLocaleString('es-PE');
+        } catch {
+            return candidate.lastWhatsAppInteractionAt;
+        }
+    }
+    if (colId === 'contact') {
+        const parts: string[] = [];
+        if (candidate.phone) parts.push(candidate.phone);
+        const em = candidate.email && !isPlaceholderImportEmail(candidate.email) ? candidate.email : '';
+        if (em) parts.push(em);
+        return parts.join(' · ');
+    }
+    if (colId === 'nextInterview') {
+        if (!candidate.nextInterviewAt) return '';
+        try {
+            return new Date(candidate.nextInterviewAt).toLocaleString('es-PE', {
+                day: '2-digit',
+                month: 'short',
+                year: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit',
+            });
+        } catch {
+            return candidate.nextInterviewAt;
+        }
+    }
+    if (colId === 'schedule') {
+        return '';
+    }
+    if (colId === 'stage') {
+        const st = stages.find(s => s.id === candidate.stageId);
+        return st?.name || candidate.stageId || '';
+    }
+    if (colId.startsWith('custom_')) {
+        const cid = colId.replace('custom_', '');
+        const col = customColumns.find(c => c.id === cid);
+        if (!col) return '';
+        const raw = getCustomStoredValue(candidate.id, cid, candidate, columnValues, customColumns);
+        return formatCustomCellDisplay(raw, col);
+    }
+    return '';
+}
+
+export function buildBulkTableExportDocument(
+    columnIds: string[],
+    candidates: BulkCandidate[],
+    headerLabels: string[],
+    opts: {
+        columnValues: Record<string, Record<string, unknown>>;
+        customColumns: CustomColumn[];
+        process?: Process;
+        bulkConfig?: BulkProcessConfig;
+        delimiter?: '\t' | ';';
+    }
+): string {
+    const delimiter = opts.delimiter ?? '\t';
+    const rows: string[] = [];
+    rows.push(headerLabels.map(h => escapeDelimitedField(h, delimiter)).join(delimiter));
+    for (const cand of candidates) {
+        const line = columnIds
+            .map(colId =>
+                escapeDelimitedField(
+                    getBulkExportCellValue(colId, cand, {
+                        columnValues: opts.columnValues,
+                        customColumns: opts.customColumns,
+                        process: opts.process,
+                        bulkConfig: opts.bulkConfig,
+                    }),
+                    delimiter
+                )
+            )
+            .join(delimiter);
+        rows.push(line);
+    }
+    return rows.join('\n');
+}
+
+/** Columnas que suelen omitirse en una “lista para cliente” (solo UI) */
+export const CLIENT_EXPORT_EXCLUDE_COLUMN_IDS = ['contact', 'schedule'] as const;
