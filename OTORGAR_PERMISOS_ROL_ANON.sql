@@ -10,13 +10,14 @@ SELECT
 FROM information_schema.role_table_grants
 WHERE grantee = 'anon'
 AND table_schema = 'public'
-AND table_name IN ('users', 'processes', 'candidates', 'stages', 'document_categories', 'attachments', 'candidate_history', 'post_its', 'comments', 'interview_events', 'form_integrations', 'app_settings')
+AND table_name IN ('users', 'processes', 'candidates', 'clients', 'stages', 'document_categories', 'attachments', 'candidate_history', 'post_its', 'comments', 'interview_events', 'form_integrations', 'app_settings')
 ORDER BY table_name, privilege_type;
 
 -- Otorgar permisos al rol anon
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.users TO anon;
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.processes TO anon;
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.candidates TO anon;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.clients TO anon;
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.stages TO anon;
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.document_categories TO anon;
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.attachments TO anon;

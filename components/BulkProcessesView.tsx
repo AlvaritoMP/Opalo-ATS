@@ -2909,6 +2909,8 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                     candidates={psychReportCandidates}
                     process={process}
                     inventory={psychInventory}
+                    customColumns={customColumns}
+                    columnValues={columnValues}
                 />
             )}
 

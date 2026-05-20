@@ -20,9 +20,13 @@ import {
  * El pdf usa `orientation: landscape` para que ese ancho coincida mejor con la hoja física.
  */
 const PAGE_W = Math.round((794 * 297) / 210);
+/** Alto mínimo (~lado corto A4 apaisado) para que el informe use mejor la hoja en vertical. */
+const PAGE_H_MIN = Math.round((PAGE_W * 210) / 297);
 
 export interface PsycholaboralReportDocumentProps {
     candidate: Pick<Candidate, 'name' | 'dni' | 'age' | 'avatarUrl'>;
+    /** Nombre y apellidos ya unidos (p. ej. desde columnas personalizadas). Si no, se usa candidate.name */
+    fullNameForReport?: string;
     process?: Process;
     evaluation: PsycholaboralEvaluation;
     competencies: PsycholaboralCompetency[];
@@ -65,8 +69,8 @@ const LEVEL_SHORT: Record<PersonalityLevel, string> = {
 function clampInterpretation(raw: string | undefined): string {
     if (!raw) return '—';
     const t = raw.replace(/\s+/g, ' ').trim();
-    if (t.length <= 320) return t;
-    return `${t.slice(0, 317)}…`;
+    if (t.length <= 480) return t;
+    return `${t.slice(0, 477)}…`;
 }
 
 export const PsycholaboralReportDocument = React.forwardRef<
@@ -87,10 +91,12 @@ export const PsycholaboralReportDocument = React.forwardRef<
         introText: introTextProp,
         closingText,
         footerLegalText,
+        fullNameForReport,
     },
     ref
 ) {
     const inventory = mergePsycholaboralInventory(rawInventory);
+    const personName = (fullNameForReport?.trim() || candidate.name || '—').trim();
     const intellectual = inventory.intellectualLevels.find(l => l.id === evaluation.intellectualLevelId);
     const { totalExpected, totalObtained, percentage } = calculateCompetencyTotals(
         competencies,
@@ -136,7 +142,7 @@ export const PsycholaboralReportDocument = React.forwardRef<
             style={{
                 width: PAGE_W,
                 maxWidth: PAGE_W,
-                minHeight: 0,
+                minHeight: PAGE_H_MIN,
                 fontFamily: "'Segoe UI', system-ui, sans-serif",
                 color: '#0f172a',
                 background: '#fff',
@@ -182,7 +188,7 @@ export const PsycholaboralReportDocument = React.forwardRef<
                         INFORME PSICOLABORAL
                     </h1>
                     <p style={{ margin: '1px 0 0', fontSize: fs.sm, color: '#475569', fontWeight: 600 }}>
-                        {candidate.name} · {position || '—'} · {reportDate}
+                        {personName} · {position || '—'} · {reportDate}
                         {companyName ? ` · ${companyName}` : ''}
                     </p>
                     <p
@@ -219,8 +225,8 @@ export const PsycholaboralReportDocument = React.forwardRef<
 
             <main
                 style={{
-                    flex: '0 0 auto',
-                    padding: '7px 8px 8px',
+                    flex: '1 1 auto',
+                    padding: '8px 9px 10px',
                     display: 'flex',
                     flexDirection: 'column',
                     gap: 6,
@@ -230,18 +236,18 @@ export const PsycholaboralReportDocument = React.forwardRef<
                 <section
                     style={{
                         display: 'flex',
-                        gap: 6,
-                        alignItems: 'center',
+                        gap: 10,
+                        alignItems: 'stretch',
                         background: '#f8fafc',
                         border: '1px solid #e2e8f0',
                         borderRadius: 4,
-                        padding: '6px 9px',
+                        padding: '8px 10px',
                     }}
                 >
                     <div
                         style={{
-                            width: 40,
-                            height: 40,
+                            width: 44,
+                            height: 44,
                             borderRadius: 4,
                             overflow: 'hidden',
                             flexShrink: 0,
@@ -259,30 +265,47 @@ export const PsycholaboralReportDocument = React.forwardRef<
                                 crossOrigin="anonymous"
                             />
                         ) : (
-                            <span style={{ fontSize: 16, fontWeight: 700, color: primaryColor }}>
-                                {candidate.name.charAt(0).toUpperCase()}
+                            <span style={{ fontSize: 17, fontWeight: 700, color: primaryColor }}>
+                                {personName.charAt(0).toUpperCase()}
                             </span>
                         )}
                     </div>
-                    <div
-                        style={{
-                            flex: 1,
-                            display: 'grid',
-                            gridTemplateColumns: 'repeat(4, minmax(0, 1fr))',
-                            gap: '4px 10px',
-                        }}
-                    >
-                        {[
-                            ['Nombre', candidate.name],
-                            ['DNI', candidate.dni || '—'],
-                            ['Edad', candidate.age ? `${candidate.age}` : '—'],
-                            ['Puesto', position || '—'],
-                        ].map(([k, v]) => (
-                            <div key={String(k)}>
-                                <div style={{ fontSize: fs.nano, color: '#64748b', fontWeight: 700 }}>{k}</div>
-                                <div style={{ fontSize: fs.sm, fontWeight: 600, lineHeight: 1.35, wordBreak: 'break-word' }}>{String(v)}</div>
+                    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 8, minWidth: 0 }}>
+                        <div>
+                            <div style={{ fontSize: fs.nano, color: '#64748b', fontWeight: 700, marginBottom: 2 }}>
+                                Nombre y apellidos
                             </div>
-                        ))}
+                            <div
+                                style={{
+                                    fontSize: fs.body,
+                                    fontWeight: 700,
+                                    lineHeight: 1.32,
+                                    wordBreak: 'break-word',
+                                }}
+                            >
+                                {personName}
+                            </div>
+                        </div>
+                        <div
+                            style={{
+                                display: 'grid',
+                                gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
+                                gap: '6px 12px',
+                            }}
+                        >
+                            {[
+                                ['DNI', candidate.dni || '—'],
+                                ['Edad', candidate.age ? `${candidate.age}` : '—'],
+                                ['Puesto', position || '—'],
+                            ].map(([k, v]) => (
+                                <div key={String(k)}>
+                                    <div style={{ fontSize: fs.nano, color: '#64748b', fontWeight: 700 }}>{k}</div>
+                                    <div style={{ fontSize: fs.sm, fontWeight: 600, lineHeight: 1.35, wordBreak: 'break-word' }}>
+                                        {String(v)}
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
                     </div>
                 </section>
 
@@ -292,12 +315,13 @@ export const PsycholaboralReportDocument = React.forwardRef<
                         display: 'grid',
                         gridTemplateColumns: 'minmax(0, 0.82fr) minmax(0, 1.22fr) minmax(0, 1fr)',
                         gap: 8,
-                        alignItems: 'start',
+                        alignItems: 'stretch',
+                        flex: '1 1 auto',
                         minHeight: 0,
                     }}
                 >
                     {/* 1 · Nivel intelectual */}
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 5, minWidth: 0 }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 5, minWidth: 0, height: '100%' }}>
                         <BlockTitle n={1} title="Nivel intelectual" color={primaryColor} compact />
                         <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                             {inventory.intellectualLevels.map(level => {
@@ -306,14 +330,19 @@ export const PsycholaboralReportDocument = React.forwardRef<
                                     <div
                                         key={level.id}
                                         style={{
+                                            display: 'flex',
+                                            flexDirection: 'column',
+                                            justifyContent: 'center',
+                                            alignItems: 'center',
                                             textAlign: 'center',
-                                            padding: '6px 5px',
+                                            minHeight: 48,
+                                            padding: '8px 6px',
                                             borderRadius: 3,
                                             background: active ? primaryColor : '#f1f5f9',
                                             color: active ? '#fff' : '#64748b',
                                             fontSize: fs.micro,
                                             fontWeight: active ? 700 : 600,
-                                            lineHeight: 1.25,
+                                            lineHeight: 1.22,
                                         }}
                                     >
                                         <div style={{ wordBreak: 'break-word' }}>{level.name}</div>
@@ -326,11 +355,13 @@ export const PsycholaboralReportDocument = React.forwardRef<
                             style={{
                                 fontSize: fs.sm,
                                 color: '#334155',
-                                borderLeft: `2px solid ${primaryColor}`,
-                                padding: '7px 8px',
+                                borderLeft: `3px solid ${primaryColor}`,
+                                padding: '12px 12px',
                                 background: '#fafafa',
-                                lineHeight: 1.38,
+                                lineHeight: 1.42,
                                 wordBreak: 'break-word',
+                                minHeight: 120,
+                                flex: '1 1 auto',
                             }}
                         >
                             {clampInterpretation(intellectual?.interpretation)}
@@ -338,7 +369,7 @@ export const PsycholaboralReportDocument = React.forwardRef<
                     </div>
 
                     {/* 2 · Personalidad */}
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 5, minWidth: 0 }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 5, minWidth: 0, height: '100%' }}>
                         <BlockTitle n={2} title="Personalidad" color={accentColor} compact />
                         <table style={{ width: '100%', tableLayout: 'fixed', borderCollapse: 'collapse', fontSize: fs.micro }}>
                             <colgroup>
@@ -350,36 +381,39 @@ export const PsycholaboralReportDocument = React.forwardRef<
                                 <tr style={{ background: '#f1f5f9' }}>
                                     <th
                                         style={{
-                                            padding: '5px 8px',
+                                            padding: '7px 8px',
                                             textAlign: 'left',
                                             border: '1px solid #e2e8f0',
                                             fontSize: fs.nano,
                                             lineHeight: 1.28,
                                             fontWeight: 700,
+                                            verticalAlign: 'middle',
                                         }}
                                     >
                                         Rasgo
                                     </th>
                                     <th
                                         style={{
-                                            padding: '5px 6px',
+                                            padding: '7px 6px',
                                             textAlign: 'center',
                                             border: '1px solid #e2e8f0',
                                             fontSize: fs.nano,
                                             lineHeight: 1.28,
                                             fontWeight: 700,
+                                            verticalAlign: 'middle',
                                         }}
                                     >
                                         Nivel
                                     </th>
                                     <th
                                         style={{
-                                            padding: '5px 8px',
+                                            padding: '7px 8px',
                                             textAlign: 'left',
                                             border: '1px solid #e2e8f0',
                                             fontSize: fs.nano,
                                             lineHeight: 1.28,
                                             fontWeight: 700,
+                                            verticalAlign: 'middle',
                                         }}
                                     >
                                         Obs.
@@ -394,9 +428,9 @@ export const PsycholaboralReportDocument = React.forwardRef<
                                         <tr key={trait.id}>
                                             <td
                                                 style={{
-                                                    padding: '5px 8px',
+                                                    padding: '7px 8px',
                                                     border: '1px solid #e2e8f0',
-                                                    verticalAlign: 'top',
+                                                    verticalAlign: 'middle',
                                                     lineHeight: 1.32,
                                                     fontWeight: 600,
                                                     fontSize: fs.micro,
@@ -408,10 +442,10 @@ export const PsycholaboralReportDocument = React.forwardRef<
                                             </td>
                                             <td
                                                 style={{
-                                                    padding: '5px 6px',
+                                                    padding: '7px 6px',
                                                     border: '1px solid #e2e8f0',
                                                     textAlign: 'center',
-                                                    verticalAlign: 'top',
+                                                    verticalAlign: 'middle',
                                                     color: LEVEL_COLORS[level],
                                                     fontWeight: 700,
                                                     fontSize: fs.micro,
@@ -423,11 +457,11 @@ export const PsycholaboralReportDocument = React.forwardRef<
                                             </td>
                                             <td
                                                 style={{
-                                                    padding: '5px 8px',
+                                                    padding: '7px 8px',
                                                     border: '1px solid #e2e8f0',
                                                     fontSize: fs.micro,
                                                     lineHeight: 1.32,
-                                                    verticalAlign: 'top',
+                                                    verticalAlign: 'middle',
                                                     wordBreak: 'break-word',
                                                     overflowWrap: 'break-word',
                                                 }}
@@ -442,67 +476,179 @@ export const PsycholaboralReportDocument = React.forwardRef<
                     </div>
 
                     {/* 3 · Competencias + 4 · Conclusiones */}
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 5, minWidth: 0 }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6, minWidth: 0, height: '100%' }}>
                         <BlockTitle n={3} title="Competencias" color={primaryColor} compact />
                         <div
                             style={{
-                                padding: '6px 8px',
+                                padding: '8px 10px',
                                 background: `#f8fafc`,
                                 borderRadius: 3,
                                 border: `1px solid ${primaryColor}40`,
                                 fontSize: fs.sm,
                                 fontWeight: 700,
-                                lineHeight: 1.28,
+                                lineHeight: 1.32,
                             }}
                         >
                             {percentage}% cumplimiento · {totalObtained}/{totalExpected} pts. (esp. máx.)
                         </div>
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-                            {competencies.map(comp => {
-                                const rating = evaluation.competencies.find(r => r.competencyId === comp.id);
-                                const obtained = rating?.obtainedScore ?? 0;
-                                const levelLabel = getCompetencyLevelLabel(obtained);
-                                return (
-                                    <div key={comp.id} style={{ lineHeight: 1.32 }}>
-                                        <div style={{ fontSize: fs.sm, fontWeight: 600, wordBreak: 'break-word' }}>
-                                            <span>{comp.name}</span>
-                                            <span style={{ fontWeight: 500, fontSize: fs.micro, color: '#475569' }}>
-                                                {' · '}
-                                                {obtained}/9 · esp. {comp.expectedScore} ({levelLabel})
-                                            </span>
-                                        </div>
-                                        {rating?.observations?.trim() ? (
-                                            <div style={{ fontSize: fs.nano, color: '#64748b', marginTop: 3, wordBreak: 'break-word', lineHeight: 1.34 }}>
-                                                {rating.observations.trim()}
-                                            </div>
-                                        ) : null}
-                                    </div>
-                                );
-                            })}
-                        </div>
+                        <table style={{ width: '100%', tableLayout: 'fixed', borderCollapse: 'collapse', fontSize: fs.micro }}>
+                            <colgroup>
+                                <col style={{ width: '22%' }} />
+                                <col style={{ width: '38%' }} />
+                                <col style={{ width: '10%' }} />
+                                <col style={{ width: '10%' }} />
+                                <col style={{ width: '20%' }} />
+                            </colgroup>
+                            <thead>
+                                <tr style={{ background: '#f1f5f9' }}>
+                                    {['Competencia', 'Significado', 'Esp.', 'Obt.', 'Nivel'].map((h, i) => (
+                                        <th
+                                            key={h}
+                                            style={{
+                                                padding: '7px 6px',
+                                                textAlign: i >= 2 && i <= 3 ? 'center' : 'left',
+                                                border: '1px solid #e2e8f0',
+                                                fontSize: fs.nano,
+                                                fontWeight: 700,
+                                                verticalAlign: 'middle',
+                                                lineHeight: 1.25,
+                                            }}
+                                        >
+                                            {h}
+                                        </th>
+                                    ))}
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {competencies.map(comp => {
+                                    const rating = evaluation.competencies.find(r => r.competencyId === comp.id);
+                                    const obtained = rating?.obtainedScore ?? 0;
+                                    const levelLabel = getCompetencyLevelLabel(obtained);
+                                    const obs = rating?.observations?.trim();
+                                    return (
+                                        <React.Fragment key={comp.id}>
+                                            <tr>
+                                                <td
+                                                    style={{
+                                                        padding: '7px 8px',
+                                                        border: '1px solid #e2e8f0',
+                                                        verticalAlign: 'middle',
+                                                        fontWeight: 600,
+                                                        wordBreak: 'break-word',
+                                                        lineHeight: 1.3,
+                                                    }}
+                                                >
+                                                    {comp.name}
+                                                </td>
+                                                <td
+                                                    style={{
+                                                        padding: '7px 8px',
+                                                        border: '1px solid #e2e8f0',
+                                                        verticalAlign: 'middle',
+                                                        color: '#475569',
+                                                        fontSize: fs.nano,
+                                                        wordBreak: 'break-word',
+                                                        lineHeight: 1.35,
+                                                    }}
+                                                >
+                                                    {comp.definition?.trim() ? comp.definition.trim() : '—'}
+                                                </td>
+                                                <td
+                                                    style={{
+                                                        padding: '7px 6px',
+                                                        border: '1px solid #e2e8f0',
+                                                        textAlign: 'center',
+                                                        verticalAlign: 'middle',
+                                                        fontWeight: 700,
+                                                    }}
+                                                >
+                                                    {comp.expectedScore}
+                                                </td>
+                                                <td
+                                                    style={{
+                                                        padding: '7px 6px',
+                                                        border: '1px solid #e2e8f0',
+                                                        textAlign: 'center',
+                                                        verticalAlign: 'middle',
+                                                        fontWeight: 700,
+                                                    }}
+                                                >
+                                                    {obtained}
+                                                </td>
+                                                <td
+                                                    style={{
+                                                        padding: '7px 6px',
+                                                        border: '1px solid #e2e8f0',
+                                                        textAlign: 'center',
+                                                        verticalAlign: 'middle',
+                                                        fontWeight: 600,
+                                                        fontSize: fs.nano,
+                                                    }}
+                                                >
+                                                    {levelLabel}
+                                                </td>
+                                            </tr>
+                                            {obs ? (
+                                                <tr>
+                                                    <td
+                                                        colSpan={5}
+                                                        style={{
+                                                            padding: '6px 10px',
+                                                            border: '1px solid #e2e8f0',
+                                                            background: '#fafafa',
+                                                            fontSize: fs.nano,
+                                                            color: '#64748b',
+                                                            verticalAlign: 'middle',
+                                                            wordBreak: 'break-word',
+                                                            lineHeight: 1.35,
+                                                        }}
+                                                    >
+                                                        <span style={{ fontWeight: 700, color: '#334155' }}>Obs.: </span>
+                                                        {obs}
+                                                    </td>
+                                                </tr>
+                                            ) : null}
+                                        </React.Fragment>
+                                    );
+                                })}
+                            </tbody>
+                        </table>
 
-                        <BlockTitle n={4} title="Conclusiones" color={accentColor} compact />
                         <div
                             style={{
-                                fontSize: fs.sm,
-                                lineHeight: 1.38,
-                                color: '#334155',
-                                padding: '8px 9px',
-                                borderLeft: `3px solid ${accentColor}`,
-                                background: '#fafafa',
-                                textAlign: 'justify',
-                                border: '1px solid #e2e8f0',
-                                borderLeftWidth: 3,
+                                marginTop: 16,
+                                paddingTop: 14,
+                                borderTop: '1px solid #cbd5e1',
+                                display: 'flex',
+                                flexDirection: 'column',
+                                gap: 8,
                                 flex: '1 1 auto',
-                                minHeight: 84,
-                                maxHeight: 220,
-                                overflow: 'hidden',
-                                wordBreak: 'break-word',
+                                minHeight: 0,
                             }}
                         >
-                            {evaluation.conclusions?.trim()
-                                ? evaluation.conclusions.trim()
-                                : 'Sin conclusiones registradas.'}
+                            <BlockTitle n={4} title="Conclusiones" color={accentColor} compact />
+                            <div
+                                style={{
+                                    fontSize: fs.sm,
+                                    lineHeight: 1.45,
+                                    color: '#334155',
+                                    padding: '14px 12px',
+                                    borderLeft: `3px solid ${accentColor}`,
+                                    background: '#fafafa',
+                                    textAlign: 'justify',
+                                    border: '1px solid #e2e8f0',
+                                    borderLeftWidth: 3,
+                                    flex: '1 1 auto',
+                                    minHeight: 150,
+                                    maxHeight: 280,
+                                    overflow: 'hidden',
+                                    wordBreak: 'break-word',
+                                }}
+                            >
+                                {evaluation.conclusions?.trim()
+                                    ? evaluation.conclusions.trim()
+                                    : 'Sin conclusiones registradas.'}
+                            </div>
                         </div>
                     </div>
                 </div>

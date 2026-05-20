@@ -81,6 +81,10 @@ BEGIN
     END IF;
 END $$;
 
+-- Permisos de tabla: sin esto, anon/authenticated no puede leer/escribir aunque RLS permita filas
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.clients TO anon;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.clients TO authenticated;
+
 -- Función para actualizar updated_at automáticamente
 CREATE OR REPLACE FUNCTION update_clients_updated_at()
 RETURNS TRIGGER AS $$

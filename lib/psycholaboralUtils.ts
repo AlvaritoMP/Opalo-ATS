@@ -8,6 +8,7 @@ import {
     PersonalityLevel,
     ConclusionTemplate,
     IntellectualLevelId,
+    CustomColumn,
 } from '../types';
 import { createDefaultPsycholaboralInventory } from './psycholaboralDefaults';
 
@@ -186,6 +187,56 @@ export function createEmptyEvaluation(
         positionApplied: positionApplied || '',
         reportDate: new Date().toISOString().split('T')[0],
     };
+}
+
+/**
+ * Construye nombre + apellidos en una sola línea de lectura continua:
+ * usa `candidates.name` y añade valores de columnas personalizadas típicas (Apellido, Apellidos, etc.).
+ */
+export function buildPsycholaboralDisplayName(
+    candidateName: string,
+    customColumns: CustomColumn[] | undefined,
+    getCellValue: (columnId: string) => unknown
+): string {
+    const base = (candidateName || '').trim();
+    const surnames: { order: number; text: string }[] = [];
+    let extraGiven = '';
+
+    for (const col of customColumns || []) {
+        const label = (col.name || '').trim();
+        if (!label) continue;
+        const raw = getCellValue(col.id);
+        const val = raw === undefined || raw === null ? '' : String(raw).trim();
+        if (!val) continue;
+
+        const norm = label.toLowerCase();
+        if (/^nombres?$/.test(norm) && !/completo/.test(norm)) {
+            extraGiven = val;
+            continue;
+        }
+        let order = -1;
+        if (/apellido\s*paterno|primer\s*apellido/.test(norm)) order = 1;
+        else if (/apellido\s*materno|segundo\s*apellido/.test(norm)) order = 2;
+        else if (/^apellidos?$/.test(norm)) order = 3;
+        else if (/apellido|surname|last\s*name/.test(norm)) order = 4;
+
+        if (order > 0) {
+            surnames.push({ order, text: val });
+        }
+    }
+
+    surnames.sort((a, b) => a.order - b.order || a.text.localeCompare(b.text));
+    const sur = surnames.map(s => s.text).join(' ').trim();
+
+    let core = base;
+    if (!core && extraGiven) core = extraGiven;
+    else if (extraGiven && !core.toLowerCase().includes(extraGiven.toLowerCase())) {
+        core = `${extraGiven} ${core}`.trim();
+    }
+
+    if (!sur) return core || '—';
+    if (core.toLowerCase().includes(sur.toLowerCase())) return core;
+    return `${core} ${sur}`.replace(/\s+/g, ' ').trim();
 }
 
 export function isPsycholaboralEnabled(config?: PsycholaboralProcessConfig): boolean {

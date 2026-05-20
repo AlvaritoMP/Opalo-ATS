@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { X, ChevronLeft, ChevronRight, Download, Save, Loader2, RefreshCw } from 'lucide-react';
 import { useAppState } from '../App';
 import { BulkCandidate } from '../lib/api/bulkCandidates';
-import { Process, PsycholaboralEvaluation, PsycholaboralInventory, IntellectualLevelId, PersonalityLevel, PsycholaboralSuitability } from '../types';
+import { Process, PsycholaboralEvaluation, PsycholaboralInventory, IntellectualLevelId, PersonalityLevel, PsycholaboralSuitability, CustomColumn } from '../types';
 import { psycholaboralApi } from '../lib/api/psycholaboral';
 import {
     resolveProcessCompetencies,
@@ -10,6 +10,7 @@ import {
     calculateCompetencyTotals,
     generateConclusionFromTemplate,
     mergePsycholaboralInventory,
+    buildPsycholaboralDisplayName,
 } from '../lib/psycholaboralUtils';
 import { captureElementToPdf, downloadPsycholaboralPdf } from '../lib/psycholaboralPdf';
 import { PsycholaboralReportDocument } from './PsycholaboralReportDocument';
@@ -20,6 +21,9 @@ interface Props {
     candidates: BulkCandidate[];
     process: Process;
     inventory: PsycholaboralInventory;
+    /** Columnas masivas / valores para armar nombre + apellidos en el PDF */
+    customColumns?: CustomColumn[];
+    columnValues?: Record<string, Record<string, unknown>>;
 }
 
 export const PsycholaboralReportModal: React.FC<Props> = ({
@@ -28,6 +32,8 @@ export const PsycholaboralReportModal: React.FC<Props> = ({
     candidates,
     process,
     inventory: initialInventory,
+    customColumns = [],
+    columnValues = {},
 }) => {
     const { state, actions } = useAppState();
     const inventory = useMemo(() => mergePsycholaboralInventory(initialInventory), [initialInventory]);
@@ -46,6 +52,12 @@ export const PsycholaboralReportModal: React.FC<Props> = ({
     const candidate = candidates[index];
     const primaryColor = state.settings?.reportTheme?.primaryColor || '#0f766e';
     const accentColor = state.settings?.reportTheme?.accentColor || '#4f46e5';
+
+    const fullNameForReport = useMemo(() => {
+        if (!candidate) return '';
+        const getCell = (columnId: string) => columnValues[candidate.id]?.[columnId];
+        return buildPsycholaboralDisplayName(candidate.name, customColumns, getCell);
+    }, [candidate, customColumns, columnValues]);
 
     useEffect(() => {
         if (!isOpen || !candidate) return;
@@ -450,6 +462,7 @@ export const PsycholaboralReportModal: React.FC<Props> = ({
                         introText={state.settings?.reportTheme?.psycholaboralIntroText ?? null}
                         closingText={state.settings?.reportTheme?.psycholaboralClosingText ?? null}
                         footerLegalText={state.settings?.reportTheme?.footerText ?? null}
+                        fullNameForReport={fullNameForReport}
                     />
                 </div>
             )}
