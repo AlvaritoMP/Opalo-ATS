@@ -287,6 +287,38 @@ export function mergeColumnValuesFromCandidates(
     return repairDateColumnValues(merged, customColumns);
 }
 
+/** Normaliza claves: si un valor está guardado por nombre de columna, lo mapea al id actual */
+export function normalizeBulkColumnValueKeys(
+    valuesByCandidate: Record<string, Record<string, any>>,
+    customColumns: CustomColumn[] = []
+): Record<string, Record<string, any>> {
+    if (customColumns.length === 0) return valuesByCandidate;
+
+    const nameToId = new Map(
+        customColumns.map(c => [c.name.toLowerCase().trim(), c.id])
+    );
+
+    const normalized: Record<string, Record<string, any>> = {};
+    for (const [candidateId, values] of Object.entries(valuesByCandidate)) {
+        const row: Record<string, any> = { ...values };
+        for (const [key, val] of Object.entries(values)) {
+            const colId = nameToId.get(key.toLowerCase().trim());
+            if (colId && colId !== key && (row[colId] === undefined || row[colId] === '')) {
+                row[colId] = val;
+            }
+        }
+        for (const col of customColumns) {
+            if (row[col.id] !== undefined && row[col.id] !== '' && row[col.id] !== null) continue;
+            const byName = Object.entries(values).find(
+                ([k]) => k.toLowerCase().trim() === col.name.toLowerCase().trim()
+            );
+            if (byName) row[col.id] = byName[1];
+        }
+        normalized[candidateId] = row;
+    }
+    return normalized;
+}
+
 const EXCEL_EPOCH_UTC_MS = Date.UTC(1899, 11, 30);
 
 function formatDateParts(day: number, month: number, year: number): string {

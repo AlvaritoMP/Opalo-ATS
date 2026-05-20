@@ -215,6 +215,46 @@ export const bulkCandidatesApi = {
         return out;
     },
 
+    /** Carga bulk_column_values de TODOS los candidatos del proceso (sin paginación de tabla) */
+    async loadAllBulkColumnValues(
+        processId: string
+    ): Promise<Record<string, Record<string, unknown>>> {
+        const out: Record<string, Record<string, unknown>> = {};
+        const pageSize = 500;
+
+        for (let page = 0; page < 200; page++) {
+            const from = page * pageSize;
+            const to = from + pageSize - 1;
+
+            const { data, error } = await supabase
+                .from('candidates')
+                .select('id, bulk_column_values')
+                .eq('app_name', APP_NAME)
+                .eq('process_id', processId)
+                .eq('archived', false)
+                .eq('discarded', false)
+                .range(from, to);
+
+            if (error) {
+                if (isMissingColumnError(error)) return out;
+                throw error;
+            }
+
+            for (const row of data || []) {
+                const vals = row.bulk_column_values as Record<string, unknown> | null;
+                if (vals && Object.keys(vals).length > 0) {
+                    out[row.id] = vals;
+                }
+            }
+
+            if (!data || data.length < pageSize) break;
+        }
+
+        cachedBulkSelect = BULK_SELECT_FULL;
+        bulkColumnValuesWriteSupported = true;
+        return out;
+    },
+
     /**
      * Registrar interacción por WhatsApp
      * @param candidateId - ID del candidato
