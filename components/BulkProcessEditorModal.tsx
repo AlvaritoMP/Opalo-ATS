@@ -9,6 +9,8 @@ import { createDefaultPsycholaboralInventory } from '../lib/psycholaboralDefault
 import { PsycholaboralConfigSection } from './PsycholaboralConfigSection';
 import { PsycholaboralInventoryModal } from './PsycholaboralInventoryModal';
 import { googleDriveService } from '../lib/googleDrive';
+import { StageColorPicker } from './StageColorPicker';
+import { suggestStageColor } from '../lib/stageColors';
 
 const fileToBase64 = (file: File): Promise<string> =>
     new Promise((resolve, reject) => {
@@ -89,7 +91,7 @@ export const BulkProcessEditorModal: React.FC<BulkProcessEditorModalProps> = ({ 
     }, [process?.id]);
 
     const handleAddStage = () => {
-        setStages([...stages, { id: `new-${Date.now()}`, name: '' }]);
+        setStages([...stages, { id: `new-${Date.now()}`, name: '', color: suggestStageColor(stages.length) }]);
     };
 
     const handleRemoveStage = (index: number) => {
@@ -101,6 +103,12 @@ export const BulkProcessEditorModal: React.FC<BulkProcessEditorModalProps> = ({ 
     const handleStageChange = (index: number, name: string) => {
         const newStages = [...stages];
         newStages[index] = { ...newStages[index], name };
+        setStages(newStages);
+    };
+
+    const handleStageColorChange = (index: number, color: Stage['color']) => {
+        const newStages = [...stages];
+        newStages[index] = { ...newStages[index], color: color || undefined };
         setStages(newStages);
     };
 
@@ -458,23 +466,32 @@ export const BulkProcessEditorModal: React.FC<BulkProcessEditorModalProps> = ({ 
                                 </label>
                                 <div className="space-y-2">
                                     {stages.map((stage, index) => (
-                                        <div key={stage.id} className="flex items-center gap-2">
-                                            <GripVertical className="w-5 h-5 text-gray-400" />
-                                            <input
-                                                type="text"
-                                                value={stage.name}
-                                                onChange={(e) => handleStageChange(index, e.target.value)}
-                                                placeholder={`Etapa ${index + 1}`}
-                                                className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                                            />
-                                            {stages.length > 1 && (
-                                                <button
-                                                    onClick={() => handleRemoveStage(index)}
-                                                    className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                                                >
-                                                    <Trash2 className="w-4 h-4" />
-                                                </button>
-                                            )}
+                                        <div key={stage.id} className="space-y-1.5">
+                                            <div className="flex items-center gap-2">
+                                                <GripVertical className="w-5 h-5 text-gray-400" />
+                                                <input
+                                                    type="text"
+                                                    value={stage.name}
+                                                    onChange={(e) => handleStageChange(index, e.target.value)}
+                                                    placeholder={`Etapa ${index + 1}`}
+                                                    className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                                                />
+                                                {stages.length > 1 && (
+                                                    <button
+                                                        onClick={() => handleRemoveStage(index)}
+                                                        className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                                                    >
+                                                        <Trash2 className="w-4 h-4" />
+                                                    </button>
+                                                )}
+                                            </div>
+                                            <div className="ml-7">
+                                                <StageColorPicker
+                                                    compact
+                                                    value={stage.color}
+                                                    onChange={(color) => handleStageColorChange(index, color)}
+                                                />
+                                            </div>
                                         </div>
                                     ))}
                                 </div>

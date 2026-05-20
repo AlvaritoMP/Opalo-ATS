@@ -29,6 +29,7 @@ import {
     getStickyColumnStyle,
     CHECKBOX_COL_WIDTH,
 } from '../lib/bulkTableColumns';
+import { getStageSelectClass } from '../lib/stageColors';
 import { getCellMetaStorageKey, BulkCellMeta, BulkCellMetaStore } from '../lib/bulkCellMeta';
 import { BulkCellContextMenu } from './BulkCellContextMenu';
 import { BulkProcessEditorModal } from './BulkProcessEditorModal';
@@ -2599,6 +2600,8 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                                 );
                                             }
                                             if (colId === 'stage') {
+                                                const currentStage = process?.stages.find(s => s.id === displayCandidate.stageId);
+                                                const stageColorClass = getStageSelectClass(currentStage?.color);
                                                 return (
                                                     <td key="stage" {...tdProps(candidate.id, 'stage')}>
                                                         <select
@@ -2606,7 +2609,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                                             onChange={(e) => updateCandidateStatus(candidate.id, { stageId: e.target.value }, candidate.stageId)}
                                                             onClick={(e) => e.stopPropagation()}
                                                             onMouseDown={(e) => e.stopPropagation()}
-                                                            className="text-xs border border-primary-300 rounded px-1 py-0.5 focus:ring-1 focus:ring-primary-500 focus:border-primary-500 bg-white min-w-[100px] max-w-[120px] cursor-pointer"
+                                                            className={`text-xs border rounded px-1 py-0.5 focus:ring-1 focus:ring-primary-500 focus:border-primary-500 min-w-[100px] max-w-[120px] cursor-pointer font-medium ${stageColorClass}`}
                                                             title="Selecciona la etapa del candidato"
                                                         >
                                                             {process?.stages.map(s => (

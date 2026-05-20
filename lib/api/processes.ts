@@ -13,6 +13,7 @@ function dbToProcess(dbProcess: any, stages: any[] = [], documentCategories: any
             name: s.name,
             requiredDocuments: s.required_documents || undefined,
             isCritical: s.is_critical === true || s.is_critical === 1 || s.is_critical === 'true',
+            color: s.color || undefined,
         })),
         salaryRange: dbProcess.salary_range,
         experienceLevel: dbProcess.experience_level,
@@ -456,6 +457,7 @@ export const processesApi = {
                 order_index: index,
                 required_documents: stage.requiredDocuments || null,
                 is_critical: stage.isCritical || false,
+                color: stage.color || null,
                 app_name: APP_NAME, // Asegurar que siempre se asigne el app_name
             }));
             
@@ -641,7 +643,7 @@ export const processesApi = {
             // Obtener stages existentes de la base de datos
             const { data: existingStages, error: fetchError } = await supabase
                 .from('stages')
-                .select('id, name, order_index, required_documents, is_critical')
+                .select('id, name, order_index, required_documents, is_critical, color')
                 .eq('process_id', id)
                 .eq('app_name', APP_NAME)
                 .order('order_index');
@@ -655,8 +657,8 @@ export const processesApi = {
             const newStagesMap = new Map(processData.stages.map((s, index) => [s.id, { ...s, order_index: index }]));
             
             // Separar stages en: actualizar, insertar, y eliminar
-            const stagesToUpdate: Array<{ id: string; name: string; order_index: number; required_documents: any; is_critical: boolean }> = [];
-            const stagesToInsert: Array<{ process_id: string; name: string; order_index: number; required_documents: any; is_critical: boolean }> = [];
+            const stagesToUpdate: Array<{ id: string; name: string; order_index: number; required_documents: any; is_critical: boolean; color: string | null }> = [];
+            const stagesToInsert: Array<{ process_id: string; name: string; order_index: number; required_documents: any; is_critical: boolean; color: string | null }> = [];
             const stagesToDelete: string[] = [];
             
             // Identificar qué hacer con cada stage existente
@@ -669,13 +671,15 @@ export const processesApi = {
                     // Stage existe en ambos, actualizar si cambió
                     if (newStage.name !== existingStage.name || 
                         JSON.stringify(newStage.requiredDocuments || []) !== JSON.stringify(existingStage.required_documents || []) ||
-                        newIsCritical !== existingIsCritical) {
+                        newIsCritical !== existingIsCritical ||
+                        (newStage.color || null) !== (existingStage.color || null)) {
                         stagesToUpdate.push({
                             id: stageId,
                             name: newStage.name,
                             order_index: newStage.order_index,
                             required_documents: newStage.requiredDocuments || null,
                             is_critical: newIsCritical,
+                            color: newStage.color || null,
                         });
                     } else if (newStage.order_index !== existingStage.order_index) {
                         // Solo cambió el orden, pero mantener otros valores
@@ -685,6 +689,7 @@ export const processesApi = {
                             order_index: newStage.order_index,
                             required_documents: existingStage.required_documents,
                             is_critical: existingIsCritical,
+                            color: existingStage.color || null,
                         });
                     }
                 } else {
@@ -705,6 +710,7 @@ export const processesApi = {
                         order_index: index,
                         required_documents: stage.requiredDocuments || null,
                         is_critical: stage.isCritical || false,
+                        color: stage.color || null,
                     });
                 }
             });
@@ -737,7 +743,7 @@ export const processesApi = {
                     order_index: stage.order_index,
                     required_documents: stage.required_documents,
                 };
-                
+
                 const { error: updateError } = await supabase
                     .from('stages')
                     .update(standardUpdate)
@@ -747,6 +753,32 @@ export const processesApi = {
                 if (updateError) {
                     console.error(`Error actualizando stage ${stage.id}:`, updateError);
                     throw updateError;
+                }
+
+                // Intentar actualizar color por separado (la columna puede no existir aún)
+                if (stage.color !== undefined) {
+                    try {
+                        const { error: colorError } = await supabase
+                            .from('stages')
+                            .update({ color: stage.color })
+                            .eq('id', stage.id)
+                            .eq('app_name', APP_NAME);
+
+                        if (colorError) {
+                            const isColumnError = colorError.message?.includes('color') ||
+                                                 colorError.message?.includes('schema cache') ||
+                                                 colorError.message?.includes('column') ||
+                                                 colorError.code === '42703';
+
+                            if (isColumnError) {
+                                console.warn('⚠️ La columna color no existe en la tabla stages. Ejecuta MIGRATION_ADD_STAGE_COLOR.sql');
+                            } else {
+                                console.warn(`Error actualizando color para stage ${stage.id}:`, colorError);
+                            }
+                        }
+                    } catch {
+                        console.warn(`No se pudo actualizar color para stage ${stage.id}`);
+                    }
                 }
                 
                 // Intentar actualizar is_critical por separado (la columna puede no existir aún)
@@ -799,7 +831,7 @@ export const processesApi = {
                     throw insertError;
                 }
                 
-                // Ahora intentar actualizar is_critical por separado para cada stage insertado
+                // Ahora intentar actualizar is_critical y color por separado para cada stage insertado
                 if (insertedStages) {
                     for (const insertedStage of insertedStages) {
                         const originalStage = stagesToInsert.find(s => s.order_index === insertedStage.order_index);
@@ -823,6 +855,27 @@ export const processesApi = {
                             } catch (err) {
                                 // Ignorar errores de columna faltante
                                 console.warn('No se pudo guardar is_critical para un stage nuevo');
+                            }
+                        }
+                        if (originalStage?.color) {
+                            try {
+                                const { error: colorError } = await supabase
+                                    .from('stages')
+                                    .update({ color: originalStage.color })
+                                    .eq('id', insertedStage.id)
+                                    .eq('app_name', APP_NAME);
+
+                                if (colorError) {
+                                    const isColumnError = colorError.message?.includes('color') ||
+                                                         colorError.message?.includes('schema cache') ||
+                                                         colorError.message?.includes('column') ||
+                                                         colorError.code === '42703';
+                                    if (isColumnError) {
+                                        console.warn('⚠️ La columna color no existe en la tabla stages. Ejecuta MIGRATION_ADD_STAGE_COLOR.sql');
+                                    }
+                                }
+                            } catch {
+                                console.warn('No se pudo guardar color para un stage nuevo');
                             }
                         }
                     }

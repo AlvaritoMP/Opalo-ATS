@@ -1,10 +1,23 @@
 // types.ts
 
+export type StageColorId =
+    | 'blue'
+    | 'green'
+    | 'yellow'
+    | 'orange'
+    | 'red'
+    | 'purple'
+    | 'pink'
+    | 'cyan'
+    | 'indigo'
+    | 'slate';
+
 export interface Stage {
     id: string;
     name: string;
     requiredDocuments?: string[]; // IDs de categorías de documentos requeridas para avanzar a esta etapa
     isCritical?: boolean; // Indica si esta etapa es crítica y requiere atención
+    color?: StageColorId; // Color para identificar la etapa en la tabla de alta densidad
 }
 
 export interface Attachment {
