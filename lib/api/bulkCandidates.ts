@@ -1,6 +1,66 @@
 import { supabase } from '../supabase';
 import { APP_NAME } from '../appConfig';
 
+/** Select mínimo — siempre disponible */
+const BULK_SELECT_BASE =
+    'id, name, email, phone, dni, age, source, province, district, score_ia, metadata_ia, stage_id, process_id, last_whatsapp_interaction_at';
+
+const BULK_SELECT_WITH_CREATED = `${BULK_SELECT_BASE}, created_at`;
+const BULK_SELECT_FULL = `${BULK_SELECT_WITH_CREATED}, bulk_column_values`;
+
+/** Cache del select que funcionó en este entorno (evita reintentos en cada página) */
+let cachedBulkSelect: string | null = null;
+
+function isMissingColumnError(error: { message?: string; code?: string } | null): boolean {
+    if (!error) return false;
+    const msg = (error.message || '').toLowerCase();
+    return (
+        error.code === '42703' ||
+        msg.includes('bulk_column_values') ||
+        msg.includes('schema cache') ||
+        msg.includes('could not find') ||
+        (msg.includes('column') && msg.includes('candidates'))
+    );
+}
+
+function getBulkSelectCandidates(): string[] {
+    if (cachedBulkSelect) return [cachedBulkSelect];
+    return [BULK_SELECT_FULL, BULK_SELECT_WITH_CREATED, BULK_SELECT_BASE];
+}
+
+function mapBulkCandidateRow(
+    c: Record<string, unknown>,
+    nextInterviews: Map<string, { start: string; interviewerId: string }>
+): BulkCandidate {
+    const nextInterview = nextInterviews.get(c.id as string);
+    return {
+        id: c.id as string,
+        name: c.name as string,
+        email: (c.email as string) || undefined,
+        phone: (c.phone as string) || undefined,
+        dni: (c.dni as string) || undefined,
+        source: (c.source as string) || undefined,
+        province: (c.province as string) || undefined,
+        district: (c.district as string) || undefined,
+        age: c.age != null ? (c.age as number) : undefined,
+        scoreIa: (c.score_ia as number) || undefined,
+        metadataIa: (c.metadata_ia as string) || undefined,
+        stageId: c.stage_id as string,
+        processId: c.process_id as string,
+        lastWhatsAppInteractionAt: (c.last_whatsapp_interaction_at as string) || undefined,
+        createdAt: (c.created_at as string) || undefined,
+        nextInterviewAt: nextInterview?.start || undefined,
+        nextInterviewerId: nextInterview?.interviewerId || undefined,
+        bulkColumnValues: (c.bulk_column_values as Record<string, unknown>) || undefined,
+    };
+}
+
+let bulkColumnValuesWriteSupported: boolean | null = null;
+
+function isBulkColumnValuesWriteSupported(): boolean {
+    return bulkColumnValuesWriteSupported !== false;
+}
+
 // Tipo ligero para la vista masiva (solo campos necesarios)
 export interface BulkCandidate {
     id: string;
@@ -57,39 +117,46 @@ export const bulkCandidatesApi = {
         const from = page * pageSize;
         const to = from + pageSize - 1;
 
-        // Construir query base
-        let query = supabase
-            .from('candidates')
-            .select('id, name, email, phone, dni, age, source, province, district, score_ia, metadata_ia, stage_id, process_id, last_whatsapp_interaction_at, bulk_column_values, created_at', { count: 'exact' })
-            .eq('app_name', APP_NAME)
-            .eq('archived', filters?.archived ?? false)
-            .eq('discarded', filters?.discarded ?? false)
-            .order('created_at', { ascending: false })
-            .range(from, to);
+        const applyFilters = (query: ReturnType<typeof supabase.from>) => {
+            let q = query
+                .eq('app_name', APP_NAME)
+                .eq('archived', filters?.archived ?? false)
+                .eq('discarded', filters?.discarded ?? false)
+                .order('created_at', { ascending: false })
+                .range(from, to);
 
-        // Aplicar filtros
-        if (processId) {
-            query = query.eq('process_id', processId);
+            if (processId) q = q.eq('process_id', processId);
+            if (filters?.stageId) q = q.eq('stage_id', filters.stageId);
+            if (filters?.search) {
+                q = q.or(`name.ilike.%${filters.search}%,phone.ilike.%${filters.search}%`);
+            }
+            return q;
+        };
+
+        let data: Record<string, unknown>[] | null = null;
+        let count: number | null = null;
+        let lastError: { message?: string; code?: string } | null = null;
+
+        for (const selectFields of getBulkSelectCandidates()) {
+            const { data: rows, error, count: total } = await applyFilters(
+                supabase.from('candidates').select(selectFields, { count: 'exact' })
+            );
+            if (!error) {
+                data = (rows || []) as Record<string, unknown>[];
+                count = total;
+                cachedBulkSelect = selectFields;
+                bulkColumnValuesWriteSupported = selectFields.includes('bulk_column_values');
+                break;
+            }
+            lastError = error;
+            if (!isMissingColumnError(error)) break;
+            if (cachedBulkSelect === selectFields) cachedBulkSelect = null;
         }
 
-        if (filters?.stageId) {
-            query = query.eq('stage_id', filters.stageId);
-        }
-
-        if (filters?.search) {
-            // Búsqueda en nombre, email o teléfono
-            query = query.or(`name.ilike.%${filters.search}%,phone.ilike.%${filters.search}%`);
-        }
-
-        // El filtrado por score IA es solo visual (columna/filtros de tabla).
-        // Nunca excluir candidatos en servidor por score_ia: los importados suelen tener NULL.
-
-        const { data, error, count } = await query;
-
-        if (error) throw error;
+        if (lastError && !data) throw lastError;
 
         // Obtener próximas entrevistas para los candidatos
-        const candidateIds = (data || []).map(c => c.id);
+        const candidateIds = (data || []).map(c => c.id as string);
         let nextInterviews: Map<string, { start: string; interviewerId: string }> = new Map();
         
         if (candidateIds.length > 0) {
@@ -115,29 +182,9 @@ export const bulkCandidatesApi = {
             }
         }
 
-        const candidates: BulkCandidate[] = (data || []).map(c => {
-            const nextInterview = nextInterviews.get(c.id);
-            return {
-                id: c.id,
-                name: c.name,
-                email: c.email || undefined,
-                phone: c.phone || undefined,
-                dni: c.dni || undefined,
-                source: c.source || undefined,
-                province: c.province || undefined,
-                district: c.district || undefined,
-                age: c.age ?? undefined,
-                scoreIa: c.score_ia || undefined,
-                metadataIa: c.metadata_ia || undefined,
-                stageId: c.stage_id,
-                processId: c.process_id,
-                lastWhatsAppInteractionAt: c.last_whatsapp_interaction_at || undefined,
-                createdAt: c.created_at || undefined,
-                nextInterviewAt: nextInterview?.start || undefined,
-                nextInterviewerId: nextInterview?.interviewerId || undefined,
-                bulkColumnValues: (c.bulk_column_values as Record<string, unknown>) || undefined,
-            };
-        });
+        const candidates: BulkCandidate[] = (data || []).map(c =>
+            mapBulkCandidateRow(c, nextInterviews)
+        );
 
         return {
             candidates,
@@ -367,6 +414,7 @@ export const bulkCandidatesApi = {
         values: Record<string, unknown>
     ): Promise<void> {
         if (Object.keys(values).length === 0) return;
+        if (!isBulkColumnValuesWriteSupported()) return;
 
         const { data, error: fetchError } = await supabase
             .from('candidates')
@@ -375,7 +423,13 @@ export const bulkCandidatesApi = {
             .eq('app_name', APP_NAME)
             .single();
 
-        if (fetchError) throw fetchError;
+        if (fetchError) {
+            if (isMissingColumnError(fetchError)) {
+                bulkColumnValuesWriteSupported = false;
+                return;
+            }
+            throw fetchError;
+        }
 
         const current = (data?.bulk_column_values as Record<string, unknown>) || {};
         const merged = { ...current, ...values };
@@ -386,7 +440,13 @@ export const bulkCandidatesApi = {
             .eq('id', candidateId)
             .eq('app_name', APP_NAME);
 
-        if (error) throw error;
+        if (error) {
+            if (isMissingColumnError(error)) {
+                bulkColumnValuesWriteSupported = false;
+                return;
+            }
+            throw error;
+        }
     },
 
     /**
