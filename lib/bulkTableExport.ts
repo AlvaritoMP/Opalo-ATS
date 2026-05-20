@@ -79,6 +79,14 @@ export function getBulkExportCellValue(
     if (colId === 'district') {
         return resolveStandardFieldValue('district', candidate.id, candidate, columnValues, customColumns) || '';
     }
+    if (colId === 'createdAt') {
+        if (!candidate.createdAt) return '';
+        try {
+            return new Date(candidate.createdAt).toLocaleString('es-PE');
+        } catch {
+            return candidate.createdAt;
+        }
+    }
     if (colId === 'lastInteraction') {
         if (!candidate.lastWhatsAppInteractionAt) return '';
         try {

@@ -7,6 +7,7 @@ import { SearchableSelect } from './SearchableSelect';
 interface AddCandidateModalProps {
     process: Process;
     onClose: () => void;
+    onSuccess?: () => void;
 }
 
 const fileToBase64 = (file: File): Promise<string> => {
@@ -18,7 +19,7 @@ const fileToBase64 = (file: File): Promise<string> => {
     });
 };
 
-export const AddCandidateModal: React.FC<AddCandidateModalProps> = ({ process, onClose }) => {
+export const AddCandidateModal: React.FC<AddCandidateModalProps> = ({ process, onClose, onSuccess }) => {
     const { state, actions, getLabel } = useAppState();
     const getDefaultSource = (): Candidate['source'] => {
         const sources = state.settings?.candidateSources && state.settings.candidateSources.length > 0
@@ -77,17 +78,16 @@ export const AddCandidateModal: React.FC<AddCandidateModalProps> = ({ process, o
                 applicationStartedDate: new Date().toISOString(), // Set automatically when candidate is created
             });
             
-            // Recargar candidatos del proceso para asegurar sincronización
-            if (actions.reloadCandidates && typeof actions.reloadCandidates === 'function') {
+            if (onSuccess) {
+                onSuccess();
+            } else if (actions.reloadCandidates && typeof actions.reloadCandidates === 'function') {
                 try {
                     await actions.reloadCandidates();
                 } catch (reloadError: any) {
                     console.warn('Error al recargar candidatos después de crear (no crítico):', reloadError);
-                    // No mostrar error al usuario, el candidato ya se creó
                 }
             }
             
-            // Solo cerrar el modal si la creación fue exitosa
             onClose();
         } catch (error: any) {
             // El error ya fue manejado y mostrado en addCandidate

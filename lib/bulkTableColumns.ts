@@ -16,6 +16,7 @@ export const BASE_COLUMNS: BaseColumn[] = [
     { id: 'source', label: 'Fuente', importKey: 'source' },
     { id: 'province', label: 'Provincia', importKey: 'province' },
     { id: 'district', label: 'Distrito', importKey: 'district' },
+    { id: 'createdAt', label: 'Fecha creación' },
     { id: 'lastInteraction', label: 'Última Interacción' },
     { id: 'contact', label: 'Contacto' },
     { id: 'nextInterview', label: 'Próxima Entrevista' },
@@ -38,7 +39,8 @@ export const COLUMN_WIDTHS: Record<string, number> = {
     source: 88,
     province: 88,
     district: 88,
-    lastInteraction: 96,
+    createdAt: 120,
+    lastInteraction: 120,
     contact: 72,
     nextInterview: 100,
     schedule: 56,
@@ -78,7 +80,7 @@ export function getStickyColumnStyle(
     pinnedColumns: string[],
     isHeader: boolean,
     bgColor?: string
-): { position: 'sticky'; left: number; zIndex: number; minWidth: number; maxWidth: number; backgroundColor: string; boxShadow?: string } | undefined {
+): { position: 'sticky'; left: number; top?: number; zIndex: number; minWidth: number; maxWidth: number; backgroundColor: string; boxShadow?: string } | undefined {
     const left = getStickyLeftOffset(target, visibleColumns, pinnedColumns);
     if (left === null && target !== 'checkbox') return undefined;
     const offset = target === 'checkbox' ? 0 : left!;
@@ -88,7 +90,10 @@ export function getStickyColumnStyle(
     return {
         position: 'sticky',
         left: offset,
-        zIndex: isHeader ? (target === 'checkbox' ? 25 : 20) : (target === 'checkbox' ? 15 : 10),
+        ...(isHeader ? { top: 0 } : {}),
+        zIndex: isHeader
+            ? (target === 'checkbox' ? 40 : 35)
+            : (target === 'checkbox' ? 20 : 15),
         minWidth: target === 'checkbox' ? CHECKBOX_COL_WIDTH : getColumnWidth(target),
         maxWidth: target === 'checkbox' ? CHECKBOX_COL_WIDTH : getColumnWidth(target),
         backgroundColor: bgColor ?? (isHeader ? '#f9fafb' : '#ffffff'),
@@ -268,6 +273,20 @@ export function getColumnValuesStorageKey(processId: string): string {
     return `bulkColumnValues_${processId}`;
 }
 
+/** Fusiona valores de BD (bulk_column_values) en el estado de columnValues */
+export function mergeColumnValuesFromCandidates(
+    prev: Record<string, Record<string, any>>,
+    candidates: { id: string; bulkColumnValues?: Record<string, unknown> }[],
+    customColumns: CustomColumn[] = []
+): Record<string, Record<string, any>> {
+    const merged = { ...prev };
+    for (const c of candidates) {
+        if (!c.bulkColumnValues || Object.keys(c.bulkColumnValues).length === 0) continue;
+        merged[c.id] = { ...(merged[c.id] || {}), ...c.bulkColumnValues };
+    }
+    return repairDateColumnValues(merged, customColumns);
+}
+
 const EXCEL_EPOCH_UTC_MS = Date.UTC(1899, 11, 30);
 
 function formatDateParts(day: number, month: number, year: number): string {
@@ -384,7 +403,54 @@ export function repairDateColumnValues(
 /** Columnas donde se permite pegar desde portapapeles */
 export function isPasteEditableColumn(colId: string): boolean {
     if (colId.startsWith('custom_')) return true;
-    return ['name', 'dni', 'email', 'phone', 'source', 'province', 'district'].includes(colId);
+    return ['name', 'dni', 'email', 'phone', 'source', 'province', 'district', 'lastInteraction'].includes(colId);
+}
+
+/** Formato: "lun 15/05/2026 14:30" */
+export function formatBulkDateTime(iso?: string | null): string {
+    if (!iso) return '-';
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return String(iso);
+    const dayName = d.toLocaleDateString('es-PE', { weekday: 'short' });
+    const date = d.toLocaleDateString('es-PE', { day: '2-digit', month: '2-digit', year: 'numeric' });
+    const time = d.toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' });
+    return `${dayName} ${date} ${time}`;
+}
+
+export function isoToDatetimeLocalValue(iso?: string | null): string {
+    if (!iso) return '';
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return '';
+    const pad = (n: number) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+export function datetimeLocalToIso(value: string): string | undefined {
+    const trimmed = value.trim();
+    if (!trimmed) return undefined;
+    const d = new Date(trimmed);
+    if (isNaN(d.getTime())) return undefined;
+    return d.toISOString();
+}
+
+export function parseBulkDateTimeInput(value: string): string | undefined {
+    const trimmed = value.trim();
+    if (!trimmed) return undefined;
+    const ddmmyyyy = trimmed.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:\s+(\d{1,2}):(\d{2}))?$/);
+    if (ddmmyyyy) {
+        const [, day, month, year, hour = '0', minute = '0'] = ddmmyyyy;
+        const d = new Date(
+            parseInt(year, 10),
+            parseInt(month, 10) - 1,
+            parseInt(day, 10),
+            parseInt(hour, 10),
+            parseInt(minute, 10)
+        );
+        if (!isNaN(d.getTime())) return d.toISOString();
+    }
+    const d = new Date(trimmed);
+    if (!isNaN(d.getTime())) return d.toISOString();
+    return undefined;
 }
 
 /** Parsea texto copiado de Excel/Sheets (TSV) o una columna simple */

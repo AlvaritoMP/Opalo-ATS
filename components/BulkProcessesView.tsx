@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useAppState } from '../App';
 import { bulkCandidatesApi, BulkCandidate } from '../lib/api/bulkCandidates';
 import { processesApi } from '../lib/api/processes';
-import { Check, X, Loader2, Send, Archive, Search, ChevronDown, ChevronUp, Plus, Edit, Trash2, ArrowLeft, MessageCircle, Phone, Upload, Download, Filter, Mail, Calendar, Settings, ArrowUp, ArrowDown, Pin, FileText, BookOpen, Paperclip, ClipboardList } from 'lucide-react';
+import { Check, X, Loader2, Send, Archive, Search, ChevronDown, ChevronUp, Plus, Edit, Trash2, ArrowLeft, MessageCircle, Phone, Upload, Download, Filter, Mail, Calendar, Settings, ArrowUp, ArrowDown, Pin, FileText, BookOpen, Paperclip, ClipboardList, UserPlus } from 'lucide-react';
 import { Process, CustomColumn, BulkProcessConfig } from '../types';
 import {
     BASE_COLUMNS,
@@ -24,6 +24,11 @@ import {
     resolveStandardFieldValue,
     isPlaceholderImportEmail,
     repairDateColumnValues,
+    mergeColumnValuesFromCandidates,
+    formatBulkDateTime,
+    isoToDatetimeLocalValue,
+    datetimeLocalToIso,
+    parseBulkDateTimeInput,
     COMPACT_TD_CLASS,
     COMPACT_TH_CLASS,
     getStickyColumnStyle,
@@ -34,10 +39,10 @@ import { getCellMetaStorageKey, BulkCellMeta, BulkCellMetaStore } from '../lib/b
 import { BulkCellContextMenu } from './BulkCellContextMenu';
 import { BulkProcessEditorModal } from './BulkProcessEditorModal';
 import { BulkProcessImportModal } from './BulkProcessImportModal';
+import { AddCandidateModal } from './AddCandidateModal';
 import { BulkWhatsAppModal } from './BulkWhatsAppModal';
 import { BulkEmailModal } from './BulkEmailModal';
 import { QuickScheduleModal } from './QuickScheduleModal';
-import { QuickScheduleInline } from './QuickScheduleInline';
 import { BulkScheduleModal } from './BulkScheduleModal';
 import { AddColumnModal } from './AddColumnModal';
 import { TableTemplateModal } from './TableTemplateModal';
@@ -70,28 +75,6 @@ const getCellFromElement = (el: EventTarget | null): CellCoord | null => {
     const colId = td.getAttribute('data-cell-col');
     if (!candidateId || !colId) return null;
     return { candidateId, colId };
-};
-
-// Función helper para formatear tiempo relativo
-const formatTimeAgo = (dateString?: string): string => {
-    if (!dateString) return 'Nunca';
-    
-    const date = new Date(dateString);
-    const now = new Date();
-    const diffMs = now.getTime() - date.getTime();
-    const diffMins = Math.floor(diffMs / 60000);
-    const diffHours = Math.floor(diffMs / 3600000);
-    const diffDays = Math.floor(diffMs / 86400000);
-    const diffWeeks = Math.floor(diffDays / 7);
-    const diffMonths = Math.floor(diffDays / 30);
-    
-    if (diffMins < 1) return 'Hace menos de 1 min';
-    if (diffMins < 60) return `Hace ${diffMins} min`;
-    if (diffHours < 24) return `Hace ${diffHours} ${diffHours === 1 ? 'hora' : 'horas'}`;
-    if (diffDays < 7) return `Hace ${diffDays} ${diffDays === 1 ? 'día' : 'días'}`;
-    if (diffWeeks < 4) return `Hace ${diffWeeks} ${diffWeeks === 1 ? 'semana' : 'semanas'}`;
-    if (diffMonths < 12) return `Hace ${diffMonths} ${diffMonths === 1 ? 'mes' : 'meses'}`;
-    return `Hace más de ${Math.floor(diffDays / 365)} ${Math.floor(diffDays / 365) === 1 ? 'año' : 'años'}`;
 };
 
 // Drawer lateral para mostrar detalles del candidato
@@ -390,6 +373,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
     const [showProcessModal, setShowProcessModal] = useState(false);
     const [editingProcess, setEditingProcess] = useState<Process | null>(null);
     const [showImportModal, setShowImportModal] = useState(false);
+    const [showAddCandidateModal, setShowAddCandidateModal] = useState(false);
     const [showWhatsAppModal, setShowWhatsAppModal] = useState(false);
     const [showEmailModal, setShowEmailModal] = useState(false);
     const [isMobile, setIsMobile] = useState(false);
@@ -410,7 +394,6 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
     const [columnValues, setColumnValues] = useState<Record<string, Record<string, any>>>({});
     const [cellMeta, setCellMeta] = useState<BulkCellMetaStore>({});
     const [cellContextMenu, setCellContextMenu] = useState<{ x: number; y: number; candidateId: string; colId: string } | null>(null);
-    const [quickScheduleCandidate, setQuickScheduleCandidate] = useState<string | null>(null);
     const [columnFilters, setColumnFilters] = useState<Record<string, string>>({});
     const [sortColumn, setSortColumn] = useState<string | null>(null);
     const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
@@ -418,6 +401,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
     const [selectedCells, setSelectedCells] = useState<Set<string>>(new Set());
     const [selectionAnchor, setSelectionAnchor] = useState<CellCoord | null>(null);
     const tableContainerRef = useRef<HTMLDivElement>(null);
+    const columnValuesMigratedRef = useRef<string | null>(null);
     const isDraggingCells = useRef(false);
     const dragAnchorCell = useRef<CellCoord | null>(null);
     const didDragSelect = useRef(false);
@@ -518,14 +502,8 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
         setPinnedColumns(config?.pinnedColumns?.length ? config.pinnedColumns : ['name']);
         setColumnOrder(resolveColumnOrder(config, cols));
         setColumnFilters({});
-
-        const savedValues = localStorage.getItem(getColumnValuesStorageKey(process.id));
-        const parsedValues = savedValues ? JSON.parse(savedValues) : {};
-        const repairedValues = repairDateColumnValues(parsedValues, cols);
-        setColumnValues(repairedValues);
-        if (repairedValues !== parsedValues && Object.keys(repairedValues).length > 0) {
-            localStorage.setItem(getColumnValuesStorageKey(process.id), JSON.stringify(repairedValues));
-        }
+        setColumnValues({});
+        columnValuesMigratedRef.current = null;
 
         const savedMeta = localStorage.getItem(getCellMetaStorageKey(process.id));
         setCellMeta(savedMeta ? JSON.parse(savedMeta) : {});
@@ -600,6 +578,8 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
             } else {
                 setCandidates(prev => [...prev, ...result.candidates]);
             }
+            const cols = process?.bulkConfig?.customColumns || [];
+            setColumnValues(prev => mergeColumnValuesFromCandidates(prev, result.candidates, cols));
             setTotal(result.total);
             setHasMore(result.hasMore);
             setCurrentPage(page);
@@ -609,11 +589,62 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
         } finally {
             setIsLoading(false);
         }
-    }, [selectedProcess, selectedStage, searchQuery, actions]);
+    }, [selectedProcess, selectedStage, searchQuery, actions, process?.bulkConfig?.customColumns]);
 
     useEffect(() => {
         loadCandidates(0, true);
     }, [selectedProcess, selectedStage, searchQuery]);
+
+    // Migrar valores que quedaron en localStorage (navegador del admin) hacia Supabase
+    useEffect(() => {
+        if (!process?.id || candidates.length === 0) return;
+        if (columnValuesMigratedRef.current === process.id) return;
+
+        const storageKey = getColumnValuesStorageKey(process.id);
+        const saved = localStorage.getItem(storageKey);
+        columnValuesMigratedRef.current = process.id;
+        if (!saved) return;
+
+        let localValues: Record<string, Record<string, any>>;
+        try {
+            localValues = JSON.parse(saved);
+        } catch {
+            localStorage.removeItem(storageKey);
+            return;
+        }
+
+        localStorage.removeItem(storageKey);
+
+        const toMigrate: Record<string, Record<string, unknown>> = {};
+        setColumnValues(prev => {
+            const merged = { ...prev };
+            for (const [candidateId, values] of Object.entries(localValues)) {
+                if (!values) continue;
+                const candidate = candidates.find(c => c.id === candidateId);
+                const dbValues = (candidate?.bulkColumnValues || {}) as Record<string, unknown>;
+                const row: Record<string, unknown> = { ...values, ...dbValues };
+                merged[candidateId] = { ...(merged[candidateId] || {}), ...row };
+
+                const patch: Record<string, unknown> = { ...dbValues };
+                let hasNew = false;
+                for (const [colId, val] of Object.entries(values)) {
+                    const dbVal = dbValues[colId];
+                    if (dbVal === undefined || dbVal === null || dbVal === '') {
+                        patch[colId] = val;
+                        hasNew = true;
+                    }
+                }
+                if (hasNew) toMigrate[candidateId] = patch;
+            }
+            return repairDateColumnValues(merged, customColumns);
+        });
+
+        if (Object.keys(toMigrate).length === 0) return;
+
+        bulkCandidatesApi.batchSetBulkColumnValues(toMigrate).catch(err => {
+            console.error('Error migrando columnValues a Supabase:', err);
+        });
+    }, [process?.id, candidates, customColumns]);
 
     // Sincronizar edades importadas al campo age de BD hacia columnas personalizadas "Edad"
     useEffect(() => {
@@ -626,6 +657,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
         setColumnValues(prev => {
             const newValues = { ...prev };
             let updated = false;
+            const dbPatches: Record<string, Record<string, unknown>> = {};
             candidates.forEach(candidate => {
                 if (candidate.age == null) return;
                 ageColumns.forEach(col => {
@@ -633,11 +665,16 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                     if (current !== undefined && current !== '' && current !== null) return;
                     if (!newValues[candidate.id]) newValues[candidate.id] = {};
                     newValues[candidate.id][col.id] = candidate.age;
+                    if (!dbPatches[candidate.id]) {
+                        dbPatches[candidate.id] = { ...(newValues[candidate.id]) };
+                    } else {
+                        dbPatches[candidate.id][col.id] = candidate.age;
+                    }
                     updated = true;
                 });
             });
             if (updated) {
-                localStorage.setItem(getColumnValuesStorageKey(process.id), JSON.stringify(newValues));
+                void bulkCandidatesApi.batchSetBulkColumnValues(dbPatches);
                 return newValues;
             }
             return prev;
@@ -751,32 +788,10 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
         }
     }, [selectedIds, candidates, state.settings, loadCandidates, currentPage, actions]);
 
-    const handleWhatsAppClick = useCallback(async (candidateId: string, phone: string) => {
-        // Registrar la interacción en la base de datos
-        try {
-            await bulkCandidatesApi.recordWhatsAppInteraction(candidateId);
-            
-            // Actualizar optimísticamente el candidato en la lista
-            setOptimisticUpdates(prev => {
-                const newMap = new Map(prev);
-                const candidate = candidates.find(c => c.id === candidateId);
-                if (candidate) {
-                    newMap.set(candidateId, {
-                        ...candidate,
-                        lastWhatsAppInteractionAt: new Date().toISOString(),
-                    });
-                }
-                return newMap;
-            });
-        } catch (error) {
-            console.error('Error registrando interacción de WhatsApp:', error);
-            // No mostramos error al usuario, solo lo registramos
-        }
-        
-        // Abrir WhatsApp en nueva pestaña
+    const handleWhatsAppClick = useCallback((candidateId: string, phone: string) => {
         const cleanPhone = phone.replace(/[^\d]/g, '');
         window.open(`https://wa.me/${cleanPhone}`, '_blank', 'noopener,noreferrer');
-    }, [candidates]);
+    }, []);
 
     const handleDeleteCandidate = useCallback(async (candidateId: string, candidateName: string) => {
         if (!confirm(`¿Estás seguro de eliminar permanentemente a ${candidateName}? Esta acción no se puede deshacer.`)) {
@@ -817,18 +832,10 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                     const cleanPhone = candidate.phone.replace(/[^\d]/g, '');
                     const personalizedMessage = message.replace(/\{\{nombre\}\}/g, candidate.name || 'Candidato');
                     const encodedMessage = encodeURIComponent(personalizedMessage);
-                    
-                    // Registrar la interacción
-                    try {
-                        await bulkCandidatesApi.recordWhatsAppInteraction(candidate.id);
-                    } catch (error) {
-                        console.error('Error registrando interacción:', error);
-                    }
-                    
-                    // Abrir WhatsApp con el mensaje prellenado
+
                     setTimeout(() => {
                         window.open(`https://wa.me/${cleanPhone}?text=${encodedMessage}`, '_blank');
-                    }, openedCount * 500); // Delay para no bloquear el navegador
+                    }, openedCount * 500);
                     openedCount++;
                 }
             }
@@ -877,14 +884,18 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
         actions.showToast(`Abriendo cliente de correo para ${emailAddresses.length} candidato(s)`, 'success', 3000);
     }, [selectedIds, candidates, actions]);
 
+    const openScheduleModal = useCallback((candidate: BulkCandidate) => {
+        setSchedulingCandidate({ id: candidate.id, name: candidate.name });
+        setShowScheduleModal(true);
+    }, []);
+
     const handleQuickSchedule = useCallback(async (date: string, time: string, interviewerId: string, notes?: string) => {
-        const candidateId = quickScheduleCandidate || schedulingCandidate?.id;
+        const candidateId = schedulingCandidate?.id;
         if (!candidateId) return;
 
         const startDateTime = new Date(`${date}T${time}`);
-        const endDateTime = new Date(startDateTime.getTime() + 60 * 60 * 1000); // 1 hora por defecto
+        const endDateTime = new Date(startDateTime.getTime() + 60 * 60 * 1000);
 
-        // Obtener nombre del candidato
         const candidate = candidates.find(c => c.id === candidateId);
         const candidateName = candidate?.name || 'Candidato';
 
@@ -899,13 +910,18 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
 
         try {
             await actions.addInterviewEvent(eventData);
+            applyOptimisticUpdate(candidateId, {
+                nextInterviewAt: startDateTime.toISOString(),
+                nextInterviewerId: interviewerId,
+            });
             actions.showToast('Entrevista agendada exitosamente', 'success', 3000);
+            await loadCandidates(currentPage, true);
         } catch (error) {
             console.error('Error agendando entrevista:', error);
             actions.showToast('Error al agendar la entrevista', 'error', 3000);
             throw error;
         }
-    }, [quickScheduleCandidate, schedulingCandidate, candidates, actions]);
+    }, [schedulingCandidate, candidates, actions, applyOptimisticUpdate, loadCandidates, currentPage]);
 
     const handleBulkSchedule = useCallback(async (date: string, time: string, interviewerId: string, notes?: string) => {
         const selectedCandidates = candidates.filter(c => selectedIds.has(c.id));
@@ -1086,14 +1102,15 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
     const handleColumnValueChange = (candidateId: string, columnId: string, value: any) => {
         if (!process) return;
         setColumnValues(prev => {
+            const candidatePatch = {
+                ...(prev[candidateId] || {}),
+                [columnId]: value,
+            };
             const newValues = {
                 ...prev,
-                [candidateId]: {
-                    ...prev[candidateId],
-                    [columnId]: value,
-                },
+                [candidateId]: candidatePatch,
             };
-            localStorage.setItem(getColumnValuesStorageKey(process.id), JSON.stringify(newValues));
+            void bulkCandidatesApi.patchBulkColumnValues(candidateId, candidatePatch);
             return newValues;
         });
     };
@@ -1104,7 +1121,9 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
         setSelectionAnchor({ candidateId, colId });
         setSelectedCells(new Set([toCellKey({ candidateId, colId })]));
         setEditingCell({ candidateId, field });
-        if (field.startsWith('custom_')) {
+        if (field === 'lastInteraction') {
+            setEditValue(isoToDatetimeLocalValue(currentValue));
+        } else if (field.startsWith('custom_')) {
             const colId = field.replace('custom_', '');
             const col = customColumns.find(c => c.id === colId);
             if (col?.type === 'checkbox') {
@@ -1126,11 +1145,12 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
         const homonymCol = customColumns.find(c => mapImportHeader(c.name.toLowerCase()) === field);
         if (!homonymCol || !process?.id) return;
         setColumnValues(prev => {
+            const candidatePatch = { ...(prev[candidateId] || {}), [homonymCol.id]: value };
             const newValues = {
                 ...prev,
-                [candidateId]: { ...(prev[candidateId] || {}), [homonymCol.id]: value },
+                [candidateId]: candidatePatch,
             };
-            localStorage.setItem(getColumnValuesStorageKey(process.id), JSON.stringify(newValues));
+            void bulkCandidatesApi.patchBulkColumnValues(candidateId, candidatePatch);
             return newValues;
         });
     }, [customColumns, process?.id]);
@@ -1144,6 +1164,19 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
             }
             setEditingCell(null);
             setEditValue('');
+            return;
+        }
+
+        if (field === 'lastInteraction') {
+            const iso = datetimeLocalToIso(editValue);
+            applyOptimisticUpdate(candidateId, { lastWhatsAppInteractionAt: iso });
+            setEditingCell(null);
+            setEditValue('');
+            bulkCandidatesApi.patchFields(candidateId, { lastWhatsAppInteractionAt: iso ?? null }).catch(error => {
+                console.error('Error guardando última interacción:', error);
+                loadCandidates(currentPage, true);
+                actions.showToast('Error al guardar cambios', 'error', 3000);
+            });
             return;
         }
 
@@ -1181,6 +1214,15 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
             const col = customColumns.find(c => c.id === customColId);
             if (!col) return;
             handleColumnValueChange(candidateId, customColId, parseCustomCellInput(rawValue, col));
+            return;
+        }
+
+        if (colId === 'lastInteraction') {
+            const iso = parseBulkDateTimeInput(rawValue);
+            applyOptimisticUpdate(candidateId, { lastWhatsAppInteractionAt: iso });
+            bulkCandidatesApi.patchFields(candidateId, { lastWhatsAppInteractionAt: iso ?? null }).catch(error => {
+                console.error('Error pegando valor:', error);
+            });
             return;
         }
 
@@ -1276,6 +1318,11 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
         e.stopPropagation();
         setCellContextMenu({ x: e.clientX, y: e.clientY, ...coord });
     }, [editingCell]);
+
+    const buildColThStyle = useCallback((colId: string, extra?: React.CSSProperties): React.CSSProperties => ({
+        ...buildThStyle(colId),
+        ...extra,
+    }), [buildThStyle]);
 
     const handleDragStart = (e: React.DragEvent, colId: string) => {
         setDraggedColumn(colId);
@@ -1407,6 +1454,10 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                     valueA = (candidateA.district || '').toLowerCase();
                     valueB = (candidateB.district || '').toLowerCase();
                     break;
+                case 'createdAt':
+                    valueA = candidateA.createdAt ? new Date(candidateA.createdAt).getTime() : 0;
+                    valueB = candidateB.createdAt ? new Date(candidateB.createdAt).getTime() : 0;
+                    break;
                 case 'lastInteraction':
                     valueA = candidateA.lastWhatsAppInteractionAt ? new Date(candidateA.lastWhatsAppInteractionAt).getTime() : 0;
                     valueB = candidateB.lastWhatsAppInteractionAt ? new Date(candidateB.lastWhatsAppInteractionAt).getTime() : 0;
@@ -1422,7 +1473,30 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                     valueB = (stageB?.name || '').toLowerCase();
                     break;
                 default:
-                    return 0;
+                    if (sortColumn.startsWith('custom_')) {
+                        const customColId = sortColumn.replace('custom_', '');
+                        const col = customColumns.find(c => c.id === customColId);
+                        const rawA = getColumnValue(candidateA.id, customColId, candidateA);
+                        const rawB = getColumnValue(candidateB.id, customColId, candidateB);
+                        if (col?.type === 'number') {
+                            valueA = Number(rawA) || 0;
+                            valueB = Number(rawB) || 0;
+                        } else if (col?.type === 'date') {
+                            const fmtA = formatBulkDate(rawA);
+                            const fmtB = formatBulkDate(rawB);
+                            valueA = fmtA ? new Date(fmtA.split('/').reverse().join('-')).getTime() : 0;
+                            valueB = fmtB ? new Date(fmtB.split('/').reverse().join('-')).getTime() : 0;
+                        } else if (col?.type === 'checkbox') {
+                            valueA = rawA === true ? 1 : 0;
+                            valueB = rawB === true ? 1 : 0;
+                        } else {
+                            valueA = String(rawA ?? '').toLowerCase();
+                            valueB = String(rawB ?? '').toLowerCase();
+                        }
+                    } else {
+                        return 0;
+                    }
+                    break;
             }
 
             // Comparar valores
@@ -2013,6 +2087,14 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                         </>
                                     )}
                                     <button
+                                        onClick={() => setShowAddCandidateModal(true)}
+                                        className="flex items-center gap-2 px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors"
+                                        title="Agregar un candidato manualmente"
+                                    >
+                                        <UserPlus className="w-4 h-4" />
+                                        Agregar candidato
+                                    </button>
+                                    <button
                                         onClick={() => setShowImportModal(true)}
                                         className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
                                     >
@@ -2156,12 +2238,6 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
 
             {selectedProcess && (
                 <div className="flex-1 overflow-hidden relative flex flex-col">
-                    {quickScheduleCandidate && (
-                        <div 
-                            className="fixed inset-0 z-30" 
-                            onClick={() => setQuickScheduleCandidate(null)}
-                        />
-                    )}
                     <p className="text-[10px] text-gray-500 px-1 pb-1 shrink-0">
                         Flechas · Shift+arrastrar selección · Ctrl+clic múltiple · Clic derecho: color/comentario · Enter/doble clic editar · Ctrl+V pegar en celdas seleccionadas · Doble clic en fila abre detalle
                     </p>
@@ -2173,7 +2249,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                         onKeyDown={handleTableKeyDown}
                     >
                         <table className="w-full border-collapse" style={{ tableLayout: 'fixed', width: 'max-content', minWidth: '100%' }}>
-                            <thead className="bg-gray-50 sticky top-0 z-10">
+                            <thead className="bg-gray-50 sticky top-0 z-20">
                             <tr>
                                 <th
                                     className={`${COMPACT_TH_CLASS} bg-gray-50`}
@@ -2187,6 +2263,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                     />
                                 </th>
                                 {visibleColumns.map(colId => {
+                                    const thStyle = (extra?: React.CSSProperties) => buildColThStyle(colId, extra);
                                     const commonProps = {
                                         key: colId,
                                         draggable: true,
@@ -2196,12 +2273,11 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                         onDrop: (e: React.DragEvent<HTMLTableCellElement>) => handleDrop(e, colId),
                                         onDragEnd: handleDragEnd,
                                         className: `${COMPACT_TH_CLASS} cursor-move transition-colors bg-gray-50`,
-                                        style: buildThStyle(colId),
                                     };
 
                                     if (colId === 'name') {
                                         return (
-                                            <th {...commonProps} style={{ minWidth: '150px' }}>
+                                            <th {...commonProps} style={thStyle({ minWidth: '150px' })}>
                                                 <div className="flex flex-col gap-1">
                                                     <button onClick={() => handleSort('name')} className="flex items-center gap-1 hover:text-primary-600 transition-colors">
                                                         <span>Nombre</span>
@@ -2214,7 +2290,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                     }
                                     if (colId === 'dni') {
                                         return (
-                                            <th {...commonProps} style={{ minWidth: '100px' }}>
+                                            <th {...commonProps} style={thStyle({ minWidth: '100px' })}>
                                                 <div className="flex flex-col gap-1">
                                                     <button onClick={() => handleSort('dni')} className="flex items-center gap-1 hover:text-primary-600 transition-colors">
                                                         <span>DNI</span>
@@ -2227,7 +2303,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                     }
                                     if (colId === 'email') {
                                         return (
-                                            <th {...commonProps} style={{ minWidth: '180px' }}>
+                                            <th {...commonProps} style={thStyle({ minWidth: '180px' })}>
                                                 <div className="flex flex-col gap-1">
                                                     <button onClick={() => handleSort('email')} className="flex items-center gap-1 hover:text-primary-600 transition-colors">
                                                         <span>Email</span>
@@ -2240,7 +2316,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                     }
                                     if (colId === 'scoreIa') {
                                         return (
-                                            <th {...commonProps} style={{ minWidth: '100px' }}>
+                                            <th {...commonProps} style={thStyle({ minWidth: '100px' })}>
                                                 <div className="flex flex-col gap-1">
                                                     <button onClick={() => handleSort('scoreIa')} className="flex items-center gap-1 hover:text-primary-600 transition-colors">
                                                         <span>Score IA</span>
@@ -2253,7 +2329,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                     }
                                     if (colId === 'status') {
                                         return (
-                                            <th {...commonProps} style={{ minWidth: '100px' }}>
+                                            <th {...commonProps} style={thStyle({ minWidth: '100px' })}>
                                                 <button onClick={() => handleSort('scoreIa')} className="flex items-center gap-1 hover:text-primary-600 transition-colors">
                                                     <span>Status</span>
                                                     {sortColumn === 'scoreIa' ? (sortDirection === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />) : <div className="w-3 h-3 opacity-30"><ArrowUp className="w-3 h-3" /></div>}
@@ -2263,7 +2339,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                     }
                                     if (colId === 'phone') {
                                         return (
-                                            <th {...commonProps} style={{ minWidth: '130px' }}>
+                                            <th {...commonProps} style={thStyle({ minWidth: '130px' })}>
                                                 <div className="flex flex-col gap-1">
                                                     <button onClick={() => handleSort('phone')} className="flex items-center gap-1 hover:text-primary-600 transition-colors">
                                                         <span>Teléfono</span>
@@ -2276,7 +2352,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                     }
                                     if (colId === 'source') {
                                         return (
-                                            <th {...commonProps} style={{ minWidth: '120px' }}>
+                                            <th {...commonProps} style={thStyle({ minWidth: '120px' })}>
                                                 <div className="flex flex-col gap-1">
                                                     <button onClick={() => handleSort('source')} className="flex items-center gap-1 hover:text-primary-600 transition-colors">
                                                         <span>Fuente</span>
@@ -2289,7 +2365,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                     }
                                     if (colId === 'province') {
                                         return (
-                                            <th {...commonProps} style={{ minWidth: '120px' }}>
+                                            <th {...commonProps} style={thStyle({ minWidth: '120px' })}>
                                                 <div className="flex flex-col gap-1">
                                                     <button onClick={() => handleSort('province')} className="flex items-center gap-1 hover:text-primary-600 transition-colors">
                                                         <span>Provincia</span>
@@ -2302,7 +2378,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                     }
                                     if (colId === 'district') {
                                         return (
-                                            <th {...commonProps} style={{ minWidth: '120px' }}>
+                                            <th {...commonProps} style={thStyle({ minWidth: '120px' })}>
                                                 <div className="flex flex-col gap-1">
                                                     <button onClick={() => handleSort('district')} className="flex items-center gap-1 hover:text-primary-600 transition-colors">
                                                         <span>Distrito</span>
@@ -2313,9 +2389,19 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                             </th>
                                         );
                                     }
+                                    if (colId === 'createdAt') {
+                                        return (
+                                            <th {...commonProps} style={thStyle({ minWidth: '140px' })}>
+                                                <button onClick={() => handleSort('createdAt')} className="flex items-center gap-1 hover:text-primary-600 transition-colors">
+                                                    <span>Fecha creación</span>
+                                                    {sortColumn === 'createdAt' ? (sortDirection === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />) : <div className="w-3 h-3 opacity-30"><ArrowUp className="w-3 h-3" /></div>}
+                                                </button>
+                                            </th>
+                                        );
+                                    }
                                     if (colId === 'lastInteraction') {
                                         return (
-                                            <th {...commonProps} style={{ minWidth: '140px' }}>
+                                            <th {...commonProps} style={thStyle({ minWidth: '140px' })}>
                                                 <button onClick={() => handleSort('lastInteraction')} className="flex items-center gap-1 hover:text-primary-600 transition-colors">
                                                     <span>Última Interacción</span>
                                                     {sortColumn === 'lastInteraction' ? (sortDirection === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />) : <div className="w-3 h-3 opacity-30"><ArrowUp className="w-3 h-3" /></div>}
@@ -2325,12 +2411,12 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                     }
                                     if (colId === 'contact') {
                                         return (
-                                            <th {...commonProps} style={{ minWidth: '100px' }}>Contacto</th>
+                                            <th {...commonProps} style={thStyle({ minWidth: '100px' })}>Contacto</th>
                                         );
                                     }
                                     if (colId === 'nextInterview') {
                                         return (
-                                            <th {...commonProps} style={{ minWidth: '150px' }}>
+                                            <th {...commonProps} style={thStyle({ minWidth: '150px' })}>
                                                 <button onClick={() => handleSort('nextInterview')} className="flex items-center gap-1 hover:text-primary-600 transition-colors">
                                                     <span>Próxima Entrevista</span>
                                                     {sortColumn === 'nextInterview' ? (sortDirection === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />) : <div className="w-3 h-3 opacity-30"><ArrowUp className="w-3 h-3" /></div>}
@@ -2340,12 +2426,12 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                     }
                                     if (colId === 'schedule') {
                                         return (
-                                            <th {...commonProps} style={{ minWidth: '90px' }}>Agendar</th>
+                                            <th {...commonProps} style={thStyle({ minWidth: '90px' })}>Agendar</th>
                                         );
                                     }
                                     if (colId === 'stage') {
                                         return (
-                                            <th {...commonProps} style={{ minWidth: '130px' }}>
+                                            <th {...commonProps} style={thStyle({ minWidth: '130px' })}>
                                                 <button onClick={() => handleSort('stage')} className="flex items-center gap-1 hover:text-primary-600 transition-colors">
                                                     <span>Etapa</span>
                                                     {sortColumn === 'stage' ? (sortDirection === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />) : <div className="w-3 h-3 opacity-30"><ArrowUp className="w-3 h-3" /></div>}
@@ -2365,7 +2451,10 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                                 style={{ ...buildThStyle(colId), minWidth: '120px' }}
                                             >
                                                 <div className="flex flex-col gap-1">
-                                                    <span className="normal-case">{col.name}</span>
+                                                    <button onClick={() => handleSort(colId)} className="flex items-center gap-1 hover:text-primary-600 transition-colors">
+                                                        <span className="normal-case">{col.name}</span>
+                                                        {sortColumn === colId ? (sortDirection === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />) : <div className="w-3 h-3 opacity-30"><ArrowUp className="w-3 h-3" /></div>}
+                                                    </button>
                                                     {col.type === 'select' && col.options ? (
                                                         <select
                                                             value={columnFilters[filterKey] || ''}
@@ -2549,13 +2638,38 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                                     </td>
                                                 );
                                             }
+                                            if (colId === 'createdAt') {
+                                                return (
+                                                    <td key="createdAt" {...tdProps(candidate.id, 'createdAt')}>
+                                                        <span className="text-xs text-gray-700" title={displayCandidate.createdAt ? new Date(displayCandidate.createdAt).toLocaleString('es-PE') : undefined}>
+                                                            {formatBulkDateTime(displayCandidate.createdAt)}
+                                                        </span>
+                                                    </td>
+                                                );
+                                            }
                                             if (colId === 'lastInteraction') {
                                                 return (
                                                     <td key="lastInteraction" {...tdProps(candidate.id, 'lastInteraction')}>
-                                                        {displayCandidate.lastWhatsAppInteractionAt ? (
-                                                            <span className="text-xs" title={new Date(displayCandidate.lastWhatsAppInteractionAt).toLocaleString('es-PE')}>{formatTimeAgo(displayCandidate.lastWhatsAppInteractionAt)}</span>
+                                                        {editingCell?.candidateId === candidate.id && editingCell?.field === 'lastInteraction' ? (
+                                                            <input
+                                                                type="datetime-local"
+                                                                value={editValue}
+                                                                onChange={(e) => setEditValue(e.target.value)}
+                                                                onBlur={() => handleSaveEdit(candidate.id, 'lastInteraction')}
+                                                                onKeyDown={(e) => { if (e.key === 'Enter') handleSaveEdit(candidate.id, 'lastInteraction'); if (e.key === 'Escape') handleCancelEdit(); }}
+                                                                autoFocus
+                                                                className="w-full px-1 py-0.5 text-xs border border-primary-500 rounded focus:ring-2 focus:ring-primary-500"
+                                                            />
                                                         ) : (
-                                                            <span className="text-gray-400 text-xs">Nunca</span>
+                                                            <span
+                                                                className="text-xs hover:bg-gray-50 px-1 py-0.5 rounded cursor-pointer"
+                                                                onDoubleClick={() => handleStartEdit(candidate.id, 'lastInteraction', displayCandidate.lastWhatsAppInteractionAt || '')}
+                                                                title="Doble clic para editar"
+                                                            >
+                                                                {displayCandidate.lastWhatsAppInteractionAt
+                                                                    ? formatBulkDateTime(displayCandidate.lastWhatsAppInteractionAt)
+                                                                    : <span className="text-gray-400">-</span>}
+                                                            </span>
                                                         )}
                                                     </td>
                                                 );
@@ -2566,7 +2680,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                                         <div className="flex gap-2 items-center">
                                                             {displayCandidate.phone && (
                                                                 <>
-                                                                    <button onClick={() => handleWhatsAppClick(displayCandidate.id, displayCandidate.phone!)} className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-green-600 hover:text-green-700 hover:bg-green-50 rounded transition-colors" title="Abrir WhatsApp y registrar interacción"><MessageCircle className="w-4 h-4" /></button>
+                                                                    <button onClick={() => handleWhatsAppClick(displayCandidate.id, displayCandidate.phone!)} className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-green-600 hover:text-green-700 hover:bg-green-50 rounded transition-colors" title="Abrir WhatsApp"><MessageCircle className="w-4 h-4" /></button>
                                                                     {isMobile && <a href={`tel:${displayCandidate.phone.replace(/[^\d]/g, '')}`} className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-blue-600 hover:text-blue-700 hover:bg-blue-50 rounded transition-colors" title="Llamar"><Phone className="w-4 h-4" /></a>}
                                                                 </>
                                                             )}
@@ -2577,15 +2691,28 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                                 );
                                             }
                                             if (colId === 'nextInterview') {
+                                                const interviewerName = displayCandidate.nextInterviewerId
+                                                    ? state.users.find(u => u.id === displayCandidate.nextInterviewerId)?.name
+                                                    : undefined;
                                                 return (
                                                     <td key="nextInterview" {...tdProps(candidate.id, 'nextInterview')}>
                                                         {displayCandidate.nextInterviewAt ? (
-                                                            <div className="flex flex-col">
-                                                                <span className="text-xs text-gray-900">{new Date(displayCandidate.nextInterviewAt).toLocaleDateString('es-PE', { day: '2-digit', month: 'short' })}</span>
-                                                                <span className="text-[10px] text-gray-500">{new Date(displayCandidate.nextInterviewAt).toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' })}</span>
+                                                            <div
+                                                                className="flex flex-col cursor-pointer hover:bg-gray-50 rounded px-1"
+                                                                onDoubleClick={(e) => { e.stopPropagation(); openScheduleModal(displayCandidate); }}
+                                                                title="Doble clic para editar entrevista"
+                                                            >
+                                                                <span className="text-xs text-gray-900">{new Date(displayCandidate.nextInterviewAt).toLocaleDateString('es-PE', { day: '2-digit', month: 'short', weekday: 'short' })}</span>
+                                                                <span className="text-[10px] text-gray-500">{new Date(displayCandidate.nextInterviewAt).toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' })}{interviewerName ? ` · ${interviewerName}` : ''}</span>
                                                             </div>
                                                         ) : (
-                                                            <span className="text-gray-400 text-xs">-</span>
+                                                            <span
+                                                                className="text-gray-400 text-xs cursor-pointer hover:text-primary-600 hover:underline"
+                                                                onDoubleClick={(e) => { e.stopPropagation(); openScheduleModal(displayCandidate); }}
+                                                                title="Doble clic para agendar"
+                                                            >
+                                                                Agendar…
+                                                            </span>
                                                         )}
                                                     </td>
                                                 );
@@ -2593,14 +2720,14 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                             if (colId === 'schedule') {
                                                 return (
                                                     <td key="schedule" {...tdProps(candidate.id, 'schedule')}>
-                                                        <div className="relative">
-                                                            <button onClick={() => setQuickScheduleCandidate(quickScheduleCandidate === candidate.id ? null : candidate.id)} className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-primary-600 hover:text-primary-700 hover:bg-primary-50 rounded transition-colors" title="Agendar entrevista rápidamente"><Calendar className="w-4 h-4" /></button>
-                                                            {quickScheduleCandidate === candidate.id && (
-                                                                <div className="absolute right-0 top-full mt-1 z-50 bg-white border border-gray-200 rounded-lg shadow-lg p-3 min-w-[280px]">
-                                                                    <QuickScheduleInline candidateId={candidate.id} candidateName={candidate.name} onSchedule={async (date, time, interviewerId) => { await handleQuickSchedule(date, time, interviewerId); setQuickScheduleCandidate(null); await loadCandidates(currentPage, true); }} onCancel={() => setQuickScheduleCandidate(null)} />
-                                                                </div>
-                                                            )}
-                                                        </div>
+                                                        <button
+                                                            type="button"
+                                                            onClick={(e) => { e.stopPropagation(); openScheduleModal(displayCandidate); }}
+                                                            className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-primary-600 hover:text-primary-700 hover:bg-primary-50 rounded transition-colors"
+                                                            title="Agendar entrevista"
+                                                        >
+                                                            <Calendar className="w-4 h-4" />
+                                                        </button>
                                                     </td>
                                                 );
                                             }
@@ -2813,21 +2940,20 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                 />
             )}
 
+            {showAddCandidateModal && process && (
+                <AddCandidateModal
+                    process={process}
+                    onClose={() => setShowAddCandidateModal(false)}
+                    onSuccess={() => loadCandidates(0, true)}
+                />
+            )}
+
             {showImportModal && process && (
                 <BulkProcessImportModal
                     process={process}
                     onClose={() => setShowImportModal(false)}
                     onImportComplete={() => {
                         setShowImportModal(false);
-                        if (process?.id) {
-                            const savedValues = localStorage.getItem(getColumnValuesStorageKey(process.id));
-                            const parsedValues = savedValues ? JSON.parse(savedValues) : {};
-                            const repairedValues = repairDateColumnValues(parsedValues, customColumns);
-                            setColumnValues(repairedValues);
-                            if (repairedValues !== parsedValues) {
-                                localStorage.setItem(getColumnValuesStorageKey(process.id), JSON.stringify(repairedValues));
-                            }
-                        }
                         loadCandidates(0, true);
                     }}
                 />

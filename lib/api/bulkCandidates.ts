@@ -16,9 +16,12 @@ export interface BulkCandidate {
     metadataIa?: string;
     stageId: string;
     processId: string;
-    lastWhatsAppInteractionAt?: string; // Fecha de última interacción por WhatsApp
+    lastWhatsAppInteractionAt?: string; // Última interacción (editable manualmente)
+    createdAt?: string;
     nextInterviewAt?: string; // Fecha/hora de la próxima entrevista
     nextInterviewerId?: string; // ID del entrevistador de la próxima entrevista
+    /** Valores de columnas personalizadas (tabla alta densidad) */
+    bulkColumnValues?: Record<string, unknown>;
     // Campos adicionales para el drawer (se cargan bajo demanda)
     description?: string;
     attachments?: any[];
@@ -57,7 +60,7 @@ export const bulkCandidatesApi = {
         // Construir query base
         let query = supabase
             .from('candidates')
-            .select('id, name, email, phone, dni, age, source, province, district, score_ia, metadata_ia, stage_id, process_id, last_whatsapp_interaction_at', { count: 'exact' })
+            .select('id, name, email, phone, dni, age, source, province, district, score_ia, metadata_ia, stage_id, process_id, last_whatsapp_interaction_at, bulk_column_values, created_at', { count: 'exact' })
             .eq('app_name', APP_NAME)
             .eq('archived', filters?.archived ?? false)
             .eq('discarded', filters?.discarded ?? false)
@@ -129,8 +132,10 @@ export const bulkCandidatesApi = {
                 stageId: c.stage_id,
                 processId: c.process_id,
                 lastWhatsAppInteractionAt: c.last_whatsapp_interaction_at || undefined,
+                createdAt: c.created_at || undefined,
                 nextInterviewAt: nextInterview?.start || undefined,
                 nextInterviewerId: nextInterview?.interviewerId || undefined,
+                bulkColumnValues: (c.bulk_column_values as Record<string, unknown>) || undefined,
             };
         });
 
@@ -233,6 +238,7 @@ export const bulkCandidatesApi = {
         source?: string;
         province?: string;
         district?: string;
+        lastWhatsAppInteractionAt?: string | null;
     }): Promise<void> {
         const dbUpdates: Record<string, string | null> = {};
         if (updates.name !== undefined) dbUpdates.name = updates.name;
@@ -240,6 +246,9 @@ export const bulkCandidatesApi = {
         if (updates.phone !== undefined) dbUpdates.phone = updates.phone || null;
         if (updates.dni !== undefined) dbUpdates.dni = updates.dni || null;
         if (updates.source !== undefined) dbUpdates.source = updates.source || null;
+        if (updates.lastWhatsAppInteractionAt !== undefined) {
+            dbUpdates.last_whatsapp_interaction_at = updates.lastWhatsAppInteractionAt;
+        }
 
         const locationFields: Record<string, string | null> = {};
         if (updates.province !== undefined) locationFields.province = updates.province || null;
@@ -348,6 +357,52 @@ export const bulkCandidatesApi = {
             attachments: data.attachments || [],
             history: data.history || [],
         };
+    },
+
+    /**
+     * Fusiona valores de columnas personalizadas en bulk_column_values (JSONB).
+     */
+    async patchBulkColumnValues(
+        candidateId: string,
+        values: Record<string, unknown>
+    ): Promise<void> {
+        if (Object.keys(values).length === 0) return;
+
+        const { data, error: fetchError } = await supabase
+            .from('candidates')
+            .select('bulk_column_values')
+            .eq('id', candidateId)
+            .eq('app_name', APP_NAME)
+            .single();
+
+        if (fetchError) throw fetchError;
+
+        const current = (data?.bulk_column_values as Record<string, unknown>) || {};
+        const merged = { ...current, ...values };
+
+        const { error } = await supabase
+            .from('candidates')
+            .update({ bulk_column_values: merged })
+            .eq('id', candidateId)
+            .eq('app_name', APP_NAME);
+
+        if (error) throw error;
+    },
+
+    /**
+     * Establece bulk_column_values para varios candidatos (p. ej. importación Excel).
+     */
+    async batchSetBulkColumnValues(
+        updates: Record<string, Record<string, unknown>>
+    ): Promise<void> {
+        const entries = Object.entries(updates);
+        if (entries.length === 0) return;
+
+        await Promise.all(
+            entries.map(([candidateId, values]) =>
+                this.patchBulkColumnValues(candidateId, values)
+            )
+        );
     },
 
     /**

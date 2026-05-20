@@ -5,12 +5,12 @@ import { Candidate, Process } from '../types';
 import * as XLSX from 'xlsx';
 import { getImportHeaders,
     mapImportHeader,
-    getColumnValuesStorageKey,
     OPTIONAL_IMPORT_FIELDS,
     formatBulkDate,
     normalizeBulkDateInput,
     DB_PRIORITY_IMPORT_FIELDS,
 } from '../lib/bulkTableColumns';
+import { bulkCandidatesApi } from '../lib/api/bulkCandidates';
 
 interface BulkProcessImportModalProps {
     process: Process;
@@ -343,10 +343,7 @@ export const BulkProcessImportModal: React.FC<BulkProcessImportModalProps> = ({ 
                 }
 
                 if (Object.keys(columnValuesUpdates).length > 0) {
-                    const storageKey = getColumnValuesStorageKey(process.id);
-                    const existing = localStorage.getItem(storageKey);
-                    const currentValues = existing ? JSON.parse(existing) : {};
-                    localStorage.setItem(storageKey, JSON.stringify({ ...currentValues, ...columnValuesUpdates }));
+                    await bulkCandidatesApi.batchSetBulkColumnValues(columnValuesUpdates);
                 }
 
                 setImportResult({
