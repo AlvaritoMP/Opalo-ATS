@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { X, Loader2, Save, RefreshCw } from 'lucide-react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import { X, Loader2, Save, RefreshCw, Download, Upload } from 'lucide-react';
 import { useAppState } from '../App';
 import { BulkCandidate } from '../lib/api/bulkCandidates';
 import {
@@ -19,6 +19,10 @@ import {
     generateConclusionFromTemplate,
     buildPsycholaboralDisplayName,
 } from '../lib/psycholaboralUtils';
+import {
+    applyPsycholaboralImportPaste,
+    buildPsycholaboralImportTemplateTsv,
+} from '../lib/psycholaboralImport';
 
 const LEVEL_OPTIONS: PersonalityLevel[] = ['bajo', 'promedio', 'alto'];
 
@@ -57,6 +61,10 @@ export const PsycholaboralBulkEvaluateModal: React.FC<Props> = ({
     const [globalReportDate, setGlobalReportDate] = useState(
         () => new Date().toISOString().split('T')[0]
     );
+    const [importPanelOpen, setImportPanelOpen] = useState(false);
+    const [importPaste, setImportPaste] = useState('');
+    const [importLog, setImportLog] = useState<string[]>([]);
+    const importFileRef = useRef<HTMLInputElement>(null);
 
     const loadEvaluations = useCallback(async () => {
         const next: Record<string, PsycholaboralEvaluation> = {};
@@ -78,6 +86,14 @@ export const PsycholaboralBulkEvaluateModal: React.FC<Props> = ({
     useEffect(() => {
         setBatchTemplateId(defaultTemplateId);
     }, [defaultTemplateId, isOpen]);
+
+    useEffect(() => {
+        if (!isOpen) {
+            setImportPanelOpen(false);
+            setImportPaste('');
+            setImportLog([]);
+        }
+    }, [isOpen]);
 
     const updateRow = useCallback((candidateId: string, updater: (e: PsycholaboralEvaluation) => PsycholaboralEvaluation) => {
         setRows(prev => ({
@@ -208,6 +224,47 @@ export const PsycholaboralBulkEvaluateModal: React.FC<Props> = ({
         }
     };
 
+    const handleDownloadImportTemplate = () => {
+        const tsv = buildPsycholaboralImportTemplateTsv(inventory, competencies);
+        const blob = new Blob([`\uFEFF${tsv}`], { type: 'text/tab-separated-values;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        const safe = process.title
+            .slice(0, 40)
+            .replace(/[^\p{L}\p{N}\-_]+/gu, '_')
+            .replace(/_+/g, '_');
+        a.href = url;
+        a.download = `plantilla_eval_psicolaboral_${safe || 'proceso'}.tsv`;
+        a.click();
+        URL.revokeObjectURL(url);
+        actions.showToast('Plantilla descargada (abra en Excel / Sheets y guarde como TSV si hace falta)', 'success', 3000);
+    };
+
+    const handleImportFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = () => setImportPaste(String(reader.result ?? ''));
+        reader.readAsText(file, 'UTF-8');
+        e.target.value = '';
+    };
+
+    const handleApplyImport = () => {
+        const r = applyPsycholaboralImportPaste(importPaste, candidates, rows, inventory, competencies);
+        setRows(prev => ({ ...prev, ...r.byCandidateId }));
+        const lines: string[] = [
+            `Candidatos actualizados: ${r.matched}`,
+            r.skippedRows > 0 ? `Filas sin emparejar con esta selección: ${r.skippedRows}` : null,
+            ...r.issues.slice(0, 12).map(i => `Fila ${i.rowIndex} · ${i.dniOrId}: ${i.message}`),
+        ].filter(Boolean) as string[];
+        setImportLog(lines);
+        if (r.matched > 0) {
+            actions.showToast(`${r.matched} evaluación(es) cargadas desde la plantilla`, 'success', 4000);
+        } else {
+            actions.showToast('No se aplicó ninguna fila. Revise DNI / id_candidato y encabezados.', 'info', 4500);
+        }
+    };
+
     if (!isOpen || candidates.length === 0) return null;
 
     const intLevels = inventory.intellectualLevels;
@@ -268,7 +325,83 @@ export const PsycholaboralBulkEvaluateModal: React.FC<Props> = ({
                             </button>
                         </div>
                     </label>
+                    <button
+                        type="button"
+                        onClick={() => setImportPanelOpen(o => !o)}
+                        className="flex items-center gap-1 px-3 py-1.5 ml-auto bg-amber-50 text-amber-900 rounded-lg border border-amber-200 hover:bg-amber-100"
+                    >
+                        <Upload className="w-3.5 h-3.5" />
+                        {importPanelOpen ? 'Ocultar importación' : 'Plantilla masiva'}
+                    </button>
                 </div>
+
+                {importPanelOpen && (
+                    <div className="px-4 py-3 border-b bg-amber-50/80 text-xs space-y-2 shrink-0">
+                        <p className="text-gray-800">
+                            Descargue la plantilla con los encabezados correctos (rasgos y competencias de su inventario),
+                            complétela en Excel y péguela aquí o cargue el archivo <strong>.tsv</strong> / <strong>.csv</strong>.
+                            Se empareja por <strong>DNI</strong> o por <strong>id_candidato</strong> con los candidatos de
+                            esta sesión. Celdas vacías no cambian el valor actual.
+                        </p>
+                        <div className="flex flex-wrap gap-2 items-center">
+                            <button
+                                type="button"
+                                onClick={handleDownloadImportTemplate}
+                                className="inline-flex items-center gap-1 px-3 py-1.5 bg-white border border-amber-300 rounded-lg hover:bg-amber-100/80"
+                            >
+                                <Download className="w-3.5 h-3.5" />
+                                Descargar plantilla (.tsv)
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => importFileRef.current?.click()}
+                                className="inline-flex items-center gap-1 px-3 py-1.5 bg-white border border-gray-300 rounded-lg hover:bg-gray-50"
+                            >
+                                <Upload className="w-3.5 h-3.5" />
+                                Cargar archivo…
+                            </button>
+                            <input
+                                ref={importFileRef}
+                                type="file"
+                                accept=".tsv,.csv,.txt,text/tab-separated-values,text/csv,text/plain"
+                                className="hidden"
+                                onChange={handleImportFile}
+                            />
+                            <button
+                                type="button"
+                                onClick={handleApplyImport}
+                                disabled={!importPaste.trim()}
+                                className="inline-flex items-center gap-1 px-3 py-1.5 bg-primary-600 text-white rounded-lg hover:bg-primary-700 disabled:opacity-40"
+                            >
+                                Aplicar al cuadro actual
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    setImportPaste('');
+                                    setImportLog([]);
+                                }}
+                                className="px-2 py-1.5 border rounded border-gray-300 bg-white hover:bg-gray-50"
+                            >
+                                Limpiar
+                            </button>
+                        </div>
+                        <textarea
+                            value={importPaste}
+                            onChange={e => setImportPaste(e.target.value)}
+                            rows={5}
+                            placeholder="Pegue aquí las filas copiadas desde Excel (incluya la fila de encabezados)…"
+                            className="w-full font-mono text-[11px] border border-amber-200 rounded-lg p-2 bg-white"
+                        />
+                        {importLog.length > 0 && (
+                            <div className="max-h-28 overflow-auto rounded border border-amber-200 bg-white p-2 font-mono text-[11px] text-gray-700 space-y-0.5">
+                                {importLog.map((line, i) => (
+                                    <div key={i}>{line}</div>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+                )}
 
                 {loading ? (
                     <div className="flex justify-center py-24">
