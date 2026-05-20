@@ -9,6 +9,7 @@ import {
     ConclusionTemplate,
     IntellectualLevelId,
     CustomColumn,
+    PsycholaboralReportNamePart,
 } from '../types';
 import { createDefaultPsycholaboralInventory } from './psycholaboralDefaults';
 
@@ -139,14 +140,16 @@ export function generateConclusionFromTemplate(
     process: Process | undefined,
     evaluation: PsycholaboralEvaluation,
     inventory: PsycholaboralInventory,
-    competencies: PsycholaboralCompetency[]
+    competencies: PsycholaboralCompetency[],
+    opts?: { displayName?: string }
 ): string {
     const level = inventory.intellectualLevels.find(l => l.id === evaluation.intellectualLevelId);
     const { percentage } = calculateCompetencyTotals(competencies, evaluation.competencies);
     const status = evaluation.suitabilityStatus || 'apto';
+    const nombre = (opts?.displayName?.trim() || candidate.name || '').trim() || '—';
 
     return applyConclusionTemplate(template, {
-        nombre: candidate.name,
+        nombre,
         puesto:
             evaluation.positionApplied ||
             process?.bulkConfig?.psycholaboral?.defaultPositionTitle ||
@@ -189,9 +192,56 @@ export function createEmptyEvaluation(
     };
 }
 
+function normalizeColumnHeaderForMatching(label: string): string {
+    return label
+        .trim()
+        .toLowerCase()
+        .replace(/^\d+\s*[\.\)]\s*/, '')
+        .replace(/\s+/g, ' ');
+}
+
+function inferReportNamePartFromLabel(labelNorm: string): PsycholaboralReportNamePart | null {
+    if (/^nombres?$/.test(labelNorm) && !/completo/.test(labelNorm)) return 'given_names';
+    if (
+        /^apellido\s*paterno$/.test(labelNorm) ||
+        /\bapellido\s*paterno\b/.test(labelNorm) ||
+        /^primer(\s+)?apellido$/.test(labelNorm) ||
+        /\bprimer(\s+)?apellido\b/.test(labelNorm) ||
+        /^ap\.?\s*paterno$/.test(labelNorm) ||
+        labelNorm === 'paterno' ||
+        labelNorm === 'ape. paterno' ||
+        labelNorm === 'ap. paterno'
+    ) {
+        return 'paternal_surname';
+    }
+    if (
+        /^apellido\s*materno$/.test(labelNorm) ||
+        /\bapellido\s*materno\b/.test(labelNorm) ||
+        /^segundo(\s+)?apellido$/.test(labelNorm) ||
+        /\bsegundo(\s+)?apellido\b/.test(labelNorm) ||
+        /^ap\.?\s*materno$/.test(labelNorm) ||
+        labelNorm === 'materno' ||
+        labelNorm === 'ape. materno' ||
+        labelNorm === 'ap. materno'
+    ) {
+        return 'maternal_surname';
+    }
+    if (/^apellidos?$/.test(labelNorm)) return 'surnames_combined';
+    if (/apellido|surname|last\s*name|apellidos/.test(labelNorm)) return 'surnames_combined';
+    return null;
+}
+
+function surnameOrderForReportPart(part: PsycholaboralReportNamePart): number {
+    if (part === 'paternal_surname') return 1;
+    if (part === 'maternal_surname') return 2;
+    if (part === 'surnames_combined') return 3;
+    return -1;
+}
+
 /**
  * Construye nombre + apellidos en una sola línea de lectura continua:
  * usa `candidates.name` y añade valores de columnas personalizadas típicas (Apellido, Apellidos, etc.).
+ * Opción `reportNamePart` en la columna fuerza el rol aunque el encabezado no coincida con patrones.
  */
 export function buildPsycholaboralDisplayName(
     candidateName: string,
@@ -209,18 +259,17 @@ export function buildPsycholaboralDisplayName(
         const val = raw === undefined || raw === null ? '' : String(raw).trim();
         if (!val) continue;
 
-        const norm = label.toLowerCase();
-        if (/^nombres?$/.test(norm) && !/completo/.test(norm)) {
+        const labelNorm = normalizeColumnHeaderForMatching(label);
+        const part: PsycholaboralReportNamePart | null =
+            col.reportNamePart || inferReportNamePartFromLabel(labelNorm);
+
+        if (part === 'given_names') {
             extraGiven = val;
             continue;
         }
-        let order = -1;
-        if (/apellido\s*paterno|primer\s*apellido/.test(norm)) order = 1;
-        else if (/apellido\s*materno|segundo\s*apellido/.test(norm)) order = 2;
-        else if (/^apellidos?$/.test(norm)) order = 3;
-        else if (/apellido|surname|last\s*name/.test(norm)) order = 4;
 
-        if (order > 0) {
+        const order = surnameOrderForReportPart(part ?? 'given_names');
+        if (part === 'paternal_surname' || part === 'maternal_surname' || part === 'surnames_combined') {
             surnames.push({ order, text: val });
         }
     }

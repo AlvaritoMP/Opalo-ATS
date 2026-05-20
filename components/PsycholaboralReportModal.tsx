@@ -89,7 +89,15 @@ export const PsycholaboralReportModal: React.FC<Props> = ({
     const applyTemplate = () => {
         const tpl = inventory.conclusionTemplates.find(t => t.id === selectedTemplateId);
         if (!tpl || !evaluation || !candidate) return;
-        const text = generateConclusionFromTemplate(tpl, candidate, process, evaluation, inventory, competencies);
+        const text = generateConclusionFromTemplate(
+            tpl,
+            candidate,
+            process,
+            evaluation,
+            inventory,
+            competencies,
+            { displayName: fullNameForReport }
+        );
         setEvaluation({ ...evaluation, conclusions: text });
     };
 
@@ -114,7 +122,7 @@ export const PsycholaboralReportModal: React.FC<Props> = ({
             if (!reportRef.current) throw new Error('No se pudo preparar el documento');
             await new Promise(r => setTimeout(r, 400));
             const blob = await captureElementToPdf(reportRef.current);
-            const safeName = candidate.name.replace(/[^a-z0-9_-]/gi, '_');
+            const safeName = (fullNameForReport || candidate.name).replace(/[^a-z0-9_-]/gi, '_');
             downloadPsycholaboralPdf(blob, `informe_psicolaboral_${safeName}.pdf`);
             actions.showToast('PDF generado', 'success', 2500);
         } catch (e: any) {
@@ -177,7 +185,7 @@ export const PsycholaboralReportModal: React.FC<Props> = ({
                             </>
                         )}
                         <h2 className="text-base md:text-lg font-semibold truncate">
-                            Informe psicolaboral — {candidate?.name}
+                            Informe psicolaboral — {fullNameForReport || candidate?.name}
                         </h2>
                     </div>
                     <button type="button" onClick={onClose} className="p-2 hover:bg-gray-100 rounded-lg shrink-0">
@@ -196,7 +204,8 @@ export const PsycholaboralReportModal: React.FC<Props> = ({
                             <h3 className="text-sm font-semibold text-primary-700 mb-2">Datos del evaluado</h3>
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
                                 <div>
-                                    <span className="text-gray-500">Nombre:</span> {candidate.name}
+                                    <span className="text-gray-500">Nombre en informe:</span>{' '}
+                                    {fullNameForReport || candidate.name}
                                 </div>
                                 <div>
                                     <span className="text-gray-500">DNI:</span> {candidate.dni || '—'}

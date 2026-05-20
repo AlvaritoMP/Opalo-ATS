@@ -1,12 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { X, Save, Download, Upload, Trash2 } from 'lucide-react';
-
-interface CustomColumn {
-    id: string;
-    name: string;
-    type: 'text' | 'number' | 'checkbox' | 'date' | 'select';
-    options?: string[];
-}
+import type { CustomColumn } from '../types';
 
 interface TableTemplate {
     id: string;

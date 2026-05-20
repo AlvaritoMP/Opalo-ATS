@@ -63,12 +63,21 @@ export interface Process {
     closedAt?: string; // Fecha y hora en que se cerró el proceso
 }
 
+/** Cómo usa el informe psicolaboral el valor de la columna al armar “Nombre y apellidos” (si no se indica, se infiere del encabezado). */
+export type PsycholaboralReportNamePart =
+    | 'given_names'
+    | 'paternal_surname'
+    | 'maternal_surname'
+    | 'surnames_combined';
+
 // Columna personalizada para la tabla de alta densidad en procesos masivos
 export interface CustomColumn {
     id: string;
     name: string;
     type: 'text' | 'number' | 'checkbox' | 'date' | 'select';
     options?: string[];
+    /** Marca explícita para el PDF psicolaboral (opcional). */
+    reportNamePart?: PsycholaboralReportNamePart;
 }
 
 // --- Informes psicolaborales ---

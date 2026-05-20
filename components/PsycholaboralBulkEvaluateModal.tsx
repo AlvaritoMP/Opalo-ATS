@@ -9,6 +9,7 @@ import {
     IntellectualLevelId,
     PersonalityLevel,
     PsycholaboralSuitability,
+    CustomColumn,
 } from '../types';
 import { psycholaboralApi } from '../lib/api/psycholaboral';
 import {
@@ -16,6 +17,7 @@ import {
     createEmptyEvaluation,
     mergePsycholaboralInventory,
     generateConclusionFromTemplate,
+    buildPsycholaboralDisplayName,
 } from '../lib/psycholaboralUtils';
 
 const LEVEL_OPTIONS: PersonalityLevel[] = ['bajo', 'promedio', 'alto'];
@@ -26,6 +28,8 @@ interface Props {
     candidates: BulkCandidate[];
     process: Process;
     inventory: PsycholaboralInventory;
+    customColumns?: CustomColumn[];
+    columnValues?: Record<string, Record<string, unknown>>;
 }
 
 export const PsycholaboralBulkEvaluateModal: React.FC<Props> = ({
@@ -34,6 +38,8 @@ export const PsycholaboralBulkEvaluateModal: React.FC<Props> = ({
     candidates,
     process,
     inventory: inventoryProp,
+    customColumns = [],
+    columnValues = {},
 }) => {
     const { actions } = useAppState();
     const inventory = useMemo(() => mergePsycholaboralInventory(inventoryProp), [inventoryProp]);
@@ -126,6 +132,14 @@ export const PsycholaboralBulkEvaluateModal: React.FC<Props> = ({
         actions.showToast('Fecha actualizada en todos los candidatos', 'success', 2000);
     };
 
+    const getDisplayName = useCallback(
+        (c: BulkCandidate) => {
+            const getCell = (columnId: string) => columnValues[c.id]?.[columnId];
+            return buildPsycholaboralDisplayName(c.name, customColumns, getCell);
+        },
+        [columnValues, customColumns]
+    );
+
     const applyTemplateToRow = (candidateId: string) => {
         const tplId = batchTemplateId;
         if (!tplId) {
@@ -144,7 +158,8 @@ export const PsycholaboralBulkEvaluateModal: React.FC<Props> = ({
                 process,
                 ev,
                 inventory,
-                competencies
+                competencies,
+                { displayName: getDisplayName(cand) }
             );
             return { ...prev, [candidateId]: { ...ev, conclusions } };
         });
@@ -164,7 +179,9 @@ export const PsycholaboralBulkEvaluateModal: React.FC<Props> = ({
                 if (!ev) return;
                 next[c.id] = {
                     ...ev,
-                    conclusions: generateConclusionFromTemplate(tpl, c, process, ev, inventory, competencies),
+                    conclusions: generateConclusionFromTemplate(tpl, c, process, ev, inventory, competencies, {
+                        displayName: getDisplayName(c),
+                    }),
                 };
             });
             return next;

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { X, Plus, Trash2 } from 'lucide-react';
-import { CustomColumn } from '../types';
+import { CustomColumn, PsycholaboralReportNamePart } from '../types';
 
 interface AddColumnModalProps {
     isOpen: boolean;
@@ -21,6 +21,8 @@ export const AddColumnModal: React.FC<AddColumnModalProps> = ({
     const [type, setType] = useState<'text' | 'number' | 'checkbox' | 'date' | 'select'>('text');
     const [options, setOptions] = useState<string[]>(['']);
 
+    const [reportNamePart, setReportNamePart] = useState<'' | PsycholaboralReportNamePart>('');
+
     const isEditing = !!editingColumn;
 
     useEffect(() => {
@@ -28,10 +30,12 @@ export const AddColumnModal: React.FC<AddColumnModalProps> = ({
             setName(editingColumn.name);
             setType(editingColumn.type);
             setOptions(editingColumn.options?.length ? [...editingColumn.options] : ['']);
+            setReportNamePart(editingColumn.reportNamePart ?? '');
         } else if (isOpen) {
             setName('');
             setType('text');
             setOptions(['']);
+            setReportNamePart('');
         }
     }, [isOpen, editingColumn]);
 
@@ -66,6 +70,7 @@ export const AddColumnModal: React.FC<AddColumnModalProps> = ({
             name: name.trim(),
             type,
             ...(type === 'select' && { options: options.map(o => o.trim()).filter(Boolean) }),
+            ...(reportNamePart ? { reportNamePart } : {}),
         };
 
         if (isEditing && onEdit) {
@@ -77,6 +82,7 @@ export const AddColumnModal: React.FC<AddColumnModalProps> = ({
         setName('');
         setType('text');
         setOptions(['']);
+        setReportNamePart('');
         onClose();
     };
 
@@ -175,6 +181,29 @@ export const AddColumnModal: React.FC<AddColumnModalProps> = ({
                             </div>
                         </div>
                     )}
+
+                    <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                            Informe psicolaboral (nombre en PDF)
+                        </label>
+                        <p className="text-xs text-gray-500 mb-2">
+                            Opcional: indica si esta columna aporta nombres o apellidos. Si dejas «Automático», se
+                            infiere del título de la columna (p. ej. «Apellido Paterno»).
+                        </p>
+                        <select
+                            value={reportNamePart}
+                            onChange={(e) =>
+                                setReportNamePart((e.target.value || '') as '' | PsycholaboralReportNamePart)
+                            }
+                            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                        >
+                            <option value="">Automático (por nombre de columna)</option>
+                            <option value="given_names">Nombres</option>
+                            <option value="paternal_surname">Apellido paterno</option>
+                            <option value="maternal_surname">Apellido materno</option>
+                            <option value="surnames_combined">Apellidos (un solo campo)</option>
+                        </select>
+                    </div>
 
                     <div className="flex gap-3 pt-4">
                         <button

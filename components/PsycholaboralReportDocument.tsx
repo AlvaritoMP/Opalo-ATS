@@ -687,15 +687,17 @@ function BlockTitle({ n, title, color, compact }: { n: number; title: string; co
                     color: '#fff',
                     fontSize: compact ? 9 : 10,
                     fontWeight: 800,
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
+                    display: 'grid',
+                    placeItems: 'center',
+                    lineHeight: 1,
                     flexShrink: 0,
+                    boxSizing: 'border-box',
+                    overflow: 'hidden',
                 }}
             >
                 {n}
             </span>
-            <strong style={{ fontSize: 9.25, color: '#0f172a' }}>{title}</strong>
+            <strong style={{ fontSize: 9.25, color: '#0f172a', lineHeight: 1.25 }}>{title}</strong>
         </div>
     );
 }
