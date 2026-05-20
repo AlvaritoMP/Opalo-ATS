@@ -889,6 +889,39 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
         setShowScheduleModal(true);
     }, []);
 
+    const resolveNextInterviewEventId = useCallback((candidate: BulkCandidate): string | undefined => {
+        if (candidate.nextInterviewEventId) return candidate.nextInterviewEventId;
+        const now = Date.now();
+        const match = state.interviewEvents
+            .filter(e => e.candidateId === candidate.id && new Date(e.start).getTime() >= now)
+            .sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime())[0];
+        return match?.id;
+    }, [state.interviewEvents]);
+
+    const handleClearInterview = useCallback(async (candidate: BulkCandidate) => {
+        const eventId = resolveNextInterviewEventId(candidate);
+        if (!eventId) {
+            actions.showToast('No hay entrevista agendada para eliminar', 'error', 2500);
+            return;
+        }
+        if (!confirm(`¿Eliminar la entrevista agendada de ${candidate.name}?`)) return;
+
+        applyOptimisticUpdate(candidate.id, {
+            nextInterviewAt: undefined,
+            nextInterviewerId: undefined,
+            nextInterviewEventId: undefined,
+        });
+
+        try {
+            await actions.deleteInterviewEvent(eventId);
+            actions.showToast('Entrevista eliminada', 'success', 2500);
+        } catch (error) {
+            console.error('Error eliminando entrevista:', error);
+            loadCandidates(currentPage, true);
+            actions.showToast('Error al eliminar la entrevista', 'error', 3000);
+        }
+    }, [resolveNextInterviewEventId, applyOptimisticUpdate, actions, loadCandidates, currentPage]);
+
     const handleQuickSchedule = useCallback(async (date: string, time: string, interviewerId: string, notes?: string) => {
         const candidateId = schedulingCandidate?.id;
         if (!candidateId) return;
@@ -2697,13 +2730,23 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                                 return (
                                                     <td key="nextInterview" {...tdProps(candidate.id, 'nextInterview')}>
                                                         {displayCandidate.nextInterviewAt ? (
-                                                            <div
-                                                                className="flex flex-col cursor-pointer hover:bg-gray-50 rounded px-1"
-                                                                onDoubleClick={(e) => { e.stopPropagation(); openScheduleModal(displayCandidate); }}
-                                                                title="Doble clic para editar entrevista"
-                                                            >
-                                                                <span className="text-xs text-gray-900">{new Date(displayCandidate.nextInterviewAt).toLocaleDateString('es-PE', { day: '2-digit', month: 'short', weekday: 'short' })}</span>
-                                                                <span className="text-[10px] text-gray-500">{new Date(displayCandidate.nextInterviewAt).toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' })}{interviewerName ? ` · ${interviewerName}` : ''}</span>
+                                                            <div className="flex items-start gap-0.5 group">
+                                                                <div
+                                                                    className="flex flex-col flex-1 min-w-0 cursor-pointer hover:bg-gray-50 rounded px-1"
+                                                                    onDoubleClick={(e) => { e.stopPropagation(); openScheduleModal(displayCandidate); }}
+                                                                    title="Doble clic para editar entrevista"
+                                                                >
+                                                                    <span className="text-xs text-gray-900">{new Date(displayCandidate.nextInterviewAt).toLocaleDateString('es-PE', { day: '2-digit', month: 'short', weekday: 'short' })}</span>
+                                                                    <span className="text-[10px] text-gray-500">{new Date(displayCandidate.nextInterviewAt).toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' })}{interviewerName ? ` · ${interviewerName}` : ''}</span>
+                                                                </div>
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={(e) => { e.stopPropagation(); void handleClearInterview(displayCandidate); }}
+                                                                    className="shrink-0 p-0.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded opacity-70 group-hover:opacity-100 transition-colors"
+                                                                    title="Eliminar entrevista"
+                                                                >
+                                                                    <X className="w-3 h-3" />
+                                                                </button>
                                                             </div>
                                                         ) : (
                                                             <span

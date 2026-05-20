@@ -30,7 +30,7 @@ function getBulkSelectCandidates(): string[] {
 
 function mapBulkCandidateRow(
     c: Record<string, unknown>,
-    nextInterviews: Map<string, { start: string; interviewerId: string }>
+    nextInterviews: Map<string, { start: string; interviewerId: string; eventId: string }>
 ): BulkCandidate {
     const nextInterview = nextInterviews.get(c.id as string);
     return {
@@ -51,6 +51,7 @@ function mapBulkCandidateRow(
         createdAt: (c.created_at as string) || undefined,
         nextInterviewAt: nextInterview?.start || undefined,
         nextInterviewerId: nextInterview?.interviewerId || undefined,
+        nextInterviewEventId: nextInterview?.eventId || undefined,
         bulkColumnValues: (c.bulk_column_values as Record<string, unknown>) || undefined,
     };
 }
@@ -80,6 +81,7 @@ export interface BulkCandidate {
     createdAt?: string;
     nextInterviewAt?: string; // Fecha/hora de la próxima entrevista
     nextInterviewerId?: string; // ID del entrevistador de la próxima entrevista
+    nextInterviewEventId?: string;
     /** Valores de columnas personalizadas (tabla alta densidad) */
     bulkColumnValues?: Record<string, unknown>;
     // Campos adicionales para el drawer (se cargan bajo demanda)
@@ -157,25 +159,25 @@ export const bulkCandidatesApi = {
 
         // Obtener próximas entrevistas para los candidatos
         const candidateIds = (data || []).map(c => c.id as string);
-        let nextInterviews: Map<string, { start: string; interviewerId: string }> = new Map();
+        let nextInterviews: Map<string, { start: string; interviewerId: string; eventId: string }> = new Map();
         
         if (candidateIds.length > 0) {
             const now = new Date().toISOString();
             const { data: interviews } = await supabase
                 .from('interview_events')
-                .select('candidate_id, start_time, interviewer_id')
+                .select('id, candidate_id, start_time, interviewer_id')
                 .in('candidate_id', candidateIds)
                 .eq('app_name', APP_NAME)
                 .gte('start_time', now)
                 .order('start_time', { ascending: true });
 
             if (interviews) {
-                // Obtener solo la próxima entrevista de cada candidato
                 interviews.forEach(interview => {
                     if (!nextInterviews.has(interview.candidate_id)) {
                         nextInterviews.set(interview.candidate_id, {
                             start: interview.start_time,
                             interviewerId: interview.interviewer_id,
+                            eventId: interview.id,
                         });
                     }
                 });
