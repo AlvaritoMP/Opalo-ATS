@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useAppState } from '../App';
 import { bulkCandidatesApi, BulkCandidate } from '../lib/api/bulkCandidates';
+import { bulkProcessActivityApi, BulkActivityActionType } from '../lib/api/bulkProcessActivity';
 import { processesApi } from '../lib/api/processes';
 import { Check, X, Loader2, Send, Archive, Search, ChevronDown, ChevronUp, Plus, Edit, Trash2, ArrowLeft, MessageCircle, Phone, Upload, Download, Filter, Mail, Calendar, Settings, ArrowUp, ArrowDown, Pin, FileText, BookOpen, Paperclip, ClipboardList, UserPlus, RefreshCw, HardDrive } from 'lucide-react';
 import { Process, CustomColumn, BulkProcessConfig } from '../types';
@@ -68,6 +69,7 @@ import { isPsycholaboralEnabled } from '../lib/psycholaboralUtils';
 import { BulkProcessCard } from './BulkProcessCard';
 import { BulkProcessAttachmentsModal } from './BulkProcessAttachmentsModal';
 import { BulkTableExportModal } from './BulkTableExportModal';
+import { BulkProcessActivityLog } from './BulkProcessActivityLog';
 
 interface BulkProcessesViewProps {}
 
@@ -429,6 +431,14 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
     const [showProcessDocsModal, setShowProcessDocsModal] = useState(false);
     const [docsModalProcess, setDocsModalProcess] = useState<Process | null>(null);
     const [showExportModal, setShowExportModal] = useState(false);
+    const [activityLogRefreshToken, setActivityLogRefreshToken] = useState(0);
+    const tableKeyboardRef = useRef({
+        editingCell: null as { candidateId: string; field: string } | null,
+        activeCell: null as CellCoord | null,
+        selectionAnchor: null as CellCoord | null,
+        displayCandidates: [] as BulkCandidate[],
+        visibleColumns: [] as string[],
+    });
 
     const pageSize = 50;
 
@@ -441,6 +451,36 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
         () => isPsycholaboralEnabled(process?.bulkConfig?.psycholaboral),
         [process?.bulkConfig?.psycholaboral]
     );
+
+    const logActivity = useCallback((
+        actionType: BulkActivityActionType,
+        payload: {
+            candidateId?: string;
+            candidateName?: string;
+            fieldName?: string;
+            oldValue?: string;
+            newValue?: string;
+            details?: Record<string, unknown>;
+        } = {}
+    ) => {
+        if (!process?.id) return;
+        void bulkProcessActivityApi.log({
+            processId: process.id,
+            actionType,
+            userId: state.currentUser?.id,
+            userName: state.currentUser?.name || state.currentUser?.email,
+            ...payload,
+        });
+        setActivityLogRefreshToken(t => t + 1);
+    }, [process?.id, state.currentUser?.id, state.currentUser?.name, state.currentUser?.email]);
+
+    const getFieldLabel = useCallback((fieldOrColId: string) => {
+        if (fieldOrColId.startsWith('custom_')) {
+            const colId = fieldOrColId.replace('custom_', '');
+            return customColumns.find(c => c.id === colId)?.name || fieldOrColId;
+        }
+        return getColumnLabel(fieldOrColId, customColumns);
+    }, [customColumns]);
 
     useEffect(() => {
         psycholaboralApi.getInventory().then(setPsychInventory).catch(() => {});
@@ -506,11 +546,17 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
             setBulkProcesses(prev => prev.map(p =>
                 p.id === process.id ? { ...p, bulkConfig: newBulkConfig } : p
             ));
+            const configKeys = Object.keys(mergedUpdates);
+            if (configKeys.length > 0) {
+                logActivity('config_change', {
+                    details: { summary: `Configuración: ${configKeys.join(', ')}` },
+                });
+            }
         } catch (error) {
             console.error('Error guardando configuración de tabla:', error);
             actions.showToast('Error al guardar configuración de columnas', 'error', 3000);
         }
-    }, [process, actions]);
+    }, [process, actions, logActivity]);
 
     useEffect(() => {
         if (!process) {
@@ -825,13 +871,22 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
             if (updates.stageId && previousStageId && updates.stageId !== previousStageId) {
                 const stageName = process?.stages.find(s => s.id === updates.stageId)?.name;
                 actions.showToast(`Movido a: ${stageName || 'nueva etapa'}`, 'success', 2000);
+                const candidate = candidates.find(c => c.id === candidateId);
+                const prevName = process?.stages.find(s => s.id === previousStageId)?.name || previousStageId;
+                logActivity('stage_change', {
+                    candidateId,
+                    candidateName: candidate?.name,
+                    fieldName: 'Etapa',
+                    oldValue: prevName,
+                    newValue: stageName || updates.stageId,
+                });
             }
         } catch (error) {
             console.error('Error actualizando candidato:', error);
             loadCandidates(currentPage, true);
             actions.showToast('Error al actualizar candidato', 'error', 3000);
         }
-    }, [applyOptimisticUpdate, loadCandidates, currentPage, actions, state.currentUser?.id, process?.stages]);
+    }, [applyOptimisticUpdate, loadCandidates, currentPage, actions, state.currentUser?.id, process?.stages, candidates, logActivity]);
 
     const handleBulkApprove = useCallback(async () => {
         if (selectedIds.size === 0) return;
@@ -845,12 +900,15 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
             });
             setSelectedIds(new Set());
             actions.showToast(`${ids.length} candidatos aprobados`, 'success', 3000);
+            logActivity('bulk_approve', {
+                details: { count: ids.length, summary: `Aprobación masiva de ${ids.length} candidato(s)` },
+            });
         } catch (error) {
             console.error('Error aprobando candidatos:', error);
             loadCandidates(currentPage, true);
             actions.showToast('Error al aprobar candidatos', 'error', 3000);
         }
-    }, [selectedIds, process, applyOptimisticUpdate, loadCandidates, currentPage, actions]);
+    }, [selectedIds, process, applyOptimisticUpdate, loadCandidates, currentPage, actions, logActivity]);
 
     const handleBulkReject = useCallback(async () => {
         if (selectedIds.size === 0) return;
@@ -860,13 +918,16 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
             await bulkCandidatesApi.updateCandidatesBatch(ids, { discarded: true, discardReason: 'Rechazado en proceso masivo' });
             setSelectedIds(new Set());
             actions.showToast(`${ids.length} candidatos rechazados`, 'success', 3000);
+            logActivity('bulk_discard', {
+                details: { count: ids.length, summary: `Descarte masivo de ${ids.length} candidato(s)` },
+            });
             loadCandidates(currentPage, true);
         } catch (error) {
             console.error('Error rechazando candidatos:', error);
             loadCandidates(currentPage, true);
             actions.showToast('Error al rechazar candidatos', 'error', 3000);
         }
-    }, [selectedIds, applyOptimisticUpdate, loadCandidates, currentPage, actions]);
+    }, [selectedIds, applyOptimisticUpdate, loadCandidates, currentPage, actions, logActivity]);
 
     const handleBulkArchive = useCallback(async () => {
         if (selectedIds.size === 0) return;
@@ -876,13 +937,16 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
             await bulkCandidatesApi.updateCandidatesBatch(ids, { archived: true });
             setSelectedIds(new Set());
             actions.showToast(`${ids.length} candidatos archivados`, 'success', 3000);
+            logActivity('bulk_archive', {
+                details: { count: ids.length, summary: `Archivado masivo de ${ids.length} candidato(s)` },
+            });
             loadCandidates(currentPage, true);
         } catch (error) {
             console.error('Error archivando candidatos:', error);
             loadCandidates(currentPage, true);
             actions.showToast('Error al archivar candidatos', 'error', 3000);
         }
-    }, [selectedIds, applyOptimisticUpdate, loadCandidates, currentPage, actions]);
+    }, [selectedIds, applyOptimisticUpdate, loadCandidates, currentPage, actions, logActivity]);
 
     const handleBulkDelete = useCallback(async () => {
         if (selectedIds.size === 0) return;
@@ -905,12 +969,15 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
             setSelectedIds(new Set());
             setTotal(prev => Math.max(0, prev - ids.length));
             actions.showToast(`${ids.length} candidato(s) eliminado(s) permanentemente`, 'success', 3000);
+            logActivity('candidate_delete', {
+                details: { count: ids.length, summary: `Eliminación masiva de ${ids.length} candidato(s)` },
+            });
         } catch (error) {
             console.error('Error eliminando candidatos:', error);
             loadCandidates(currentPage, true);
             actions.showToast('Error al eliminar candidatos', 'error', 3000);
         }
-    }, [selectedIds, candidates, state.settings, loadCandidates, currentPage, actions]);
+    }, [selectedIds, candidates, state.settings, loadCandidates, currentPage, actions, logActivity]);
 
     const handleWhatsAppClick = useCallback((candidateId: string, phone: string) => {
         const cleanPhone = phone.replace(/[^\d]/g, '');
@@ -931,11 +998,16 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
             });
             setTotal(prev => prev - 1);
             actions.showToast('Candidato eliminado', 'success', 3000);
+            logActivity('candidate_delete', {
+                candidateId,
+                candidateName,
+                details: { summary: `Eliminación de candidato` },
+            });
         } catch (error) {
             console.error('Error eliminando candidato:', error);
             actions.showToast('Error al eliminar candidato', 'error', 3000);
         }
-    }, [actions]);
+    }, [actions, logActivity]);
 
     const handleBulkWhatsApp = useCallback(async (message: string, createGroup: boolean) => {
         const selectedCandidates = candidates.filter(c => selectedIds.has(c.id) && c.phone);
@@ -1256,6 +1328,26 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
         actions.showToast('Plantilla aplicada', 'success', 2000);
     };
 
+    const persistCustomColumnValues = useCallback((
+        candidateId: string,
+        candidatePatch: Record<string, unknown>
+    ) => {
+        bulkCandidatesApi.patchBulkColumnValues(candidateId, candidatePatch, customColumns)
+            .then(ok => {
+                if (!ok) {
+                    actions.showToast(
+                        'No se guardó en Supabase. Ejecute MIGRATION_ADD_BULK_COLUMN_VALUES.sql si aún no lo hizo.',
+                        'error',
+                        6000
+                    );
+                }
+            })
+            .catch(err => {
+                console.error('Error guardando columna personalizada:', err);
+                actions.showToast('Error al guardar en Supabase', 'error', 4000);
+            });
+    }, [customColumns, actions]);
+
     const handleColumnValueChange = (candidateId: string, columnId: string, value: any) => {
         if (!process) return;
         setColumnValues(prev => {
@@ -1271,7 +1363,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                 [candidateId]: candidatePatch,
             };
             persistLocalColumnValues(process.id, newValues);
-            void bulkCandidatesApi.patchBulkColumnValues(candidateId, candidatePatch, customColumns);
+            persistCustomColumnValues(candidateId, candidatePatch);
             return newValues;
         });
     };
@@ -1314,17 +1406,30 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                 ...prev,
                 [candidateId]: candidatePatch,
             };
-            void bulkCandidatesApi.patchBulkColumnValues(candidateId, candidatePatch, customColumns);
+            persistLocalColumnValues(process.id, newValues);
+            persistCustomColumnValues(candidateId, candidatePatch);
             return newValues;
         });
-    }, [customColumns, process?.id]);
+    }, [customColumns, process?.id, persistCustomColumnValues]);
 
     const handleSaveEdit = (candidateId: string, field: string) => {
+        const candidate = candidates.find(c => c.id === candidateId);
+        const oldValue = readCandidateFieldValue(candidateId, field);
+        const fieldLabel = getFieldLabel(field.startsWith('custom_') ? field : field);
+
         if (field.startsWith('custom_')) {
             const colId = field.replace('custom_', '');
             const col = customColumns.find(c => c.id === colId);
             if (col) {
-                handleColumnValueChange(candidateId, colId, parseCustomCellInput(editValue, col));
+                const newVal = parseCustomCellInput(editValue, col);
+                handleColumnValueChange(candidateId, colId, newVal);
+                logActivity('cell_edit', {
+                    candidateId,
+                    candidateName: candidate?.name,
+                    fieldName: fieldLabel,
+                    oldValue,
+                    newValue: formatCustomCellDisplay(newVal, col),
+                });
             }
             setEditingCell(null);
             setEditValue('');
@@ -1333,6 +1438,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
 
         if (field === 'lastInteraction') {
             const iso = datetimeLocalToIso(editValue);
+            const newDisplay = iso ? formatBulkDateTime(iso) : '';
             applyOptimisticUpdate(candidateId, { lastWhatsAppInteractionAt: iso });
             setEditingCell(null);
             setEditValue('');
@@ -1340,6 +1446,13 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                 console.error('Error guardando última interacción:', error);
                 loadCandidates(currentPage, true);
                 actions.showToast('Error al guardar cambios', 'error', 3000);
+            });
+            logActivity('cell_edit', {
+                candidateId,
+                candidateName: candidate?.name,
+                fieldName: fieldLabel,
+                oldValue,
+                newValue: newDisplay,
             });
             return;
         }
@@ -1367,6 +1480,13 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
             console.error('Error guardando celda:', error);
             loadCandidates(currentPage, true);
             actions.showToast('Error al guardar cambios', 'error', 3000);
+        });
+        logActivity('cell_edit', {
+            candidateId,
+            candidateName: candidate?.name,
+            fieldName: fieldLabel,
+            oldValue,
+            newValue: trimmed,
         });
     };
 
@@ -1455,7 +1575,19 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
             localStorage.setItem(getCellMetaStorageKey(process.id), JSON.stringify(next));
             return next;
         });
-    }, [process?.id]);
+        const candidateName = candidates.find(c => c.id === candidateIds[0])?.name;
+        const fieldNames = colIds.map(id => getFieldLabel(id)).join(', ');
+        const summaryParts: string[] = [];
+        if (patch.bgColor !== undefined) summaryParts.push(`color: ${patch.bgColor || 'sin color'}`);
+        if (patch.comment !== undefined) summaryParts.push(`comentario: ${patch.comment || '(eliminado)'}`);
+        logActivity('cell_meta', {
+            candidateId: candidateIds[0],
+            candidateName,
+            fieldName: fieldNames,
+            newValue: summaryParts.join('; '),
+            details: { cellCount: candidateIds.length * colIds.length },
+        });
+    }, [process?.id, candidates, getFieldLabel, logActivity]);
 
     const getCellMetaFor = useCallback((candidateId: string, colId: string): BulkCellMeta | undefined => {
         return cellMeta[candidateId]?.[colId];
@@ -1542,6 +1674,26 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
         }
         return '';
     };
+
+    const readCandidateFieldValue = useCallback((candidateId: string, field: string): string => {
+        const candidate = candidates.find(c => c.id === candidateId);
+        if (!candidate) return '';
+        const optimistic = optimisticUpdates.get(candidateId);
+        const displayCandidate = optimistic ? { ...candidate, ...optimistic } : candidate;
+        if (field.startsWith('custom_')) {
+            const colId = field.replace('custom_', '');
+            const col = customColumns.find(c => c.id === colId);
+            const raw = getColumnValue(candidateId, colId, displayCandidate);
+            return formatCustomCellDisplay(raw, col);
+        }
+        if (field === 'lastInteraction') {
+            return displayCandidate.lastWhatsAppInteractionAt
+                ? formatBulkDateTime(displayCandidate.lastWhatsAppInteractionAt)
+                : '';
+        }
+        const direct = (displayCandidate as Record<string, unknown>)[field];
+        return direct == null ? '' : String(direct);
+    }, [candidates, optimisticUpdates, customColumns, columnValues]);
 
     const getCustomFilterKey = (columnId: string) => `custom_${columnId}`;
 
@@ -1766,7 +1918,22 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
         const el = container.querySelector(
             `[data-cell-row="${coord.candidateId}"][data-cell-col="${coord.colId}"]`
         ) as HTMLElement | null;
-        el?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+        if (!el) return;
+
+        const containerRect = container.getBoundingClientRect();
+        const cellRect = el.getBoundingClientRect();
+        const padding = 4;
+
+        if (cellRect.top < containerRect.top + padding) {
+            container.scrollTop -= containerRect.top + padding - cellRect.top;
+        } else if (cellRect.bottom > containerRect.bottom - padding) {
+            container.scrollTop += cellRect.bottom - containerRect.bottom + padding;
+        }
+        if (cellRect.left < containerRect.left + padding) {
+            container.scrollLeft -= containerRect.left + padding - cellRect.left;
+        } else if (cellRect.right > containerRect.right - padding) {
+            container.scrollLeft += cellRect.right - containerRect.right + padding;
+        }
     }, []);
 
     const focusTable = useCallback(() => {
@@ -1837,18 +2004,24 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
     const moveActiveCell = useCallback((
         dRow: number,
         dCol: number,
-        extendSelection: boolean
+        extendSelection: boolean,
+        baseOverride?: CellCoord | null
     ) => {
         if (displayCandidates.length === 0 || visibleColumns.length === 0) return;
 
-        let base = activeCell;
+        let base = baseOverride ?? tableKeyboardRef.current.activeCell;
         if (!base) {
             base = { candidateId: displayCandidates[0].id, colId: visibleColumns[0] };
         }
 
         const { rowIdx, colIdx } = getCellIndices(base.candidateId, base.colId);
         const next = getCellAt(rowIdx + dRow, colIdx + dCol);
-        if (!next) return;
+        if (!next) {
+            if (baseOverride) {
+                selectSingleCell(base);
+            }
+            return;
+        }
 
         const anchor = selectionAnchor || base;
         setActiveCell(next);
@@ -1861,8 +2034,8 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
         scrollCellIntoView(next);
         focusTable();
     }, [
-        activeCell, selectionAnchor, displayCandidates, visibleColumns,
-        getCellIndices, getCellAt, buildCellRange, scrollCellIntoView, focusTable,
+        selectionAnchor, displayCandidates, visibleColumns,
+        getCellIndices, getCellAt, buildCellRange, scrollCellIntoView, focusTable, selectSingleCell,
     ]);
 
     useEffect(() => {
@@ -1885,47 +2058,59 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
         setSelectedCells(buildCellRange(dragAnchorCell.current, coord));
     }, [editingCell, buildCellRange]);
 
-    const handleTableKeyDown = useCallback((e: React.KeyboardEvent) => {
-        if (editingCell) return;
+    const handleTableKeyDown = useCallback((e: React.KeyboardEvent | KeyboardEvent) => {
+        const ctx = tableKeyboardRef.current;
+        if (ctx.editingCell) return;
         const target = e.target as HTMLElement;
         if (['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName)) return;
 
-        if (!activeCell && displayCandidates.length > 0 && visibleColumns.length > 0) {
-            if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Tab', 'Enter'].includes(e.key)) {
-                selectSingleCell({ candidateId: displayCandidates[0].id, colId: visibleColumns[0] });
-                e.preventDefault();
+        const navKeys = ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Tab', 'Enter', 'Escape'];
+        if (!navKeys.includes(e.key)) return;
+
+        const inTable = tableContainerRef.current?.contains(document.activeElement) ?? false;
+        if (!ctx.activeCell && !inTable) return;
+
+        if (!ctx.activeCell && ctx.displayCandidates.length > 0 && ctx.visibleColumns.length > 0) {
+            e.preventDefault();
+            const first = { candidateId: ctx.displayCandidates[0].id, colId: ctx.visibleColumns[0] };
+            if (e.key === 'Enter') {
+                selectSingleCell(first);
+                beginEditCell(first.candidateId, first.colId);
+                return;
             }
+            if (e.key === 'Escape') return;
+            const dRow = e.key === 'ArrowUp' ? -1 : e.key === 'ArrowDown' ? 1 : 0;
+            const dCol = e.key === 'ArrowLeft' ? -1 : (e.key === 'ArrowRight' || e.key === 'Tab') ? (e.shiftKey ? -1 : 1) : 0;
+            if (dRow === 0 && dCol === 0) {
+                selectSingleCell(first);
+                return;
+            }
+            moveActiveCell(dRow, dCol, e.shiftKey, first);
             return;
         }
-        if (!activeCell) return;
+        if (!ctx.activeCell) return;
 
+        e.preventDefault();
         const extend = e.shiftKey;
 
         switch (e.key) {
             case 'ArrowUp':
-                e.preventDefault();
                 moveActiveCell(-1, 0, extend);
                 break;
             case 'ArrowDown':
-                e.preventDefault();
                 moveActiveCell(1, 0, extend);
                 break;
             case 'ArrowLeft':
-                e.preventDefault();
                 moveActiveCell(0, -1, extend);
                 break;
             case 'ArrowRight':
-                e.preventDefault();
                 moveActiveCell(0, 1, extend);
                 break;
-            case 'Tab': {
-                e.preventDefault();
+            case 'Tab':
                 moveActiveCell(0, e.shiftKey ? -1 : 1, false);
                 break;
-            }
             case 'Enter':
-                e.preventDefault();
-                beginEditCell(activeCell.candidateId, activeCell.colId);
+                beginEditCell(ctx.activeCell.candidateId, ctx.activeCell.colId);
                 break;
             case 'Escape':
                 setSelectedCells(new Set());
@@ -1934,10 +2119,22 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
             default:
                 break;
         }
-    }, [
-        editingCell, activeCell, displayCandidates, visibleColumns,
-        selectSingleCell, moveActiveCell, beginEditCell,
-    ]);
+    }, [selectSingleCell, moveActiveCell, beginEditCell]);
+
+    tableKeyboardRef.current = {
+        editingCell,
+        activeCell,
+        selectionAnchor,
+        displayCandidates,
+        visibleColumns,
+    };
+
+    useEffect(() => {
+        if (!selectedProcess) return;
+        const onKeyDown = (e: KeyboardEvent) => handleTableKeyDown(e);
+        document.addEventListener('keydown', onKeyDown, true);
+        return () => document.removeEventListener('keydown', onKeyDown, true);
+    }, [selectedProcess, handleTableKeyDown]);
 
     const isActiveCell = (candidateId: string, colId: string) =>
         activeCell?.candidateId === candidateId && activeCell?.colId === colId;
@@ -2100,8 +2297,11 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
 
         if (pastedCells > 0) {
             actions.showToast(`Pegado en ${pastedCells} celda(s)`, 'success', 2000);
+            logActivity('paste', {
+                details: { count: pastedCells, summary: `Pegado en ${pastedCells} celda(s)` },
+            });
         }
-    }, [activeCell, editingCell, visibleColumns, selectedIds, selectedCells, displayCandidates, setCellValue, actions, sortSelectedCellKeys]);
+    }, [activeCell, editingCell, visibleColumns, selectedIds, selectedCells, displayCandidates, setCellValue, actions, sortSelectedCellKeys, logActivity]);
 
     useEffect(() => {
         document.addEventListener('paste', handleBulkPaste);
@@ -2442,6 +2642,10 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                         className="flex-1 overflow-x-auto overflow-y-auto outline-none focus:ring-2 focus:ring-primary-300 focus:ring-inset rounded"
                         style={{ minHeight: 0 }}
                         tabIndex={0}
+                        onMouseDown={(e) => {
+                            if ((e.target as HTMLElement).closest('input, select, textarea, button, a')) return;
+                            focusTable();
+                        }}
                         onKeyDown={handleTableKeyDown}
                     >
                         <table className="w-full border-collapse" style={{ tableLayout: 'fixed', width: 'max-content', minWidth: '100%' }}>
@@ -3082,6 +3286,13 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                             </button>
                         </div>
                     )}
+
+                    {process && (
+                        <BulkProcessActivityLog
+                            processId={process.id}
+                            refreshToken={activityLogRefreshToken}
+                        />
+                    )}
                 </div>
             )}
 
@@ -3166,6 +3377,9 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                         setShowImportModal(false);
                         setImportRestoreMode(false);
                         loadCandidates(0, true);
+                        logActivity('import', {
+                            details: { summary: importRestoreMode ? 'Restauración desde Excel' : 'Importación de candidatos' },
+                        });
                     }}
                 />
             )}

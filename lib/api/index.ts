@@ -3,6 +3,7 @@ export * from './users';
 export * from './processes';
 export * from './candidates';
 export * from './bulkCandidates';
+export * from './bulkProcessActivity';
 export * from './postits';
 export * from './comments';
 export * from './attachments';
