@@ -1,6 +1,11 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { useAppState } from '../App';
 import { FormIntegration, Process, FieldMapping } from '../types';
+import {
+    filterTallyFieldMapping,
+    getTallyIntegrationMappingFields,
+    normalizeTallyFieldMapping,
+} from '../lib/bulkTableColumns';
 import { X, Copy, ChevronDown, ChevronUp, Settings } from 'lucide-react';
 
 interface FormIntegrationModalProps {
@@ -26,73 +31,38 @@ export const FormEditorModal: React.FC<FormIntegrationModalProps> = ({ integrati
     const [webhookUrl, setWebhookUrl] = useState(integration?.webhookUrl || '');
     const [isSaving, setIsSaving] = useState(false);
     const [showFieldMapping, setShowFieldMapping] = useState(false);
-    const [fieldMapping, setFieldMapping] = useState<FieldMapping>(integration?.fieldMapping || {});
-    
-    // Cargar columnas personalizadas y ocultas (solo relevantes para procesos masivos)
-    const customColumns = useMemo(() => {
-        try {
-            const saved = localStorage.getItem('bulkProcessesCustomColumns');
-            return saved ? JSON.parse(saved) : [];
-        } catch {
-            return [];
-        }
-    }, []);
-    
-    const hiddenColumns = useMemo(() => {
-        try {
-            const saved = localStorage.getItem('bulkProcessesHiddenColumns');
-            return saved ? JSON.parse(saved) : [];
-        } catch {
-            return [];
-        }
-    }, []);
+    const [fieldMapping, setFieldMapping] = useState<FieldMapping>(() =>
+        normalizeTallyFieldMapping(integration?.fieldMapping || {})
+    );
 
     // Proceso seleccionado
     const selectedProcessDetails = useMemo(() => {
         return processesList.find(p => p.id === processId);
     }, [processId, processesList]);
 
-    // Campos disponibles en el candidato, ajustados según el proceso seleccionado
-    const candidateFields = useMemo(() => {
-        const baseFields = [
-            { key: 'name', label: 'Nombre', placeholder: 'nombre, name, nombre_completo' },
-            { key: 'email', label: 'Email', placeholder: 'email, correo, e-mail' },
-            { key: 'phone', label: 'Teléfono', placeholder: 'phone, telefono, teléfono' },
-            { key: 'phone2', label: 'Teléfono 2', placeholder: 'phone2, telefono2, teléfono_secundario' },
-            { key: 'description', label: 'Descripción', placeholder: 'description, descripcion, notas' },
-            { key: 'source', label: 'Fuente', placeholder: 'source, fuente, origen' },
-            { key: 'salaryExpectation', label: 'Expectativa salarial', placeholder: 'salaryExpectation, expectativa_salarial' },
-            { key: 'dni', label: 'DNI', placeholder: 'dni, documento, documento_identidad' },
-            { key: 'linkedinUrl', label: 'LinkedIn', placeholder: 'linkedinUrl, linkedin, perfil_linkedin' },
-            { key: 'address', label: 'Dirección', placeholder: 'address, direccion, dirección' },
-            { key: 'province', label: 'Provincia', placeholder: 'province, provincia' },
-            { key: 'district', label: 'Distrito', placeholder: 'district, distrito' },
-            { key: 'age', label: 'Edad', placeholder: 'age, edad' },
-        ];
+    // Campos del proceso (simple o masivo según bulkConfig del proceso vinculado)
+    const candidateFields = useMemo(
+        () => getTallyIntegrationMappingFields(selectedProcessDetails),
+        [selectedProcessDetails]
+    );
 
-        if (!selectedProcessDetails?.isBulkProcess) {
-            return baseFields;
-        }
+    const allowedFieldKeys = useMemo(
+        () => new Set(candidateFields.map(f => f.key)),
+        [candidateFields]
+    );
 
-        // Si es masivo, filtramos por las ocultas y agregamos custom columns
-        let fields = [...baseFields];
+    // Al cambiar de proceso, quitar mapeos de campos que ya no aplican
+    useEffect(() => {
+        setFieldMapping(prev => filterTallyFieldMapping(prev, allowedFieldKeys));
+    }, [allowedFieldKeys]);
 
-        // Remover campos base que estén ocultos
-        fields = fields.filter(f => !hiddenColumns.includes(f.key));
-
-        // Agregar custom columns que no estén ocultos
-        const visibleCustomCols = customColumns.filter((c: any) => !hiddenColumns.includes(`custom_${c.id}`));
-        
-        visibleCustomCols.forEach((col: any) => {
-            fields.push({
-                key: `custom_${col.id}`,
-                label: col.name,
-                placeholder: col.name.toLowerCase()
-            });
-        });
-
-        return fields;
-    }, [selectedProcessDetails, customColumns, hiddenColumns]);
+    const buildFieldMappingPayload = (): FieldMapping | undefined => {
+        const normalized = filterTallyFieldMapping(
+            normalizeTallyFieldMapping(fieldMapping),
+            allowedFieldKeys
+        );
+        return Object.keys(normalized).length > 0 ? normalized : undefined;
+    };
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -118,7 +88,7 @@ export const FormEditorModal: React.FC<FormIntegrationModalProps> = ({ integrati
                     formName: formName.trim(),
                     formIdOrUrl: formIdOrUrl.trim(),
                     processId,
-                    fieldMapping: Object.keys(fieldMapping).length > 0 ? fieldMapping : undefined,
+                    fieldMapping: buildFieldMappingPayload(),
                 });
                 onClose();
             } else {
@@ -128,7 +98,7 @@ export const FormEditorModal: React.FC<FormIntegrationModalProps> = ({ integrati
                     formName: formName.trim(),
                     formIdOrUrl: formIdOrUrl.trim(),
                     processId,
-                    fieldMapping: Object.keys(fieldMapping).length > 0 ? fieldMapping : undefined,
+                    fieldMapping: buildFieldMappingPayload(),
                 });
                 setWebhookUrl(newIntegration.webhookUrl);
                 setShowWebhook(true);
@@ -193,7 +163,7 @@ export const FormEditorModal: React.FC<FormIntegrationModalProps> = ({ integrati
                             <X className="w-6 h-6 text-gray-600" />
                         </button>
                     </div>
-                    <div className="p-6 space-y-4 overflow-y-auto flex-1">
+                    <div className="p-6 space-y-4 overflow-y-auto flex-1 min-h-0">
                         <div>
                             <label htmlFor="platform" className="block text-sm font-medium text-gray-700">Plataforma</label>
                             <select 
@@ -293,7 +263,7 @@ export const FormEditorModal: React.FC<FormIntegrationModalProps> = ({ integrati
                                 )}
                             </button>
                             {showFieldMapping && (
-                                <div className="mt-4 space-y-3 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                                <div className="mt-4 space-y-3 p-4 bg-blue-50 border border-blue-200 rounded-lg shrink-0">
                                     <div className="mb-4">
                                         <p className="text-sm font-medium text-blue-900 mb-2">
                                             ¿Cómo funciona el mapeo?
@@ -309,7 +279,7 @@ export const FormEditorModal: React.FC<FormIntegrationModalProps> = ({ integrati
                                             encontrar el campo usando nombres comunes).
                                         </p>
                                     </div>
-                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-96 overflow-y-auto p-2 bg-white rounded border border-blue-100">
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 p-2 bg-white rounded border border-blue-100">
                                         {candidateFields.map(field => (
                                             <div key={field.key} className="space-y-1">
                                                 <label className="block text-xs font-semibold text-gray-700">

@@ -1,4 +1,4 @@
-import { BulkProcessConfig, CustomColumn } from '../types';
+import { BulkProcessConfig, CustomColumn, FieldMapping, Process } from '../types';
 
 const BULK_NAME_KEY_PREFIX = '__name__';
 
@@ -506,63 +506,112 @@ export const OPTIONAL_IMPORT_FIELDS = [
     'agreedSalary', 'age', 'dni', 'linkedinUrl', 'address', 'province', 'district',
 ];
 
-/** Campos estándar de importación que no deben normalizarse (identificadores, URLs, etc.) */
-const IMPORT_PROPER_CASE_EXCLUDE_FIELDS = new Set([
-    'email',
-    'linkedinUrl',
-    'phone',
-    'phone2',
-    'dni',
-    'age',
-]);
-
-const IMPORT_TEXT_LETTER_RE = /[a-zA-ZáéíóúÁÉÍÓÚñÑüÜ]/g;
-const IMPORT_WORD_RE = /[a-zA-ZáéíóúÁÉÍÓÚñÑüÜ]+(?:'[a-zA-ZáéíóúÁÉÍÓÚñÑüÜ]+)*/g;
-
-/** True si todas las letras del texto están en mayúsculas (p. ej. FACEBOOK, SAN ISIDRO). */
-export function isImportTextAllCaps(text: string): boolean {
-    const letters = text.match(IMPORT_TEXT_LETTER_RE);
-    if (!letters?.length) return false;
-    return letters.every(c => c === c.toUpperCase() && c !== c.toLowerCase());
+/** Campo mapeable en integraciones Tally (UI + webhook) */
+export interface TallyMappingField {
+    key: string;
+    label: string;
+    placeholder: string;
 }
 
-/** Convierte cada palabra a formato nombre propio: FACEBOOK → Facebook. */
-export function toImportProperCase(text: string): string {
-    return text.replace(IMPORT_WORD_RE, word => {
-        const lower = word.toLowerCase();
-        return lower.charAt(0).toUpperCase() + lower.slice(1);
-    });
-}
+const SIMPLE_TALLY_MAPPING_FIELDS: TallyMappingField[] = [
+    { key: 'name', label: 'Nombre', placeholder: 'nombre, name, nombre_completo' },
+    { key: 'email', label: 'Email', placeholder: 'email, correo, e-mail' },
+    { key: 'phone', label: 'Teléfono', placeholder: 'phone, telefono, teléfono' },
+    { key: 'phone2', label: 'Teléfono 2', placeholder: 'phone2, telefono2, teléfono_secundario' },
+    { key: 'description', label: 'Descripción', placeholder: 'description, descripcion, notas' },
+    { key: 'source', label: 'Fuente', placeholder: 'source, fuente, origen' },
+    { key: 'salary_expectation', label: 'Expectativa salarial', placeholder: 'salary_expectation, expectativa_salarial' },
+    { key: 'dni', label: 'DNI', placeholder: 'dni, documento, documento_identidad' },
+    { key: 'linkedin_url', label: 'LinkedIn', placeholder: 'linkedin_url, linkedin, perfil_linkedin' },
+    { key: 'address', label: 'Dirección', placeholder: 'address, direccion, dirección' },
+    { key: 'province', label: 'Provincia', placeholder: 'province, provincia' },
+    { key: 'district', label: 'Distrito', placeholder: 'district, distrito' },
+    { key: 'age', label: 'Edad', placeholder: 'age, edad' },
+];
 
-export type NormalizeImportTextCaseOptions = {
-    field?: string;
-    columnType?: string;
-    selectOptions?: string[];
-};
+/** Campos estándar adicionales en procesos masivos (no siempre visibles en la tabla) */
+const BULK_EXTRA_TALLY_MAPPING_FIELDS: TallyMappingField[] = [
+    { key: 'phone2', label: 'Teléfono 2', placeholder: 'phone2, telefono2, teléfono_secundario' },
+    { key: 'description', label: 'Descripción', placeholder: 'description, descripcion, notas' },
+    { key: 'salary_expectation', label: 'Expectativa salarial', placeholder: 'salary_expectation, expectativa_salarial' },
+    { key: 'linkedin_url', label: 'LinkedIn', placeholder: 'linkedin_url, linkedin, perfil_linkedin' },
+    { key: 'address', label: 'Dirección', placeholder: 'address, direccion, dirección' },
+    { key: 'age', label: 'Edad', placeholder: 'age, edad' },
+];
 
 /**
- * Si el valor está en MAYÚSCULAS, lo normaliza a nombre propio.
- * Respeta emails, teléfonos, DNI, URLs y columnas numéricas/fecha/checkbox.
+ * Campos disponibles para mapeo Tally según el proceso seleccionado.
+ * Procesos masivos: columnas visibles del bulkConfig + campos estándar extra.
  */
-export function normalizeImportTextCase(
-    value: string,
-    opts: NormalizeImportTextCaseOptions = {}
-): string {
-    const { field, columnType, selectOptions } = opts;
-
-    if (field && IMPORT_PROPER_CASE_EXCLUDE_FIELDS.has(field)) return value;
-    if (columnType === 'number' || columnType === 'date' || columnType === 'checkbox') {
-        return value;
+export function getTallyIntegrationMappingFields(process?: Process): TallyMappingField[] {
+    if (!process?.isBulkProcess) {
+        return SIMPLE_TALLY_MAPPING_FIELDS;
     }
 
-    if (columnType === 'select' && selectOptions?.length) {
-        const match = selectOptions.find(o => o.toLowerCase() === value.toLowerCase());
-        if (match) return match;
+    const bulkConfig = process.bulkConfig;
+    const customColumns = bulkConfig?.customColumns || [];
+    const fields: TallyMappingField[] = [];
+    const seen = new Set<string>();
+
+    const add = (field: TallyMappingField) => {
+        if (seen.has(field.key)) return;
+        seen.add(field.key);
+        fields.push(field);
+    };
+
+    for (const h of getImportHeaders(bulkConfig)) {
+        const key = h.isCustom ? `custom_${h.columnId}` : h.field;
+        const label = h.isCustom ? h.header : getColumnLabel(h.field, customColumns);
+        add({
+            key,
+            label,
+            placeholder: h.isCustom
+                ? h.header.toLowerCase()
+                : `${h.field}, ${label.toLowerCase()}`,
+        });
     }
 
-    if (!isImportTextAllCaps(value)) return value;
-    return toImportProperCase(value);
+    for (const extra of BULK_EXTRA_TALLY_MAPPING_FIELDS) {
+        add(extra);
+    }
+
+    return fields;
 }
+
+/** Normaliza claves legacy (camelCase) al formato que usa el webhook */
+export function normalizeTallyFieldMapping(mapping: FieldMapping = {}): FieldMapping {
+    const legacyToSnake: Record<string, string> = {
+        salaryExpectation: 'salary_expectation',
+        linkedinUrl: 'linkedin_url',
+    };
+    const out: FieldMapping = { ...mapping };
+    for (const [oldKey, newKey] of Object.entries(legacyToSnake)) {
+        if (out[oldKey] !== undefined && out[newKey] === undefined) {
+            out[newKey] = out[oldKey];
+            delete out[oldKey];
+        }
+    }
+    return out;
+}
+
+/** Conserva solo entradas cuyas claves existen en los campos del proceso actual */
+export function filterTallyFieldMapping(
+    mapping: FieldMapping,
+    allowedKeys: Set<string>
+): FieldMapping {
+    return Object.fromEntries(
+        Object.entries(mapping).filter(([key]) => allowedKeys.has(key))
+    );
+}
+
+export {
+    isImportTextAllCaps,
+    toImportProperCase,
+    normalizeImportTextCase,
+    applyImportTextCaseToCandidate,
+    IMPORT_TEXT_CASE_CANDIDATE_FIELDS,
+} from './importTextCase';
+export type { NormalizeImportTextCaseOptions } from './importTextCase';
 
 export function getCustomColumnIds(customColumns: CustomColumn[] = []): string[] {
     return customColumns.map(c => `custom_${c.id}`);

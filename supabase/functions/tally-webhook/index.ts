@@ -1,6 +1,7 @@
 // Edge Function para recibir webhooks de Tally y crear candidatos
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { applyImportTextCaseToCandidate } from '../_shared/importTextCase.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -293,6 +294,13 @@ function mapTallyToCandidate(tallyData: any, integration: any): any {
     const ageNum = parseInt(ageValue, 10)
     candidate.age = isNaN(ageNum) ? null : ageNum
   }
+
+  const sourceFromForm = getFieldValue('source')
+  if (sourceFromForm) {
+    candidate.source = sourceFromForm
+  }
+
+  applyImportTextCaseToCandidate(candidate)
 
   return candidate
 }

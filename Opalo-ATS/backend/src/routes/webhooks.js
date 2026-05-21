@@ -1,5 +1,6 @@
 import express from 'express';
 import { createClient } from '@supabase/supabase-js';
+import { applyImportTextCaseToCandidate } from '../../../../lib/importTextCase.js';
 
 console.log('🔵 Cargando módulo webhooks.js...');
 
@@ -151,6 +152,13 @@ function mapTallyToCandidate(tallyData, integration) {
         const ageNum = parseInt(ageValue, 10);
         candidate.age = isNaN(ageNum) ? null : ageNum;
     }
+
+    const sourceFromForm = getFieldValue('source');
+    if (sourceFromForm) {
+        candidate.source = sourceFromForm;
+    }
+
+    applyImportTextCaseToCandidate(candidate);
 
     return candidate;
 }
