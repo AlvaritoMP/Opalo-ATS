@@ -1,7 +1,9 @@
 import type { BulkProcessConfig, CustomColumn, FieldMapping, Process } from '../types';
 import {
+    BASE_COLUMNS,
     enrichBulkColumnValuesForStorage,
     findCustomColumnByHeader,
+    getColumnLabel,
     getTallyIntegrationMappingFields,
     mapImportHeader,
     normalizeBulkDateInput,
@@ -12,9 +14,11 @@ import {
 } from './bulkTableColumns';
 import { applyImportTextCaseToCandidate } from './importTextCase';
 
-export interface TallyWebhookProcess {
-    id: string;
+export interface TallyWebhookProcessRow {
+    id?: string;
+    is_bulk_process?: boolean | number;
     isBulkProcess?: boolean;
+    bulk_config?: BulkProcessConfig | string | null;
     bulkConfig?: BulkProcessConfig;
 }
 
@@ -35,44 +39,94 @@ export interface TallyCandidateInsert {
     bulk_column_values?: Record<string, unknown>;
 }
 
-const STANDARD_FIELD_NAMES: Record<string, string[]> = {
-    name: ['name', 'nombre', 'nombre_completo', 'full_name', 'nombre_y_apellidos'],
-    email: ['email', 'correo', 'e-mail'],
-    phone: ['phone', 'telefono', 'teléfono', 'mobile', 'celular'],
-    phone2: ['phone2', 'telefono2', 'teléfono_secundario', 'secondary_phone'],
-    description: ['description', 'descripcion', 'notas', 'comments'],
-    source: ['source', 'fuente', 'origen'],
-    salary_expectation: ['salaryexpectation', 'expectativa_salarial', 'salario_esperado'],
-    dni: ['dni', 'documento', 'documento_identidad', 'id_number'],
-    linkedin_url: ['linkedinurl', 'linkedin', 'perfil_linkedin'],
-    address: ['address', 'direccion', 'dirección'],
-    province: ['province', 'provincia'],
-    district: ['district', 'distrito'],
-    age: ['age', 'edad'],
+type TallyFieldRow = {
+    key?: string;
+    label?: string;
+    type?: string;
+    value?: unknown;
+    options?: { id?: string; text?: string; label?: string }[];
 };
 
-/** Convierte el valor de un campo Tally a texto */
-export function tallyFieldValueToString(value: unknown): string {
+const CHOICE_TYPES = new Set([
+    'MULTIPLE_CHOICE',
+    'DROPDOWN',
+    'MULTIPLE_CHOICE_SELECT',
+    'SELECT',
+    'CHECKBOXES',
+]);
+
+export interface NormalizedWebhookProcess {
+    isBulkProcess: boolean;
+    bulkConfig?: BulkProcessConfig;
+}
+
+/** Normaliza fila de proceso desde Supabase (snake_case) */
+export function normalizeWebhookProcess(
+    row: TallyWebhookProcessRow | Process | null | undefined
+): NormalizedWebhookProcess | null {
+    if (!row) return null;
+    const isBulk =
+        (row as Process).isBulkProcess === true ||
+        row.is_bulk_process === true ||
+        row.is_bulk_process === 1;
+    let bulkConfig = (row as Process).bulkConfig ?? row.bulk_config;
+    if (typeof bulkConfig === 'string') {
+        try {
+            bulkConfig = JSON.parse(bulkConfig);
+        } catch {
+            bulkConfig = undefined;
+        }
+    }
+    return {
+        isBulkProcess: isBulk,
+        bulkConfig: bulkConfig as BulkProcessConfig | undefined,
+    };
+}
+
+/** Extrae texto legible de un campo Tally (resuelve IDs de opciones en choice fields) */
+export function extractTallyFieldText(field: TallyFieldRow): string {
+    const { value, type, options } = field;
     if (value === undefined || value === null) return '';
+
+    if (type && CHOICE_TYPES.has(type) && options?.length) {
+        if (Array.isArray(value)) {
+            const texts = value
+                .map((id) => {
+                    const opt = options.find((o) => o.id === id);
+                    return opt?.text || opt?.label || '';
+                })
+                .filter(Boolean);
+            return texts.join(', ');
+        }
+        const opt = options.find((o) => o.id === value);
+        if (opt?.text) return String(opt.text).trim();
+        if (opt?.label) return String(opt.label).trim();
+    }
+
     if (typeof value === 'string') return value.trim();
     if (typeof value === 'number' || typeof value === 'boolean') return String(value);
     if (Array.isArray(value)) {
-        return value.map(tallyFieldValueToString).filter(Boolean).join(', ');
+        return value.map((v) => extractTallyFieldText({ value: v, options })).filter(Boolean).join(', ');
     }
     if (typeof value === 'object') {
         const o = value as Record<string, unknown>;
         if (typeof o.text === 'string') return o.text.trim();
         if (typeof o.label === 'string') return o.label.trim();
-        if (typeof o.value === 'string') return o.value.trim();
-        if (Array.isArray(o.value)) return tallyFieldValueToString(o.value);
     }
     return String(value).trim();
 }
 
-/** Mapa label/key Tally (minúsculas) → valor */
-export function buildTallyFieldsMap(tallyData: unknown): Record<string, string> {
-    const fieldsMap: Record<string, string> = {};
-    const tally = tallyData as { data?: { fields?: unknown[] }; fields?: unknown[] };
+export interface TallyFieldsIndex {
+    /** lookup por label/key exacto (lower) o normalizado */
+    byRef: Record<string, string>;
+    /** refs ya consumidos por otra columna ATS */
+    usedRefs: Set<string>;
+}
+
+/** Índice de respuestas Tally con registro de uso para evitar duplicar un valor en varias columnas */
+export function buildTallyFieldsIndex(tallyData: unknown): TallyFieldsIndex {
+    const byRef: Record<string, string> = {};
+    const tally = tallyData as { data?: { fields?: TallyFieldRow[] }; fields?: TallyFieldRow[] };
     const fieldsArray = Array.isArray(tally?.data?.fields)
         ? tally.data.fields
         : Array.isArray(tally?.fields)
@@ -80,23 +134,67 @@ export function buildTallyFieldsMap(tallyData: unknown): Record<string, string> 
           : [];
 
     for (const field of fieldsArray) {
-        const f = field as { key?: string; label?: string; value?: unknown };
-        const text = tallyFieldValueToString(f.value);
+        const text = extractTallyFieldText(field);
         if (!text) continue;
 
-        const key = (f.key || '').trim().toLowerCase();
-        const label = (f.label || '').trim().toLowerCase();
+        const key = (field.key || '').trim();
+        const label = (field.label || '').trim();
+        const refs = new Set<string>();
 
         if (key) {
-            fieldsMap[key] = text;
-            fieldsMap[normalizeColumnNameKey(key)] = text;
+            refs.add(key.toLowerCase());
+            refs.add(normalizeColumnNameKey(key));
         }
         if (label) {
-            fieldsMap[label] = text;
-            fieldsMap[normalizeColumnNameKey(label)] = text;
+            refs.add(label.toLowerCase());
+            refs.add(normalizeColumnNameKey(label));
+        }
+
+        for (const ref of refs) {
+            if (!byRef[ref]) byRef[ref] = text;
         }
     }
-    return fieldsMap;
+
+    return { byRef, usedRefs: new Set() };
+}
+
+function markRefUsed(index: TallyFieldsIndex, ref: string): void {
+    const r = ref.trim().toLowerCase();
+    index.usedRefs.add(r);
+    index.usedRefs.add(normalizeColumnNameKey(ref));
+}
+
+function isRefUsed(index: TallyFieldsIndex, ref: string): boolean {
+    return (
+        index.usedRefs.has(ref.trim().toLowerCase()) ||
+        index.usedRefs.has(normalizeColumnNameKey(ref))
+    );
+}
+
+/** Busca valor por nombre/key configurado en el mapeo */
+export function lookupTallyValue(index: TallyFieldsIndex, tallyFieldRef: string): string {
+    const trimmed = tallyFieldRef.trim();
+    if (!trimmed) return '';
+
+    const candidates = [trimmed.toLowerCase(), normalizeColumnNameKey(trimmed)];
+
+    for (const c of candidates) {
+        if (index.byRef[c] !== undefined && index.byRef[c] !== '') {
+            if (!isRefUsed(index, c)) {
+                markRefUsed(index, trimmed);
+                return index.byRef[c];
+            }
+        }
+    }
+
+    const normTarget = normalizeColumnNameKey(trimmed);
+    for (const [k, v] of Object.entries(index.byRef)) {
+        if (normalizeColumnNameKey(k) === normTarget && v !== '' && !isRefUsed(index, k)) {
+            markRefUsed(index, trimmed);
+            return v;
+        }
+    }
+    return '';
 }
 
 export function parseIntegrationFieldMapping(integration: {
@@ -116,57 +214,67 @@ export function parseIntegrationFieldMapping(integration: {
     return {};
 }
 
-function lookupTallyValue(fieldsMap: Record<string, string>, tallyFieldName: string): string {
-    const trimmed = tallyFieldName.trim();
-    if (!trimmed) return '';
-
-    const candidates = [
-        trimmed.toLowerCase(),
-        normalizeColumnNameKey(trimmed),
-    ];
-
-    for (const c of candidates) {
-        if (fieldsMap[c] !== undefined && fieldsMap[c] !== '') return fieldsMap[c];
-    }
-
-    const normTarget = normalizeColumnNameKey(trimmed);
-    for (const [k, v] of Object.entries(fieldsMap)) {
-        if (normalizeColumnNameKey(k) === normTarget && v !== '') return v;
-    }
-    return '';
-}
-
-function standardNamesForField(
+/** Nombres Tally permitidos para auto-mapeo (solo esta columna, sin sinónimos globales) */
+function autoMatchRefsForField(
     mappingKey: string,
-    customColumns: CustomColumn[]
+    customColumns: CustomColumn[],
+    isBulk: boolean
 ): string[] {
     if (mappingKey.startsWith('custom_')) {
         const colId = mappingKey.replace('custom_', '');
-        const col = customColumns.find(c => c.id === colId);
-        if (!col) return [mappingKey];
-        const names = new Set<string>([
+        const col = customColumns.find((c) => c.id === colId);
+        if (!col) return [];
+        const refs = new Set<string>([
+            col.name,
             col.name.toLowerCase(),
             normalizeColumnNameKey(col.name),
         ]);
         const matched = findCustomColumnByHeader(col.name, customColumns);
-        if (matched) names.add(normalizeColumnNameKey(matched.name));
-        return [...names];
+        if (matched) refs.add(normalizeColumnNameKey(matched.name));
+        return [...refs];
     }
-    return STANDARD_FIELD_NAMES[mappingKey] || [mappingKey];
+
+    const baseCol = BASE_COLUMNS.find((c) => c.importKey === mappingKey || c.id === mappingKey);
+    if (baseCol) {
+        const refs = new Set<string>([
+            baseCol.importKey || mappingKey,
+            baseCol.label,
+            baseCol.label.toLowerCase(),
+            normalizeColumnNameKey(baseCol.label),
+        ]);
+        return [...refs];
+    }
+
+    if (!isBulk) {
+        const simpleAliases: Record<string, string[]> = {
+            name: ['name', 'nombre', 'nombre_completo'],
+            email: ['email', 'correo', 'e-mail'],
+            phone: ['phone', 'telefono', 'teléfono'],
+            source: ['source', 'fuente'],
+            dni: ['dni', 'documento'],
+            province: ['province', 'provincia'],
+            district: ['district', 'distrito'],
+            age: ['age', 'edad'],
+        };
+        return simpleAliases[mappingKey] || [mappingKey];
+    }
+
+    return [mappingKey];
 }
 
 function getMappedValue(
     mappingKey: string,
-    fieldsMap: Record<string, string>,
+    index: TallyFieldsIndex,
     customMapping: FieldMapping,
-    customColumns: CustomColumn[]
+    customColumns: CustomColumn[],
+    isBulk: boolean
 ): string {
     if (customMapping[mappingKey]) {
-        const fromCustom = lookupTallyValue(fieldsMap, customMapping[mappingKey]);
-        if (fromCustom) return fromCustom;
+        return lookupTallyValue(index, customMapping[mappingKey]);
     }
-    for (const name of standardNamesForField(mappingKey, customColumns)) {
-        const v = lookupTallyValue(fieldsMap, name);
+
+    for (const ref of autoMatchRefsForField(mappingKey, customColumns, isBulk)) {
+        const v = lookupTallyValue(index, ref);
         if (v) return v;
     }
     return '';
@@ -222,8 +330,6 @@ function assignStandardField(target: TallyCandidateInsert, key: string, value: s
             if (!isNaN(ageNum)) target.age = ageNum;
             break;
         }
-        default:
-            break;
     }
 }
 
@@ -233,31 +339,34 @@ function syncHomonymCustomColumns(
     candidate: TallyCandidateInsert
 ): void {
     for (const col of customColumns) {
+        if (bulkValues[col.id] !== undefined && bulkValues[col.id] !== '') continue;
         const mapped = mapImportHeader(col.name.toLowerCase());
-        if (mapped === 'source' && candidate.source) {
-            bulkValues[col.id] = candidate.source;
-        } else if (mapped === 'province' && candidate.province) {
-            bulkValues[col.id] = candidate.province;
-        } else if (mapped === 'district' && candidate.district) {
-            bulkValues[col.id] = candidate.district;
-        }
+        if (mapped === 'source' && candidate.source) bulkValues[col.id] = candidate.source;
+        else if (mapped === 'province' && candidate.province) bulkValues[col.id] = candidate.province;
+        else if (mapped === 'district' && candidate.district) bulkValues[col.id] = candidate.district;
     }
 }
 
 /**
  * Mapea payload Tally → fila candidates (+ bulk_column_values si es proceso masivo).
- * Usa las mismas claves que el UI de integración (getTallyIntegrationMappingFields).
  */
 export function buildTallyCandidateFromSubmission(
     tallyData: unknown,
     integration: { field_mapping?: string | FieldMapping | null; form_name?: string },
-    process?: TallyWebhookProcess | Process | null
+    processRow?: TallyWebhookProcessRow | Process | null
 ): TallyCandidateInsert {
-    const fieldsMap = buildTallyFieldsMap(tallyData);
+    const process = normalizeWebhookProcess(processRow);
+    const index = buildTallyFieldsIndex(tallyData);
     const customMapping = parseIntegrationFieldMapping(integration);
     const customColumns = process?.bulkConfig?.customColumns || [];
+    const isBulk = !!process?.isBulkProcess;
     const mappingFields: TallyMappingField[] = getTallyIntegrationMappingFields(
-        process as Process | undefined
+        process
+            ? ({
+                  isBulkProcess: process.isBulkProcess,
+                  bulkConfig: process.bulkConfig,
+              } as Process)
+            : undefined
     );
 
     const candidate: TallyCandidateInsert = {
@@ -266,7 +375,7 @@ export function buildTallyCandidateFromSubmission(
         phone: '',
         phone2: '',
         description: '',
-        source: 'Tally',
+        source: '',
         salary_expectation: '',
         dni: '',
         linkedin_url: '',
@@ -279,12 +388,12 @@ export function buildTallyCandidateFromSubmission(
     const bulkRaw: Record<string, unknown> = {};
 
     for (const field of mappingFields) {
-        const raw = getMappedValue(field.key, fieldsMap, customMapping, customColumns);
+        const raw = getMappedValue(field.key, index, customMapping, customColumns, isBulk);
         if (!raw) continue;
 
         if (field.key.startsWith('custom_')) {
             const colId = field.key.replace('custom_', '');
-            const col = customColumns.find(c => c.id === colId);
+            const col = customColumns.find((c) => c.id === colId);
             if (col) {
                 bulkRaw[col.id] = parseValueForCustomColumn(raw, col);
             }
@@ -293,9 +402,13 @@ export function buildTallyCandidateFromSubmission(
         }
     }
 
+    if (!candidate.source?.trim()) {
+        candidate.source = 'Tally';
+    }
+
     applyImportTextCaseToCandidate(candidate as Record<string, unknown>);
 
-    if (process?.isBulkProcess && customColumns.length > 0) {
+    if (isBulk && customColumns.length > 0) {
         syncHomonymCustomColumns(bulkRaw, customColumns, candidate);
         const enriched = enrichBulkColumnValuesForStorage(bulkRaw, customColumns);
         if (Object.keys(enriched).length > 0) {
@@ -304,4 +417,9 @@ export function buildTallyCandidateFromSubmission(
     }
 
     return candidate;
+}
+
+/** @deprecated Use buildTallyFieldsIndex */
+export function buildTallyFieldsMap(tallyData: unknown): Record<string, string> {
+    return buildTallyFieldsIndex(tallyData).byRef;
 }

@@ -176,17 +176,17 @@ router.post('/tally/:webhookId', async (req, res) => {
             });
         }
 
+        const bulkColumnValues = candidateData.bulk_column_values;
+        const insertPayload = { ...candidateData };
+        delete insertPayload.bulk_column_values;
+
         // 5. Crear el candidato en Supabase
         console.log('📝 Intentando insertar candidato en Supabase...');
-        console.log('📝 Datos a insertar:', JSON.stringify({
-            ...candidateData,
-            created_at: new Date().toISOString(),
-        }, null, 2));
         
         const { data: candidate, error: candidateError } = await supabase
             .from('candidates')
             .insert({
-                ...candidateData,
+                ...insertPayload,
                 created_at: new Date().toISOString(),
             })
             .select()
@@ -211,7 +211,18 @@ router.post('/tally/:webhookId', async (req, res) => {
         }
 
         console.log(`✅ Candidato creado: ${candidate.id} - ${candidate.name || candidate.email}`);
-        console.log('📝 Candidato completo:', JSON.stringify(candidate, null, 2));
+
+        if (bulkColumnValues && Object.keys(bulkColumnValues).length > 0) {
+            const { error: bulkError } = await supabase
+                .from('candidates')
+                .update({ bulk_column_values: bulkColumnValues })
+                .eq('id', candidate.id);
+            if (bulkError) {
+                console.warn('⚠️ bulk_column_values no guardado:', bulkError.message);
+            } else {
+                console.log('✅ bulk_column_values guardado');
+            }
+        }
 
         // 6. Crear entrada en historial
         // Nota: moved_by es UUID (referencia a usuario), no texto

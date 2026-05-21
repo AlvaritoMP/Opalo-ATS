@@ -16,20 +16,14 @@ serve(async (req) => {
 
   try {
     const url = new URL(req.url)
-    const pathParts = url.pathname.split('/')
-    const webhookId = pathParts[pathParts.length - 1]
-
-    console.log(`📥 Webhook recibido de Tally - ID: ${webhookId}`)
-
     const tallyData = await req.json()
-    console.log('📋 Datos recibidos:', JSON.stringify(tallyData, null, 2))
+    console.log('📋 Webhook Tally recibido')
 
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!
     const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     const supabase = createClient(supabaseUrl, supabaseServiceKey)
 
     const webhookUrl = `https://${url.host}${url.pathname}`
-    console.log(`🔍 Buscando integración con webhook_url: ${webhookUrl}`)
 
     const { data: integration, error: integrationError } = await supabase
       .from('form_integrations')
@@ -37,78 +31,67 @@ serve(async (req) => {
       .eq('webhook_url', webhookUrl)
       .maybeSingle()
 
-    if (integrationError) {
-      console.error('❌ Error buscando integración:', integrationError)
-      return new Response(
-        JSON.stringify({ error: 'Error buscando integración', details: integrationError.message }),
-        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
-    }
-
-    if (!integration) {
-      console.error(`❌ Integración no encontrada para webhook: ${webhookUrl}`)
+    if (integrationError || !integration) {
+      console.error('❌ Integración no encontrada:', webhookUrl, integrationError)
       return new Response(
         JSON.stringify({ error: 'Integration not found', webhookUrl }),
-        { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        { status: integrationError ? 500 : 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
     }
-
-    console.log(`✅ Integración encontrada: ${integration.form_name} (${integration.id})`)
 
     const { data: process, error: processError } = await supabase
       .from('processes')
-      .select('id, stages, is_bulk_process, bulk_config')
+      .select('id, is_bulk_process, bulk_config')
       .eq('id', integration.process_id)
       .eq('app_name', integration.app_name)
       .maybeSingle()
 
-    if (processError) {
-      console.error('❌ Error buscando proceso:', processError)
+    if (processError || !process) {
       return new Response(
-        JSON.stringify({ error: 'Error buscando proceso', details: processError.message }),
-        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
-    }
-
-    if (!process) {
-      console.error(`❌ Proceso no encontrado: ${integration.process_id}`)
-      return new Response(
-        JSON.stringify({ error: 'Process not found', processId: integration.process_id }),
+        JSON.stringify({ error: 'Process not found' }),
         { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
     }
 
-    if (!process.stages || process.stages.length === 0) {
-      console.error(`❌ Proceso no tiene etapas: ${integration.process_id}`)
+    const { data: stages, error: stagesError } = await supabase
+      .from('stages')
+      .select('id')
+      .eq('process_id', integration.process_id)
+      .eq('app_name', integration.app_name)
+      .order('order_index', { ascending: true })
+      .limit(1)
+
+    if (stagesError || !stages?.length) {
       return new Response(
-        JSON.stringify({ error: 'Process has no stages', processId: integration.process_id }),
+        JSON.stringify({ error: 'Process has no stages' }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
     }
-
-    console.log(`✅ Proceso encontrado (masivo: ${process.is_bulk_process})`)
 
     const candidateData = buildTallyCandidateFromSubmission(tallyData, integration, process)
     applyImportTextCaseToCandidate(candidateData)
 
     candidateData.process_id = integration.process_id
-    candidateData.stage_id = process.stages[0].id
+    candidateData.stage_id = stages[0].id
     candidateData.app_name = integration.app_name
 
-    console.log('👤 Datos del candidato mapeados:', JSON.stringify(candidateData, null, 2))
+    console.log('👤 Candidato mapeado:', JSON.stringify(candidateData, null, 2))
 
     if (!candidateData.name && !candidateData.email) {
-      console.error('❌ Candidato sin nombre ni email')
       return new Response(
-        JSON.stringify({ error: 'Candidate must have at least name or email', candidateData }),
+        JSON.stringify({ error: 'Candidate must have at least name or email' }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
     }
 
+    const bulkValues = candidateData.bulk_column_values
+    const insertPayload = { ...candidateData }
+    delete insertPayload.bulk_column_values
+
     const { data: candidate, error: candidateError } = await supabase
       .from('candidates')
       .insert({
-        ...candidateData,
+        ...insertPayload,
         created_at: new Date().toISOString(),
       })
       .select()
@@ -122,30 +105,29 @@ serve(async (req) => {
       )
     }
 
-    console.log(`✅ Candidato creado: ${candidate.id} - ${candidate.name || candidate.email}`)
+    if (bulkValues && Object.keys(bulkValues).length > 0) {
+      const { error: bulkError } = await supabase
+        .from('candidates')
+        .update({ bulk_column_values: bulkValues })
+        .eq('id', candidate.id)
 
-    const { error: historyError } = await supabase
-      .from('candidate_history')
-      .insert({
-        candidate_id: candidate.id,
-        stage_id: process.stages[0].id,
-        moved_at: new Date().toISOString(),
-        moved_by: null,
-        app_name: integration.app_name,
-      })
-
-    if (historyError) {
-      console.warn('⚠️ Error creando historial (no crítico):', historyError)
-    } else {
-      console.log(`✅ Historial creado para candidato ${candidate.id}`)
+      if (bulkError) {
+        console.warn('⚠️ bulk_column_values no guardado:', bulkError.message)
+      } else {
+        console.log('✅ bulk_column_values guardado')
+      }
     }
 
+    await supabase.from('candidate_history').insert({
+      candidate_id: candidate.id,
+      stage_id: stages[0].id,
+      moved_at: new Date().toISOString(),
+      moved_by: null,
+      app_name: integration.app_name,
+    })
+
     return new Response(
-      JSON.stringify({
-        success: true,
-        candidateId: candidate.id,
-        candidateName: candidate.name || candidate.email,
-      }),
+      JSON.stringify({ success: true, candidateId: candidate.id }),
       { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     )
   } catch (error) {
