@@ -1,6 +1,7 @@
 import express from 'express';
 import { createClient } from '@supabase/supabase-js';
 import { applyImportTextCaseToCandidate } from '../../../../lib/importTextCase.js';
+import { buildTallyCandidateFromSubmission } from '../../../../lib/tallyWebhookMapping.js';
 
 console.log('🔵 Cargando módulo webhooks.js...');
 
@@ -31,137 +32,6 @@ const supabase = createClient(
 );
 
 console.log('🔵 Cliente Supabase inicializado');
-
-// Función helper para obtener nombres estándar de campos
-function getStandardFieldNames(candidateFieldKey) {
-    const mappings = {
-        name: ['name', 'nombre', 'nombre_completo', 'nombre completo', 'full_name', 'nombre_y_apellidos', 'question_8d2xpz'],
-        email: ['email', 'correo', 'correo electrónico', 'correo electronico', 'e-mail', 'question_ylg9wd'],
-        phone: ['phone', 'telefono', 'teléfono', 'mobile', 'celular'],
-        phone2: ['phone2', 'telefono2', 'teléfono_secundario', 'secondary_phone'],
-        description: ['description', 'descripcion', 'notas', 'comments'],
-        source: ['source', 'fuente', 'origen'],
-        salary_expectation: ['salaryexpectation', 'expectativa_salarial', 'salario_esperado'],
-        dni: ['dni', 'documento', 'documento_identidad', 'id_number'],
-        linkedin_url: ['linkedinurl', 'linkedin', 'perfil_linkedin'],
-        address: ['address', 'direccion', 'dirección'],
-        province: ['province', 'provincia'],
-        district: ['district', 'distrito'],
-        age: ['age', 'edad'],
-    };
-    return mappings[candidateFieldKey] || [candidateFieldKey];
-}
-
-// Función para mapear datos de Tally a formato de candidato
-function mapTallyToCandidate(tallyData, integration) {
-    const candidate = {
-        process_id: '', // Se llenará después
-        stage_id: '',
-        name: '',
-        email: '',
-        phone: '',
-        phone2: '',
-        description: '',
-        source: integration.form_name || 'Tally',
-        salary_expectation: '',
-        dni: '',
-        linkedin_url: '',
-        address: '',
-        province: '',
-        district: '',
-        age: null,
-    };
-
-    // Convertir array de fields a objeto para búsqueda rápida
-    // Tally puede enviar los datos en diferentes formatos
-    let fieldsArray = [];
-    if (tallyData.data && tallyData.data.fields && Array.isArray(tallyData.data.fields)) {
-        fieldsArray = tallyData.data.fields;
-    } else if (tallyData.fields && Array.isArray(tallyData.fields)) {
-        fieldsArray = tallyData.fields;
-    }
-    
-    const fields = {};
-    fieldsArray.forEach(field => {
-        const key = field.key?.toLowerCase() || '';
-        const label = field.label?.toLowerCase() || '';
-        const value = field.value || '';
-        
-        // Guardar por key y por label
-        if (key) fields[key] = value;
-        if (label) fields[label] = value;
-    });
-    
-    console.log('🔍 Campos mapeados:', JSON.stringify(fields, null, 2));
-
-    // Obtener mapeo personalizado si existe
-    let customMapping = {};
-    if (integration.field_mapping) {
-        try {
-            if (typeof integration.field_mapping === 'string') {
-                customMapping = JSON.parse(integration.field_mapping);
-            } else if (typeof integration.field_mapping === 'object') {
-                customMapping = integration.field_mapping;
-            }
-        } catch (err) {
-            console.warn('Error parseando field_mapping:', err);
-        }
-    }
-
-    // Función helper para obtener valor de campo
-    const getFieldValue = (candidateFieldKey) => {
-        // 1. Si hay mapeo personalizado, usarlo primero
-        if (customMapping[candidateFieldKey]) {
-            const mappedTallyField = customMapping[candidateFieldKey].toLowerCase();
-            if (fields[mappedTallyField] !== undefined && fields[mappedTallyField] !== '') {
-                return fields[mappedTallyField];
-            }
-        }
-        
-        // 2. Intentar con nombres estándar
-        const standardNames = getStandardFieldNames(candidateFieldKey);
-        for (const name of standardNames) {
-            if (fields[name] !== undefined && fields[name] !== '') {
-                return fields[name];
-            }
-        }
-        
-        return '';
-    };
-
-    // Mapear campos
-    candidate.name = getFieldValue('name') || '';
-    candidate.email = getFieldValue('email') || '';
-    
-    console.log('🔍 Búsqueda de campos:');
-    console.log('  - name:', candidate.name, '(buscado en:', Object.keys(fields).filter(k => k.includes('nombre') || k.includes('name')), ')');
-    console.log('  - email:', candidate.email, '(buscado en:', Object.keys(fields).filter(k => k.includes('correo') || k.includes('email')), ')');
-    candidate.phone = getFieldValue('phone') || '';
-    candidate.phone2 = getFieldValue('phone2') || '';
-    candidate.description = getFieldValue('description') || '';
-    candidate.salary_expectation = getFieldValue('salary_expectation') || '';
-    candidate.dni = getFieldValue('dni') || '';
-    candidate.linkedin_url = getFieldValue('linkedin_url') || '';
-    candidate.address = getFieldValue('address') || '';
-    candidate.province = getFieldValue('province') || '';
-    candidate.district = getFieldValue('district') || '';
-    
-    // Manejar age como número
-    const ageValue = getFieldValue('age');
-    if (ageValue) {
-        const ageNum = parseInt(ageValue, 10);
-        candidate.age = isNaN(ageNum) ? null : ageNum;
-    }
-
-    const sourceFromForm = getFieldValue('source');
-    if (sourceFromForm) {
-        candidate.source = sourceFromForm;
-    }
-
-    applyImportTextCaseToCandidate(candidate);
-
-    return candidate;
-}
 
 // Endpoint para recibir webhooks de Tally
 router.post('/tally/:webhookId', async (req, res) => {
@@ -241,7 +111,7 @@ router.post('/tally/:webhookId', async (req, res) => {
         // 2. Obtener el proceso asociado
         const { data: process, error: processError } = await supabase
             .from('processes')
-            .select('id')
+            .select('id, is_bulk_process, bulk_config')
             .eq('id', integration.process_id)
             .eq('app_name', integration.app_name)
             .maybeSingle();
@@ -289,7 +159,8 @@ router.post('/tally/:webhookId', async (req, res) => {
         console.log(`✅ Proceso encontrado con ${stages.length} etapas`);
 
         // 4. Mapear campos de Tally a candidato
-        const candidateData = mapTallyToCandidate(tallyData, integration);
+        const candidateData = buildTallyCandidateFromSubmission(tallyData, integration, process);
+        applyImportTextCaseToCandidate(candidateData);
         candidateData.process_id = integration.process_id;
         candidateData.stage_id = stages[0].id;
         candidateData.app_name = integration.app_name;

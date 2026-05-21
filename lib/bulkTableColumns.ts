@@ -529,19 +529,9 @@ const SIMPLE_TALLY_MAPPING_FIELDS: TallyMappingField[] = [
     { key: 'age', label: 'Edad', placeholder: 'age, edad' },
 ];
 
-/** Campos estándar adicionales en procesos masivos (no siempre visibles en la tabla) */
-const BULK_EXTRA_TALLY_MAPPING_FIELDS: TallyMappingField[] = [
-    { key: 'phone2', label: 'Teléfono 2', placeholder: 'phone2, telefono2, teléfono_secundario' },
-    { key: 'description', label: 'Descripción', placeholder: 'description, descripcion, notas' },
-    { key: 'salary_expectation', label: 'Expectativa salarial', placeholder: 'salary_expectation, expectativa_salarial' },
-    { key: 'linkedin_url', label: 'LinkedIn', placeholder: 'linkedin_url, linkedin, perfil_linkedin' },
-    { key: 'address', label: 'Dirección', placeholder: 'address, direccion, dirección' },
-    { key: 'age', label: 'Edad', placeholder: 'age, edad' },
-];
-
 /**
  * Campos disponibles para mapeo Tally según el proceso seleccionado.
- * Procesos masivos: columnas visibles del bulkConfig + campos estándar extra.
+ * Masivo: solo columnas visibles del proceso (bulkConfig). Simple: campos estándar del ATS.
  */
 export function getTallyIntegrationMappingFields(process?: Process): TallyMappingField[] {
     if (!process?.isBulkProcess) {
@@ -553,26 +543,18 @@ export function getTallyIntegrationMappingFields(process?: Process): TallyMappin
     const fields: TallyMappingField[] = [];
     const seen = new Set<string>();
 
-    const add = (field: TallyMappingField) => {
-        if (seen.has(field.key)) return;
-        seen.add(field.key);
-        fields.push(field);
-    };
-
     for (const h of getImportHeaders(bulkConfig)) {
         const key = h.isCustom ? `custom_${h.columnId}` : h.field;
+        if (seen.has(key)) continue;
+        seen.add(key);
         const label = h.isCustom ? h.header : getColumnLabel(h.field, customColumns);
-        add({
+        fields.push({
             key,
             label,
             placeholder: h.isCustom
                 ? h.header.toLowerCase()
                 : `${h.field}, ${label.toLowerCase()}`,
         });
-    }
-
-    for (const extra of BULK_EXTRA_TALLY_MAPPING_FIELDS) {
-        add(extra);
     }
 
     return fields;
