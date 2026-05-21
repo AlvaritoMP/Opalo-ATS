@@ -14,6 +14,7 @@ import { getImportHeaders,
     findCustomColumnByHeader,
     normalizeDniKey,
     normalizePhoneKey,
+    normalizeImportTextCase,
 } from '../lib/bulkTableColumns';
 import { bulkCandidatesApi } from '../lib/api/bulkCandidates';
 
@@ -57,10 +58,27 @@ const parseCSVLine = (line: string): string[] => {
     return result;
 };
 
+type ImportCustomColumn = {
+    name: string;
+    id: string;
+    type: string;
+    options?: string[];
+};
+
+const normalizeImportCellText = (
+    rawValue: string,
+    opts: { field?: string; column?: ImportCustomColumn }
+): string =>
+    normalizeImportTextCase(rawValue, {
+        field: opts.field,
+        columnType: opts.column?.type,
+        selectOptions: opts.column?.options,
+    });
+
 const parseRow = (
     headers: string[],
     values: string[],
-    customColumns: { name: string; id: string; type: string }[]
+    customColumns: ImportCustomColumn[]
 ): ParsedRow => {
     const candidate: Record<string, any> = {};
     const customValues: Record<string, any> = {};
@@ -95,7 +113,11 @@ const parseRow = (
             } else if (customCol.type === 'date') {
                 customValues[customCol.id] = normalizeBulkDateInput(rawValue);
             } else {
-                customValues[customCol.id] = typeof rawValue === 'string' ? rawValue : String(rawValue);
+                const text =
+                    typeof rawValue === 'string' ? rawValue : String(rawValue);
+                customValues[customCol.id] = normalizeImportCellText(text, {
+                    column: customCol,
+                });
             }
             return;
         }
@@ -104,12 +126,23 @@ const parseRow = (
             if (mappedField === 'age' && !isNaN(Number(rawValue))) {
                 candidate[mappedField] = Number(rawValue);
             } else {
-                candidate[mappedField] = typeof rawValue === 'string' ? rawValue : String(rawValue);
+                const text =
+                    typeof rawValue === 'string' ? rawValue : String(rawValue);
+                candidate[mappedField] = normalizeImportCellText(text, {
+                    field: mappedField,
+                });
             }
             // Mantener copia en columna personalizada homónima si existe
             if (isDbPriorityField) {
                 const homonymCol = findCustomColumnByHeader(header, customColumns);
-                if (homonymCol) customValues[homonymCol.id] = rawValue;
+                if (homonymCol) {
+                    const text =
+                        typeof rawValue === 'string' ? rawValue : String(rawValue);
+                    customValues[homonymCol.id] = normalizeImportCellText(text, {
+                        field: mappedField,
+                        column: homonymCol,
+                    });
+                }
             }
         }
     });
@@ -117,7 +150,7 @@ const parseRow = (
     return { candidate, customValues };
 };
 
-const parseCSV = (csvText: string, customColumns: { name: string; id: string; type: string }[]): ParsedRow[] => {
+const parseCSV = (csvText: string, customColumns: ImportCustomColumn[]): ParsedRow[] => {
     const lines = csvText.split('\n').filter(line => line.trim() !== '');
     if (lines.length < 2) return [];
 
@@ -132,7 +165,7 @@ const parseCSV = (csvText: string, customColumns: { name: string; id: string; ty
     return rows;
 };
 
-const parseExcel = (data: ArrayBuffer, customColumns: { name: string; id: string; type: string }[]): ParsedRow[] => {
+const parseExcel = (data: ArrayBuffer, customColumns: ImportCustomColumn[]): ParsedRow[] => {
     const workbook = XLSX.read(data, { type: 'array', cellDates: true });
     const firstSheetName = workbook.SheetNames[0];
     const worksheet = workbook.Sheets[firstSheetName];
@@ -213,6 +246,7 @@ export const BulkProcessImportModal: React.FC<BulkProcessImportModalProps> = ({
         id: c.id,
         name: c.name,
         type: c.type,
+        options: c.options,
     }));
 
     const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {

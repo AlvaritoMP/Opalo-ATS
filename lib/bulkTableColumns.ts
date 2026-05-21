@@ -506,6 +506,64 @@ export const OPTIONAL_IMPORT_FIELDS = [
     'agreedSalary', 'age', 'dni', 'linkedinUrl', 'address', 'province', 'district',
 ];
 
+/** Campos estándar de importación que no deben normalizarse (identificadores, URLs, etc.) */
+const IMPORT_PROPER_CASE_EXCLUDE_FIELDS = new Set([
+    'email',
+    'linkedinUrl',
+    'phone',
+    'phone2',
+    'dni',
+    'age',
+]);
+
+const IMPORT_TEXT_LETTER_RE = /[a-zA-ZáéíóúÁÉÍÓÚñÑüÜ]/g;
+const IMPORT_WORD_RE = /[a-zA-ZáéíóúÁÉÍÓÚñÑüÜ]+(?:'[a-zA-ZáéíóúÁÉÍÓÚñÑüÜ]+)*/g;
+
+/** True si todas las letras del texto están en mayúsculas (p. ej. FACEBOOK, SAN ISIDRO). */
+export function isImportTextAllCaps(text: string): boolean {
+    const letters = text.match(IMPORT_TEXT_LETTER_RE);
+    if (!letters?.length) return false;
+    return letters.every(c => c === c.toUpperCase() && c !== c.toLowerCase());
+}
+
+/** Convierte cada palabra a formato nombre propio: FACEBOOK → Facebook. */
+export function toImportProperCase(text: string): string {
+    return text.replace(IMPORT_WORD_RE, word => {
+        const lower = word.toLowerCase();
+        return lower.charAt(0).toUpperCase() + lower.slice(1);
+    });
+}
+
+export type NormalizeImportTextCaseOptions = {
+    field?: string;
+    columnType?: string;
+    selectOptions?: string[];
+};
+
+/**
+ * Si el valor está en MAYÚSCULAS, lo normaliza a nombre propio.
+ * Respeta emails, teléfonos, DNI, URLs y columnas numéricas/fecha/checkbox.
+ */
+export function normalizeImportTextCase(
+    value: string,
+    opts: NormalizeImportTextCaseOptions = {}
+): string {
+    const { field, columnType, selectOptions } = opts;
+
+    if (field && IMPORT_PROPER_CASE_EXCLUDE_FIELDS.has(field)) return value;
+    if (columnType === 'number' || columnType === 'date' || columnType === 'checkbox') {
+        return value;
+    }
+
+    if (columnType === 'select' && selectOptions?.length) {
+        const match = selectOptions.find(o => o.toLowerCase() === value.toLowerCase());
+        if (match) return match;
+    }
+
+    if (!isImportTextAllCaps(value)) return value;
+    return toImportProperCase(value);
+}
+
 export function getCustomColumnIds(customColumns: CustomColumn[] = []): string[] {
     return customColumns.map(c => `custom_${c.id}`);
 }
