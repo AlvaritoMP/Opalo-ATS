@@ -347,7 +347,11 @@ export const BulkProcessImportModal: React.FC<BulkProcessImportModalProps> = ({ 
                         const standardUpdates: Record<string, string> = {};
                         OPTIONAL_IMPORT_FIELDS.forEach(field => {
                             const cleaned = cleanValue((candidateData as any)[field]);
-                            if (cleaned !== undefined) standardUpdates[field] = String(cleaned);
+                            if (cleaned === undefined) return;
+                            const current = (existing as Record<string, unknown>)[field];
+                            if (current === undefined || current === null || current === '') {
+                                standardUpdates[field] = String(cleaned);
+                            }
                         });
                         if (Object.keys(standardUpdates).length > 0) {
                             try {
@@ -396,7 +400,7 @@ export const BulkProcessImportModal: React.FC<BulkProcessImportModalProps> = ({ 
                 }
 
                 if (Object.keys(columnValuesUpdates).length > 0) {
-                    await bulkCandidatesApi.batchSetBulkColumnValues(columnValuesUpdates, customColumnsFull);
+                    await bulkCandidatesApi.batchFillEmptyBulkColumnValues(columnValuesUpdates, customColumnsFull);
                 }
 
                 setImportResult({
@@ -456,7 +460,8 @@ export const BulkProcessImportModal: React.FC<BulkProcessImportModalProps> = ({ 
                         <p className="text-sm text-gray-600 mb-4">
                             La plantilla se genera según las columnas configuradas en la Tabla de Alta Densidad de este proceso.
                             Las celdas vacías son válidas: solo se importan los datos que existan en cada fila.
-                            Si un candidato ya existe (mismo DNI, email o teléfono), se actualizan sus columnas personalizadas en lugar de duplicarlo.
+                            Si un candidato ya existe (mismo DNI, email o teléfono), solo se rellenan celdas vacías;
+                            no se sobrescriben datos que ya editaste manualmente.
                         </p>
                         <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-md">
                             <div className="flex items-center justify-between mb-2">

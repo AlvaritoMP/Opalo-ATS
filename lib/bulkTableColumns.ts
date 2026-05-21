@@ -43,6 +43,8 @@ export function buildLegacyColumnIdToName(
     const out: Record<string, string> = {
         ...loadTemplateColumnIdToName(),
         ...(bulkConfig?.columnKeyAliases || {}),
+        ...loadGlobalCustomColumnIdToName(),
+        ...buildLegacyFromColumnOrder(bulkConfig, customColumns),
     };
     for (const col of customColumns) {
         out[col.id] = col.name;
@@ -53,8 +55,156 @@ export function buildLegacyColumnIdToName(
     return out;
 }
 
+/** Columnas globales guardadas en localStorage (pueden tener IDs históricos) */
+function loadGlobalCustomColumnIdToName(): Record<string, string> {
+    const out: Record<string, string> = {};
+    try {
+        const saved = localStorage.getItem('bulkProcessesCustomColumns');
+        if (!saved) return out;
+        const cols = JSON.parse(saved) as { id: string; name: string }[];
+        for (const c of cols) {
+            if (c.id && c.name) out[c.id] = c.name;
+        }
+    } catch {
+        /* ignore */
+    }
+    return out;
+}
+
+/**
+ * Si columnOrder tiene IDs antiguos (p. ej. tras recrear columnas),
+ * mapea cada slot al nombre de la columna en la misma posición.
+ */
+export function buildLegacyFromColumnOrder(
+    bulkConfig: BulkProcessConfig | undefined,
+    customColumns: CustomColumn[] = []
+): Record<string, string> {
+    const aliases: Record<string, string> = {};
+    if (!bulkConfig?.columnOrder?.length || customColumns.length === 0) return aliases;
+
+    const customSlotIds = bulkConfig.columnOrder
+        .filter(id => id.startsWith('custom_'))
+        .map(id => id.slice('custom_'.length));
+
+    customSlotIds.forEach((slotId, idx) => {
+        const col = customColumns.find(c => c.id === slotId);
+        if (col) {
+            aliases[slotId] = col.name;
+        } else if (idx < customColumns.length) {
+            aliases[slotId] = customColumns[idx].name;
+        }
+    });
+    return aliases;
+}
+
+/**
+ * Detecta claves huérfanas en bulk_column_values y las asocia a columnas vacías
+ * (misma cantidad → emparejamiento por orden de creación del ID).
+ */
+export function discoverOrphanKeyAliases(
+    allDbValues: Record<string, Record<string, unknown>>,
+    customColumns: CustomColumn[],
+    existingAliases: Record<string, string> = {}
+): Record<string, string> {
+    const aliases = { ...existingAliases };
+    const currentIds = new Set(customColumns.map(c => c.id));
+
+    const orphanKeys = new Set<string>();
+    for (const row of Object.values(allDbValues)) {
+        for (const [k, v] of Object.entries(row)) {
+            if (currentIds.has(k) || k.startsWith(BULK_NAME_KEY_PREFIX) || aliases[k]) continue;
+            if (!isEmptyBulkValue(v) || v === false) orphanKeys.add(k);
+        }
+    }
+
+    const unmappedOrphans = [...orphanKeys].filter(k => !aliases[k]).sort();
+    if (unmappedOrphans.length === 0) return aliases;
+
+    const emptyCols = customColumns.filter(col =>
+        !Object.values(allDbValues).some(row => {
+            const v = resolveColumnValueFromRow(row, col, aliases);
+            return !isEmptyBulkValue(v) || v === false;
+        })
+    );
+
+    if (unmappedOrphans.length !== emptyCols.length) return aliases;
+
+    unmappedOrphans.forEach((key, i) => {
+        aliases[key] = emptyCols[i].name;
+    });
+    return aliases;
+}
+
+export function getColumnValuesBackupStorageKey(processId: string): string {
+    return `${getColumnValuesStorageKey(processId)}_backup`;
+}
+
+/** Lee valores locales (activos + respaldo) sin borrarlos */
+export function loadLocalColumnValuesForProcess(
+    processId: string
+): Record<string, Record<string, any>> {
+    const merged: Record<string, Record<string, any>> = {};
+    const keys = [
+        getColumnValuesStorageKey(processId),
+        getColumnValuesBackupStorageKey(processId),
+    ];
+    for (const key of keys) {
+        try {
+            const saved = localStorage.getItem(key);
+            if (!saved) continue;
+            const parsed = JSON.parse(saved) as Record<string, Record<string, any>>;
+            for (const [candidateId, values] of Object.entries(parsed)) {
+                if (!values) continue;
+                merged[candidateId] = { ...(merged[candidateId] || {}), ...values };
+            }
+        } catch {
+            /* ignore */
+        }
+    }
+    return merged;
+}
+
+/** Fusiona fuentes: BD + local. No sobrescribe celdas que ya tienen valor. */
+export function mergeColumnValueSources(
+    dbValues: Record<string, Record<string, any>>,
+    localValues: Record<string, Record<string, any>>,
+    customColumns: CustomColumn[] = [],
+    legacyIdToName: Record<string, string> = {}
+): Record<string, Record<string, any>> {
+    const candidateIds = new Set([...Object.keys(dbValues), ...Object.keys(localValues)]);
+    const merged: Record<string, Record<string, any>> = {};
+
+    for (const candidateId of candidateIds) {
+        const dbRow = dbValues[candidateId] || {};
+        const localRow = localValues[candidateId] || {};
+        const combined = { ...localRow, ...dbRow };
+
+        for (const col of customColumns) {
+            const fromDb = resolveColumnValueFromRow(dbRow, col, legacyIdToName);
+            const fromLocal = resolveColumnValueFromRow(localRow, col, legacyIdToName);
+            const dbHas = !isEmptyBulkValue(fromDb) || fromDb === false;
+            const localHas = !isEmptyBulkValue(fromLocal) || fromLocal === false;
+
+            if (dbHas) {
+                combined[col.id] = fromDb;
+                combined[bulkColumnNameKey(col.name)] = fromDb;
+            } else if (localHas) {
+                combined[col.id] = fromLocal;
+                combined[bulkColumnNameKey(col.name)] = fromLocal;
+            }
+        }
+        merged[candidateId] = combined;
+    }
+
+    return normalizeBulkColumnValueKeys(merged, customColumns, legacyIdToName);
+}
+
 function isEmptyBulkValue(val: unknown): boolean {
     return val === undefined || val === null || val === '';
+}
+
+export function hasBulkCellValue(val: unknown): boolean {
+    return !isEmptyBulkValue(val) || val === false;
 }
 
 /** Añade claves por nombre además del id de columna (persistencia estable) */

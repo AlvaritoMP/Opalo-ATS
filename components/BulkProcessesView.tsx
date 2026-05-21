@@ -10,6 +10,10 @@ import {
     buildAllColumnIds,
     getColumnLabel,
     getColumnValuesStorageKey,
+    getColumnValuesBackupStorageKey,
+    loadLocalColumnValuesForProcess,
+    mergeColumnValueSources,
+    discoverOrphanKeyAliases,
     resolveColumnOrder,
     formatBulkDate,
     normalizeBulkDateInput,
@@ -29,6 +33,8 @@ import {
     buildLegacyColumnIdToName,
     enrichBulkColumnValuesForStorage,
     resolveColumnValueFromRow,
+    hasBulkCellValue,
+    normalizeColumnNameKey,
     formatBulkDateTime,
     isoToDatetimeLocalValue,
     datetimeLocalToIso,
@@ -519,8 +525,16 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
         setPinnedColumns(config?.pinnedColumns?.length ? config.pinnedColumns : ['name']);
         setColumnOrder(resolveColumnOrder(config, cols));
         setColumnFilters({});
-        setColumnValues({});
         columnValuesMigratedRef.current = null;
+
+        const legacy = buildLegacyColumnIdToName(config, cols);
+        const localValues = loadLocalColumnValuesForProcess(process.id);
+        if (Object.keys(localValues).length > 0) {
+            const normalized = normalizeBulkColumnValueKeys(localValues, cols, legacy);
+            setColumnValues(repairDateColumnValues(normalized, cols));
+        } else {
+            setColumnValues({});
+        }
 
         const savedMeta = localStorage.getItem(getCellMetaStorageKey(process.id));
         setCellMeta(savedMeta ? JSON.parse(savedMeta) : {});
@@ -573,43 +587,39 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
         [process?.bulkConfig, customColumns]
     );
 
-    const applyColumnValuesFromDb = useCallback((
-        fromDb: Record<string, Record<string, unknown>>,
-        cols: CustomColumn[]
-    ) => {
-        const legacy = buildLegacyColumnIdToName(process?.bulkConfig, cols);
-        const normalized = normalizeBulkColumnValueKeys(fromDb, cols, legacy);
-        setColumnValues(repairDateColumnValues(normalized, cols));
-    }, [process?.bulkConfig]);
-
     const syncColumnValuesFromDatabase = useCallback(async (processId: string) => {
         const cols = process?.bulkConfig?.customColumns || [];
         try {
             const fromDb = await bulkCandidatesApi.loadAllBulkColumnValues(processId);
-            const legacy = buildLegacyColumnIdToName(process?.bulkConfig, cols);
-            applyColumnValuesFromDb(fromDb, cols);
+            let legacy = buildLegacyColumnIdToName(process?.bulkConfig, cols);
+            legacy = discoverOrphanKeyAliases(fromDb, cols, legacy);
+
+            const newAliases = { ...(process?.bulkConfig?.columnKeyAliases || {}) };
+            let aliasesChanged = false;
+            for (const [id, name] of Object.entries(legacy)) {
+                if (newAliases[id] !== name) {
+                    newAliases[id] = name;
+                    aliasesChanged = true;
+                }
+            }
+            if (aliasesChanged && process) {
+                void persistBulkConfig({ columnKeyAliases: newAliases });
+            }
+
+            const localValues = loadLocalColumnValuesForProcess(processId);
+            const merged = mergeColumnValueSources(fromDb, localValues, cols, legacy);
+            setColumnValues(repairDateColumnValues(merged, cols));
 
             const repairs: Record<string, Record<string, unknown>> = {};
-            for (const [candidateId, raw] of Object.entries(fromDb)) {
-                let needsRepair = false;
-                for (const col of cols) {
-                    const resolved = resolveColumnValueFromRow(raw, col, legacy);
-                    if (resolved === undefined || resolved === '') continue;
-                    if (raw[col.id] === undefined || raw[col.id] === '') {
-                        needsRepair = true;
-                        break;
-                    }
-                }
+            for (const [candidateId, row] of Object.entries(merged)) {
+                const raw = fromDb[candidateId] || {};
+                const needsRepair = cols.some(col => {
+                    const resolved = resolveColumnValueFromRow(row, col, legacy);
+                    if (resolved === undefined || resolved === '') return false;
+                    return raw[col.id] === undefined || raw[col.id] === '';
+                });
                 if (needsRepair) {
-                    const normalized = normalizeBulkColumnValueKeys(
-                        { [candidateId]: raw as Record<string, any> },
-                        cols,
-                        legacy
-                    );
-                    repairs[candidateId] = enrichBulkColumnValuesForStorage(
-                        normalized[candidateId] || {},
-                        cols
-                    );
+                    repairs[candidateId] = enrichBulkColumnValuesForStorage(row, cols);
                 }
             }
             if (Object.keys(repairs).length > 0) {
@@ -618,7 +628,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
         } catch (error) {
             console.error('Error sincronizando columnas personalizadas:', error);
         }
-    }, [process?.bulkConfig, applyColumnValuesFromDb]);
+    }, [process?.bulkConfig, persistBulkConfig]);
 
     // Cargar candidatos
     const loadCandidates = useCallback(async (page: number = 0, reset: boolean = false) => {
@@ -673,63 +683,71 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
         loadCandidates(0, true);
     }, [selectedProcess, selectedStage, searchQuery]);
 
-    // Migrar valores que quedaron en localStorage (navegador del admin) hacia Supabase
+    // Migrar valores que quedaron en localStorage hacia Supabase (sin borrar el respaldo local)
     useEffect(() => {
         if (!process?.id || candidates.length === 0) return;
         if (columnValuesMigratedRef.current === process.id) return;
 
         const storageKey = getColumnValuesStorageKey(process.id);
+        const backupKey = getColumnValuesBackupStorageKey(process.id);
         const saved = localStorage.getItem(storageKey);
         if (!saved) {
             columnValuesMigratedRef.current = process.id;
             return;
         }
 
+        localStorage.setItem(backupKey, saved);
+
         let localValues: Record<string, Record<string, any>>;
         try {
             localValues = JSON.parse(saved);
         } catch {
-            localStorage.removeItem(storageKey);
             columnValuesMigratedRef.current = process.id;
             return;
         }
 
+        const legacy = buildLegacyColumnIdToName(process.bulkConfig, customColumns);
         const toMigrate: Record<string, Record<string, unknown>> = {};
         for (const [candidateId, values] of Object.entries(localValues)) {
             if (!values) continue;
             const candidate = candidates.find(c => c.id === candidateId);
             const dbValues = (candidate?.bulkColumnValues || {}) as Record<string, unknown>;
-            const patch: Record<string, unknown> = { ...dbValues };
+            const patch: Record<string, unknown> = {};
             let hasNew = false;
             for (const [colId, val] of Object.entries(values)) {
-                const dbVal = dbValues[colId];
-                if (dbVal === undefined || dbVal === null || dbVal === '') {
+                if (!hasBulkCellValue(val)) continue;
+                const col =
+                    customColumns.find(c => c.id === colId) ||
+                    customColumns.find(c =>
+                        legacy[colId] &&
+                        normalizeColumnNameKey(c.name) === normalizeColumnNameKey(legacy[colId])
+                    );
+                if (col) {
+                    const dbVal = resolveColumnValueFromRow(dbValues, col, legacy);
+                    if (!hasBulkCellValue(dbVal)) {
+                        patch[col.id] = val;
+                        hasNew = true;
+                    }
+                } else if (!hasBulkCellValue(dbValues[colId])) {
                     patch[colId] = val;
                     hasNew = true;
                 }
             }
             if (hasNew) {
-                toMigrate[candidateId] = enrichBulkColumnValuesForStorage(patch, customColumns);
+                toMigrate[candidateId] = enrichBulkColumnValuesForStorage(
+                    { ...dbValues, ...patch },
+                    customColumns
+                );
             }
         }
 
         if (Object.keys(toMigrate).length === 0) {
-            localStorage.removeItem(storageKey);
             columnValuesMigratedRef.current = process.id;
             return;
         }
 
         bulkCandidatesApi.batchSetBulkColumnValues(toMigrate, customColumns)
             .then(async () => {
-                const verify = await bulkCandidatesApi.loadAllBulkColumnValues(process.id);
-                const hasData = Object.keys(toMigrate).some(id => {
-                    const row = verify[id];
-                    return row && Object.keys(row).length > 0;
-                });
-                if (!hasData) {
-                    throw new Error('Los datos no se guardaron en Supabase');
-                }
-                localStorage.removeItem(storageKey);
                 columnValuesMigratedRef.current = process.id;
                 await syncColumnValuesFromDatabase(process.id);
                 actions.showToast('Datos de columnas sincronizados a la nube', 'success', 3000);
@@ -738,7 +756,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                 console.error('Error migrando columnValues a Supabase:', err);
                 actions.showToast('No se pudieron migrar algunos datos de columnas. Ejecute MIGRATION_ADD_BULK_COLUMN_VALUES.sql en Supabase.', 'error', 6000);
             });
-    }, [process?.id, candidates, customColumns, syncColumnValuesFromDatabase, actions]);
+    }, [process?.id, process?.bulkConfig, candidates, customColumns, syncColumnValuesFromDatabase, actions]);
 
     // Sincronizar edades importadas al campo age de BD hacia columnas personalizadas "Edad"
     useEffect(() => {

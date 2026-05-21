@@ -501,6 +501,66 @@ export const bulkCandidatesApi = {
     },
 
     /**
+     * Solo rellena celdas vacías (importación aditiva — no pisa ediciones manuales).
+     */
+    async patchBulkColumnValuesFillEmpty(
+        candidateId: string,
+        values: Record<string, unknown>,
+        customColumns: CustomColumn[] = []
+    ): Promise<boolean> {
+        if (Object.keys(values).length === 0) return true;
+        if (!isBulkColumnValuesWriteSupported()) return false;
+
+        const { data, error: fetchError } = await supabase
+            .from('candidates')
+            .select('bulk_column_values')
+            .eq('id', candidateId)
+            .eq('app_name', APP_NAME)
+            .single();
+
+        if (fetchError) {
+            if (isMissingColumnError(fetchError)) {
+                bulkColumnValuesWriteSupported = false;
+                return false;
+            }
+            throw fetchError;
+        }
+
+        const current = (data?.bulk_column_values as Record<string, unknown>) || {};
+        const patch: Record<string, unknown> = {};
+
+        for (const [key, val] of Object.entries(values)) {
+            const existing = current[key];
+            if (existing === undefined || existing === null || existing === '') {
+                patch[key] = val;
+            }
+        }
+
+        if (Object.keys(patch).length === 0) return true;
+        return this.patchBulkColumnValues(candidateId, { ...current, ...patch }, customColumns);
+    },
+
+    async batchFillEmptyBulkColumnValues(
+        updates: Record<string, Record<string, unknown>>,
+        customColumns: CustomColumn[] = []
+    ): Promise<void> {
+        const entries = Object.entries(updates);
+        if (entries.length === 0) return;
+
+        const results = await Promise.all(
+            entries.map(([candidateId, values]) =>
+                this.patchBulkColumnValuesFillEmpty(candidateId, values, customColumns)
+            )
+        );
+
+        if (results.every(r => !r)) {
+            throw new Error(
+                'No se pudieron guardar los valores de columnas. Ejecute MIGRATION_ADD_BULK_COLUMN_VALUES.sql en Supabase.'
+            );
+        }
+    },
+
+    /**
      * Establece bulk_column_values para varios candidatos (p. ej. importación Excel).
      */
     async batchSetBulkColumnValues(
