@@ -57,10 +57,13 @@ export const FormEditorModal: React.FC<FormIntegrationModalProps> = ({ integrati
     }, [allowedFieldKeys]);
 
     const buildFieldMappingPayload = (): FieldMapping | undefined => {
-        const normalized = filterTallyFieldMapping(
-            normalizeTallyFieldMapping(fieldMapping),
-            allowedFieldKeys
-        );
+        const trimmed: FieldMapping = {};
+        for (const [key, val] of Object.entries(fieldMapping)) {
+            if (!allowedFieldKeys.has(key)) continue;
+            const t = typeof val === 'string' ? val.trim() : '';
+            if (t) trimmed[key] = t;
+        }
+        const normalized = normalizeTallyFieldMapping(trimmed);
         return Object.keys(normalized).length > 0 ? normalized : undefined;
     };
 
@@ -291,24 +294,25 @@ export const FormEditorModal: React.FC<FormIntegrationModalProps> = ({ integrati
                                                     <label className="block text-xs font-semibold text-gray-700">
                                                         {field.label} <span className="text-gray-400 font-normal">→</span>
                                                     </label>
-                                                    <input
-                                                        type="text"
-                                                        value={fieldMapping[field.key] || ''}
-                                                        onChange={e => {
-                                                            const newMapping = { ...fieldMapping };
-                                                            if (e.target.value.trim()) {
-                                                                newMapping[field.key] = e.target.value.trim();
-                                                            } else {
-                                                                delete newMapping[field.key];
-                                                            }
-                                                            setFieldMapping(newMapping);
-                                                        }}
-                                                        placeholder={field.placeholder}
-                                                        className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
-                                                    />
-                                                    <p className="text-xs text-gray-500">
-                                                        Nombre exacto del campo en Tally
-                                                    </p>
+                                                <input
+                                                    type="text"
+                                                    value={fieldMapping[field.key] ?? ''}
+                                                    onChange={e => {
+                                                        const v = e.target.value;
+                                                        setFieldMapping(prev => {
+                                                            const next = { ...prev };
+                                                            if (v) next[field.key] = v;
+                                                            else delete next[field.key];
+                                                            return next;
+                                                        });
+                                                    }}
+                                                    onKeyDown={e => e.stopPropagation()}
+                                                    placeholder={field.placeholder}
+                                                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+                                                />
+                                                <p className="text-xs text-gray-500">
+                                                    Label exacto del campo en Tally (respete mayúsculas y espacios)
+                                                </p>
                                                 </div>
                                             ))}
                                         </div>

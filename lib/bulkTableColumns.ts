@@ -690,8 +690,8 @@ export function normalizePhoneKey(phone?: string | null): string {
     return (phone || '').replace(/\D/g, '');
 }
 
-/** Alias de encabezados Excel → nombre normalizado de columna custom */
-const CUSTOM_COLUMN_HEADER_ALIASES: Record<string, string[]> = {
+/** Alias de encabezados Excel / Tally → nombre normalizado de columna custom */
+export const CUSTOM_COLUMN_HEADER_ALIASES: Record<string, string[]> = {
     'ap paterno': ['apellido paterno', 'paterno', 'ap. paterno', 'appaterno', 'ap_paterno'],
     'ap materno': ['apellido materno', 'materno', 'ap. materno', 'apmaterno', 'ap_materno'],
     'f nac': ['f. nac', 'f.nac', 'f nac.', 'fecha nacimiento', 'fecha de nacimiento', 'fnac', 'fec nac', 'fec. nac'],

@@ -67,6 +67,10 @@ function normalizeColumnNameKey(name: string): string {
     .replace(/\s+/g, ' ');
 }
 
+function compactColumnRef(name: string): string {
+  return normalizeColumnNameKey(name).replace(/\s+/g, '');
+}
+
 function bulkColumnNameKey(name: string): string {
   return `${BULK_NAME_KEY_PREFIX}${normalizeColumnNameKey(name)}`;
 }
@@ -248,10 +252,12 @@ export function buildTallyFieldsIndex(tallyData: unknown): TallyFieldsIndex {
     if (key) {
       refs.add(key.toLowerCase());
       refs.add(normalizeColumnNameKey(key));
+      refs.add(compactColumnRef(key));
     }
     if (label) {
       refs.add(label.toLowerCase());
       refs.add(normalizeColumnNameKey(label));
+      refs.add(compactColumnRef(label));
     }
     for (const ref of refs) {
       if (!byRef[ref]) byRef[ref] = text;
@@ -293,19 +299,21 @@ export function parseIntegrationFieldMapping(integration: {
 function markRefUsed(index: TallyFieldsIndex, ref: string): void {
   index.usedRefs.add(ref.trim().toLowerCase());
   index.usedRefs.add(normalizeColumnNameKey(ref));
+  index.usedRefs.add(compactColumnRef(ref));
 }
 
 function isRefUsed(index: TallyFieldsIndex, ref: string): boolean {
   return (
     index.usedRefs.has(ref.trim().toLowerCase()) ||
-    index.usedRefs.has(normalizeColumnNameKey(ref))
+    index.usedRefs.has(normalizeColumnNameKey(ref)) ||
+    index.usedRefs.has(compactColumnRef(ref))
   );
 }
 
 function lookupTallyValue(index: TallyFieldsIndex, tallyFieldRef: string): string {
   const trimmed = tallyFieldRef.trim();
   if (!trimmed) return '';
-  const candidates = [trimmed.toLowerCase(), normalizeColumnNameKey(trimmed)];
+  const candidates = [trimmed.toLowerCase(), normalizeColumnNameKey(trimmed), compactColumnRef(trimmed)];
   for (const c of candidates) {
     if (index.byRef[c] !== undefined && index.byRef[c] !== '' && !isRefUsed(index, c)) {
       markRefUsed(index, trimmed);
@@ -347,9 +355,21 @@ function autoMatchRefsForField(
     const colId = mappingKey.replace('custom_', '');
     const col = customColumns.find((c) => c.id === colId);
     if (!col) return [];
-    const refs = new Set([col.name, col.name.toLowerCase(), normalizeColumnNameKey(col.name)]);
+    const refs = new Set([
+      col.name,
+      col.name.toLowerCase(),
+      normalizeColumnNameKey(col.name),
+      compactColumnRef(col.name),
+    ]);
     const matched = findCustomColumnByHeader(col.name, customColumns);
     if (matched) refs.add(normalizeColumnNameKey(matched.name));
+    const colNorm = normalizeColumnNameKey(col.name);
+    for (const alias of CUSTOM_COLUMN_HEADER_ALIASES[colNorm] || []) {
+      refs.add(alias);
+      refs.add(alias.toLowerCase());
+      refs.add(normalizeColumnNameKey(alias));
+      refs.add(compactColumnRef(alias));
+    }
     return [...refs];
   }
   const baseCol = BASE_COLUMNS.find((c) => c.importKey === mappingKey || c.id === mappingKey);
@@ -365,19 +385,40 @@ function autoMatchRefsForField(
   return [mappingKey];
 }
 
+function shouldRejectSourceAutoMatch(
+  value: string,
+  integration?: { form_name?: string },
+  tallyData?: unknown
+): boolean {
+  const tally = tallyData as { data?: { formName?: string }; formName?: string } | undefined;
+  const names = [
+    integration?.form_name,
+    tally?.data?.formName,
+    tally?.formName,
+  ].filter(Boolean) as string[];
+  const normVal = normalizeColumnNameKey(value);
+  return names.some((n) => normalizeColumnNameKey(n) === normVal);
+}
+
 function getMappedValue(
   mappingKey: string,
   index: TallyFieldsIndex,
   customMapping: Record<string, string>,
   customColumns: { id: string; name: string; type: string }[],
-  isBulk: boolean
+  isBulk: boolean,
+  integration?: { form_name?: string },
+  tallyData?: unknown
 ): string {
   if (customMapping[mappingKey]) {
     return lookupTallyValue(index, customMapping[mappingKey]);
   }
   for (const ref of autoMatchRefsForField(mappingKey, customColumns, isBulk)) {
     const v = lookupTallyValue(index, ref);
-    if (v) return v;
+    if (!v) continue;
+    if (mappingKey === 'source' && shouldRejectSourceAutoMatch(v, integration, tallyData)) {
+      continue;
+    }
+    return v;
   }
   return '';
 }
@@ -482,7 +523,15 @@ export function buildTallyCandidateFromSubmission(
   const bulkRaw: Record<string, unknown> = {};
 
   for (const field of mappingFields) {
-    const raw = getMappedValue(field.key, index, customMapping, customColumns, !!isBulk);
+    const raw = getMappedValue(
+      field.key,
+      index,
+      customMapping,
+      customColumns,
+      !!isBulk,
+      integration as { form_name?: string },
+      tallyData
+    );
     if (!raw) continue;
 
     if (field.key.startsWith('custom_')) {
