@@ -139,15 +139,29 @@ export function getColumnValuesBackupStorageKey(processId: string): string {
     return `${getColumnValuesStorageKey(processId)}_backup`;
 }
 
-/** Lee valores locales (activos + respaldo) sin borrarlos */
+/** Lee valores locales (activos + respaldo + cualquier clave bulkColumnValues del proceso) */
 export function loadLocalColumnValuesForProcess(
     processId: string
 ): Record<string, Record<string, any>> {
     const merged: Record<string, Record<string, any>> = {};
-    const keys = [
-        getColumnValuesStorageKey(processId),
+    const prefix = getColumnValuesStorageKey(processId);
+    const keys = new Set<string>([
+        prefix,
         getColumnValuesBackupStorageKey(processId),
-    ];
+    ]);
+
+    try {
+        for (let i = 0; i < localStorage.length; i++) {
+            const key = localStorage.key(i);
+            if (!key) continue;
+            if (key === prefix || key.startsWith(`${prefix}_`)) {
+                keys.add(key);
+            }
+        }
+    } catch {
+        /* ignore */
+    }
+
     for (const key of keys) {
         try {
             const saved = localStorage.getItem(key);
@@ -162,6 +176,87 @@ export function loadLocalColumnValuesForProcess(
         }
     }
     return merged;
+}
+
+export interface LocalColumnBackupInfo {
+    storageKey: string;
+    candidateCount: number;
+    valueCount: number;
+    sampleColumns: string[];
+}
+
+/** Escanea todas las copias locales de columnas para un proceso */
+export function scanLocalColumnBackups(
+    processId: string,
+    legacyIdToName: Record<string, string> = {},
+    customColumns: CustomColumn[] = []
+): LocalColumnBackupInfo[] {
+    const prefix = getColumnValuesStorageKey(processId);
+    const found: LocalColumnBackupInfo[] = [];
+
+    try {
+        for (let i = 0; i < localStorage.length; i++) {
+            const key = localStorage.key(i);
+            if (!key || (!key.startsWith(prefix) && key !== prefix)) continue;
+            try {
+                const parsed = JSON.parse(localStorage.getItem(key) || '{}') as Record<string, Record<string, any>>;
+                let valueCount = 0;
+                const colNames = new Set<string>();
+                for (const row of Object.values(parsed)) {
+                    if (!row) continue;
+                    for (const [k, v] of Object.entries(row)) {
+                        if (!hasBulkCellValue(v)) continue;
+                        valueCount++;
+                        const name = legacyIdToName[k] || customColumns.find(c => c.id === k)?.name || k;
+                        colNames.add(name);
+                    }
+                }
+                found.push({
+                    storageKey: key,
+                    candidateCount: Object.keys(parsed).length,
+                    valueCount,
+                    sampleColumns: [...colNames].slice(0, 8),
+                });
+            } catch {
+                /* ignore */
+            }
+        }
+    } catch {
+        /* ignore */
+    }
+    return found.sort((a, b) => b.valueCount - a.valueCount);
+}
+
+/** Guarda copia local de columnas (respaldo en navegador) */
+export function persistLocalColumnValues(
+    processId: string,
+    values: Record<string, Record<string, any>>
+): void {
+    if (Object.keys(values).length === 0) return;
+    try {
+        const key = getColumnValuesStorageKey(processId);
+        localStorage.setItem(key, JSON.stringify(values));
+        localStorage.setItem(getColumnValuesBackupStorageKey(processId), JSON.stringify(values));
+    } catch {
+        /* ignore quota errors */
+    }
+}
+
+/** Cuenta celdas recuperables para columnas concretas */
+export function countRecoverableForColumns(
+    localValues: Record<string, Record<string, any>>,
+    customColumns: CustomColumn[],
+    legacyIdToName: Record<string, string> = {}
+): Record<string, number> {
+    const counts: Record<string, number> = {};
+    for (const col of customColumns) counts[col.name] = 0;
+    for (const row of Object.values(localValues)) {
+        for (const col of customColumns) {
+            const v = resolveColumnValueFromRow(row, col, legacyIdToName);
+            if (hasBulkCellValue(v)) counts[col.name]++;
+        }
+    }
+    return counts;
 }
 
 /** Fusiona fuentes: BD + local. No sobrescribe celdas que ya tienen valor. */
@@ -496,6 +591,43 @@ export function getImportHeaders(
     });
 
     return headers;
+}
+
+export function normalizeDniKey(dni?: string | null): string {
+    return (dni || '').replace(/\D/g, '');
+}
+
+export function normalizePhoneKey(phone?: string | null): string {
+    return (phone || '').replace(/\D/g, '');
+}
+
+/** Alias de encabezados Excel → nombre normalizado de columna custom */
+const CUSTOM_COLUMN_HEADER_ALIASES: Record<string, string[]> = {
+    'ap paterno': ['apellido paterno', 'paterno', 'ap. paterno', 'appaterno', 'ap_paterno'],
+    'ap materno': ['apellido materno', 'materno', 'ap. materno', 'apmaterno', 'ap_materno'],
+    'f nac': ['f. nac', 'f.nac', 'f nac.', 'fecha nacimiento', 'fecha de nacimiento', 'fnac', 'fec nac', 'fec. nac'],
+    'experiencia': ['exp', 'experiencia laboral', 'exp laboral'],
+    'edad': ['age'],
+};
+
+/** Empareja encabezado de Excel con columna personalizada del proceso */
+export function findCustomColumnByHeader(
+    header: string,
+    customColumns: { name: string; id: string; type: string }[]
+): { name: string; id: string; type: string } | undefined {
+    const norm = normalizeColumnNameKey(header);
+    if (!norm) return undefined;
+
+    const exact = customColumns.find(c => normalizeColumnNameKey(c.name) === norm);
+    if (exact) return exact;
+
+    for (const col of customColumns) {
+        const colNorm = normalizeColumnNameKey(col.name);
+        const aliases = CUSTOM_COLUMN_HEADER_ALIASES[colNorm] || [];
+        if (aliases.some(a => normalizeColumnNameKey(a) === norm)) return col;
+        if (norm === colNorm) return col;
+    }
+    return undefined;
 }
 
 export function mapImportHeader(header: string): string | null {

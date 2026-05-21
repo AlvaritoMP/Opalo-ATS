@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAppState } from '../App';
 import { Upload, FileText, X, Loader2, Download } from 'lucide-react';
 import { Candidate, Process } from '../types';
@@ -11,6 +11,9 @@ import { getImportHeaders,
     DB_PRIORITY_IMPORT_FIELDS,
     enrichBulkColumnValuesForStorage,
     isPlaceholderImportEmail,
+    findCustomColumnByHeader,
+    normalizeDniKey,
+    normalizePhoneKey,
 } from '../lib/bulkTableColumns';
 import { bulkCandidatesApi } from '../lib/api/bulkCandidates';
 
@@ -18,6 +21,8 @@ interface BulkProcessImportModalProps {
     process: Process;
     onClose: () => void;
     onImportComplete: () => void;
+    /** Modo restauración: solo actualiza existentes, no crea candidatos nuevos */
+    restoreMode?: boolean;
 }
 
 interface ParsedRow {
@@ -64,7 +69,7 @@ const parseRow = (
         const cellValue = values[index];
         if (cellValue === undefined || cellValue === null || cellValue === '') return;
 
-        const customColByHeader = customColumns.find(c => c.name.toLowerCase() === header.trim().toLowerCase());
+        const customColByHeader = findCustomColumnByHeader(header, customColumns);
         if (customColByHeader?.type === 'date') {
             customValues[customColByHeader.id] = normalizeBulkDateInput(cellValue);
             return;
@@ -75,12 +80,11 @@ const parseRow = (
             : cellValue;
         if (rawValue === '') return;
 
-        // Priorizar columnas personalizadas, excepto campos que deben ir siempre a BD
         const mappedField = mapImportHeader(header);
         const isDbPriorityField = mappedField && (DB_PRIORITY_IMPORT_FIELDS as readonly string[]).includes(mappedField);
 
         const customCol = !isDbPriorityField
-            ? customColumns.find(c => c.name.toLowerCase() === header.trim().toLowerCase())
+            ? findCustomColumnByHeader(header, customColumns)
             : undefined;
 
         if (customCol) {
@@ -104,7 +108,7 @@ const parseRow = (
             }
             // Mantener copia en columna personalizada homónima si existe
             if (isDbPriorityField) {
-                const homonymCol = customColumns.find(c => c.name.toLowerCase() === header.trim().toLowerCase());
+                const homonymCol = findCustomColumnByHeader(header, customColumns);
                 if (homonymCol) customValues[homonymCol.id] = rawValue;
             }
         }
@@ -181,11 +185,28 @@ const resolveImportEmail = (
     };
 };
 
-export const BulkProcessImportModal: React.FC<BulkProcessImportModalProps> = ({ process, onClose, onImportComplete }) => {
+export const BulkProcessImportModal: React.FC<BulkProcessImportModalProps> = ({
+    process,
+    onClose,
+    onImportComplete,
+    restoreMode = false,
+}) => {
     const { actions } = useAppState();
     const [file, setFile] = useState<File | null>(null);
     const [isImporting, setIsImporting] = useState(false);
-    const [importResult, setImportResult] = useState<{ success: number; updated: number; failed: number; errors: string[] } | null>(null);
+    const [updateOnly, setUpdateOnly] = useState(true);
+
+    useEffect(() => {
+        if (restoreMode) setUpdateOnly(true);
+    }, [restoreMode]);
+    const [importResult, setImportResult] = useState<{
+        success: number;
+        updated: number;
+        skippedUnmatched: number;
+        cellsRestored: number;
+        failed: number;
+        errors: string[];
+    } | null>(null);
 
     const importHeaders = getImportHeaders(process.bulkConfig);
     const customColumns = (process.bulkConfig?.customColumns || []).map(c => ({
@@ -272,6 +293,8 @@ export const BulkProcessImportModal: React.FC<BulkProcessImportModalProps> = ({ 
 
                 let successCount = 0;
                 let updatedCount = 0;
+                let skippedUnmatched = 0;
+                let cellsRestored = 0;
                 let skippedEmptyRows = 0;
                 const errors: string[] = [];
                 const columnValuesUpdates: Record<string, Record<string, any>> = {};
@@ -285,11 +308,13 @@ export const BulkProcessImportModal: React.FC<BulkProcessImportModalProps> = ({ 
                 const byEmail = new Map<string, typeof existingCandidates[0]>();
                 const byPhone = new Map<string, typeof existingCandidates[0]>();
                 for (const c of existingCandidates) {
-                    if (c.dni) byDni.set(normalizeMatchKey(c.dni), c);
+                    const dniKey = normalizeDniKey(c.dni);
+                    if (dniKey) byDni.set(dniKey, c);
                     if (c.email && !isPlaceholderImportEmail(c.email)) {
                         byEmail.set(normalizeMatchKey(c.email), c);
                     }
-                    if (c.phone) byPhone.set(normalizeMatchKey(c.phone), c);
+                    const phoneKey = normalizePhoneKey(c.phone);
+                    if (phoneKey) byPhone.set(phoneKey, c);
                 }
 
                 const cleanValue = (value: any): any => {
@@ -332,14 +357,16 @@ export const BulkProcessImportModal: React.FC<BulkProcessImportModalProps> = ({ 
                     }
 
                     const existing =
-                        (dni ? byDni.get(normalizeMatchKey(dni)) : undefined) ||
+                        (dni ? byDni.get(normalizeDniKey(dni)) : undefined) ||
                         (email ? byEmail.get(normalizeMatchKey(email)) : undefined) ||
-                        (phone ? byPhone.get(normalizeMatchKey(phone)) : undefined);
+                        (phone ? byPhone.get(normalizePhoneKey(phone)) : undefined);
 
                     if (existing) {
                         if (Object.keys(customValues).length > 0) {
+                            cellsRestored += Object.keys(customValues).length;
+                            const prev = columnValuesUpdates[existing.id] || {};
                             columnValuesUpdates[existing.id] = enrichBulkColumnValuesForStorage(
-                                customValues,
+                                { ...prev, ...customValues },
                                 customColumnsFull
                             );
                         }
@@ -363,6 +390,14 @@ export const BulkProcessImportModal: React.FC<BulkProcessImportModalProps> = ({ 
 
                         updatedCount++;
                         successCount++;
+                        continue;
+                    }
+
+                    if (updateOnly) {
+                        skippedUnmatched++;
+                        if (skippedUnmatched <= 10) {
+                            errors.push(`Fila ${rowNumber} (${name}): no coincide con ningún candidato existente (DNI/email/teléfono)`);
+                        }
                         continue;
                     }
 
@@ -406,16 +441,26 @@ export const BulkProcessImportModal: React.FC<BulkProcessImportModalProps> = ({ 
                 setImportResult({
                     success: successCount,
                     updated: updatedCount,
-                    failed: parsedRows.length - successCount - skippedEmptyRows,
-                    errors: errors.slice(0, 10),
+                    skippedUnmatched,
+                    cellsRestored,
+                    failed: parsedRows.length - successCount - skippedEmptyRows - skippedUnmatched,
+                    errors: errors.slice(0, 15),
                 });
 
                 if (successCount > 0) {
-                    const msg = updatedCount > 0
-                        ? `${updatedCount} candidato(s) actualizado(s)${successCount > updatedCount ? `, ${successCount - updatedCount} nuevo(s)` : ''}`
-                        : `${successCount} candidato(s) importado(s) exitosamente`;
-                    actions.showToast(msg, 'success', 5000);
+                    const msg = updateOnly
+                        ? `${updatedCount} candidato(s) actualizado(s), ${cellsRestored} celdas importadas (solo vacías)`
+                        : updatedCount > 0
+                            ? `${updatedCount} actualizado(s), ${successCount - updatedCount} nuevo(s)`
+                            : `${successCount} candidato(s) importado(s)`;
+                    actions.showToast(msg, 'success', 6000);
                     onImportComplete();
+                } else if (updateOnly && skippedUnmatched > 0) {
+                    actions.showToast(
+                        'Ninguna fila coincidió. Verifique que el Excel tenga columna DNI igual que en la tabla.',
+                        'error',
+                        8000
+                    );
                 }
             } catch (error) {
                 const errorMsg = error instanceof Error ? error.message : 'Error desconocido';
@@ -423,6 +468,8 @@ export const BulkProcessImportModal: React.FC<BulkProcessImportModalProps> = ({ 
                 setImportResult({
                     success: 0,
                     updated: 0,
+                    skippedUnmatched: 0,
+                    cellsRestored: 0,
                     failed: parsedRows.length,
                     errors: [`Error al parsear el archivo: ${errorMsg}`],
                 });
@@ -456,13 +503,29 @@ export const BulkProcessImportModal: React.FC<BulkProcessImportModalProps> = ({ 
                 </div>
 
                 <div className="p-6 space-y-6">
+                    {restoreMode && (
+                        <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-900">
+                            <strong>Restaurar datos perdidos:</strong> sube tu Excel original. Se empareja cada fila
+                            por <strong>DNI</strong> (luego email o teléfono) con los candidatos que ya existen.
+                            Solo se rellenan celdas vacías — no se borran tus ediciones recientes ni se crean duplicados.
+                        </div>
+                    )}
                     <div>
                         <p className="text-sm text-gray-600 mb-4">
-                            La plantilla se genera según las columnas configuradas en la Tabla de Alta Densidad de este proceso.
-                            Las celdas vacías son válidas: solo se importan los datos que existan en cada fila.
-                            Si un candidato ya existe (mismo DNI, email o teléfono), solo se rellenan celdas vacías;
-                            no se sobrescriben datos que ya editaste manualmente.
+                            {restoreMode
+                                ? 'Usa el archivo Excel con el que importaste originalmente (debe incluir columna DNI y las columnas Ap Paterno, Ap Materno, Experiencia, F Nac., etc.).'
+                                : 'La plantilla se genera según las columnas configuradas en la Tabla de Alta Densidad de este proceso.'}
+                            {' '}Las celdas vacías son válidas. Si un candidato ya existe, solo se rellenan celdas vacías.
                         </p>
+                        <label className="flex items-center gap-2 text-sm text-gray-700 mb-4 cursor-pointer">
+                            <input
+                                type="checkbox"
+                                checked={updateOnly}
+                                onChange={e => setUpdateOnly(e.target.checked)}
+                                className="rounded border-gray-300"
+                            />
+                            Solo actualizar candidatos existentes (no crear nuevos)
+                        </label>
                         <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-md">
                             <div className="flex items-center justify-between mb-2">
                                 <p className="text-xs text-blue-800 font-medium">Plantilla dinámica del proceso</p>
@@ -531,11 +594,16 @@ export const BulkProcessImportModal: React.FC<BulkProcessImportModalProps> = ({ 
                             <p className="font-medium text-sm mb-2">
                                 {importResult.success > 0 && (
                                     <span className="text-green-700">
-                                        ✅ {importResult.success} fila(s) procesada(s)
-                                        {importResult.updated > 0 && ` (${importResult.updated} actualizada(s))`}
+                                        ✅ {importResult.updated} candidato(s) actualizado(s)
+                                        {importResult.cellsRestored > 0 && ` · ${importResult.cellsRestored} celdas importadas`}
                                     </span>
                                 )}
-                                {importResult.failed > 0 && <span className="text-yellow-700"> ⚠️ {importResult.failed} fila(s) fallaron</span>}
+                                {importResult.skippedUnmatched > 0 && (
+                                    <span className="text-yellow-700"> · {importResult.skippedUnmatched} fila(s) sin coincidencia</span>
+                                )}
+                                {importResult.failed > 0 && (
+                                    <span className="text-red-700"> · {importResult.failed} error(es)</span>
+                                )}
                             </p>
                             {importResult.errors.length > 0 && (
                                 <div className="mt-2 max-h-40 overflow-y-auto">

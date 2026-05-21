@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useAppState } from '../App';
 import { bulkCandidatesApi, BulkCandidate } from '../lib/api/bulkCandidates';
 import { processesApi } from '../lib/api/processes';
-import { Check, X, Loader2, Send, Archive, Search, ChevronDown, ChevronUp, Plus, Edit, Trash2, ArrowLeft, MessageCircle, Phone, Upload, Download, Filter, Mail, Calendar, Settings, ArrowUp, ArrowDown, Pin, FileText, BookOpen, Paperclip, ClipboardList, UserPlus, RefreshCw } from 'lucide-react';
+import { Check, X, Loader2, Send, Archive, Search, ChevronDown, ChevronUp, Plus, Edit, Trash2, ArrowLeft, MessageCircle, Phone, Upload, Download, Filter, Mail, Calendar, Settings, ArrowUp, ArrowDown, Pin, FileText, BookOpen, Paperclip, ClipboardList, UserPlus, RefreshCw, HardDrive } from 'lucide-react';
 import { Process, CustomColumn, BulkProcessConfig } from '../types';
 import {
     BASE_COLUMNS,
@@ -14,6 +14,7 @@ import {
     loadLocalColumnValuesForProcess,
     mergeColumnValueSources,
     discoverOrphanKeyAliases,
+    persistLocalColumnValues,
     resolveColumnOrder,
     formatBulkDate,
     normalizeBulkDateInput,
@@ -49,6 +50,7 @@ import { getCellMetaStorageKey, BulkCellMeta, BulkCellMetaStore } from '../lib/b
 import { BulkCellContextMenu } from './BulkCellContextMenu';
 import { BulkProcessEditorModal } from './BulkProcessEditorModal';
 import { BulkProcessImportModal } from './BulkProcessImportModal';
+import { BulkColumnRecoveryModal } from './BulkColumnRecoveryModal';
 import { AddCandidateModal } from './AddCandidateModal';
 import { BulkWhatsAppModal } from './BulkWhatsAppModal';
 import { BulkEmailModal } from './BulkEmailModal';
@@ -383,6 +385,8 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
     const [showProcessModal, setShowProcessModal] = useState(false);
     const [editingProcess, setEditingProcess] = useState<Process | null>(null);
     const [showImportModal, setShowImportModal] = useState(false);
+    const [importRestoreMode, setImportRestoreMode] = useState(false);
+    const [showRecoveryModal, setShowRecoveryModal] = useState(false);
     const [showAddCandidateModal, setShowAddCandidateModal] = useState(false);
     const [showWhatsAppModal, setShowWhatsAppModal] = useState(false);
     const [showEmailModal, setShowEmailModal] = useState(false);
@@ -608,7 +612,9 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
 
             const localValues = loadLocalColumnValuesForProcess(processId);
             const merged = mergeColumnValueSources(fromDb, localValues, cols, legacy);
-            setColumnValues(repairDateColumnValues(merged, cols));
+            const repaired = repairDateColumnValues(merged, cols);
+            setColumnValues(repaired);
+            persistLocalColumnValues(processId, repaired);
 
             const repairs: Record<string, Record<string, unknown>> = {};
             for (const [candidateId, row] of Object.entries(merged)) {
@@ -1264,6 +1270,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                 ...prev,
                 [candidateId]: candidatePatch,
             };
+            persistLocalColumnValues(process.id, newValues);
             void bulkCandidatesApi.patchBulkColumnValues(candidateId, candidatePatch, customColumns);
             return newValues;
         });
@@ -2253,6 +2260,18 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                     )}
                                     <button
                                         type="button"
+                                        onClick={() => {
+                                            setImportRestoreMode(true);
+                                            setShowImportModal(true);
+                                        }}
+                                        className="flex items-center gap-2 px-4 py-2 bg-amber-50 border border-amber-300 text-amber-900 rounded-lg hover:bg-amber-100 transition-colors"
+                                        title="Restaurar columnas desde tu Excel original"
+                                    >
+                                        <HardDrive className="w-4 h-4" />
+                                        Restaurar desde Excel
+                                    </button>
+                                    <button
+                                        type="button"
                                         onClick={() => loadCandidates(0, true)}
                                         className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 text-gray-800 rounded-lg hover:bg-gray-50 transition-colors"
                                         title="Recargar candidatos y columnas personalizadas"
@@ -2269,7 +2288,10 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                         Agregar candidato
                                     </button>
                                     <button
-                                        onClick={() => setShowImportModal(true)}
+                                        onClick={() => {
+                                            setImportRestoreMode(false);
+                                            setShowImportModal(true);
+                                        }}
                                         className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
                                     >
                                         <Upload className="w-4 h-4" />
@@ -3135,9 +3157,26 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
             {showImportModal && process && (
                 <BulkProcessImportModal
                     process={process}
-                    onClose={() => setShowImportModal(false)}
+                    restoreMode={importRestoreMode}
+                    onClose={() => {
+                        setShowImportModal(false);
+                        setImportRestoreMode(false);
+                    }}
                     onImportComplete={() => {
                         setShowImportModal(false);
+                        setImportRestoreMode(false);
+                        loadCandidates(0, true);
+                    }}
+                />
+            )}
+
+            {showRecoveryModal && process && (
+                <BulkColumnRecoveryModal
+                    process={process}
+                    customColumns={customColumns}
+                    candidateIds={new Set(candidates.map(c => c.id))}
+                    onClose={() => setShowRecoveryModal(false)}
+                    onRecovered={() => {
                         loadCandidates(0, true);
                     }}
                 />

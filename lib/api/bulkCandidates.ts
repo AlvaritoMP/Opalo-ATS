@@ -1,7 +1,11 @@
 import { supabase } from '../supabase';
 import { APP_NAME } from '../appConfig';
 import type { CustomColumn } from '../../types';
-import { enrichBulkColumnValuesForStorage } from '../bulkTableColumns';
+import { enrichBulkColumnValuesForStorage,
+    resolveColumnValueFromRow,
+    hasBulkCellValue,
+    bulkColumnNameKey,
+} from '../bulkTableColumns';
 
 /** Select mínimo — siempre disponible */
 const BULK_SELECT_BASE =
@@ -529,10 +533,22 @@ export const bulkCandidatesApi = {
         const current = (data?.bulk_column_values as Record<string, unknown>) || {};
         const patch: Record<string, unknown> = {};
 
-        for (const [key, val] of Object.entries(values)) {
-            const existing = current[key];
-            if (existing === undefined || existing === null || existing === '') {
-                patch[key] = val;
+        if (customColumns.length > 0) {
+            for (const col of customColumns) {
+                const incoming =
+                    values[col.id] ?? values[bulkColumnNameKey(col.name)];
+                if (!hasBulkCellValue(incoming)) continue;
+                const currentVal = resolveColumnValueFromRow(current, col);
+                if (!hasBulkCellValue(currentVal)) {
+                    patch[col.id] = incoming;
+                }
+            }
+        } else {
+            for (const [key, val] of Object.entries(values)) {
+                const existing = current[key];
+                if (existing === undefined || existing === null || existing === '') {
+                    patch[key] = val;
+                }
             }
         }
 
