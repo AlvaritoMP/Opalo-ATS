@@ -67,9 +67,18 @@ function mapRow(row: Record<string, unknown>): BulkProcessActivityEntry {
     };
 }
 
+function isCandidateFkError(error: { message?: string; code?: string } | null): boolean {
+    if (!error) return false;
+    const msg = (error.message || '').toLowerCase();
+    return (
+        error.code === '23503' &&
+        (msg.includes('bulk_process_activity_log_candidate_id_fkey') || msg.includes('candidate_id'))
+    );
+}
+
 export const bulkProcessActivityApi = {
     async log(input: LogBulkActivityInput): Promise<void> {
-        const { error } = await supabase.from('bulk_process_activity_log').insert({
+        const row = {
             process_id: input.processId,
             candidate_id: input.candidateId || null,
             candidate_name: input.candidateName || null,
@@ -81,7 +90,17 @@ export const bulkProcessActivityApi = {
             new_value: truncate(input.newValue),
             details: input.details || {},
             app_name: APP_NAME,
-        });
+        };
+
+        let { error } = await supabase.from('bulk_process_activity_log').insert(row);
+
+        if (error && isCandidateFkError(error) && input.candidateId) {
+            ({ error } = await supabase.from('bulk_process_activity_log').insert({
+                ...row,
+                candidate_id: null,
+            }));
+        }
+
         if (error) {
             console.warn('No se pudo registrar actividad del proceso masivo:', error.message);
         }

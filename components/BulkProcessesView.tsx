@@ -659,12 +659,15 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
 
             const localValues = loadLocalColumnValuesForProcess(processId);
             const merged = mergeColumnValueSources(fromDb, localValues, cols, legacy);
-            const repaired = repairDateColumnValues(merged, cols);
+            const scopedMerged = Object.fromEntries(
+                Object.entries(merged).filter(([id]) => id in fromDb)
+            );
+            const repaired = repairDateColumnValues(scopedMerged, cols);
             setColumnValues(repaired);
             persistLocalColumnValues(processId, repaired);
 
             const repairs: Record<string, Record<string, unknown>> = {};
-            for (const [candidateId, row] of Object.entries(merged)) {
+            for (const [candidateId, row] of Object.entries(scopedMerged)) {
                 const raw = fromDb[candidateId] || {};
                 const needsRepair = cols.some(col => {
                     const resolved = resolveColumnValueFromRow(row, col, legacy);
@@ -796,10 +799,13 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
         }
 
         const legacy = buildLegacyColumnIdToName(process.bulkConfig, customColumns);
+        const validCandidateIds = new Set(candidates.map(c => c.id));
         const toMigrate: Record<string, Record<string, unknown>> = {};
         for (const [candidateId, values] of Object.entries(localValues)) {
             if (!values) continue;
+            if (!validCandidateIds.has(candidateId)) continue;
             const candidate = candidates.find(c => c.id === candidateId);
+            if (!candidate) continue;
             const dbValues = (candidate?.bulkColumnValues || {}) as Record<string, unknown>;
             const patch: Record<string, unknown> = {};
             let hasNew = false;
@@ -831,6 +837,12 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
         }
 
         if (Object.keys(toMigrate).length === 0) {
+            const pruned = Object.fromEntries(
+                Object.entries(localValues).filter(([id]) => validCandidateIds.has(id))
+            );
+            if (Object.keys(pruned).length !== Object.keys(localValues).length) {
+                localStorage.setItem(storageKey, JSON.stringify(pruned));
+            }
             columnValuesMigratedRef.current = process.id;
             return;
         }

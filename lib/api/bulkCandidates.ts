@@ -34,6 +34,12 @@ function isMissingColumnError(error: { message?: string; code?: string } | null)
     );
 }
 
+/** PostgREST 406 cuando .single() no encuentra fila (p. ej. candidato borrado o id obsoleto en localStorage) */
+function isNotFoundError(error: { message?: string; code?: string } | null): boolean {
+    if (!error) return false;
+    return error.code === 'PGRST116' || (error.message || '').includes('0 rows');
+}
+
 function getBulkSelectCandidates(): string[] {
     if (cachedBulkSelect) return [cachedBulkSelect];
     return [BULK_SELECT_FULL, BULK_SELECT_WITH_CREATED, BULK_SELECT_BASE];
@@ -253,9 +259,7 @@ export const bulkCandidatesApi = {
 
             for (const row of data || []) {
                 const vals = row.bulk_column_values as Record<string, unknown> | null;
-                if (vals && Object.keys(vals).length > 0) {
-                    out[row.id] = vals;
-                }
+                out[row.id] = vals && Object.keys(vals).length > 0 ? vals : {};
             }
 
             if (!data || data.length < pageSize) break;
@@ -480,17 +484,19 @@ export const bulkCandidatesApi = {
             .select('bulk_column_values')
             .eq('id', candidateId)
             .eq('app_name', APP_NAME)
-            .single();
+            .maybeSingle();
 
         if (fetchError) {
             if (isMissingColumnError(fetchError)) {
                 bulkColumnValuesWriteSupported = false;
                 return false;
             }
+            if (isNotFoundError(fetchError)) return false;
             throw fetchError;
         }
+        if (!data) return false;
 
-        const current = (data?.bulk_column_values as Record<string, unknown>) || {};
+        const current = (data.bulk_column_values as Record<string, unknown>) || {};
         const merged = { ...current, ...enriched };
 
         const { error } = await supabase
@@ -525,15 +531,17 @@ export const bulkCandidatesApi = {
             .select('bulk_column_values')
             .eq('id', candidateId)
             .eq('app_name', APP_NAME)
-            .single();
+            .maybeSingle();
 
         if (fetchError) {
             if (isMissingColumnError(fetchError)) {
                 bulkColumnValuesWriteSupported = false;
                 return false;
             }
+            if (isNotFoundError(fetchError)) return false;
             throw fetchError;
         }
+        if (!data) return false;
 
         const current = (data?.bulk_column_values as Record<string, unknown>) || {};
         const patch: Record<string, unknown> = {};
@@ -574,7 +582,8 @@ export const bulkCandidatesApi = {
             )
         );
 
-        if (results.every(r => !r)) {
+        const okCount = results.filter(Boolean).length;
+        if (okCount === 0 && entries.length > 0 && bulkColumnValuesWriteSupported === false) {
             throw new Error(
                 'No se pudieron guardar los valores de columnas. Ejecute MIGRATION_ADD_BULK_COLUMN_VALUES.sql en Supabase.'
             );
@@ -597,7 +606,8 @@ export const bulkCandidatesApi = {
             )
         );
 
-        if (results.every(r => !r)) {
+        const okCount = results.filter(Boolean).length;
+        if (okCount === 0 && entries.length > 0 && bulkColumnValuesWriteSupported === false) {
             throw new Error(
                 'No se pudieron guardar los valores de columnas. Ejecute MIGRATION_ADD_BULK_COLUMN_VALUES.sql en Supabase.'
             );
