@@ -918,6 +918,80 @@ export function normalizeBulkDateInput(value: BulkDateInput): string {
     return formatBulkDate(value);
 }
 
+/** Campos estándar de candidato que se normalizan en tabla masiva */
+export const BULK_TEXT_CASE_STANDARD_FIELDS = [
+    'name',
+    'source',
+    'province',
+    'district',
+] as const;
+
+/** Normaliza mayúsculas palabra a palabra en celdas de texto */
+export function normalizeTextCaseCellValue(
+    value: unknown,
+    opts: { field?: string; columnType?: string; selectOptions?: string[] } = {}
+): unknown {
+    if (value === undefined || value === null || value === '') return value;
+    if (typeof value !== 'string') return value;
+    return normalizeImportTextCase(value, opts);
+}
+
+/** Repara texto en bulk_column_values (p. ej. "CALLE Italia" → "Calle Italia") */
+export function repairTextCaseColumnValues(
+    columnValues: Record<string, Record<string, any>>,
+    customColumns: CustomColumn[],
+    legacyIdToName: Record<string, string> = {}
+): { repaired: Record<string, Record<string, any>>; changed: boolean } {
+    let changed = false;
+    const repaired: Record<string, Record<string, any>> = {};
+
+    for (const [candidateId, values] of Object.entries(columnValues)) {
+        const row = { ...values };
+
+        for (const col of customColumns) {
+            if (col.type === 'number' || col.type === 'date' || col.type === 'checkbox') continue;
+            const raw = resolveColumnValueFromRow(row, col, legacyIdToName);
+            if (typeof raw !== 'string' || !raw.trim()) continue;
+            const fixed = normalizeImportTextCase(raw, {
+                columnType: col.type,
+                selectOptions: col.options,
+            });
+            if (fixed !== raw) {
+                row[col.id] = fixed;
+                row[bulkColumnNameKey(col.name)] = fixed;
+                changed = true;
+            }
+        }
+
+        for (const [key, val] of Object.entries(row)) {
+            if (!key.startsWith(BULK_NAME_KEY_PREFIX) || typeof val !== 'string' || !val.trim()) continue;
+            const fixed = normalizeImportTextCase(val, { columnType: 'text' });
+            if (fixed !== val) {
+                row[key] = fixed;
+                changed = true;
+            }
+        }
+
+        repaired[candidateId] = row;
+    }
+
+    return { repaired: changed ? repaired : columnValues, changed };
+}
+
+/** Calcula parches de campos estándar del candidato (name, source, etc.) */
+export function buildStandardFieldTextCasePatch(
+    candidate: { name?: string; source?: string; province?: string; district?: string }
+): Partial<Record<(typeof BULK_TEXT_CASE_STANDARD_FIELDS)[number], string>> {
+    const patch: Partial<Record<(typeof BULK_TEXT_CASE_STANDARD_FIELDS)[number], string>> = {};
+    for (const field of BULK_TEXT_CASE_STANDARD_FIELDS) {
+        const val = candidate[field];
+        if (typeof val !== 'string' || !val.trim()) continue;
+        const fixed = normalizeImportTextCase(val, { field });
+        if (fixed !== val) patch[field] = fixed;
+    }
+    return patch;
+}
+
 /** Repara fechas almacenadas en columnValues para columnas tipo date */
 export function repairDateColumnValues(
     columnValues: Record<string, Record<string, any>>,

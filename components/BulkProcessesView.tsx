@@ -3,7 +3,7 @@ import { useAppState } from '../App';
 import { bulkCandidatesApi, BulkCandidate } from '../lib/api/bulkCandidates';
 import { bulkProcessActivityApi, BulkActivityActionType } from '../lib/api/bulkProcessActivity';
 import { processesApi } from '../lib/api/processes';
-import { Check, X, Loader2, Send, Archive, Search, ChevronDown, ChevronUp, Plus, Edit, Trash2, ArrowLeft, MessageCircle, Phone, Upload, Download, Filter, Mail, Calendar, Settings, ArrowUp, ArrowDown, Pin, FileText, BookOpen, Paperclip, ClipboardList, UserPlus, RefreshCw, HardDrive } from 'lucide-react';
+import { Check, X, Loader2, Send, Archive, Search, ChevronDown, ChevronUp, Plus, Edit, Trash2, ArrowLeft, MessageCircle, Phone, Upload, Download, Filter, Mail, Calendar, Settings, ArrowUp, ArrowDown, Pin, FileText, BookOpen, Paperclip, ClipboardList, UserPlus, RefreshCw, HardDrive, CaseSensitive } from 'lucide-react';
 import { Process, CustomColumn, BulkProcessConfig } from '../types';
 import {
     BASE_COLUMNS,
@@ -431,6 +431,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
     const [showProcessDocsModal, setShowProcessDocsModal] = useState(false);
     const [docsModalProcess, setDocsModalProcess] = useState<Process | null>(null);
     const [showExportModal, setShowExportModal] = useState(false);
+    const [isNormalizingTextCase, setIsNormalizingTextCase] = useState(false);
     const [activityLogRefreshToken, setActivityLogRefreshToken] = useState(0);
     const tableKeyboardRef = useRef({
         editingCell: null as { candidateId: string; field: string } | null,
@@ -730,6 +731,42 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
             setIsLoading(false);
         }
     }, [selectedProcess, selectedStage, searchQuery, actions, process?.bulkConfig?.customColumns, syncColumnValuesFromDatabase]);
+
+    const handleNormalizeTextCase = useCallback(async () => {
+        if (!selectedProcess || !process) return;
+        const ok = window.confirm(
+            '¿Normalizar mayúsculas en todos los candidatos de este proceso?\n\n' +
+            'Ejemplo: "CALLE Italia 325" → "Calle Italia 325".\n' +
+            'Los cambios se guardan en la base de datos.'
+        );
+        if (!ok) return;
+
+        setIsNormalizingTextCase(true);
+        try {
+            const cols = process.bulkConfig?.customColumns || [];
+            const result = await bulkCandidatesApi.normalizeProcessTextCase(
+                selectedProcess,
+                cols,
+                process.bulkConfig
+            );
+            await syncColumnValuesFromDatabase(selectedProcess);
+            await loadCandidates(0, true);
+            if (result.candidates === 0) {
+                actions.showToast('No había celdas por normalizar', 'info', 3000);
+            } else {
+                actions.showToast(
+                    `Texto normalizado: ${result.candidates} candidato(s), ${result.cells} celda(s)`,
+                    'success',
+                    4000
+                );
+            }
+        } catch (error) {
+            console.error('Error normalizando texto:', error);
+            actions.showToast('Error al normalizar texto', 'error', 3000);
+        } finally {
+            setIsNormalizingTextCase(false);
+        }
+    }, [selectedProcess, process, syncColumnValuesFromDatabase, loadCandidates, actions]);
 
     useEffect(() => {
         loadCandidates(0, true);
@@ -2478,6 +2515,20 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                     >
                                         <RefreshCw className="w-4 h-4" />
                                         Actualizar
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={handleNormalizeTextCase}
+                                        disabled={isNormalizingTextCase || isLoading}
+                                        className="flex items-center gap-2 px-4 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                        title='Corregir MAYÚSCULAS en nombres, direcciones y columnas de texto (ej. "CALLE Italia" → "Calle Italia")'
+                                    >
+                                        {isNormalizingTextCase ? (
+                                            <Loader2 className="w-4 h-4 animate-spin" />
+                                        ) : (
+                                            <CaseSensitive className="w-4 h-4" />
+                                        )}
+                                        Normalizar texto
                                     </button>
                                     <button
                                         onClick={() => setShowAddCandidateModal(true)}

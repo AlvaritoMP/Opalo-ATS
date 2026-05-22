@@ -1,11 +1,16 @@
 import { supabase } from '../supabase';
 import { APP_NAME } from '../appConfig';
 import type { CustomColumn } from '../../types';
-import { enrichBulkColumnValuesForStorage,
+import {
+    enrichBulkColumnValuesForStorage,
     resolveColumnValueFromRow,
     hasBulkCellValue,
     bulkColumnNameKey,
+    buildLegacyColumnIdToName,
+    buildStandardFieldTextCasePatch,
+    repairTextCaseColumnValues,
 } from '../bulkTableColumns';
+import type { BulkProcessConfig } from '../../types';
 
 /** Select mínimo — siempre disponible */
 const BULK_SELECT_BASE =
@@ -597,6 +602,82 @@ export const bulkCandidatesApi = {
                 'No se pudieron guardar los valores de columnas. Ejecute MIGRATION_ADD_BULK_COLUMN_VALUES.sql en Supabase.'
             );
         }
+    },
+
+    /**
+     * Normaliza mayúsculas en todos los candidatos del proceso y persiste en Supabase.
+     */
+    async normalizeProcessTextCase(
+        processId: string,
+        customColumns: CustomColumn[] = [],
+        bulkConfig?: BulkProcessConfig
+    ): Promise<{ candidates: number; cells: number }> {
+        const legacy = buildLegacyColumnIdToName(bulkConfig, customColumns);
+        const candidates = await this.getAllCandidates(processId, {
+            archived: false,
+            discarded: false,
+        });
+        const fromDb = await this.loadAllBulkColumnValues(processId);
+
+        const columnValues: Record<string, Record<string, unknown>> = {};
+        for (const c of candidates) {
+            const dbRow = fromDb[c.id] || (c.bulkColumnValues as Record<string, unknown> | undefined) || {};
+            columnValues[c.id] = { ...dbRow };
+        }
+
+        const { repaired, changed: bulkChanged } = repairTextCaseColumnValues(
+            columnValues as Record<string, Record<string, any>>,
+            customColumns,
+            legacy
+        );
+
+        const bulkUpdates: Record<string, Record<string, unknown>> = {};
+        let cellCount = 0;
+
+        if (bulkChanged) {
+            for (const c of candidates) {
+                const before = columnValues[c.id] || {};
+                const after = repaired[c.id] || {};
+                const enriched = enrichBulkColumnValuesForStorage(after, customColumns);
+                const differs = customColumns.some(col => {
+                    const b = resolveColumnValueFromRow(before as Record<string, unknown>, col, legacy);
+                    const a = resolveColumnValueFromRow(enriched, col, legacy);
+                    return String(b ?? '') !== String(a ?? '');
+                });
+                if (differs) {
+                    bulkUpdates[c.id] = enriched;
+                    cellCount += customColumns.filter(col => {
+                        const b = resolveColumnValueFromRow(before as Record<string, unknown>, col, legacy);
+                        const a = resolveColumnValueFromRow(enriched, col, legacy);
+                        return String(b ?? '') !== String(a ?? '');
+                    }).length;
+                }
+            }
+        }
+
+        const fieldPatches: { id: string; patch: ReturnType<typeof buildStandardFieldTextCasePatch> }[] = [];
+
+        for (const c of candidates) {
+            const patch = buildStandardFieldTextCasePatch(c);
+            if (Object.keys(patch).length > 0) {
+                fieldPatches.push({ id: c.id, patch });
+            }
+        }
+
+        if (Object.keys(bulkUpdates).length > 0) {
+            await this.batchSetBulkColumnValues(bulkUpdates, customColumns);
+        }
+
+        const chunkSize = 15;
+        for (let i = 0; i < fieldPatches.length; i += chunkSize) {
+            const chunk = fieldPatches.slice(i, i + chunkSize);
+            await Promise.all(chunk.map(({ id, patch }) => this.patchFields(id, patch)));
+        }
+
+        return {
+            candidates: new Set([...Object.keys(bulkUpdates), ...fieldPatches.map(p => p.id)]).size,
+            cells: cellCount + fieldPatches.reduce((n, p) => n + Object.keys(p.patch).length, 0),
+        };
     },
 
     /**
