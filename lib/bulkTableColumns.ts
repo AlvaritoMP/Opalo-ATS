@@ -1,4 +1,5 @@
 import { BulkProcessConfig, CustomColumn, FieldMapping, Process } from '../types';
+import { normalizeImportTextCase } from './importTextCase.js';
 
 const BULK_NAME_KEY_PREFIX = '__name__';
 
@@ -1034,5 +1035,5 @@ export function parseCustomCellInput(rawValue: string, col: CustomColumn): any {
         const match = col.options.find(o => o.toLowerCase() === trimmed.toLowerCase());
         return match ?? trimmed;
     }
-    return trimmed;
+    return normalizeImportTextCase(trimmed, { columnType: col.type });
 }

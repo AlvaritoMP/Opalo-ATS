@@ -3,6 +3,8 @@
  * Mantener alineado con lib/tallyWebhookMapping.ts
  */
 
+import { normalizeImportTextCase } from './importTextCase.ts';
+
 const BULK_NAME_KEY_PREFIX = '__name__';
 
 export interface BulkProcessConfigLike {
@@ -482,7 +484,7 @@ function parseValueForCustomColumn(
     const match = col.options.find((o) => o.toLowerCase() === trimmed.toLowerCase());
     return match ?? trimmed;
   }
-  return trimmed;
+  return normalizeImportTextCase(trimmed, { columnType: col.type });
 }
 
 export function buildTallyCandidateFromSubmission(

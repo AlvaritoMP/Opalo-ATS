@@ -56,8 +56,10 @@ export function normalizeImportTextCase(
         if (match) return match;
     }
 
-    if (!isImportTextAllCaps(value)) return value;
-    return toImportProperCase(value);
+    // Palabra a palabra: "CALLE Italia 325" → "Calle Italia 325"
+    return value.replace(IMPORT_WORD_RE, word =>
+        isImportTextAllCaps(word) ? toImportProperCase(word) : word
+    );
 }
 
 export const IMPORT_TEXT_CASE_CANDIDATE_FIELDS = [
