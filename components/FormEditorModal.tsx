@@ -151,10 +151,26 @@ export const FormEditorModal: React.FC<FormIntegrationModalProps> = ({ integrati
          );
     }
     
+    const stopSpaceScrollInInputs = (e: React.KeyboardEvent) => {
+        const tag = (e.target as HTMLElement).tagName;
+        if (tag !== 'INPUT' && tag !== 'TEXTAREA') return;
+        e.stopPropagation();
+        if (e.key === ' ') {
+            e.nativeEvent.stopImmediatePropagation();
+        }
+    };
+
     return (
-         <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4 overflow-y-auto">
+         <div
+            className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4 overflow-y-auto"
+            onKeyDownCapture={stopSpaceScrollInInputs}
+         >
             <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[min(90vh,calc(100vh-2rem))] flex flex-col overflow-hidden my-auto">
-                <form onSubmit={handleSubmit} className="flex flex-col min-h-0 flex-1 overflow-hidden">
+                <form
+                    onSubmit={handleSubmit}
+                    onKeyDownCapture={stopSpaceScrollInInputs}
+                    className="flex flex-col min-h-0 flex-1 overflow-hidden"
+                >
                     <div className="p-6 border-b flex justify-between items-center flex-shrink-0">
                         <h2 className="text-2xl font-bold text-gray-800">
                             {isEditing 
@@ -287,6 +303,7 @@ export const FormEditorModal: React.FC<FormIntegrationModalProps> = ({ integrati
                                     <div
                                         className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-4 pb-4"
                                         style={{ maxHeight: 'min(50vh, 420px)' }}
+                                        onKeyDownCapture={stopSpaceScrollInInputs}
                                     >
                                         <div className="grid grid-cols-1 md:grid-cols-2 gap-3 p-2 bg-white rounded border border-blue-100">
                                             {candidateFields.map(field => (
@@ -296,6 +313,8 @@ export const FormEditorModal: React.FC<FormIntegrationModalProps> = ({ integrati
                                                     </label>
                                                 <input
                                                     type="text"
+                                                    autoComplete="off"
+                                                    spellCheck={false}
                                                     value={fieldMapping[field.key] ?? ''}
                                                     onChange={e => {
                                                         const v = e.target.value;
@@ -306,7 +325,8 @@ export const FormEditorModal: React.FC<FormIntegrationModalProps> = ({ integrati
                                                             return next;
                                                         });
                                                     }}
-                                                    onKeyDown={e => e.stopPropagation()}
+                                                    onKeyDown={stopSpaceScrollInInputs}
+                                                    onKeyDownCapture={stopSpaceScrollInInputs}
                                                     placeholder={field.placeholder}
                                                     className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
                                                 />
