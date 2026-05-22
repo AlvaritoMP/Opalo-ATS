@@ -5,6 +5,7 @@ import { getSettings, saveSettings as saveSettingsToStorage } from './lib/settin
 import { usersApi, processesApi, candidatesApi, postItsApi, commentsApi, interviewsApi, settingsApi, formIntegrationsApi, setCurrentUser } from './lib/api/index';
 import { isCorsError, getErrorMessage, isSupabaseConfigured } from './lib/supabase';
 import { googleDriveService } from './lib/googleDrive';
+import { debugLog } from './lib/debugLog';
 import { Dashboard } from './components/Dashboard';
 import { ProcessList } from './components/ProcessList';
 import { ProcessView } from './components/ProcessView';
@@ -231,19 +232,15 @@ const LoginPage: React.FC = () => {
 const getVisibleSections = (user: User | null): Section[] => {
     if (!user) return [];
     if (user.visibleSections && user.visibleSections.length > 0) {
-        console.log('🔍 Usuario con secciones personalizadas:', user.visibleSections);
         return user.visibleSections;
     }
-    // Secciones por defecto según rol
     const defaultSections: Record<UserRole, Section[]> = {
         admin: ['dashboard', 'processes', 'archived', 'candidates', 'forms', 'letters', 'calendar', 'reports', 'compare', 'bulk-import', 'bulk-processes', 'users', 'settings'],
         recruiter: ['dashboard', 'processes', 'archived', 'candidates', 'forms', 'letters', 'calendar', 'reports', 'compare', 'bulk-import', 'bulk-processes'],
         client: ['dashboard', 'processes', 'candidates', 'calendar', 'reports', 'compare'],
         viewer: ['dashboard', 'processes', 'candidates', 'calendar', 'reports']
     };
-    const sections = defaultSections[user.role] || [];
-    console.log('🔍 Usuario:', user.role, 'Secciones visibles:', sections);
-    return sections;
+    return defaultSections[user.role] || [];
 };
 
 const NavItem: React.FC<{
@@ -279,19 +276,7 @@ const Sidebar: React.FC = () => {
     if (!state.currentUser) return null;
     
     const visibleSections = getVisibleSections(state.currentUser);
-    const canSeeSection = (section: Section) => {
-        const canSee = visibleSections.includes(section);
-        if (section === 'bulk-processes') {
-            console.log('🔍 Verificando bulk-processes:', {
-                canSee,
-                visibleSections,
-                userRole: state.currentUser.role,
-                hasCustomSections: !!state.currentUser.visibleSections,
-                customSections: state.currentUser.visibleSections
-            });
-        }
-        return canSee;
-    };
+    const canSeeSection = (section: Section) => visibleSections.includes(section);
 
     return (
         <>
@@ -475,7 +460,7 @@ const App: React.FC = () => {
                     return;
                 }
                 
-                console.log('Loading data from Supabase...');
+                debugLog('Loading data from Supabase...');
                 
                 // Cargar datos de Supabase con timeouts y mejor manejo de errores
                 const loadWithEmptyFallback = async <T,>(
@@ -491,7 +476,7 @@ const App: React.FC = () => {
                                 setTimeout(() => reject(new Error('Timeout')), 30000)
                             )
                         ]);
-                        console.log(`✓ Loaded ${name} from Supabase`);
+                        debugLog(`Loaded ${name} from Supabase`);
                         return result;
                     } catch (error) {
                         console.error(`❌ Failed to load ${name} from Supabase:`, error);
@@ -518,8 +503,7 @@ const App: React.FC = () => {
                 // Cargar candidatos descartados (aunque estén archivados) para el conteo del Dashboard
                 let discardedCandidates: Candidate[] = [];
                 try {
-                    const allArchived = await candidatesApi.getAll(true, true); // true = include archived
-                    discardedCandidates = allArchived.filter(c => c.discarded === true);
+                    discardedCandidates = await candidatesApi.getDiscardedArchived();
                 } catch (error) {
                     console.warn('Error cargando candidatos descartados:', error);
                 }
@@ -533,49 +517,35 @@ const App: React.FC = () => {
                 let currentUser: User | null = null;
                 
                 if (sessionUserId) {
-                    try {
-                        currentUser = await usersApi.getById(sessionUserId);
-                        if (currentUser) {
-                            await setCurrentUser(currentUser.id).catch(() => {
-                                // No crítico si falla
-                            });
+                    currentUser = users.find(u => u.id === sessionUserId) || null;
+                    if (!currentUser) {
+                        try {
+                            currentUser = await usersApi.getById(sessionUserId);
+                        } catch {
+                            currentUser = null;
                         }
-                    } catch (error) {
-                        // Buscar en los usuarios cargados
-                        currentUser = users.find(u => u.id === sessionUserId) || null;
+                    }
+                    if (currentUser) {
+                        await setCurrentUser(currentUser.id).catch(() => {});
                     }
                 }
 
-                console.log('✓ Data loaded successfully');
+                debugLog('Data loaded successfully');
                 
                 // Inicializar Google Drive si está configurado
                 if (settings?.googleDrive?.connected && settings.googleDrive.accessToken) {
-                    console.log('🔧 Configurando Google Drive:', {
-                        hasAccessToken: !!settings.googleDrive.accessToken,
-                        hasRefreshToken: !!settings.googleDrive.refreshToken,
-                        refreshTokenLength: settings.googleDrive.refreshToken?.length || 0,
-                        tokenExpiry: settings.googleDrive.tokenExpiry
-                    });
-                    
-                    // Configurar callback para actualizar tokens en settings cuando se refrescan
                     googleDriveService.setTokenUpdateCallback(async (accessToken, refreshToken, expiresIn) => {
                         try {
                             const updatedGoogleDrive = {
                                 ...settings.googleDrive!,
                                 accessToken,
-                                refreshToken: refreshToken || settings.googleDrive!.refreshToken, // Preservar refresh token si no se proporciona uno nuevo
+                                refreshToken: refreshToken || settings.googleDrive!.refreshToken,
                                 tokenExpiry: expiresIn ? new Date(Date.now() + expiresIn * 1000).toISOString() : settings.googleDrive!.tokenExpiry,
                             };
-                            console.log('💾 Actualizando tokens en settings:', {
-                                hasAccessToken: !!updatedGoogleDrive.accessToken,
-                                hasRefreshToken: !!updatedGoogleDrive.refreshToken,
-                                refreshTokenLength: updatedGoogleDrive.refreshToken?.length || 0
-                            });
                             const updatedSettings = await settingsApi.update({ googleDrive: updatedGoogleDrive });
                             setState(s => ({ ...s, settings: updatedSettings }));
-                            console.log('✅ Token de Google Drive actualizado en settings');
                         } catch (error) {
-                            console.error('❌ Error actualizando token en settings:', error);
+                            console.error('Error actualizando token en settings:', error);
                         }
                     });
                     
@@ -700,35 +670,21 @@ const App: React.FC = () => {
             setState(s => {
                 // Si se está navegando a un proceso específico, guardar como último proceso visto
                 if (type === 'process-view' && payload) {
-                    console.log('📌 Guardando último proceso visto:', payload);
                     return { ...s, view: { type, payload }, lastViewedProcessId: payload };
                 }
-                // Si se está navegando a la lista de procesos
                 if (type === 'processes') {
-                    // Si payload es explícitamente null, limpiar y mostrar lista (botón retroceso)
                     if (payload === null) {
-                        console.log('🔙 Limpiando último proceso visto (botón retroceso)');
                         return { ...s, view: { type, payload: undefined }, lastViewedProcessId: null };
                     }
-                    // Si hay un último proceso visto (navegación desde sidebar o cualquier otra)
-                    // ir directamente a ese proceso, a menos que payload sea explícitamente null
                     if (s.lastViewedProcessId) {
-                        // Verificar que el proceso aún existe
                         const processExists = s.processes.some(p => p.id === s.lastViewedProcessId);
                         if (processExists) {
-                            console.log('🔄 Navegando al último proceso visto:', s.lastViewedProcessId);
                             return { ...s, view: { type: 'process-view', payload: s.lastViewedProcessId } };
-                        } else {
-                            console.log('⚠️ Último proceso visto ya no existe, limpiando');
-                            return { ...s, view: { type, payload: undefined }, lastViewedProcessId: null };
                         }
+                        return { ...s, view: { type, payload: undefined }, lastViewedProcessId: null };
                     }
-                    // Si no hay último proceso visto, mostrar lista
-                    console.log('📋 Mostrando lista de procesos (sin último proceso visto)');
                     return { ...s, view: { type, payload: undefined } };
                 }
-                // Para cualquier otra navegación, mantener el último proceso visto
-                console.log('📍 Navegando a:', type, '(manteniendo último proceso visto:', s.lastViewedProcessId, ')');
                 return { ...s, view: { type, payload } };
             });
         },
@@ -958,27 +914,24 @@ const App: React.FC = () => {
                             
                             // Verificar carpetas de candidatos que tienen proceso con carpeta configurada
                             for (const candidate of allCandidates) {
+                                if (candidate.googleDriveFolderId) continue;
                                 const process = state.processes.find(p => p.id === candidate.processId);
                                 if (!process?.googleDriveFolderId) continue;
                                 
                                 try {
-                                    // Buscar carpeta (incluso si no tiene una guardada, para encontrar carpetas huérfanas)
                                     const folder = await googleDriveService.getOrCreateCandidateFolder(
                                         candidate.name,
                                         process.googleDriveFolderId,
-                                        candidate.googleDriveFolderId // Puede ser undefined
+                                        candidate.googleDriveFolderId
                                     );
                                     
-                                    // Si el candidato no tenía carpeta o la carpeta encontrada es diferente, actualizar
-                                    if (!candidate.googleDriveFolderId || folder.id !== candidate.googleDriveFolderId) {
-                                        console.log(`🔄 ${!candidate.googleDriveFolderId ? 'Asociando' : 'Actualizando'} carpeta de candidato ${candidate.name}: ${candidate.googleDriveFolderId || '(sin carpeta)'} → ${folder.id}`);
+                                    if (folder.id !== candidate.googleDriveFolderId) {
                                         await candidatesApi.update(candidate.id, {
                                             ...candidate,
                                             googleDriveFolderId: folder.id,
                                             googleDriveFolderName: folder.name,
                                         }, state.currentUser?.id);
                                         
-                                        // Actualizar estado local
                                         setState(s => ({
                                             ...s,
                                             candidates: s.candidates.map(c => 
@@ -989,7 +942,6 @@ const App: React.FC = () => {
                                         }));
                                     }
                                 } catch (error) {
-                                    // Ignorar errores individuales para no bloquear el proceso
                                     console.warn(`Error verificando carpeta para candidato ${candidate.name}:`, error);
                                 }
                             }

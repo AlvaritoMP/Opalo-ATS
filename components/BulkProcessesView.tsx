@@ -3,6 +3,7 @@ import { useAppState } from '../App';
 import { bulkCandidatesApi, BulkCandidate } from '../lib/api/bulkCandidates';
 import { bulkProcessActivityApi, BulkActivityActionType } from '../lib/api/bulkProcessActivity';
 import { processesApi } from '../lib/api/processes';
+import { useDebouncedValue } from '../lib/useDebouncedValue';
 import { Check, X, Loader2, Send, Archive, Search, ChevronDown, ChevronUp, Plus, Edit, Trash2, ArrowLeft, MessageCircle, Phone, Upload, Download, Filter, Mail, Calendar, Settings, ArrowUp, ArrowDown, Pin, FileText, BookOpen, Paperclip, ClipboardList, UserPlus, RefreshCw, HardDrive, CaseSensitive } from 'lucide-react';
 import { Process, CustomColumn, BulkProcessConfig } from '../types';
 import {
@@ -380,7 +381,8 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
     const [isLoadingProcesses, setIsLoadingProcesses] = useState(false);
     const [selectedProcess, setSelectedProcess] = useState<string>('');
     const [selectedStage, setSelectedStage] = useState<string>('');
-    const [searchQuery, setSearchQuery] = useState('');
+    const [searchInput, setSearchInput] = useState('');
+    const debouncedSearch = useDebouncedValue(searchInput, 400);
     const [drawerCandidate, setDrawerCandidate] = useState<BulkCandidate | null>(null);
     const [isDrawerOpen, setIsDrawerOpen] = useState(false);
     const [optimisticUpdates, setOptimisticUpdates] = useState<Map<string, Partial<BulkCandidate>>>(new Map());
@@ -494,7 +496,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
             await Promise.all(
                 bulkProcesses.map(async p => {
                     try {
-                        counts[p.id] = await processesApi.getAttachmentsCount(p.id, p.googleDriveFolderId, state.settings?.googleDrive);
+                        counts[p.id] = await processesApi.getAttachmentsCountDb(p.id);
                     } catch {
                         counts[p.id] = p.attachments?.length ?? 0;
                     }
@@ -503,7 +505,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
             setAttachmentCounts(counts);
         };
         loadCounts();
-    }, [bulkProcesses, state.settings?.googleDrive]);
+    }, [bulkProcesses]);
 
     const openPsychReport = useCallback((list: BulkCandidate[]) => {
         if (!process || list.length === 0) return;
@@ -679,14 +681,14 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                 }
             }
             if (Object.keys(repairs).length > 0) {
-                void bulkCandidatesApi.batchSetBulkColumnValues(repairs, cols);
+                void bulkCandidatesApi.batchSetBulkColumnValues(repairs, cols, { replace: true });
             }
         } catch (error) {
             console.error('Error sincronizando columnas personalizadas:', error);
         }
     }, [process?.bulkConfig, persistBulkConfig]);
 
-    // Cargar candidatos
+    // Cargar candidatos (paginado; no escanea todo el proceso)
     const loadCandidates = useCallback(async (page: number = 0, reset: boolean = false) => {
         if (!selectedProcess) {
             setCandidates([]);
@@ -702,26 +704,30 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                 pageSize,
                 {
                     stageId: selectedStage || undefined,
-                    search: searchQuery || undefined,
+                    search: debouncedSearch || undefined,
                     archived: false,
                     discarded: false,
                 }
             );
 
+            const cols = process?.bulkConfig?.customColumns || [];
+            const legacy = buildLegacyColumnIdToName(process?.bulkConfig, cols);
+
             if (reset) {
                 setCandidates(result.candidates);
-            } else {
-                setCandidates(prev => [...prev, ...result.candidates]);
-            }
-            const cols = process?.bulkConfig?.customColumns || [];
-            if (reset) {
-                await syncColumnValuesFromDatabase(selectedProcess);
-            } else {
                 setColumnValues(prev => mergeColumnValuesFromCandidates(
                     prev,
                     result.candidates,
                     cols,
-                    buildLegacyColumnIdToName(process?.bulkConfig, cols)
+                    legacy
+                ));
+            } else {
+                setCandidates(prev => [...prev, ...result.candidates]);
+                setColumnValues(prev => mergeColumnValuesFromCandidates(
+                    prev,
+                    result.candidates,
+                    cols,
+                    legacy
                 ));
             }
             setTotal(result.total);
@@ -733,7 +739,13 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
         } finally {
             setIsLoading(false);
         }
-    }, [selectedProcess, selectedStage, searchQuery, actions, process?.bulkConfig?.customColumns, syncColumnValuesFromDatabase]);
+    }, [selectedProcess, selectedStage, debouncedSearch, actions, process?.bulkConfig]);
+
+    const refreshFromDatabase = useCallback(async () => {
+        if (!selectedProcess) return;
+        await syncColumnValuesFromDatabase(selectedProcess);
+        await loadCandidates(0, true);
+    }, [selectedProcess, syncColumnValuesFromDatabase, loadCandidates]);
 
     const handleNormalizeTextCase = useCallback(async () => {
         if (!selectedProcess || !process) return;
@@ -771,9 +783,28 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
         }
     }, [selectedProcess, process, syncColumnValuesFromDatabase, loadCandidates, actions]);
 
+    // Al cambiar de proceso: sincronizar columnas completas una sola vez
     useEffect(() => {
+        if (!selectedProcess) return;
+        let cancelled = false;
+        (async () => {
+            await syncColumnValuesFromDatabase(selectedProcess);
+            if (!cancelled) await loadCandidates(0, true);
+        })();
+        return () => { cancelled = true; };
+    }, [selectedProcess]);
+
+    const prevProcessForFilterRef = useRef<string | null>(null);
+
+    // Filtros/búsqueda: solo recargar la página visible (sin escanear todo el proceso)
+    useEffect(() => {
+        if (!selectedProcess) return;
+        if (prevProcessForFilterRef.current !== selectedProcess) {
+            prevProcessForFilterRef.current = selectedProcess;
+            return;
+        }
         loadCandidates(0, true);
-    }, [selectedProcess, selectedStage, searchQuery]);
+    }, [selectedStage, debouncedSearch, selectedProcess]);
 
     // Migrar valores que quedaron en localStorage hacia Supabase (sin borrar el respaldo local)
     useEffect(() => {
@@ -2421,7 +2452,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                         setSelectedProcess('');
                                         setCandidates([]);
                                         setSelectedStage('');
-                                        setSearchQuery('');
+                                        setSearchInput('');
                                     }}
                                     className="flex items-center gap-2 text-sm text-gray-600 hover:text-gray-900 shrink-0"
                                 >
@@ -2521,7 +2552,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                     </button>
                                     <button
                                         type="button"
-                                        onClick={() => loadCandidates(0, true)}
+                                        onClick={() => refreshFromDatabase()}
                                         className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 text-gray-800 rounded-lg hover:bg-gray-50 transition-colors"
                                         title="Recargar candidatos y columnas personalizadas"
                                     >
@@ -2682,8 +2713,8 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                         <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
                                         <input
                                             type="text"
-                                            value={searchQuery}
-                                            onChange={(e) => setSearchQuery(e.target.value)}
+                                            value={searchInput}
+                                            onChange={(e) => setSearchInput(e.target.value)}
                                             placeholder="Nombre, teléfono..."
                                             className="w-full pl-10 pr-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
                                         />
@@ -3533,7 +3564,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                     displayCandidates={displayCandidates}
                     hasMore={hasMore}
                     total={total}
-                    searchQuery={searchQuery}
+                    searchQuery={debouncedSearch}
                 />
             )}
 

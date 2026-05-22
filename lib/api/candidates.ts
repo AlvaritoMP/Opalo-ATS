@@ -393,6 +393,60 @@ export const candidatesApi = {
         });
     },
 
+    /** Candidatos descartados y archivados (dashboard) — sin relaciones */
+    async getDiscardedArchived(): Promise<Candidate[]> {
+        const { data, error } = await supabase
+            .from('candidates')
+            .select('id, name, email, phone, phone2, process_id, stage_id, description, avatar_url, source, salary_expectation, agreed_salary, agreed_salary_in_words, age, dni, linkedin_url, address, province, district, archived, archived_at, discarded, discard_reason, discarded_at, hire_date, google_drive_folder_id, google_drive_folder_name, visible_to_clients, offer_accepted_date, application_started_date, application_completed_date, critical_stage_reviewed_at, created_at')
+            .eq('app_name', APP_NAME)
+            .eq('discarded', true)
+            .eq('archived', true)
+            .order('created_at', { ascending: false })
+            .limit(200);
+
+        if (error) throw error;
+        if (!data?.length) return [];
+
+        return data.map(dbCandidate => ({
+            id: dbCandidate.id,
+            name: dbCandidate.name,
+            email: dbCandidate.email,
+            phone: dbCandidate.phone,
+            phone2: dbCandidate.phone2,
+            processId: dbCandidate.process_id,
+            stageId: dbCandidate.stage_id,
+            description: dbCandidate.description,
+            history: [],
+            avatarUrl: dbCandidate.avatar_url,
+            attachments: [],
+            source: dbCandidate.source,
+            salaryExpectation: dbCandidate.salary_expectation,
+            agreedSalary: dbCandidate.agreed_salary,
+            agreedSalaryInWords: dbCandidate.agreed_salary_in_words,
+            age: dbCandidate.age,
+            dni: dbCandidate.dni,
+            linkedinUrl: dbCandidate.linkedin_url,
+            address: dbCandidate.address,
+            province: dbCandidate.province,
+            district: dbCandidate.district,
+            postIts: [],
+            comments: [],
+            archived: dbCandidate.archived || false,
+            archivedAt: dbCandidate.archived_at,
+            discarded: true,
+            discardReason: dbCandidate.discard_reason || undefined,
+            discardedAt: dbCandidate.discarded_at || undefined,
+            hireDate: dbCandidate.hire_date,
+            googleDriveFolderId: dbCandidate.google_drive_folder_id,
+            googleDriveFolderName: dbCandidate.google_drive_folder_name,
+            visibleToClients: dbCandidate.visible_to_clients ?? false,
+            offerAcceptedDate: dbCandidate.offer_accepted_date,
+            applicationStartedDate: dbCandidate.application_started_date,
+            applicationCompletedDate: dbCandidate.application_completed_date,
+            criticalStageReviewedAt: dbCandidate.critical_stage_reviewed_at,
+        }));
+    },
+
     // Obtener candidatos por proceso
     // OPTIMIZADO EGRESS: Usa getAll con filtro en memoria o consulta optimizada
     async getByProcess(processId: string, includeArchived: boolean = false, includeRelations: boolean = false): Promise<Candidate[]> {

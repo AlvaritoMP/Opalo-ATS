@@ -259,6 +259,19 @@ function processToDb(process: Partial<Process>): any {
 }
 
 export const processesApi = {
+    /** Conteo rápido solo desde Supabase (sin Google Drive) */
+    async getAttachmentsCountDb(processId: string): Promise<number> {
+        const { count, error } = await supabase
+            .from('attachments')
+            .select('*', { count: 'exact', head: true })
+            .eq('process_id', processId)
+            .eq('app_name', APP_NAME)
+            .is('candidate_id', null);
+
+        if (error) throw error;
+        return count || 0;
+    },
+
     // Obtener solo el conteo de attachments de un proceso (sin cargar los datos)
     // Incluye archivos de la base de datos y archivos en Google Drive (excluyendo carpetas de candidatos)
     async getAttachmentsCount(processId: string, processFolderId?: string, googleDriveConfig?: any): Promise<number> {

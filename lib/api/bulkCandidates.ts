@@ -470,7 +470,8 @@ export const bulkCandidatesApi = {
     async patchBulkColumnValues(
         candidateId: string,
         values: Record<string, unknown>,
-        customColumns: CustomColumn[] = []
+        customColumns: CustomColumn[] = [],
+        options?: { replace?: boolean }
     ): Promise<boolean> {
         if (Object.keys(values).length === 0) return true;
         if (!isBulkColumnValuesWriteSupported()) return false;
@@ -478,6 +479,23 @@ export const bulkCandidatesApi = {
         const enriched = customColumns.length > 0
             ? enrichBulkColumnValuesForStorage(values, customColumns)
             : values;
+
+        if (options?.replace) {
+            const { error } = await supabase
+                .from('candidates')
+                .update({ bulk_column_values: enriched })
+                .eq('id', candidateId)
+                .eq('app_name', APP_NAME);
+
+            if (error) {
+                if (isMissingColumnError(error)) {
+                    bulkColumnValuesWriteSupported = false;
+                    return false;
+                }
+                throw error;
+            }
+            return true;
+        }
 
         const { data, error: fetchError } = await supabase
             .from('candidates')
@@ -595,22 +613,26 @@ export const bulkCandidatesApi = {
      */
     async batchSetBulkColumnValues(
         updates: Record<string, Record<string, unknown>>,
-        customColumns: CustomColumn[] = []
+        customColumns: CustomColumn[] = [],
+        options?: { replace?: boolean }
     ): Promise<void> {
         const entries = Object.entries(updates);
         if (entries.length === 0) return;
 
-        const results = await Promise.all(
-            entries.map(([candidateId, values]) =>
-                this.patchBulkColumnValues(candidateId, values, customColumns)
-            )
-        );
-
-        const okCount = results.filter(Boolean).length;
-        if (okCount === 0 && entries.length > 0 && bulkColumnValuesWriteSupported === false) {
-            throw new Error(
-                'No se pudieron guardar los valores de columnas. Ejecute MIGRATION_ADD_BULK_COLUMN_VALUES.sql en Supabase.'
+        const chunkSize = 20;
+        for (let i = 0; i < entries.length; i += chunkSize) {
+            const chunk = entries.slice(i, i + chunkSize);
+            const results = await Promise.all(
+                chunk.map(([candidateId, values]) =>
+                    this.patchBulkColumnValues(candidateId, values, customColumns, options)
+                )
             );
+            const okCount = results.filter(Boolean).length;
+            if (okCount === 0 && chunk.length > 0 && bulkColumnValuesWriteSupported === false) {
+                throw new Error(
+                    'No se pudieron guardar los valores de columnas. Ejecute MIGRATION_ADD_BULK_COLUMN_VALUES.sql en Supabase.'
+                );
+            }
         }
     },
 
