@@ -1,6 +1,5 @@
 // Edge Function para recibir webhooks de Tally y crear candidatos
-import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.49.1'
 import { applyImportTextCaseToCandidate } from '../_shared/importTextCase.ts'
 import { buildTallyCandidateFromSubmission } from '../_shared/tallyMapping.ts'
 
@@ -9,21 +8,49 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
 
-serve(async (req) => {
+function json(body: unknown, status = 200) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+  })
+}
+
+/** Supabase pasa pathname interno (/tally-webhook/id); en BD guardamos la URL pública. */
+function buildPublicWebhookUrl(req: Request): string {
+  const url = new URL(req.url)
+  let path = url.pathname
+  if (!path.includes('/functions/v1/')) {
+    path = `/functions/v1${path.startsWith('/') ? path : `/${path}`}`
+  }
+  return `https://${url.host}${path}`
+}
+
+Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders })
   }
 
+  if (req.method !== 'POST') {
+    return json({ error: 'Method not allowed' }, 405)
+  }
+
   try {
-    const url = new URL(req.url)
     const tallyData = await req.json()
     console.log('📋 Webhook Tally recibido')
 
-    const supabaseUrl = Deno.env.get('SUPABASE_URL')!
-    const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
-    const supabase = createClient(supabaseUrl, supabaseServiceKey)
+    const supabaseUrl = Deno.env.get('SUPABASE_URL')
+    const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
+    if (!supabaseUrl || !supabaseServiceKey) {
+      console.error('❌ Variables de entorno Supabase faltantes')
+      return json({ error: 'Server misconfigured' }, 500)
+    }
 
-    const webhookUrl = `https://${url.host}${url.pathname}`
+    const supabase = createClient(supabaseUrl, supabaseServiceKey, {
+      auth: { persistSession: false, autoRefreshToken: false },
+    })
+
+    const webhookUrl = buildPublicWebhookUrl(req)
+    console.log('🔍 Buscando integración:', webhookUrl)
 
     const { data: integration, error: integrationError } = await supabase
       .from('form_integrations')
@@ -31,12 +58,17 @@ serve(async (req) => {
       .eq('webhook_url', webhookUrl)
       .maybeSingle()
 
-    if (integrationError || !integration) {
-      console.error('❌ Integración no encontrada:', webhookUrl, integrationError)
-      return new Response(
-        JSON.stringify({ error: 'Integration not found', webhookUrl }),
-        { status: integrationError ? 500 : 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    if (integrationError) {
+      console.error('❌ Error consultando integración:', integrationError.message)
+      return json(
+        { error: 'Database query failed', details: integrationError.message, webhookUrl },
+        503
       )
+    }
+
+    if (!integration) {
+      console.error('❌ Integración no encontrada:', webhookUrl)
+      return json({ error: 'Integration not found', webhookUrl }, 404)
     }
 
     const { data: process, error: processError } = await supabase
@@ -47,10 +79,7 @@ serve(async (req) => {
       .maybeSingle()
 
     if (processError || !process) {
-      return new Response(
-        JSON.stringify({ error: 'Process not found' }),
-        { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
+      return json({ error: 'Process not found' }, 404)
     }
 
     const { data: stages, error: stagesError } = await supabase
@@ -62,10 +91,7 @@ serve(async (req) => {
       .limit(1)
 
     if (stagesError || !stages?.length) {
-      return new Response(
-        JSON.stringify({ error: 'Process has no stages' }),
-        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
+      return json({ error: 'Process has no stages' }, 400)
     }
 
     const candidateData = buildTallyCandidateFromSubmission(tallyData, integration, process)
@@ -75,16 +101,13 @@ serve(async (req) => {
     candidateData.stage_id = stages[0].id
     candidateData.app_name = integration.app_name
 
-    console.log('👤 Candidato mapeado:', JSON.stringify(candidateData, null, 2))
+    console.log('👤 Candidato mapeado:', JSON.stringify(candidateData))
 
     if (!candidateData.name && !candidateData.email) {
-      return new Response(
-        JSON.stringify({ error: 'Candidate must have at least name or email' }),
-        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
+      return json({ error: 'Candidate must have at least name or email' }, 400)
     }
 
-    const bulkValues = candidateData.bulk_column_values
+    const bulkValues = candidateData.bulk_column_values as Record<string, unknown> | undefined
     const insertPayload = { ...candidateData }
     delete insertPayload.bulk_column_values
 
@@ -99,10 +122,7 @@ serve(async (req) => {
 
     if (candidateError) {
       console.error('❌ Error creando candidato:', candidateError)
-      return new Response(
-        JSON.stringify({ error: 'Failed to create candidate', details: candidateError.message }),
-        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
+      return json({ error: 'Failed to create candidate', details: candidateError.message }, 500)
     }
 
     if (bulkValues && Object.keys(bulkValues).length > 0) {
@@ -126,15 +146,13 @@ serve(async (req) => {
       app_name: integration.app_name,
     })
 
-    return new Response(
-      JSON.stringify({ success: true, candidateId: candidate.id }),
-      { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-    )
+    console.log('✅ Candidato creado:', candidate.id)
+    return json({ success: true, candidateId: candidate.id })
   } catch (error) {
     console.error('❌ Error procesando webhook:', error)
-    return new Response(
-      JSON.stringify({ error: 'Internal server error', message: (error as Error).message }),
-      { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    return json(
+      { error: 'Internal server error', message: error instanceof Error ? error.message : String(error) },
+      500
     )
   }
 })

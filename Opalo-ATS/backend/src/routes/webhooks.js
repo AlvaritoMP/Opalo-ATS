@@ -99,10 +99,10 @@ router.post('/tally/:webhookId', async (req, res) => {
         }
 
         if (!integration) {
-            console.error(`❌ Integración no encontrada para webhook: ${webhookUrl}`);
+            console.error(`❌ Integración no encontrada para webhook: ${webhookUrlHttps}`)
             return res.status(404).json({ 
                 error: 'Integration not found',
-                webhookUrl 
+                webhookUrl: webhookUrlHttps,
             });
         }
 
