@@ -1,39 +1,55 @@
 import React, { useState, useMemo } from 'react';
 import { useAppState } from '../App';
-import { Briefcase, Users, FileText, CheckCircle, Calendar } from 'lucide-react';
+import { Briefcase, Users, FileText, CheckCircle, Calendar, Grid3x3 } from 'lucide-react';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend, BarChart, CartesianGrid, XAxis, YAxis, Bar } from 'recharts';
+import { Candidate, Process } from '../types';
+
+const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#AF19FF', '#6366f1', '#14b8a6', '#f97316'];
 
 const StatCard: React.FC<{
     icon: React.ElementType;
     title: string;
     value: number | string;
+    subtitle: string;
     color: string;
-}> = ({ icon: Icon, title, value, color }) => (
-    <div className="bg-white p-4 md:p-6 rounded-xl border border-gray-200 shadow-sm flex items-center">
-        <div className={`p-2 md:p-3 rounded-full mr-3 md:mr-4 flex-shrink-0 ${color}`}>
-            <Icon className="w-5 h-5 md:w-6 md:h-6 text-white" />
-        </div>
-        <div className="min-w-0">
-            <p className="text-xs md:text-sm text-gray-500 truncate">{title}</p>
-            <p className="text-xl md:text-2xl font-bold text-gray-800">{value}</p>
+}> = ({ icon: Icon, title, value, subtitle, color }) => (
+    <div className="bg-white p-4 md:p-6 rounded-xl border border-gray-200 shadow-sm">
+        <div className="flex items-start gap-3 md:gap-4">
+            <div className={`p-2 md:p-3 rounded-full flex-shrink-0 ${color}`}>
+                <Icon className="w-5 h-5 md:w-6 md:h-6 text-white" />
+            </div>
+            <div className="min-w-0 flex-1">
+                <p className="text-xs md:text-sm text-gray-500">{title}</p>
+                <p className="text-xl md:text-2xl font-bold text-gray-800">{value}</p>
+                <p className="text-xs text-gray-400 mt-1 leading-snug">{subtitle}</p>
+            </div>
         </div>
     </div>
 );
 
-const ChartContainer: React.FC<{title: string, children: React.ReactNode, hasData: boolean, className?: string}> = ({title, children, hasData, className=""}) => (
+const ChartContainer: React.FC<{
+    title: string;
+    description?: string;
+    children: React.ReactNode;
+    hasData: boolean;
+    className?: string;
+    height?: number;
+}> = ({ title, description, children, hasData, className = '', height = 280 }) => (
     <div className={`bg-white p-4 md:p-6 rounded-xl border border-gray-200 shadow-sm ${className}`}>
-        <h2 className="text-lg md:text-xl font-semibold text-gray-800 mb-3 md:mb-4">{title}</h2>
+        <h2 className="text-lg md:text-xl font-semibold text-gray-800">{title}</h2>
+        {description && <p className="text-xs md:text-sm text-gray-500 mt-1 mb-3">{description}</p>}
+        {!description && <div className="mb-3 md:mb-4" />}
         {hasData ? (
-            <ResponsiveContainer width="100%" height={250}>
+            <ResponsiveContainer width="100%" height={height}>
                 {children}
             </ResponsiveContainer>
         ) : (
-             <div className="flex items-center justify-center h-[250px] text-gray-500 text-sm md:text-base">Sin datos para los filtros seleccionados.</div>
+            <div className="flex items-center justify-center text-gray-500 text-sm md:text-base" style={{ height }}>
+                Sin datos para los filtros seleccionados.
+            </div>
         )}
     </div>
 );
-
-const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#AF19FF'];
 
 const translateSource = (source: string) => {
     switch (source.toLowerCase()) {
@@ -45,130 +61,228 @@ const translateSource = (source: string) => {
     }
 };
 
+const normalizeDistrictName = (raw?: string): string | null => {
+    if (!raw?.trim()) return null;
+    return raw
+        .trim()
+        .replace(/\s+/g, ' ')
+        .split(' ')
+        .map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+        .join(' ');
+};
+
+const isHiredInProcess = (candidate: Candidate, process?: Process): boolean => {
+    if (!process?.stages?.length) return false;
+    const lastStageId = process.stages[process.stages.length - 1].id;
+    return candidate.stageId === lastStageId && !candidate.discarded;
+};
+
+const getStageName = (candidate: Candidate, processes: Process[]): string => {
+    const process = processes.find(p => p.id === candidate.processId);
+    return process?.stages.find(s => s.id === candidate.stageId)?.name || 'Sin etapa';
+};
+
+const truncateLabel = (label: string, max = 28): string =>
+    label.length > max ? `${label.slice(0, max - 1)}…` : label;
+
+const topNWithOthers = (
+    entries: [string, number][],
+    limit: number
+): { name: string; Candidatos: number }[] => {
+    const sorted = [...entries].sort((a, b) => b[1] - a[1]);
+    if (sorted.length <= limit) {
+        return sorted.map(([name, Candidatos]) => ({ name, Candidatos }));
+    }
+    const top = sorted.slice(0, limit);
+    const others = sorted.slice(limit).reduce((sum, [, count]) => sum + count, 0);
+    return [
+        ...top.map(([name, Candidatos]) => ({ name, Candidatos })),
+        { name: 'Otros', Candidatos: others },
+    ];
+};
+
 export const Dashboard: React.FC = () => {
     const { state, getLabel } = useAppState();
     const { processes, candidates: allCandidates, interviewEvents, users } = state;
 
     const [processFilter, setProcessFilter] = useState<string>('all');
+    const [processScopeFilter, setProcessScopeFilter] = useState<'all' | 'bulk' | 'standard'>('all');
     const [dateFilter, setDateFilter] = useState<{ start: string; end: string }>({ start: '', end: '' });
+
+    const scopedProcesses = useMemo(() => {
+        if (processScopeFilter === 'bulk') return processes.filter(p => p.isBulkProcess);
+        if (processScopeFilter === 'standard') return processes.filter(p => !p.isBulkProcess);
+        return processes;
+    }, [processes, processScopeFilter]);
+
+    const processMap = useMemo(() => new Map(processes.map(p => [p.id, p])), [processes]);
 
     const filteredCandidates = useMemo(() => {
         const userRole = state.currentUser?.role;
         const isClientOrViewer = userRole === 'client' || userRole === 'viewer';
-        
+        const scopedProcessIds = new Set(scopedProcesses.map(p => p.id));
+
         return allCandidates.filter(candidate => {
-            // Filtrar por visibilidad según el rol
             if (isClientOrViewer && !candidate.visibleToClients) return false;
-            
+            if (!scopedProcessIds.has(candidate.processId)) return false;
+
             const processMatch = processFilter === 'all' || candidate.processId === processFilter;
-            
-            const applicationDate = new Date(candidate.history[0]?.movedAt);
+
+            const firstMove = candidate.history[0]?.movedAt;
+            if (!firstMove) return processMatch;
+
+            const applicationDate = new Date(firstMove);
             const startDate = dateFilter.start ? new Date(dateFilter.start) : null;
             const endDate = dateFilter.end ? new Date(dateFilter.end) : null;
-            if(startDate) startDate.setHours(0,0,0,0);
-            if(endDate) endDate.setHours(23,59,59,999);
+            if (startDate) startDate.setHours(0, 0, 0, 0);
+            if (endDate) endDate.setHours(23, 59, 59, 999);
 
-            const dateMatch = (!startDate || applicationDate >= startDate) && (!endDate || applicationDate <= endDate);
+            const dateMatch =
+                (!startDate || applicationDate >= startDate) &&
+                (!endDate || applicationDate <= endDate);
 
             return processMatch && dateMatch;
         });
-    }, [allCandidates, processFilter, dateFilter, state.currentUser?.role]);
+    }, [allCandidates, processFilter, dateFilter, scopedProcesses, state.currentUser?.role]);
 
-    const totalCandidates = filteredCandidates.length;
-    const totalProcesses = processes.length; // This stat is not filtered
-    const discardedCandidates = allCandidates.filter(c => c.discarded === true).length; // Candidatos descartados (no filtrado)
-    
-    const hiredCandidates = filteredCandidates.filter(c => {
-        const process = processes.find(p => p.id === c.processId);
-        if (!process || process.stages.length === 0) return false;
-        const lastStageId = process.stages[process.stages.length - 1].id;
-        return c.stageId === lastStageId;
-    }).length;
+    const activeProcesses = scopedProcesses.filter(p => p.status === 'en_proceso');
+    const bulkActiveCount = activeProcesses.filter(p => p.isBulkProcess).length;
+    const standardActiveCount = activeProcesses.length - bulkActiveCount;
+
+    const bulkCandidates = filteredCandidates.filter(c => processMap.get(c.processId)?.isBulkProcess).length;
+    const standardCandidates = filteredCandidates.length - bulkCandidates;
+
+    const discardedCandidates = filteredCandidates.filter(c => c.discarded === true).length;
+    const activeCandidates = filteredCandidates.filter(c => !c.discarded).length;
+
+    const hiredCandidates = filteredCandidates.filter(c =>
+        isHiredInProcess(c, processMap.get(c.processId))
+    ).length;
+
+    const conversionRate = activeCandidates > 0
+        ? Math.round((hiredCandidates / activeCandidates) * 1000) / 10
+        : null;
 
     const candidateSources = useMemo(() => {
         const sourceMap = new Map<string, number>();
         filteredCandidates.forEach(c => {
-            const source = translateSource(c.source || 'Other');
+            const source = translateSource(c.source || 'Otro');
             sourceMap.set(source, (sourceMap.get(source) || 0) + 1);
         });
         return Array.from(sourceMap, ([name, value]) => ({ name, value }));
     }, [filteredCandidates]);
-    
-    const candidateLocations = useMemo(() => {
-        const locationMap = new Map<string, number>();
+
+    const candidateDistricts = useMemo(() => {
+        const districtMap = new Map<string, number>();
         filteredCandidates.forEach(c => {
-            if (c.address) {
-                locationMap.set(c.address, (locationMap.get(c.address) || 0) + 1);
-            }
+            const district = normalizeDistrictName(c.district);
+            const key = district || 'Sin distrito';
+            districtMap.set(key, (districtMap.get(key) || 0) + 1);
         });
-        return Array.from(locationMap, ([name, value]) => ({ name, Candidatos: value }));
+        return topNWithOthers(Array.from(districtMap.entries()), 10);
     }, [filteredCandidates]);
-    
+
+    const candidatesByStage = useMemo(() => {
+        const stageMap = new Map<string, number>();
+        filteredCandidates.forEach(c => {
+            const stageName = getStageName(c, processes);
+            stageMap.set(stageName, (stageMap.get(stageName) || 0) + 1);
+        });
+
+        if (processFilter !== 'all') {
+            const process = processMap.get(processFilter);
+            if (process?.stages?.length) {
+                return process.stages
+                    .map(stage => ({
+                        name: stage.name,
+                        Candidatos: stageMap.get(stage.name) || 0,
+                    }))
+                    .filter(d => d.Candidatos > 0);
+            }
+        }
+
+        return topNWithOthers(Array.from(stageMap.entries()), 12);
+    }, [filteredCandidates, processes, processFilter, processMap]);
+
+    const candidatesByPosition = useMemo(() => {
+        const positionMap = new Map<string, number>();
+        filteredCandidates.forEach(c => {
+            const process = processMap.get(c.processId);
+            const label = process?.title?.trim() || 'Sin puesto asignado';
+            positionMap.set(label, (positionMap.get(label) || 0) + 1);
+        });
+        return topNWithOthers(Array.from(positionMap.entries()), 8);
+    }, [filteredCandidates, processMap]);
+
     const ageDistribution = useMemo(() => {
-        const ageBrackets = { '20-29': 0, '30-39': 0, '40-49': 0, '50+': 0, 'Unknown': 0 };
+        const ageBrackets: Record<string, number> = {
+            '20-29': 0,
+            '30-39': 0,
+            '40-49': 0,
+            '50+': 0,
+            'Sin dato': 0,
+        };
         filteredCandidates.forEach(c => {
             if (c.age) {
                 if (c.age >= 20 && c.age <= 29) ageBrackets['20-29']++;
                 else if (c.age >= 30 && c.age <= 39) ageBrackets['30-39']++;
                 else if (c.age >= 40 && c.age <= 49) ageBrackets['40-49']++;
                 else if (c.age >= 50) ageBrackets['50+']++;
-                else ageBrackets['Unknown']++;
+                else ageBrackets['Sin dato']++;
             } else {
-                 ageBrackets['Unknown']++;
+                ageBrackets['Sin dato']++;
             }
         });
-        return Object.entries(ageBrackets).map(([name, value]) => ({ name, Candidatos: value }));
+        return Object.entries(ageBrackets).map(([name, Candidatos]) => ({ name, Candidatos }));
     }, [filteredCandidates]);
 
     const upcomingInterviews = useMemo(() => {
         const now = new Date();
+        const filteredIds = new Set(filteredCandidates.map(c => c.id));
         return interviewEvents
-            .filter(event => event.start > now)
+            .filter(event => event.start > now && filteredIds.has(event.candidateId))
             .sort((a, b) => a.start.getTime() - b.start.getTime())
-            .slice(0, 4);
-    }, [interviewEvents]);
+            .slice(0, 5);
+    }, [interviewEvents, filteredCandidates]);
 
-    // Indicadores de Eficiencia
     const timeToHire = useMemo(() => {
         const hiredCandidatesWithDates = filteredCandidates
             .filter(c => {
-                const process = processes.find(p => p.id === c.processId);
-                if (!process || !process.stages || process.stages.length === 0) return false;
+                const process = processMap.get(c.processId);
+                if (!process?.stages?.length) return false;
                 const lastStageId = process.stages[process.stages.length - 1]?.id;
                 return c.stageId === lastStageId && (c.offerAcceptedDate || c.hireDate);
             })
             .map(c => {
-                const process = processes.find(p => p.id === c.processId);
+                const process = processMap.get(c.processId);
                 const publishedDate = process?.publishedDate || process?.startDate;
                 const acceptedDate = c.offerAcceptedDate || c.hireDate;
-                
                 if (!publishedDate || !acceptedDate) return null;
-                
                 const published = new Date(publishedDate);
                 const accepted = new Date(acceptedDate);
                 const days = Math.ceil((accepted.getTime() - published.getTime()) / (1000 * 60 * 60 * 24));
                 return days >= 0 ? days : null;
             })
             .filter((days): days is number => days !== null);
-        
+
         if (hiredCandidatesWithDates.length === 0) return null;
         const average = hiredCandidatesWithDates.reduce((sum, days) => sum + days, 0) / hiredCandidatesWithDates.length;
-        return Math.round(average * 10) / 10; // Redondear a 1 decimal
-    }, [filteredCandidates, processes]);
+        return Math.round(average * 10) / 10;
+    }, [filteredCandidates, processMap]);
 
     const timeToFill = useMemo(() => {
-        const filledProcesses = processes
+        const filledProcesses = scopedProcesses
             .filter(p => {
                 if (!p.needIdentifiedDate) return false;
                 const processCandidates = filteredCandidates.filter(c => c.processId === p.id);
-                if (!p.stages || p.stages.length === 0) return false;
+                if (!p.stages?.length) return false;
                 const lastStageId = p.stages[p.stages.length - 1]?.id;
                 const hiredCount = processCandidates.filter(c => c.stageId === lastStageId).length;
                 return hiredCount >= p.vacancies;
             })
             .map(p => {
                 const processCandidates = filteredCandidates.filter(c => c.processId === p.id);
-                if (!p.stages || p.stages.length === 0) return null;
+                if (!p.stages?.length) return null;
                 const lastStageId = p.stages[p.stages.length - 1]?.id;
                 const lastHired = processCandidates
                     .filter(c => c.stageId === lastStageId)
@@ -177,269 +291,374 @@ export const Dashboard: React.FC = () => {
                         const dateB = b.offerAcceptedDate || b.hireDate || '';
                         return dateB.localeCompare(dateA);
                     })[0];
-                
+
                 if (!lastHired || !p.needIdentifiedDate) return null;
-                
+
                 const needDate = new Date(p.needIdentifiedDate);
                 const fillDate = new Date(lastHired.offerAcceptedDate || lastHired.hireDate || '');
                 const days = Math.ceil((fillDate.getTime() - needDate.getTime()) / (1000 * 60 * 60 * 24));
                 return days >= 0 ? days : null;
             })
             .filter((days): days is number => days !== null);
-        
+
         if (filledProcesses.length === 0) return null;
         const average = filledProcesses.reduce((sum, days) => sum + days, 0) / filledProcesses.length;
         return Math.round(average * 10) / 10;
-    }, [filteredCandidates, processes]);
+    }, [filteredCandidates, scopedProcesses]);
 
     const stageDuration = useMemo(() => {
-        const stageDurations: { [stageId: string]: number[] } = {};
-        
+        const stageDurations: Record<string, number[]> = {};
+        const stageNames: Record<string, string> = {};
+
         filteredCandidates.forEach(candidate => {
             if (!candidate.history || candidate.history.length < 2) return;
-            
+
             for (let i = 1; i < candidate.history.length; i++) {
                 const prevStage = candidate.history[i - 1];
                 const currentStage = candidate.history[i];
-                
+
                 const prevDate = new Date(prevStage.movedAt);
                 const currentDate = new Date(currentStage.movedAt);
                 const days = Math.ceil((currentDate.getTime() - prevDate.getTime()) / (1000 * 60 * 60 * 24));
-                
+
                 if (days >= 0) {
-                    if (!stageDurations[prevStage.stageId]) {
-                        stageDurations[prevStage.stageId] = [];
-                    }
+                    if (!stageDurations[prevStage.stageId]) stageDurations[prevStage.stageId] = [];
                     stageDurations[prevStage.stageId].push(days);
+
+                    const process = processMap.get(candidate.processId);
+                    const stageName = process?.stages.find(s => s.id === prevStage.stageId)?.name;
+                    if (stageName) stageNames[prevStage.stageId] = stageName;
                 }
             }
         });
-        
-        const averages: { stageName: string; averageDays: number }[] = [];
-        processes.forEach(process => {
-            if (!process.stages) return;
-            process.stages.forEach(stage => {
-                const durations = stageDurations[stage.id];
-                if (durations && durations.length > 0) {
-                    const average = durations.reduce((sum, days) => sum + days, 0) / durations.length;
-                    averages.push({
-                        stageName: stage.name,
-                        averageDays: Math.round(average * 10) / 10
-                    });
-                }
-            });
-        });
-        
-        return averages;
-    }, [filteredCandidates, processes]);
+
+        const byName = new Map<string, number[]>();
+        for (const [stageId, durations] of Object.entries(stageDurations)) {
+            const name = stageNames[stageId] || stageId;
+            const existing = byName.get(name) || [];
+            byName.set(name, [...existing, ...durations]);
+        }
+
+        return Array.from(byName.entries())
+            .map(([stageName, durations]) => ({
+                name: stageName,
+                dias: Math.round((durations.reduce((s, d) => s + d, 0) / durations.length) * 10) / 10,
+                muestras: durations.length,
+            }))
+            .sort((a, b) => b.dias - a.dias);
+    }, [filteredCandidates, processMap]);
 
     const applicationCompletionRate = useMemo(() => {
         const started = filteredCandidates.filter(c => c.applicationStartedDate).length;
         const completed = filteredCandidates.filter(c => c.applicationCompletedDate).length;
-        
         if (started === 0) return null;
-        const rate = (completed / started) * 100;
-        return Math.round(rate * 10) / 10;
+        return Math.round((completed / started) * 1000) / 10;
     }, [filteredCandidates]);
 
-
-
+    const stageChartHeight = Math.max(280, candidatesByStage.length * 36);
 
     return (
         <div className="p-4 md:p-8 bg-gray-50/50 min-h-full overflow-y-auto">
             <div className="flex justify-between items-center mb-4 md:mb-6">
                 <h1 className="text-2xl md:text-3xl font-bold text-gray-800">{getLabel('sidebar_dashboard', 'Panel')}</h1>
             </div>
-            
-            {/* Filters */}
-            <div className="bg-white p-3 md:p-4 rounded-xl border border-gray-200 shadow-sm mb-6 md:mb-8 flex flex-col md:flex-row md:items-center gap-3 md:gap-4 md:space-x-4">
+
+            <div className="bg-white p-3 md:p-4 rounded-xl border border-gray-200 shadow-sm mb-6 md:mb-8 flex flex-col lg:flex-row lg:flex-wrap lg:items-end gap-3 md:gap-4">
                 <div>
-                    <label htmlFor="processFilter" className="text-sm font-medium text-gray-700">Filtrar por proceso:</label>
-                    <select 
-                        id="processFilter"
-                        value={processFilter}
-                        onChange={(e) => setProcessFilter(e.target.value)}
-                        className="ml-2 border-gray-300 rounded-md shadow-sm"
+                    <label htmlFor="processScopeFilter" className="block text-sm font-medium text-gray-700 mb-1">Tipo de proceso</label>
+                    <select
+                        id="processScopeFilter"
+                        value={processScopeFilter}
+                        onChange={(e) => {
+                            setProcessScopeFilter(e.target.value as 'all' | 'bulk' | 'standard');
+                            setProcessFilter('all');
+                        }}
+                        className="border-gray-300 rounded-md shadow-sm text-sm w-full md:w-auto"
                     >
-                        <option value="all">Todos los procesos</option>
-                        {processes.map(p => <option key={p.id} value={p.id}>{p.title}</option>)}
+                        <option value="all">Todos (regulares + masivos)</option>
+                        <option value="bulk">Solo procesos masivos</option>
+                        <option value="standard">Solo procesos regulares</option>
                     </select>
                 </div>
                 <div>
-                    <label htmlFor="startDate" className="text-sm font-medium text-gray-700">Desde:</label>
-                    <input 
-                        type="date" 
+                    <label htmlFor="processFilter" className="block text-sm font-medium text-gray-700 mb-1">Proceso</label>
+                    <select
+                        id="processFilter"
+                        value={processFilter}
+                        onChange={(e) => setProcessFilter(e.target.value)}
+                        className="border-gray-300 rounded-md shadow-sm text-sm w-full md:w-auto max-w-xs"
+                    >
+                        <option value="all">Todos los procesos</option>
+                        {scopedProcesses.map(p => (
+                            <option key={p.id} value={p.id}>
+                                {p.isBulkProcess ? `[Masivo] ${p.title}` : p.title}
+                            </option>
+                        ))}
+                    </select>
+                </div>
+                <div>
+                    <label htmlFor="startDate" className="block text-sm font-medium text-gray-700 mb-1">Postulación desde</label>
+                    <input
+                        type="date"
                         id="startDate"
                         value={dateFilter.start}
                         onChange={(e) => setDateFilter(prev => ({ ...prev, start: e.target.value }))}
-                        className="ml-2 border-gray-300 rounded-md shadow-sm"
+                        className="border-gray-300 rounded-md shadow-sm text-sm"
                     />
                 </div>
-                 <div>
-                    <label htmlFor="endDate" className="text-sm font-medium text-gray-700">Hasta:</label>
-                    <input 
-                        type="date" 
+                <div>
+                    <label htmlFor="endDate" className="block text-sm font-medium text-gray-700 mb-1">Postulación hasta</label>
+                    <input
+                        type="date"
                         id="endDate"
                         value={dateFilter.end}
                         onChange={(e) => setDateFilter(prev => ({ ...prev, end: e.target.value }))}
-                        className="ml-2 border-gray-300 rounded-md shadow-sm"
+                        className="border-gray-300 rounded-md shadow-sm text-sm"
                     />
                 </div>
             </div>
 
-
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-                <StatCard icon={Briefcase} title="Procesos activos" value={totalProcesses} color="bg-blue-500" />
-                <StatCard icon={Users} title="Candidatos filtrados" value={totalCandidates} color="bg-green-500" />
-                <StatCard icon={FileText} title="Descartados" value={discardedCandidates} color="bg-purple-500" />
-                <StatCard icon={CheckCircle} title="Contratados filtrados" value={hiredCandidates} color="bg-teal-500" />
+                <StatCard
+                    icon={Briefcase}
+                    title="Procesos activos"
+                    value={activeProcesses.length}
+                    subtitle={`${bulkActiveCount} masivos · ${standardActiveCount} regulares en curso`}
+                    color="bg-blue-500"
+                />
+                <StatCard
+                    icon={Users}
+                    title="Candidatos en alcance"
+                    value={filteredCandidates.length}
+                    subtitle={`${bulkCandidates} en masivos · ${standardCandidates} en regulares · ${activeCandidates} activos`}
+                    color="bg-green-500"
+                />
+                <StatCard
+                    icon={FileText}
+                    title="Descartados"
+                    value={discardedCandidates}
+                    subtitle={
+                        filteredCandidates.length > 0
+                            ? `${Math.round((discardedCandidates / filteredCandidates.length) * 1000) / 10}% del total filtrado`
+                            : 'Sin candidatos en el filtro actual'
+                    }
+                    color="bg-purple-500"
+                />
+                <StatCard
+                    icon={CheckCircle}
+                    title="Contratados"
+                    value={hiredCandidates}
+                    subtitle={
+                        conversionRate !== null
+                            ? `${conversionRate}% de conversión sobre candidatos activos`
+                            : 'Sin candidatos activos en el filtro'
+                    }
+                    color="bg-teal-500"
+                />
             </div>
 
-            {/* Indicadores de Eficiencia */}
             <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm mb-8">
-                <h2 className="text-xl font-semibold text-gray-800 mb-4">Indicadores de Eficiencia</h2>
+                <h2 className="text-xl font-semibold text-gray-800 mb-1">Indicadores de Eficiencia</h2>
+                <p className="text-sm text-gray-500 mb-4">Métricas calculadas sobre los candidatos y procesos del filtro actual.</p>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
                     <div className="p-4 bg-blue-50 rounded-lg border border-blue-200">
                         <h3 className="text-sm font-medium text-blue-800 mb-1">Time to Hire</h3>
-                        <p className="text-2xl font-bold text-blue-900">
-                            {timeToHire !== null ? `${timeToHire} días` : 'N/D'}
-                        </p>
-                        <p className="text-xs text-blue-600 mt-1">Promedio desde publicación hasta aceptación</p>
+                        <p className="text-2xl font-bold text-blue-900">{timeToHire !== null ? `${timeToHire} días` : 'N/D'}</p>
+                        <p className="text-xs text-blue-600 mt-1">Promedio desde publicación del proceso hasta aceptación de oferta</p>
                     </div>
                     <div className="p-4 bg-green-50 rounded-lg border border-green-200">
                         <h3 className="text-sm font-medium text-green-800 mb-1">Time to Fill</h3>
-                        <p className="text-2xl font-bold text-green-900">
-                            {timeToFill !== null ? `${timeToFill} días` : 'N/D'}
-                        </p>
-                        <p className="text-xs text-green-600 mt-1">Promedio desde necesidad hasta llenado</p>
+                        <p className="text-2xl font-bold text-green-900">{timeToFill !== null ? `${timeToFill} días` : 'N/D'}</p>
+                        <p className="text-xs text-green-600 mt-1">Promedio desde identificación de necesidad hasta cubrir vacantes</p>
                     </div>
                     <div className="p-4 bg-purple-50 rounded-lg border border-purple-200">
                         <h3 className="text-sm font-medium text-purple-800 mb-1">Tasa de Finalización</h3>
                         <p className="text-2xl font-bold text-purple-900">
                             {applicationCompletionRate !== null ? `${applicationCompletionRate}%` : 'N/D'}
                         </p>
-                        <p className="text-xs text-purple-600 mt-1">% de solicitudes completadas</p>
+                        <p className="text-xs text-purple-600 mt-1">Postulaciones completadas vs. iniciadas (formularios Tally)</p>
                     </div>
                     <div className="p-4 bg-orange-50 rounded-lg border border-orange-200">
-                        <h3 className="text-sm font-medium text-orange-800 mb-1">Etapas con datos</h3>
+                        <h3 className="text-sm font-medium text-orange-800 mb-1">Tasa de Conversión</h3>
                         <p className="text-2xl font-bold text-orange-900">
-                            {stageDuration.length}
+                            {conversionRate !== null ? `${conversionRate}%` : 'N/D'}
                         </p>
-                        <p className="text-xs text-orange-600 mt-1">Etapas con duración calculada</p>
+                        <p className="text-xs text-orange-600 mt-1">Contratados sobre candidatos activos (no descartados)</p>
                     </div>
                 </div>
-                
-                {/* Duración por Etapa */}
+
                 {stageDuration.length > 0 && (
                     <div className="mt-6">
-                        <h3 className="text-lg font-semibold text-gray-800 mb-3">Duración Promedio por Etapa</h3>
-                        <div className="space-y-2">
-                            {stageDuration.map((stage, index) => (
-                                <div key={index} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-                                    <span className="font-medium text-gray-700">{stage.stageName}</span>
-                                    <span className="text-lg font-bold text-gray-900">{stage.averageDays} días</span>
-                                </div>
-                            ))}
-                        </div>
+                        <h3 className="text-lg font-semibold text-gray-800 mb-1">Duración promedio por etapa</h3>
+                        <p className="text-sm text-gray-500 mb-3">Días que los candidatos permanecen en cada etapa antes de avanzar.</p>
+                        <ResponsiveContainer width="100%" height={Math.max(200, stageDuration.length * 40)}>
+                            <BarChart data={stageDuration} layout="vertical" margin={{ top: 5, right: 30, left: 10, bottom: 5 }}>
+                                <CartesianGrid strokeDasharray="3 3" />
+                                <XAxis type="number" unit=" d" />
+                                <YAxis type="category" dataKey="name" width={120} tick={{ fontSize: 12 }} />
+                                <Tooltip
+                                    formatter={(value: number, _name, item) => [
+                                        `${value} días (${item.payload.muestras} movimientos)`,
+                                        'Promedio',
+                                    ]}
+                                />
+                                <Bar dataKey="dias" fill="#f97316" radius={[0, 4, 4, 0]} />
+                            </BarChart>
+                        </ResponsiveContainer>
                     </div>
                 )}
             </div>
 
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 mb-8">
-                 <div className="lg:col-span-2 bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
-                    <h2 className="text-xl font-semibold text-gray-800 mb-4">{getLabel('dashboard_recent_candidates', 'Candidatos recientes')}</h2>
-                    <div className="space-y-3">
-                        {filteredCandidates.slice(-5).reverse().map(candidate => {
-                            const process = processes.find(p => p.id === candidate.processId);
-                            return (
-                                <div key={candidate.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-                                    <div>
-                                        <p className="font-medium text-gray-900">{candidate.name}</p>
-                                        <p className="text-sm text-gray-500">{process?.title || 'Sin proceso'}</p>
-                                    </div>
-                                    <span className="text-xs text-gray-400">
-                                        {candidate.history.length > 0 && new Date(candidate.history[0].movedAt).toLocaleDateString()}
-                                    </span>
-                                </div>
-                            );
-                        })}
-                        {filteredCandidates.length === 0 && <p className="text-center text-gray-500 py-8">No hay candidatos recientes que coincidan con los filtros.</p>}
-                    </div>
-                </div>
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
+                <ChartContainer
+                    title="Candidatos por etapa"
+                    description={
+                        processFilter !== 'all'
+                            ? 'Distribución actual según el pipeline del proceso seleccionado.'
+                            : 'Agrupado por nombre de etapa. Al filtrar un proceso se respeta el orden del pipeline.'
+                    }
+                    hasData={candidatesByStage.some(d => d.Candidatos > 0)}
+                    height={stageChartHeight}
+                >
+                    <BarChart data={candidatesByStage} layout="vertical" margin={{ top: 5, right: 20, left: 10, bottom: 5 }}>
+                        <CartesianGrid strokeDasharray="3 3" />
+                        <XAxis type="number" allowDecimals={false} />
+                        <YAxis type="category" dataKey="name" width={130} tick={{ fontSize: 12 }} />
+                        <Tooltip formatter={(value: number) => [`${value} candidato${value !== 1 ? 's' : ''}`, 'Total']} />
+                        <Bar dataKey="Candidatos" fill="#6366f1" radius={[0, 4, 4, 0]} />
+                    </BarChart>
+                </ChartContainer>
 
-                <ChartContainer title={getLabel('dashboard_candidate_source', 'Fuentes de candidatos')} hasData={candidateSources.length > 0} className="lg:col-span-1">
+                <ChartContainer
+                    title={getLabel('dashboard_candidate_source', 'Fuentes de candidatos')}
+                    description="Origen de postulación de los candidatos en el filtro actual."
+                    hasData={candidateSources.length > 0}
+                >
                     <PieChart>
                         <Pie
                             data={candidateSources}
                             cx="50%"
                             cy="50%"
                             labelLine={false}
-                            outerRadius={80}
+                            outerRadius={90}
                             fill="#8884d8"
                             dataKey="value"
                             nameKey="name"
-                            label={({ name, percent }) => `${(percent * 100).toFixed(0)}%`}
+                            label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
                         >
-                            {candidateSources.map((entry, index) => (
+                            {candidateSources.map((_entry, index) => (
                                 <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
                             ))}
                         </Pie>
-                        <Tooltip />
+                        <Tooltip formatter={(value: number, name: string) => [`${value} candidatos`, name]} />
                         <Legend />
                     </PieChart>
                 </ChartContainer>
             </div>
-            
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                <ChartContainer title={getLabel('dashboard_candidate_locations', 'Ubicación de candidatos')} hasData={candidateLocations.length > 0}>
-                    <BarChart data={candidateLocations} layout="vertical" margin={{ top: 5, right: 20, left: 20, bottom: 5 }}>
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
+                <ChartContainer
+                    title="Candidatos por puesto"
+                    description="Cantidad de candidatos según el proceso o puesto al que postularon (incluye procesos masivos)."
+                    hasData={candidatesByPosition.some(d => d.Candidatos > 0)}
+                    height={Math.max(280, candidatesByPosition.length * 44)}
+                >
+                    <BarChart data={candidatesByPosition} layout="vertical" margin={{ top: 5, right: 20, left: 10, bottom: 5 }}>
                         <CartesianGrid strokeDasharray="3 3" />
-                        <XAxis type="number" />
-                        <YAxis type="category" dataKey="name" width={100} />
-                        <Tooltip />
-                        <Bar dataKey="Candidatos" fill="#8884d8" />
+                        <XAxis type="number" allowDecimals={false} />
+                        <YAxis
+                            type="category"
+                            dataKey="name"
+                            width={150}
+                            tick={{ fontSize: 11 }}
+                            tickFormatter={(v: string) => truncateLabel(v, 22)}
+                        />
+                        <Tooltip formatter={(value: number) => [`${value} candidato${value !== 1 ? 's' : ''}`, 'Total']} />
+                        <Bar dataKey="Candidatos" fill="#0ea5e9" radius={[0, 4, 4, 0]} />
                     </BarChart>
                 </ChartContainer>
-                
-                <ChartContainer title={getLabel('dashboard_age_distribution', 'Distribución por edad')} hasData={ageDistribution.some(d => d.Candidatos > 0)}>
-                    <BarChart data={ageDistribution} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
+
+                <ChartContainer
+                    title={getLabel('dashboard_age_distribution', 'Distribución por edad')}
+                    description="Rangos etarios de los candidatos filtrados."
+                    hasData={ageDistribution.some(d => d.Candidatos > 0)}
+                >
+                    <BarChart data={ageDistribution} margin={{ top: 10, right: 20, left: 10, bottom: 5 }}>
                         <CartesianGrid strokeDasharray="3 3" />
                         <XAxis dataKey="name" />
-                        <YAxis />
-                        <Tooltip />
-                        <Bar dataKey="Candidatos" fill="#82ca9d" />
+                        <YAxis allowDecimals={false} />
+                        <Tooltip formatter={(value: number) => [`${value} candidato${value !== 1 ? 's' : ''}`, 'Total']} />
+                        <Bar dataKey="Candidatos" fill="#82ca9d" radius={[4, 4, 0, 0]} />
                     </BarChart>
                 </ChartContainer>
             </div>
-            
-            <div className="mt-8">
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
+                <ChartContainer
+                    title="Candidatos por distrito"
+                    description="Solo se considera el campo distrito del candidato (no direcciones). Muestra los 10 distritos con más postulantes."
+                    hasData={candidateDistricts.some(d => d.Candidatos > 0 && d.name !== 'Sin distrito') || candidateDistricts.some(d => d.name === 'Sin distrito' && d.Candidatos > 0)}
+                    height={Math.max(280, candidateDistricts.length * 36)}
+                >
+                    <BarChart data={candidateDistricts} layout="vertical" margin={{ top: 5, right: 20, left: 10, bottom: 5 }}>
+                        <CartesianGrid strokeDasharray="3 3" />
+                        <XAxis type="number" allowDecimals={false} />
+                        <YAxis type="category" dataKey="name" width={130} tick={{ fontSize: 12 }} />
+                        <Tooltip formatter={(value: number) => [`${value} candidato${value !== 1 ? 's' : ''}`, 'Total']} />
+                        <Bar dataKey="Candidatos" fill="#9333ea" radius={[0, 4, 4, 0]} />
+                    </BarChart>
+                </ChartContainer>
+
                 <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
-                    <h2 className="text-xl font-semibold text-gray-800 mb-4 flex items-center"><Calendar className="w-5 h-5 mr-3 text-primary-500" /> {getLabel('dashboard_upcoming_interviews', 'Próximas entrevistas')}</h2>
+                    <h2 className="text-xl font-semibold text-gray-800 mb-1 flex items-center">
+                        <Calendar className="w-5 h-5 mr-2 text-primary-500" />
+                        {getLabel('dashboard_upcoming_interviews', 'Próximas entrevistas')}
+                    </h2>
+                    <p className="text-sm text-gray-500 mb-4">Entrevistas programadas de candidatos incluidos en el filtro actual.</p>
                     <div className="space-y-3">
                         {upcomingInterviews.length > 0 ? (
                             upcomingInterviews.map(event => {
                                 const candidate = allCandidates.find(c => c.id === event.candidateId);
+                                const process = candidate ? processMap.get(candidate.processId) : undefined;
                                 const interviewer = users.find(u => u.id === event.interviewerId);
                                 return (
                                     <div key={event.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-                                        <div>
-                                            <p className="font-medium text-gray-900">{candidate?.name || 'Candidato desconocido'}</p>
-                                            <p className="text-sm text-gray-500">con {interviewer?.name || 'Entrevistador desconocido'}</p>
+                                        <div className="min-w-0">
+                                            <p className="font-medium text-gray-900 truncate">{candidate?.name || 'Candidato desconocido'}</p>
+                                            <p className="text-sm text-gray-500 truncate">
+                                                {process?.title || 'Sin proceso'} · con {interviewer?.name || 'Entrevistador'}
+                                            </p>
                                         </div>
                                         <div className="text-right flex-shrink-0 ml-4">
-                                            <p className="text-sm font-medium text-gray-700">{event.start.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })}</p>
-                                            <p className="text-xs text-gray-500">{event.start.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</p>
+                                            <p className="text-sm font-medium text-gray-700">
+                                                {event.start.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })}
+                                            </p>
+                                            <p className="text-xs text-gray-500">
+                                                {event.start.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                            </p>
                                         </div>
                                     </div>
                                 );
                             })
                         ) : (
-                            <p className="text-center text-gray-500 py-8">No hay entrevistas próximas programadas.</p>
+                            <p className="text-center text-gray-500 py-8">No hay entrevistas próximas para los candidatos filtrados.</p>
                         )}
                     </div>
                 </div>
             </div>
 
+            {(processScopeFilter === 'bulk' || bulkCandidates > 0) && (
+                <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-4 flex items-start gap-3">
+                    <Grid3x3 className="w-5 h-5 text-indigo-600 flex-shrink-0 mt-0.5" />
+                    <div>
+                        <p className="text-sm font-medium text-indigo-900">Procesos masivos incluidos en el análisis</p>
+                        <p className="text-xs text-indigo-700 mt-1">
+                            {bulkCandidates} candidato{bulkCandidates !== 1 ? 's' : ''} de procesos masivos en el filtro actual.
+                            Usa el filtro &quot;Solo procesos masivos&quot; para analizar únicamente reclutamiento de alto volumen.
+                        </p>
+                    </div>
+                </div>
+            )}
         </div>
     );
 };
