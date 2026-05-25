@@ -375,12 +375,12 @@ export const BASE_COLUMNS: BaseColumn[] = [
     { id: 'scoreIa', label: 'Score IA' },
     { id: 'status', label: 'Status' },
     { id: 'phone', label: 'Teléfono', importKey: 'phone' },
+    { id: 'contact', label: 'Contacto' },
     { id: 'source', label: 'Fuente', importKey: 'source' },
     { id: 'province', label: 'Provincia', importKey: 'province' },
     { id: 'district', label: 'Distrito', importKey: 'district' },
     { id: 'createdAt', label: 'Fecha creación' },
     { id: 'lastInteraction', label: 'Última Interacción' },
-    { id: 'contact', label: 'Contacto' },
     { id: 'nextInterview', label: 'Próxima Entrevista' },
     { id: 'schedule', label: 'Agendar' },
     { id: 'stage', label: 'Etapa' },
@@ -398,12 +398,12 @@ export const COLUMN_WIDTHS: Record<string, number> = {
     scoreIa: 64,
     status: 72,
     phone: 96,
+    contact: 128,
     source: 88,
     province: 88,
     district: 88,
     createdAt: 120,
     lastInteraction: 120,
-    contact: 72,
     nextInterview: 100,
     schedule: 56,
     stage: 120,
@@ -412,16 +412,27 @@ export const COLUMN_WIDTHS: Record<string, number> = {
 export const COMPACT_TD_CLASS = 'px-1.5 py-0.5 text-xs text-gray-700 whitespace-nowrap leading-tight';
 export const COMPACT_TH_CLASS = 'px-1.5 py-1 text-left text-xs font-medium text-gray-500 uppercase tracking-wide whitespace-nowrap';
 
-export function getColumnWidth(colId: string): number {
+export function getColumnWidth(colId: string, overrides?: Record<string, number>): number {
+    if (overrides?.[colId] != null) return overrides[colId];
     if (colId.startsWith('custom_')) return 100;
     return COLUMN_WIDTHS[colId] ?? 96;
+}
+
+export function getColumnWidthStyle(colId: string, overrides?: Record<string, number>): {
+    width: number;
+    minWidth: number;
+    maxWidth: number;
+} {
+    const w = getColumnWidth(colId, overrides);
+    return { width: w, minWidth: w, maxWidth: w };
 }
 
 /** Calcula `left` para position:sticky. null = no sticky */
 export function getStickyLeftOffset(
     target: 'checkbox' | string,
     visibleColumns: string[],
-    pinnedColumns: string[]
+    pinnedColumns: string[],
+    columnWidthOverrides?: Record<string, number>
 ): number | null {
     if (target === 'checkbox') return 0;
     if (!pinnedColumns.includes(target)) return null;
@@ -430,7 +441,7 @@ export function getStickyLeftOffset(
     for (const colId of visibleColumns) {
         if (colId === target) break;
         if (pinnedColumns.includes(colId)) {
-            left += getColumnWidth(colId);
+            left += getColumnWidth(colId, columnWidthOverrides);
         }
     }
     return left;
@@ -441,14 +452,16 @@ export function getStickyColumnStyle(
     visibleColumns: string[],
     pinnedColumns: string[],
     isHeader: boolean,
-    bgColor?: string
-): { position: 'sticky'; left: number; top?: number; zIndex: number; minWidth: number; maxWidth: number; backgroundColor: string; boxShadow?: string } | undefined {
-    const left = getStickyLeftOffset(target, visibleColumns, pinnedColumns);
+    bgColor?: string,
+    columnWidthOverrides?: Record<string, number>
+): { position: 'sticky'; left: number; top?: number; zIndex: number; minWidth: number; maxWidth: number; width: number; backgroundColor: string; boxShadow?: string } | undefined {
+    const left = getStickyLeftOffset(target, visibleColumns, pinnedColumns, columnWidthOverrides);
     if (left === null && target !== 'checkbox') return undefined;
     const offset = target === 'checkbox' ? 0 : left!;
     const isPinned = target === 'checkbox' || pinnedColumns.includes(target);
     if (!isPinned && target !== 'checkbox') return undefined;
 
+    const w = target === 'checkbox' ? CHECKBOX_COL_WIDTH : getColumnWidth(target, columnWidthOverrides);
     return {
         position: 'sticky',
         left: offset,
@@ -456,8 +469,9 @@ export function getStickyColumnStyle(
         zIndex: isHeader
             ? (target === 'checkbox' ? 40 : 35)
             : (target === 'checkbox' ? 20 : 15),
-        minWidth: target === 'checkbox' ? CHECKBOX_COL_WIDTH : getColumnWidth(target),
-        maxWidth: target === 'checkbox' ? CHECKBOX_COL_WIDTH : getColumnWidth(target),
+        width: w,
+        minWidth: w,
+        maxWidth: w,
         backgroundColor: bgColor ?? (isHeader ? '#f9fafb' : '#ffffff'),
         boxShadow: isPinned && (target !== 'checkbox' || pinnedColumns.length > 0)
             ? '2px 0 4px -2px rgba(0,0,0,0.12)'

@@ -1,4 +1,5 @@
 -- Crear políticas más permisivas que permitan acceso al rol anon
+-- ⚠️ DEPRECADO — Usar RLS_OPALO_ATS_DEFINITIVO.sql (ver RLS_POLITICA.md)
 -- Ejecuta este script en Supabase SQL Editor
 
 -- ============================================

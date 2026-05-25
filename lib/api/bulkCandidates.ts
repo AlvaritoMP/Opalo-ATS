@@ -11,12 +11,16 @@ import {
     repairTextCaseColumnValues,
 } from '../bulkTableColumns';
 import type { BulkProcessConfig } from '../../types';
+import type { ContactStatus } from '../contactTracking';
+import { normalizeContactStatus } from '../contactTracking';
 
 /** Select mínimo — siempre disponible */
 const BULK_SELECT_BASE =
     'id, name, email, phone, dni, age, source, province, district, score_ia, metadata_ia, stage_id, process_id, last_whatsapp_interaction_at';
 
-const BULK_SELECT_WITH_CREATED = `${BULK_SELECT_BASE}, created_at`;
+const BULK_SELECT_WITH_CONTACT = `${BULK_SELECT_BASE}, contact_status, contact_attempt_count, contact_last_attempt_at, contact_last_user_id, contact_last_user_name`;
+
+const BULK_SELECT_WITH_CREATED = `${BULK_SELECT_WITH_CONTACT}, created_at`;
 const BULK_SELECT_FULL = `${BULK_SELECT_WITH_CREATED}, bulk_column_values`;
 
 /** Cache del select que funcionó en este entorno (evita reintentos en cada página) */
@@ -42,7 +46,7 @@ function isNotFoundError(error: { message?: string; code?: string } | null): boo
 
 function getBulkSelectCandidates(): string[] {
     if (cachedBulkSelect) return [cachedBulkSelect];
-    return [BULK_SELECT_FULL, BULK_SELECT_WITH_CREATED, BULK_SELECT_BASE];
+    return [BULK_SELECT_FULL, BULK_SELECT_WITH_CREATED, BULK_SELECT_WITH_CONTACT, BULK_SELECT_BASE];
 }
 
 function mapBulkCandidateRow(
@@ -65,6 +69,11 @@ function mapBulkCandidateRow(
         stageId: c.stage_id as string,
         processId: c.process_id as string,
         lastWhatsAppInteractionAt: (c.last_whatsapp_interaction_at as string) || undefined,
+        contactStatus: normalizeContactStatus(c.contact_status as string),
+        contactAttemptCount: (c.contact_attempt_count as number) ?? 0,
+        contactLastAttemptAt: (c.contact_last_attempt_at as string) || undefined,
+        contactLastUserId: (c.contact_last_user_id as string) || undefined,
+        contactLastUserName: (c.contact_last_user_name as string) || undefined,
         createdAt: (c.created_at as string) || undefined,
         nextInterviewAt: nextInterview?.start || undefined,
         nextInterviewerId: nextInterview?.interviewerId || undefined,
@@ -95,6 +104,11 @@ export interface BulkCandidate {
     stageId: string;
     processId: string;
     lastWhatsAppInteractionAt?: string; // Última interacción (editable manualmente)
+    contactStatus?: ContactStatus;
+    contactAttemptCount?: number;
+    contactLastAttemptAt?: string;
+    contactLastUserId?: string;
+    contactLastUserName?: string;
     createdAt?: string;
     nextInterviewAt?: string; // Fecha/hora de la próxima entrevista
     nextInterviewerId?: string; // ID del entrevistador de la próxima entrevista

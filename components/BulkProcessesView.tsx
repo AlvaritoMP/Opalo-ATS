@@ -2,6 +2,10 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useAppState } from '../App';
 import { bulkCandidatesApi, BulkCandidate } from '../lib/api/bulkCandidates';
 import { bulkProcessActivityApi, BulkActivityActionType } from '../lib/api/bulkProcessActivity';
+import { contactTrackingApi } from '../lib/api/contactTracking';
+import { supabase } from '../lib/supabase';
+import { normalizeContactStatus, isContactCooldownActive } from '../lib/contactTracking';
+import type { ContactStatus } from '../lib/contactTracking';
 import { processesApi } from '../lib/api/processes';
 import { useDebouncedValue } from '../lib/useDebouncedValue';
 import { Check, X, Loader2, Send, Archive, Search, ChevronDown, ChevronUp, Plus, Edit, Trash2, ArrowLeft, MessageCircle, Phone, Upload, Download, Filter, Mail, Calendar, Settings, ArrowUp, ArrowDown, Pin, FileText, BookOpen, Paperclip, ClipboardList, UserPlus, RefreshCw, HardDrive, CaseSensitive } from 'lucide-react';
@@ -45,6 +49,8 @@ import {
     COMPACT_TD_CLASS,
     COMPACT_TH_CLASS,
     getStickyColumnStyle,
+    getColumnWidth,
+    getColumnWidthStyle,
     CHECKBOX_COL_WIDTH,
 } from '../lib/bulkTableColumns';
 import { getStageSelectClass } from '../lib/stageColors';
@@ -71,6 +77,7 @@ import { BulkProcessCard } from './BulkProcessCard';
 import { BulkProcessAttachmentsModal } from './BulkProcessAttachmentsModal';
 import { BulkTableExportModal } from './BulkTableExportModal';
 import { BulkProcessActivityLog } from './BulkProcessActivityLog';
+import { BulkContactStatusCell } from './BulkContactStatusCell';
 
 interface BulkProcessesViewProps {}
 
@@ -91,6 +98,30 @@ const getCellFromElement = (el: EventTarget | null): CellCoord | null => {
     if (!candidateId || !colId) return null;
     return { candidateId, colId };
 };
+
+const MIN_BULK_COL_WIDTH = 48;
+const MAX_BULK_COL_WIDTH = 600;
+
+const BulkTh: React.FC<{
+    colId: string;
+    style?: React.CSSProperties;
+    headerProps: React.ThHTMLAttributes<HTMLTableCellElement>;
+    onResizeStart: (e: React.MouseEvent, colId: string) => void;
+    children: React.ReactNode;
+}> = ({ colId, style, headerProps, onResizeStart, children }) => (
+    <th {...headerProps} style={style} className={`${headerProps.className ?? ''} relative`.trim()}>
+        {children}
+        <div
+            role="separator"
+            aria-orientation="vertical"
+            aria-label="Redimensionar columna"
+            className="absolute top-0 right-0 w-1.5 h-full cursor-col-resize hover:bg-primary-400/80 active:bg-primary-500 z-30 touch-none"
+            onMouseDown={(e) => onResizeStart(e, colId)}
+            onClick={(e) => e.stopPropagation()}
+            onDragStart={(e) => e.preventDefault()}
+        />
+    </th>
+);
 
 // Drawer lateral para mostrar detalles del candidato
 const CandidateDrawer: React.FC<{
@@ -407,6 +438,9 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
     const [showColumnConfig, setShowColumnConfig] = useState(false);
     const [hiddenColumns, setHiddenColumns] = useState<string[]>([]);
     const [pinnedColumns, setPinnedColumns] = useState<string[]>(['name']);
+    const [columnWidths, setColumnWidths] = useState<Record<string, number>>({});
+    const columnWidthsRef = useRef<Record<string, number>>({});
+    const resizeSessionRef = useRef<{ colId: string; startX: number; startWidth: number } | null>(null);
     const [columnOrder, setColumnOrder] = useState<string[]>(DEFAULT_COLUMN_ORDER);
     const [draggedColumn, setDraggedColumn] = useState<string | null>(null);
     const [columnValues, setColumnValues] = useState<Record<string, Record<string, any>>>({});
@@ -576,6 +610,9 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
         setCustomColumns(cols);
         setHiddenColumns(config?.hiddenColumns || []);
         setPinnedColumns(config?.pinnedColumns?.length ? config.pinnedColumns : ['name']);
+        const savedWidths = config?.columnWidths || {};
+        setColumnWidths(savedWidths);
+        columnWidthsRef.current = savedWidths;
         setColumnOrder(resolveColumnOrder(config, cols));
         setColumnFilters({});
         columnValuesMigratedRef.current = null;
@@ -792,6 +829,50 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
             if (!cancelled) await loadCandidates(0, true);
         })();
         return () => { cancelled = true; };
+    }, [selectedProcess]);
+
+    // Sincronizar semáforo de contacto entre reclutadores en la misma lista
+    useEffect(() => {
+        if (!selectedProcess) return;
+
+        const patchFromRow = (row: Record<string, unknown>) => {
+            const id = row.id as string;
+            if (!id) return;
+            setCandidates(prev =>
+                prev.map(c =>
+                    c.id === id
+                        ? {
+                              ...c,
+                              contactStatus: normalizeContactStatus(row.contact_status as string),
+                              contactAttemptCount: (row.contact_attempt_count as number) ?? 0,
+                              contactLastAttemptAt: (row.contact_last_attempt_at as string) || undefined,
+                              contactLastUserId: (row.contact_last_user_id as string) || undefined,
+                              contactLastUserName: (row.contact_last_user_name as string) || undefined,
+                          }
+                        : c
+                )
+            );
+        };
+
+        const channel = supabase
+            .channel(`bulk-contact-${selectedProcess}`)
+            .on(
+                'postgres_changes',
+                {
+                    event: 'UPDATE',
+                    schema: 'public',
+                    table: 'candidates',
+                    filter: `process_id=eq.${selectedProcess}`,
+                },
+                (payload) => {
+                    if (payload.new) patchFromRow(payload.new as Record<string, unknown>);
+                }
+            )
+            .subscribe();
+
+        return () => {
+            void supabase.removeChannel(channel);
+        };
     }, [selectedProcess]);
 
     const prevProcessForFilterRef = useRef<string | null>(null);
@@ -1059,10 +1140,76 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
         }
     }, [selectedIds, candidates, state.settings, loadCandidates, currentPage, actions, logActivity]);
 
-    const handleWhatsAppClick = useCallback((candidateId: string, phone: string) => {
-        const cleanPhone = phone.replace(/[^\d]/g, '');
+    const handleContactSummaryChange = useCallback(
+        (
+            candidateId: string,
+            candidateName: string | undefined,
+            summary: {
+                status: ContactStatus;
+                attemptCount: number;
+                lastAttemptAt?: string;
+                lastUserName?: string;
+            },
+            actionType: 'contact_attempt' | 'contact_status'
+        ) => {
+            applyOptimisticUpdate(candidateId, {
+                contactStatus: summary.status,
+                contactAttemptCount: summary.attemptCount,
+                contactLastAttemptAt: summary.lastAttemptAt,
+                contactLastUserName: summary.lastUserName,
+            });
+            logActivity(actionType, {
+                candidateId,
+                candidateName,
+                fieldName: 'Contacto',
+                newValue: `${summary.status} (${summary.attemptCount} intentos)`,
+            });
+        },
+        [applyOptimisticUpdate, logActivity]
+    );
+
+    const handleWhatsAppClick = useCallback(async (candidate: BulkCandidate) => {
+        if (!candidate.phone || !process?.id) return;
+        const cleanPhone = candidate.phone.replace(/[^\d]/g, '');
         window.open(`https://wa.me/${cleanPhone}`, '_blank', 'noopener,noreferrer');
-    }, []);
+
+        const now = new Date().toISOString();
+        applyOptimisticUpdate(candidate.id, { lastWhatsAppInteractionAt: now });
+        void bulkCandidatesApi.recordWhatsAppInteraction(candidate.id).catch(() => {});
+
+        try {
+            const summary = await contactTrackingApi.recordAttempt({
+                candidateId: candidate.id,
+                processId: process.id,
+                channel: 'whatsapp',
+                outcome: 'no_response',
+                userId: state.currentUser?.id,
+                userName: state.currentUser?.name || state.currentUser?.email,
+            });
+            if (summary) {
+                handleContactSummaryChange(
+                    candidate.id,
+                    candidate.name,
+                    {
+                        status: summary.status,
+                        attemptCount: summary.attemptCount,
+                        lastAttemptAt: summary.lastAttemptAt,
+                        lastUserName: summary.lastUserName,
+                    },
+                    'contact_attempt'
+                );
+            }
+        } catch {
+            /* contact tracking opcional si la migración no está aplicada */
+        }
+    }, [
+        process?.id,
+        state.currentUser?.id,
+        state.currentUser?.name,
+        state.currentUser?.email,
+        applyOptimisticUpdate,
+        handleContactSummaryChange,
+    ]);
 
     const handleDeleteCandidate = useCallback(async (candidateId: string, candidateName: string) => {
         if (!confirm(`¿Estás seguro de eliminar permanentemente a ${candidateName}? Esta acción no se puede deshacer.`)) {
@@ -1673,18 +1820,19 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
         return cellMeta[candidateId]?.[colId];
     }, [cellMeta]);
 
-    const buildTdStyle = useCallback((candidateId: string, colId: string): React.CSSProperties | undefined => {
+    const buildTdStyle = useCallback((candidateId: string, colId: string): React.CSSProperties => {
         const meta = getCellMetaFor(candidateId, colId);
-        return getStickyColumnStyle(colId, visibleColumns, pinnedColumns, false, meta?.bgColor);
-    }, [getCellMetaFor, visibleColumns, pinnedColumns]);
+        const sticky = getStickyColumnStyle(colId, visibleColumns, pinnedColumns, false, meta?.bgColor, columnWidths);
+        return { ...getColumnWidthStyle(colId, columnWidths), ...sticky };
+    }, [getCellMetaFor, visibleColumns, pinnedColumns, columnWidths]);
 
     const buildThStyle = useCallback((colId: string): React.CSSProperties | undefined => {
-        return getStickyColumnStyle(colId, visibleColumns, pinnedColumns, true);
-    }, [visibleColumns, pinnedColumns]);
+        return getStickyColumnStyle(colId, visibleColumns, pinnedColumns, true, undefined, columnWidths);
+    }, [visibleColumns, pinnedColumns, columnWidths]);
 
     const buildCheckboxStyle = useCallback((isHeader: boolean): React.CSSProperties | undefined => {
-        return getStickyColumnStyle('checkbox', visibleColumns, pinnedColumns, isHeader);
-    }, [visibleColumns, pinnedColumns]);
+        return getStickyColumnStyle('checkbox', visibleColumns, pinnedColumns, isHeader, undefined, columnWidths);
+    }, [visibleColumns, pinnedColumns, columnWidths]);
 
     const handleTableContextMenu = useCallback((e: React.MouseEvent) => {
         if (editingCell) return;
@@ -1696,9 +1844,49 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
     }, [editingCell]);
 
     const buildColThStyle = useCallback((colId: string, extra?: React.CSSProperties): React.CSSProperties => ({
+        ...getColumnWidthStyle(colId, columnWidths),
         ...buildThStyle(colId),
         ...extra,
-    }), [buildThStyle]);
+    }), [buildThStyle, columnWidths]);
+
+    useEffect(() => {
+        columnWidthsRef.current = columnWidths;
+    }, [columnWidths]);
+
+    const handleColumnResizeStart = useCallback((e: React.MouseEvent, colId: string) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const startWidth = getColumnWidth(colId, columnWidthsRef.current);
+        resizeSessionRef.current = { colId, startX: e.clientX, startWidth };
+
+        const onMove = (ev: MouseEvent) => {
+            const session = resizeSessionRef.current;
+            if (!session) return;
+            const delta = ev.clientX - session.startX;
+            const newWidth = Math.round(
+                Math.max(MIN_BULK_COL_WIDTH, Math.min(MAX_BULK_COL_WIDTH, session.startWidth + delta))
+            );
+            setColumnWidths(prev => {
+                const next = { ...prev, [session.colId]: newWidth };
+                columnWidthsRef.current = next;
+                return next;
+            });
+        };
+
+        const onUp = () => {
+            resizeSessionRef.current = null;
+            document.removeEventListener('mousemove', onMove);
+            document.removeEventListener('mouseup', onUp);
+            document.body.style.cursor = '';
+            document.body.style.userSelect = '';
+            void persistBulkConfig({ columnWidths: columnWidthsRef.current });
+        };
+
+        document.body.style.cursor = 'col-resize';
+        document.body.style.userSelect = 'none';
+        document.addEventListener('mousemove', onMove);
+        document.addEventListener('mouseup', onUp);
+    }, [persistBulkConfig]);
 
     const handleDragStart = (e: React.DragEvent, colId: string) => {
         setDraggedColumn(colId);
@@ -2729,7 +2917,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
             {selectedProcess && (
                 <div className="flex-1 overflow-hidden relative flex flex-col">
                     <p className="text-[10px] text-gray-500 px-1 pb-1 shrink-0">
-                        Flechas · Shift+arrastrar selección · Ctrl+clic múltiple · Clic derecho: color/comentario · Enter/doble clic editar · Ctrl+V pegar en celdas seleccionadas · Doble clic en fila abre detalle
+                        Flechas · Shift+arrastrar selección · Ctrl+clic múltiple · Clic derecho: color/comentario · Enter/doble clic editar · Ctrl+V pegar en celdas seleccionadas · Doble clic en fila abre detalle · Arrastre el borde derecho del encabezado para ajustar el ancho de columna
                     </p>
                     <div
                         ref={tableContainerRef}
@@ -2771,7 +2959,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
 
                                     if (colId === 'name') {
                                         return (
-                                            <th {...commonProps} style={thStyle({ minWidth: '150px' })}>
+                                            <BulkTh colId={colId} headerProps={commonProps} style={thStyle()} onResizeStart={handleColumnResizeStart}>
                                                 <div className="flex flex-col gap-1">
                                                     <button onClick={() => handleSort('name')} className="flex items-center gap-1 hover:text-primary-600 transition-colors">
                                                         <span>Nombre</span>
@@ -2779,12 +2967,12 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                                     </button>
                                                     <input type="text" placeholder="Filtrar..." value={columnFilters.name || ''} onChange={(e) => setColumnFilters({ ...columnFilters, name: e.target.value })} className="text-xs px-2 py-1 border border-gray-300 rounded focus:ring-1 focus:ring-primary-500 focus:border-primary-500 font-normal normal-case" onClick={(e) => e.stopPropagation()} />
                                                 </div>
-                                            </th>
+                                            </BulkTh>
                                         );
                                     }
                                     if (colId === 'dni') {
                                         return (
-                                            <th {...commonProps} style={thStyle({ minWidth: '100px' })}>
+                                            <BulkTh colId={colId} headerProps={commonProps} style={thStyle()} onResizeStart={handleColumnResizeStart}>
                                                 <div className="flex flex-col gap-1">
                                                     <button onClick={() => handleSort('dni')} className="flex items-center gap-1 hover:text-primary-600 transition-colors">
                                                         <span>DNI</span>
@@ -2792,12 +2980,12 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                                     </button>
                                                     <input type="text" placeholder="Filtrar..." value={columnFilters.dni || ''} onChange={(e) => setColumnFilters({ ...columnFilters, dni: e.target.value })} className="text-xs px-2 py-1 border border-gray-300 rounded focus:ring-1 focus:ring-primary-500 focus:border-primary-500 font-normal normal-case" onClick={(e) => e.stopPropagation()} />
                                                 </div>
-                                            </th>
+                                            </BulkTh>
                                         );
                                     }
                                     if (colId === 'email') {
                                         return (
-                                            <th {...commonProps} style={thStyle({ minWidth: '180px' })}>
+                                            <BulkTh colId={colId} headerProps={commonProps} style={thStyle()} onResizeStart={handleColumnResizeStart}>
                                                 <div className="flex flex-col gap-1">
                                                     <button onClick={() => handleSort('email')} className="flex items-center gap-1 hover:text-primary-600 transition-colors">
                                                         <span>Email</span>
@@ -2805,12 +2993,12 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                                     </button>
                                                     <input type="text" placeholder="Filtrar..." value={columnFilters.email || ''} onChange={(e) => setColumnFilters({ ...columnFilters, email: e.target.value })} className="text-xs px-2 py-1 border border-gray-300 rounded focus:ring-1 focus:ring-primary-500 focus:border-primary-500 font-normal normal-case" onClick={(e) => e.stopPropagation()} />
                                                 </div>
-                                            </th>
+                                            </BulkTh>
                                         );
                                     }
                                     if (colId === 'scoreIa') {
                                         return (
-                                            <th {...commonProps} style={thStyle({ minWidth: '100px' })}>
+                                            <BulkTh colId={colId} headerProps={commonProps} style={thStyle()} onResizeStart={handleColumnResizeStart}>
                                                 <div className="flex flex-col gap-1">
                                                     <button onClick={() => handleSort('scoreIa')} className="flex items-center gap-1 hover:text-primary-600 transition-colors">
                                                         <span>Score IA</span>
@@ -2818,22 +3006,22 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                                     </button>
                                                     <input type="text" placeholder="Min..." value={columnFilters.scoreIa || ''} onChange={(e) => setColumnFilters({ ...columnFilters, scoreIa: e.target.value })} className="text-xs px-2 py-1 border border-gray-300 rounded focus:ring-1 focus:ring-primary-500 focus:border-primary-500 font-normal normal-case" onClick={(e) => e.stopPropagation()} />
                                                 </div>
-                                            </th>
+                                            </BulkTh>
                                         );
                                     }
                                     if (colId === 'status') {
                                         return (
-                                            <th {...commonProps} style={thStyle({ minWidth: '100px' })}>
+                                            <BulkTh colId={colId} headerProps={commonProps} style={thStyle()} onResizeStart={handleColumnResizeStart}>
                                                 <button onClick={() => handleSort('scoreIa')} className="flex items-center gap-1 hover:text-primary-600 transition-colors">
                                                     <span>Status</span>
                                                     {sortColumn === 'scoreIa' ? (sortDirection === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />) : <div className="w-3 h-3 opacity-30"><ArrowUp className="w-3 h-3" /></div>}
                                                 </button>
-                                            </th>
+                                            </BulkTh>
                                         );
                                     }
                                     if (colId === 'phone') {
                                         return (
-                                            <th {...commonProps} style={thStyle({ minWidth: '130px' })}>
+                                            <BulkTh colId={colId} headerProps={commonProps} style={thStyle()} onResizeStart={handleColumnResizeStart}>
                                                 <div className="flex flex-col gap-1">
                                                     <button onClick={() => handleSort('phone')} className="flex items-center gap-1 hover:text-primary-600 transition-colors">
                                                         <span>Teléfono</span>
@@ -2841,12 +3029,19 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                                     </button>
                                                     <input type="text" placeholder="Filtrar..." value={columnFilters.phone || ''} onChange={(e) => setColumnFilters({ ...columnFilters, phone: e.target.value })} className="text-xs px-2 py-1 border border-gray-300 rounded focus:ring-1 focus:ring-primary-500 focus:border-primary-500 font-normal normal-case" onClick={(e) => e.stopPropagation()} />
                                                 </div>
-                                            </th>
+                                            </BulkTh>
+                                        );
+                                    }
+                                    if (colId === 'contact') {
+                                        return (
+                                            <BulkTh colId={colId} headerProps={commonProps} style={thStyle()} onResizeStart={handleColumnResizeStart}>
+                                                <span title="Semáforo de contacto telefónico y WhatsApp">Contacto</span>
+                                            </BulkTh>
                                         );
                                     }
                                     if (colId === 'source') {
                                         return (
-                                            <th {...commonProps} style={thStyle({ minWidth: '120px' })}>
+                                            <BulkTh colId={colId} headerProps={commonProps} style={thStyle()} onResizeStart={handleColumnResizeStart}>
                                                 <div className="flex flex-col gap-1">
                                                     <button onClick={() => handleSort('source')} className="flex items-center gap-1 hover:text-primary-600 transition-colors">
                                                         <span>Fuente</span>
@@ -2854,12 +3049,12 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                                     </button>
                                                     <input type="text" placeholder="Filtrar..." value={columnFilters.source || ''} onChange={(e) => setColumnFilters({ ...columnFilters, source: e.target.value })} className="text-xs px-2 py-1 border border-gray-300 rounded focus:ring-1 focus:ring-primary-500 focus:border-primary-500 font-normal normal-case" onClick={(e) => e.stopPropagation()} />
                                                 </div>
-                                            </th>
+                                            </BulkTh>
                                         );
                                     }
                                     if (colId === 'province') {
                                         return (
-                                            <th {...commonProps} style={thStyle({ minWidth: '120px' })}>
+                                            <BulkTh colId={colId} headerProps={commonProps} style={thStyle()} onResizeStart={handleColumnResizeStart}>
                                                 <div className="flex flex-col gap-1">
                                                     <button onClick={() => handleSort('province')} className="flex items-center gap-1 hover:text-primary-600 transition-colors">
                                                         <span>Provincia</span>
@@ -2867,12 +3062,12 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                                     </button>
                                                     <input type="text" placeholder="Filtrar..." value={columnFilters.province || ''} onChange={(e) => setColumnFilters({ ...columnFilters, province: e.target.value })} className="text-xs px-2 py-1 border border-gray-300 rounded focus:ring-1 focus:ring-primary-500 focus:border-primary-500 font-normal normal-case" onClick={(e) => e.stopPropagation()} />
                                                 </div>
-                                            </th>
+                                            </BulkTh>
                                         );
                                     }
                                     if (colId === 'district') {
                                         return (
-                                            <th {...commonProps} style={thStyle({ minWidth: '120px' })}>
+                                            <BulkTh colId={colId} headerProps={commonProps} style={thStyle()} onResizeStart={handleColumnResizeStart}>
                                                 <div className="flex flex-col gap-1">
                                                     <button onClick={() => handleSort('district')} className="flex items-center gap-1 hover:text-primary-600 transition-colors">
                                                         <span>Distrito</span>
@@ -2880,57 +3075,52 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                                     </button>
                                                     <input type="text" placeholder="Filtrar..." value={columnFilters.district || ''} onChange={(e) => setColumnFilters({ ...columnFilters, district: e.target.value })} className="text-xs px-2 py-1 border border-gray-300 rounded focus:ring-1 focus:ring-primary-500 focus:border-primary-500 font-normal normal-case" onClick={(e) => e.stopPropagation()} />
                                                 </div>
-                                            </th>
+                                            </BulkTh>
                                         );
                                     }
                                     if (colId === 'createdAt') {
                                         return (
-                                            <th {...commonProps} style={thStyle({ minWidth: '140px' })}>
+                                            <BulkTh colId={colId} headerProps={commonProps} style={thStyle()} onResizeStart={handleColumnResizeStart}>
                                                 <button onClick={() => handleSort('createdAt')} className="flex items-center gap-1 hover:text-primary-600 transition-colors">
                                                     <span>Fecha creación</span>
                                                     {sortColumn === 'createdAt' ? (sortDirection === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />) : <div className="w-3 h-3 opacity-30"><ArrowUp className="w-3 h-3" /></div>}
                                                 </button>
-                                            </th>
+                                            </BulkTh>
                                         );
                                     }
                                     if (colId === 'lastInteraction') {
                                         return (
-                                            <th {...commonProps} style={thStyle({ minWidth: '140px' })}>
+                                            <BulkTh colId={colId} headerProps={commonProps} style={thStyle()} onResizeStart={handleColumnResizeStart}>
                                                 <button onClick={() => handleSort('lastInteraction')} className="flex items-center gap-1 hover:text-primary-600 transition-colors">
                                                     <span>Última Interacción</span>
                                                     {sortColumn === 'lastInteraction' ? (sortDirection === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />) : <div className="w-3 h-3 opacity-30"><ArrowUp className="w-3 h-3" /></div>}
                                                 </button>
-                                            </th>
-                                        );
-                                    }
-                                    if (colId === 'contact') {
-                                        return (
-                                            <th {...commonProps} style={thStyle({ minWidth: '100px' })}>Contacto</th>
+                                            </BulkTh>
                                         );
                                     }
                                     if (colId === 'nextInterview') {
                                         return (
-                                            <th {...commonProps} style={thStyle({ minWidth: '150px' })}>
+                                            <BulkTh colId={colId} headerProps={commonProps} style={thStyle()} onResizeStart={handleColumnResizeStart}>
                                                 <button onClick={() => handleSort('nextInterview')} className="flex items-center gap-1 hover:text-primary-600 transition-colors">
                                                     <span>Próxima Entrevista</span>
                                                     {sortColumn === 'nextInterview' ? (sortDirection === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />) : <div className="w-3 h-3 opacity-30"><ArrowUp className="w-3 h-3" /></div>}
                                                 </button>
-                                            </th>
+                                            </BulkTh>
                                         );
                                     }
                                     if (colId === 'schedule') {
                                         return (
-                                            <th {...commonProps} style={thStyle({ minWidth: '90px' })}>Agendar</th>
+                                            <BulkTh colId={colId} headerProps={commonProps} style={thStyle()} onResizeStart={handleColumnResizeStart}>Agendar</BulkTh>
                                         );
                                     }
                                     if (colId === 'stage') {
                                         return (
-                                            <th {...commonProps} style={thStyle({ minWidth: '130px' })}>
+                                            <BulkTh colId={colId} headerProps={commonProps} style={thStyle()} onResizeStart={handleColumnResizeStart}>
                                                 <button onClick={() => handleSort('stage')} className="flex items-center gap-1 hover:text-primary-600 transition-colors">
                                                     <span>Etapa</span>
                                                     {sortColumn === 'stage' ? (sortDirection === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />) : <div className="w-3 h-3 opacity-30"><ArrowUp className="w-3 h-3" /></div>}
                                                 </button>
-                                            </th>
+                                            </BulkTh>
                                         );
                                     }
                                     if (colId.startsWith('custom_')) {
@@ -2939,10 +3129,14 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                         if (!col) return null;
                                         const filterKey = getCustomFilterKey(col.id);
                                         return (
-                                            <th
-                                                {...commonProps}
-                                                className={`${COMPACT_TH_CLASS} normal-case cursor-move transition-colors bg-gray-50`}
-                                                style={{ ...buildThStyle(colId), minWidth: '120px' }}
+                                            <BulkTh
+                                                colId={colId}
+                                                headerProps={{
+                                                    ...commonProps,
+                                                    className: `${COMPACT_TH_CLASS} normal-case cursor-move transition-colors bg-gray-50`,
+                                                }}
+                                                style={buildColThStyle(colId)}
+                                                onResizeStart={handleColumnResizeStart}
                                             >
                                                 <div className="flex flex-col gap-1">
                                                     <button onClick={() => handleSort(colId)} className="flex items-center gap-1 hover:text-primary-600 transition-colors">
@@ -2983,7 +3177,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                                         />
                                                     )}
                                                 </div>
-                                            </th>
+                                            </BulkTh>
                                         );
                                     }
                                     return null;
@@ -3089,13 +3283,45 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                                 );
                                             }
                                             if (colId === 'phone') {
+                                                const phoneCooldown = isContactCooldownActive(displayCandidate.contactLastAttemptAt);
                                                 return (
-                                                    <td key="phone" {...tdProps(candidate.id, 'phone')}>
+                                                    <td
+                                                        key="phone"
+                                                        {...tdProps(candidate.id, 'phone')}
+                                                        className={`${COMPACT_TD_CLASS} ${phoneCooldown ? 'ring-1 ring-inset ring-red-200' : ''}`}
+                                                    >
                                                         {editingCell?.candidateId === candidate.id && editingCell?.field === 'phone' ? (
                                                             <input type="tel" value={editValue} onChange={(e) => setEditValue(e.target.value)} onBlur={() => handleSaveEdit(candidate.id, 'phone')} onKeyDown={(e) => { if (e.key === 'Enter') handleSaveEdit(candidate.id, 'phone'); if (e.key === 'Escape') handleCancelEdit(); }} autoFocus className="w-full px-2 py-1 border border-primary-500 rounded focus:ring-2 focus:ring-primary-500" />
                                                         ) : (
                                                             <span className="hover:bg-gray-50 px-1 py-0.5 rounded cursor-pointer" onDoubleClick={() => handleStartEdit(candidate.id, 'phone', displayCandidate.phone || '')} title="Doble clic para editar">{displayCandidate.phone || 'N/A'}</span>
                                                         )}
+                                                    </td>
+                                                );
+                                            }
+                                            if (colId === 'contact' && process?.id) {
+                                                return (
+                                                    <td key="contact" {...tdProps(candidate.id, 'contact')}>
+                                                        <BulkContactStatusCell
+                                                            candidateId={displayCandidate.id}
+                                                            candidateName={displayCandidate.name}
+                                                            processId={process.id}
+                                                            phone={displayCandidate.phone}
+                                                            status={normalizeContactStatus(displayCandidate.contactStatus)}
+                                                            attemptCount={displayCandidate.contactAttemptCount ?? 0}
+                                                            lastAttemptAt={displayCandidate.contactLastAttemptAt}
+                                                            lastUserName={displayCandidate.contactLastUserName}
+                                                            userId={state.currentUser?.id}
+                                                            userName={state.currentUser?.name || state.currentUser?.email}
+                                                            onSummaryChange={(summary, actionType) =>
+                                                                handleContactSummaryChange(
+                                                                    displayCandidate.id,
+                                                                    displayCandidate.name,
+                                                                    summary,
+                                                                    actionType
+                                                                )
+                                                            }
+                                                            onWhatsApp={() => void handleWhatsAppClick(displayCandidate)}
+                                                        />
                                                     </td>
                                                 );
                                             }
@@ -3165,22 +3391,6 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                                                     : <span className="text-gray-400">-</span>}
                                                             </span>
                                                         )}
-                                                    </td>
-                                                );
-                                            }
-                                            if (colId === 'contact') {
-                                                return (
-                                                    <td key="contact" {...tdProps(candidate.id, 'contact')}>
-                                                        <div className="flex gap-2 items-center">
-                                                            {displayCandidate.phone && (
-                                                                <>
-                                                                    <button onClick={() => handleWhatsAppClick(displayCandidate.id, displayCandidate.phone!)} className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-green-600 hover:text-green-700 hover:bg-green-50 rounded transition-colors" title="Abrir WhatsApp"><MessageCircle className="w-4 h-4" /></button>
-                                                                    {isMobile && <a href={`tel:${displayCandidate.phone.replace(/[^\d]/g, '')}`} className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-blue-600 hover:text-blue-700 hover:bg-blue-50 rounded transition-colors" title="Llamar"><Phone className="w-4 h-4" /></a>}
-                                                                </>
-                                                            )}
-                                                            {displayCandidate.email && <a href={`mailto:${displayCandidate.email}`} className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-blue-600 hover:text-blue-700 hover:bg-blue-50 rounded transition-colors" title="Enviar correo"><Mail className="w-4 h-4" /></a>}
-                                                            {!displayCandidate.phone && !displayCandidate.email && <span className="text-gray-400 text-xs">-</span>}
-                                                        </div>
                                                     </td>
                                                 );
                                             }

@@ -1,4 +1,5 @@
 -- Reestablecer RLS y políticas para Opalo ATS
+-- ⚠️ DEPRECADO — Usar RLS_OPALO_ATS_DEFINITIVO.sql (ver RLS_POLITICA.md)
 -- Ejecuta este script después de configurar las URLs en Supabase
 
 -- ============================================

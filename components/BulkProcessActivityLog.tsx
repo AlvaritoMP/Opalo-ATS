@@ -18,6 +18,8 @@ const ACTION_LABELS: Record<BulkActivityActionType, string> = {
     config_change: 'Configuración',
     cell_meta: 'Color/comentario de celda',
     paste: 'Pegado en celdas',
+    contact_attempt: 'Intento de contacto',
+    contact_status: 'Estado de contacto',
 };
 
 interface BulkProcessActivityLogProps {

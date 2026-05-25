@@ -1,4 +1,5 @@
 import { BulkCandidate } from './api/bulkCandidates';
+import { CONTACT_STATUS_META, getContactBadgeLabel, normalizeContactStatus } from './contactTracking';
 import { BulkProcessConfig, CustomColumn, Process } from '../types';
 import {
     formatCustomCellDisplay,
@@ -96,11 +97,11 @@ export function getBulkExportCellValue(
         }
     }
     if (colId === 'contact') {
-        const parts: string[] = [];
-        if (candidate.phone) parts.push(candidate.phone);
-        const em = candidate.email && !isPlaceholderImportEmail(candidate.email) ? candidate.email : '';
-        if (em) parts.push(em);
-        return parts.join(' · ');
+        const status = normalizeContactStatus(candidate.contactStatus);
+        const count = candidate.contactAttemptCount ?? 0;
+        const label = getContactBadgeLabel(status, count);
+        const who = candidate.contactLastUserName ? ` (${candidate.contactLastUserName})` : '';
+        return `${CONTACT_STATUS_META[status].label}: ${label}${who}`;
     }
     if (colId === 'nextInterview') {
         if (!candidate.nextInterviewAt) return '';

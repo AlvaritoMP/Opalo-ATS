@@ -189,6 +189,8 @@ export interface BulkProcessConfig {
     hiddenColumns?: string[]; // IDs de columnas ocultas
     columnOrder?: string[]; // Orden de columnas (base + custom_*)
     pinnedColumns?: string[]; // Columnas inmovilizadas al hacer scroll horizontal
+    /** Anchos de columna en px (id de columna → ancho). Persistido por proceso. */
+    columnWidths?: Record<string, number>;
     /** Colores de etapas por ID (respaldo en JSON del proceso masivo) */
     stageColors?: Record<string, StageColorId>;
     /** Colores de etapas por nombre (respaldo si cambian los IDs) */

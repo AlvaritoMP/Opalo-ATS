@@ -36,20 +36,8 @@ ON bulk_process_activity_log (app_name);
 CREATE INDEX IF NOT EXISTS idx_bulk_activity_user
 ON bulk_process_activity_log (user_id);
 
--- RLS: mismo patrón que candidate_history (solo Opalo ATS)
-ALTER TABLE bulk_process_activity_log ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY "anon_bulk_activity_opalo_ats_select"
-ON public.bulk_process_activity_log FOR SELECT
-TO anon
-USING (app_name = 'Opalo ATS');
-
-CREATE POLICY "anon_bulk_activity_opalo_ats_insert"
-ON public.bulk_process_activity_log FOR INSERT
-TO anon
-WITH CHECK (app_name = 'Opalo ATS');
-
-GRANT SELECT, INSERT ON public.bulk_process_activity_log TO anon;
+-- RLS: ejecutar RLS_OPALO_ATS_DEFINITIVO.sql después de crear la tabla
+-- (reemplaza políticas parciales TO anon por el estándar TO public + GRANTs completos)
 
 SELECT column_name, data_type, is_nullable
 FROM information_schema.columns

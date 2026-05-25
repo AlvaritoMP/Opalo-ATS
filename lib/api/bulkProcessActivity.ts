@@ -12,7 +12,9 @@ export type BulkActivityActionType =
     | 'import'
     | 'config_change'
     | 'cell_meta'
-    | 'paste';
+    | 'paste'
+    | 'contact_attempt'
+    | 'contact_status';
 
 export interface BulkProcessActivityEntry {
     id: string;
@@ -67,18 +69,14 @@ function mapRow(row: Record<string, unknown>): BulkProcessActivityEntry {
     };
 }
 
-function isCandidateFkError(error: { message?: string; code?: string } | null): boolean {
+function isFkViolation(error: { message?: string; code?: string } | null): boolean {
     if (!error) return false;
-    const msg = (error.message || '').toLowerCase();
-    return (
-        error.code === '23503' &&
-        (msg.includes('bulk_process_activity_log_candidate_id_fkey') || msg.includes('candidate_id'))
-    );
+    return error.code === '23503';
 }
 
 export const bulkProcessActivityApi = {
     async log(input: LogBulkActivityInput): Promise<void> {
-        const row = {
+        const baseRow = {
             process_id: input.processId,
             candidate_id: input.candidateId || null,
             candidate_name: input.candidateName || null,
@@ -92,12 +90,14 @@ export const bulkProcessActivityApi = {
             app_name: APP_NAME,
         };
 
-        let { error } = await supabase.from('bulk_process_activity_log').insert(row);
+        let { error } = await supabase.from('bulk_process_activity_log').insert(baseRow);
 
-        if (error && isCandidateFkError(error) && input.candidateId) {
+        // FK inválida (409): IDs obsoletos tras restore o usuario no en public.users
+        if (error && isFkViolation(error)) {
             ({ error } = await supabase.from('bulk_process_activity_log').insert({
-                ...row,
+                ...baseRow,
                 candidate_id: null,
+                user_id: null,
             }));
         }
 
