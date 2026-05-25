@@ -511,14 +511,14 @@ export const BulkContactStatusCell: React.FC<BulkContactStatusCellProps> = ({
                 type="button"
                 disabled={disabled || saving}
                 onClick={toggleStatusPopover}
-                className={`inline-flex items-center gap-px shrink-0 px-0.5 py-px rounded border text-[10px] font-semibold leading-none whitespace-nowrap ${meta.badgeClass}`}
+                className={`inline-flex items-center gap-0.5 shrink-0 h-5 min-w-[22px] pl-0.5 pr-1 rounded border text-[10px] font-semibold leading-none whitespace-nowrap ${meta.badgeClass}`}
                 aria-expanded={popover === 'status'}
                 title="Estado de contacto"
             >
-                <span className="text-[9px] leading-none">{meta.dot}</span>
+                <span className="text-[10px] leading-none">{meta.dot}</span>
                 {badgeLabel ? <span>{badgeLabel}</span> : null}
                 <ChevronDown
-                    className={`w-2 h-2 shrink-0 opacity-60 ${popover === 'status' ? 'rotate-180' : ''}`}
+                    className={`w-3.5 h-3.5 shrink-0 opacity-70 ${popover === 'status' ? 'rotate-180' : ''}`}
                 />
             </button>
 
@@ -531,7 +531,7 @@ export const BulkContactStatusCell: React.FC<BulkContactStatusCellProps> = ({
                         if (popover === 'history') closePopover();
                         else openPopover('history', e.currentTarget);
                     }}
-                    className="shrink-0 p-0 text-[10px] font-bold text-gray-600 hover:text-primary-700 tabular-nums leading-none"
+                    className="shrink-0 inline-flex items-center justify-center min-w-[18px] h-5 px-0.5 text-[10px] font-bold text-gray-600 hover:text-primary-700 hover:bg-gray-50 rounded tabular-nums leading-none"
                     title={cellTooltip || 'Ver historial'}
                 >
                     {status !== 'en_intento' ? attemptCount : null}
@@ -546,7 +546,7 @@ export const BulkContactStatusCell: React.FC<BulkContactStatusCellProps> = ({
                         e.stopPropagation();
                         void handleQuickAction();
                     }}
-                    className={`shrink-0 p-0 rounded leading-none ${
+                    className={`shrink-0 inline-flex items-center justify-center min-w-[22px] h-5 rounded leading-none ${
                         channel === 'whatsapp'
                             ? 'text-green-600 hover:bg-green-50'
                             : 'text-blue-600 hover:bg-blue-50'
@@ -554,14 +554,16 @@ export const BulkContactStatusCell: React.FC<BulkContactStatusCellProps> = ({
                     title={`Registrar ${channelDef.shortLabel}`}
                 >
                     {saving ? (
-                        <Loader2 className="w-3 h-3 animate-spin" />
+                        <Loader2 className="w-4 h-4 animate-spin" />
                     ) : (
-                        <QuickIcon className="w-3 h-3" />
+                        <QuickIcon className="w-4 h-4" strokeWidth={2.25} />
                     )}
                 </button>
             )}
 
-            {cooldown && <Clock className="w-2.5 h-2.5 text-red-500 shrink-0" aria-hidden />}
+            {cooldown && (
+                <Clock className="w-3.5 h-3.5 text-red-500 shrink-0" aria-hidden />
+            )}
 
             {lastAttemptAt ? (
                 <button
@@ -572,7 +574,7 @@ export const BulkContactStatusCell: React.FC<BulkContactStatusCellProps> = ({
                         if (popover === 'history') closePopover();
                         else openPopover('history', e.currentTarget);
                     }}
-                    className="text-[9px] text-gray-500 tabular-nums whitespace-nowrap min-w-0 shrink truncate hover:text-primary-700 leading-none"
+                    className="inline-flex items-center h-5 min-w-0 shrink px-0.5 text-[9px] text-gray-500 tabular-nums whitespace-nowrap truncate hover:text-primary-700 hover:bg-gray-50 rounded leading-none"
                     title={cellTooltip}
                 >
                     {formatContactLastAtCompact(lastAttemptAt)}
