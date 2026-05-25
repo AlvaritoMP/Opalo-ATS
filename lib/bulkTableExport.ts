@@ -10,7 +10,7 @@ import {
     shouldApplyScoreAutoFilter,
 } from './bulkTableColumns';
 
-export type BulkExportScope = 'current_view' | 'full_process';
+export type BulkExportScope = 'current_view' | 'full_process' | 'selected';
 
 /** Escapa campo para TSV/CSV cuando hay tabuladores o saltos de línea */
 export function escapeDelimitedField(value: string, delimiter: string): string {

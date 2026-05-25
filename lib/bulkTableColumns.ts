@@ -752,6 +752,47 @@ export function isPlaceholderImportEmail(email?: string | null): boolean {
     return /@import\.opalo$/i.test(email) || /^sin-email\./i.test(email);
 }
 
+const BULK_PLACEHOLDER_EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+/** Supabase exige email NOT NULL: placeholder único si falta o es inválido (importación / fila manual) */
+export function buildBulkPlaceholderEmail(params: {
+    rowNumber: number;
+    name?: string;
+    dni?: string;
+    phone?: string;
+    suffix?: string;
+}): string {
+    const { rowNumber, name, dni, phone, suffix = 'manual' } = params;
+    const slug = (dni || phone || name || 'candidato')
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-|-$/g, '')
+        .slice(0, 40) || 'candidato';
+
+    return `sin-email.${slug}.fila${rowNumber}.${suffix}@import.opalo`;
+}
+
+/** Resuelve email real o placeholder para altas manuales / importación masiva */
+export function resolveBulkCandidateEmail(
+    email: string | undefined,
+    rowNumber: number,
+    name: string,
+    dni?: string,
+    phone?: string,
+    suffix?: string
+): { email: string; usedPlaceholder: boolean } {
+    const trimmed = email?.trim();
+    if (trimmed && BULK_PLACEHOLDER_EMAIL_REGEX.test(trimmed)) {
+        return { email: trimmed, usedPlaceholder: false };
+    }
+    return {
+        email: buildBulkPlaceholderEmail({ rowNumber, name, dni, phone, suffix }),
+        usedPlaceholder: true,
+    };
+}
+
 export function getDisplayEmail(email?: string | null): string | null {
     if (!email || isPlaceholderImportEmail(email)) return null;
     return email;

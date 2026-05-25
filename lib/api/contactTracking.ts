@@ -11,7 +11,7 @@ import {
     type ChannelContactSummary,
     getChannelDbFields,
     readChannelSummaryFromRow,
-    buildChannelResetUpdate,
+    buildSingleChannelResetUpdate,
 } from '../contactChannelConfig';
 
 export type { ChannelContactSummary as ContactSummary };
@@ -55,7 +55,7 @@ export interface SetContactStatusInput {
 
 export interface ResetContactTrackingResult {
     clearedAttempts: number;
-    channelsReset: ContactAttemptChannel[];
+    channel: ContactAttemptChannel;
 }
 
 export interface ContactUndoSnapshot {
@@ -368,10 +368,11 @@ export const contactTrackingApi = {
         return summary;
     },
 
-    /** Reinicia los 3 canales — candidato como nuevo (sin historial de contacto) */
-    async resetAllContactTracking(input: {
+    /** Reinicia un solo canal — candidato como nuevo en esa columna */
+    async resetChannelContactTracking(input: {
         candidateId: string;
         processId: string;
+        channel: ContactAttemptChannel;
         userId?: string;
         userName?: string;
     }): Promise<ResetContactTrackingResult | null> {
@@ -379,6 +380,7 @@ export const contactTrackingApi = {
             .from('candidate_contact_attempts')
             .select('id', { count: 'exact', head: true })
             .eq('candidate_id', input.candidateId)
+            .eq('channel', input.channel)
             .eq('app_name', APP_NAME);
 
         if (countErr && !isMissingContactColumnError(countErr)) throw countErr;
@@ -388,13 +390,14 @@ export const contactTrackingApi = {
             .from('candidate_contact_attempts')
             .delete()
             .eq('candidate_id', input.candidateId)
+            .eq('channel', input.channel)
             .eq('app_name', APP_NAME);
 
         if (delErr && !isMissingContactColumnError(delErr)) throw delErr;
 
         const { error: updErr } = await supabase
             .from('candidates')
-            .update(buildChannelResetUpdate())
+            .update(buildSingleChannelResetUpdate(input.channel))
             .eq('id', input.candidateId)
             .eq('app_name', APP_NAME);
 
@@ -409,7 +412,7 @@ export const contactTrackingApi = {
         contactColumnsSupported = true;
         return {
             clearedAttempts,
-            channelsReset: ['call', 'whatsapp', 'email'],
+            channel: input.channel,
         };
     },
 };

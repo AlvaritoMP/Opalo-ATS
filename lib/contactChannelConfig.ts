@@ -78,6 +78,11 @@ export interface ChannelContactSummary {
     lastUserName?: string;
 }
 
+export function hasChannelContactTracking(summary?: ChannelContactSummary | null): boolean {
+    if (!summary) return false;
+    return summary.status !== 'por_contactar' || summary.attemptCount > 0 || !!summary.lastAttemptAt;
+}
+
 export function readChannelSummaryFromRow(
     row: Record<string, unknown>,
     channel: ContactAttemptChannel
@@ -115,6 +120,29 @@ export function readChannelSummaryFromRow(
     }
 
     return { status: 'por_contactar', attemptCount: 0 };
+}
+
+export function buildSingleChannelResetUpdate(
+    channel: ContactAttemptChannel
+): Record<string, string | number | null> {
+    const f = getChannelDbFields(channel);
+    const out: Record<string, string | number | null> = {
+        [f.status]: 'por_contactar',
+        [f.attemptCount]: 0,
+        [f.lastAt]: null,
+        [f.lastUserName]: null,
+    };
+    if (channel === 'call') {
+        out.contact_status = 'por_contactar';
+        out.contact_attempt_count = 0;
+        out.contact_last_attempt_at = null;
+        out.contact_last_user_id = null;
+        out.contact_last_user_name = null;
+    }
+    if (channel === 'whatsapp') {
+        out.last_whatsapp_interaction_at = null;
+    }
+    return out;
 }
 
 export function buildChannelResetUpdate(): Record<string, string | number | null> {

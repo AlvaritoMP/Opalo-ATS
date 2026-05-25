@@ -14,7 +14,7 @@ import {
 } from '../lib/contactChannelConfig';
 import { processesApi } from '../lib/api/processes';
 import { useDebouncedValue } from '../lib/useDebouncedValue';
-import { Check, X, Loader2, Send, Archive, Search, ChevronDown, ChevronUp, Plus, Edit, Trash2, ArrowLeft, MessageCircle, Phone, Upload, Download, Filter, Mail, Calendar, Settings, ArrowUp, ArrowDown, Pin, FileText, BookOpen, Paperclip, ClipboardList, UserPlus, RefreshCw, HardDrive, CaseSensitive } from 'lucide-react';
+import { Check, X, Loader2, Send, Archive, Search, ChevronDown, ChevronUp, Plus, Edit, Trash2, ArrowLeft, MessageCircle, Phone, Upload, Download, Filter, Mail, Calendar, Settings, ArrowUp, ArrowDown, Pin, FileText, BookOpen, Paperclip, ClipboardList, ListPlus, RefreshCw, HardDrive, CaseSensitive } from 'lucide-react';
 import { Process, CustomColumn, BulkProcessConfig } from '../types';
 import {
     BASE_COLUMNS,
@@ -65,7 +65,7 @@ import { BulkCellContextMenu } from './BulkCellContextMenu';
 import { BulkProcessEditorModal } from './BulkProcessEditorModal';
 import { BulkProcessImportModal } from './BulkProcessImportModal';
 import { BulkColumnRecoveryModal } from './BulkColumnRecoveryModal';
-import { AddCandidateModal } from './AddCandidateModal';
+import { BulkAddRowModal } from './BulkAddRowModal';
 import { BulkWhatsAppModal } from './BulkWhatsAppModal';
 import { BulkEmailModal } from './BulkEmailModal';
 import { QuickScheduleModal } from './QuickScheduleModal';
@@ -428,7 +428,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
     const [showImportModal, setShowImportModal] = useState(false);
     const [importRestoreMode, setImportRestoreMode] = useState(false);
     const [showRecoveryModal, setShowRecoveryModal] = useState(false);
-    const [showAddCandidateModal, setShowAddCandidateModal] = useState(false);
+    const [showAddRowModal, setShowAddRowModal] = useState(false);
     const [showWhatsAppModal, setShowWhatsAppModal] = useState(false);
     const [showEmailModal, setShowEmailModal] = useState(false);
     const [isMobile, setIsMobile] = useState(false);
@@ -1172,29 +1172,33 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
     );
 
     const handleContactReset = useCallback(
-        (candidateId: string, candidateName: string | undefined, result: ResetContactTrackingResult) => {
+        (
+            candidateId: string,
+            candidateName: string | undefined,
+            channel: ContactAttemptChannel,
+            result: ResetContactTrackingResult
+        ) => {
             const empty: ChannelContactSummary = { status: 'por_contactar', attemptCount: 0 };
-            applyOptimisticUpdate(candidateId, {
-                contactPhone: empty,
-                contactWhatsapp: empty,
-                contactEmail: empty,
-            });
+            const key = CHANNEL_CANDIDATE_KEY[channel];
+            applyOptimisticUpdate(candidateId, { [key]: empty });
+            const channelLabel =
+                channel === 'call' ? 'Llamadas' : channel === 'whatsapp' ? 'WhatsApp' : 'Correo';
             const who = state.currentUser?.name || state.currentUser?.email || 'Usuario';
             logActivity('contact_reset', {
                 candidateId,
                 candidateName,
-                fieldName: 'Contacto (todos los canales)',
+                fieldName: channelLabel,
                 oldValue: `${result.clearedAttempts} registro(s) de contacto`,
-                newValue: 'Sin seguimiento — como candidato nuevo',
+                newValue: 'Sin seguimiento en este canal',
                 details: {
-                    summary: `${who} reinició todo el seguimiento (teléfono, WhatsApp y correo)`,
+                    summary: `${who} reinició el seguimiento de ${channelLabel}`,
                     clearedAttempts: result.clearedAttempts,
-                    channelsReset: result.channelsReset,
+                    channel,
                     performedBy: who,
                     performedByUserId: state.currentUser?.id,
                 },
             });
-            actions.showToast('Candidato reiniciado en contacto (3 canales)', 'success', 2500);
+            actions.showToast(`${channelLabel} reiniciado`, 'success', 2500);
         },
         [
             applyOptimisticUpdate,
@@ -2220,6 +2224,25 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
         focusTable();
     }, [focusTable]);
 
+    const handleAddRowSuccess = useCallback((newRow: BulkCandidate) => {
+        setCandidates(prev => [newRow, ...prev]);
+        setTotal(t => t + 1);
+        logActivity('add_row', {
+            candidateId: newRow.id,
+            candidateName: newRow.name,
+            details: { source: 'manual_row' },
+        });
+        actions.showToast('Fila añadida — complete el resto en la tabla', 'success', 2500);
+
+        const firstEditableCol = visibleColumns.find(colId => isPasteEditableColumn(colId)) || 'name';
+        requestAnimationFrame(() => {
+            setTimeout(() => {
+                scrollCellIntoView({ candidateId: newRow.id, colId: firstEditableCol });
+                selectSingleCell({ candidateId: newRow.id, colId: firstEditableCol });
+            }, 50);
+        });
+    }, [logActivity, actions, visibleColumns, scrollCellIntoView, selectSingleCell]);
+
     const applyCellSelection = useCallback((
         coord: CellCoord,
         e: { shiftKey: boolean; ctrlKey: boolean; metaKey: boolean },
@@ -2767,12 +2790,12 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                         Normalizar texto
                                     </button>
                                     <button
-                                        onClick={() => setShowAddCandidateModal(true)}
+                                        onClick={() => setShowAddRowModal(true)}
                                         className="flex items-center gap-2 px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors"
-                                        title="Agregar un candidato manualmente"
+                                        title="Añadir una fila con los campos básicos del proceso masivo"
                                     >
-                                        <UserPlus className="w-4 h-4" />
-                                        Agregar candidato
+                                        <ListPlus className="w-4 h-4" />
+                                        Añadir fila
                                     </button>
                                     <button
                                         onClick={() => {
@@ -3329,15 +3352,13 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                                                     ch
                                                                 )
                                                             }
-                                                            onResetAll={
-                                                                channel === 'call'
-                                                                    ? (result) =>
-                                                                          handleContactReset(
-                                                                              displayCandidate.id,
-                                                                              displayCandidate.name,
-                                                                              result
-                                                                          )
-                                                                    : undefined
+                                                            onResetChannel={(result) =>
+                                                                handleContactReset(
+                                                                    displayCandidate.id,
+                                                                    displayCandidate.name,
+                                                                    channel,
+                                                                    result
+                                                                )
                                                             }
                                                         />
                                                     </td>
@@ -3652,11 +3673,12 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                 />
             )}
 
-            {showAddCandidateModal && process && (
-                <AddCandidateModal
+            {showAddRowModal && process && (
+                <BulkAddRowModal
                     process={process}
-                    onClose={() => setShowAddCandidateModal(false)}
-                    onSuccess={() => loadCandidates(0, true)}
+                    rowNumber={total + 1}
+                    onClose={() => setShowAddRowModal(false)}
+                    onSuccess={handleAddRowSuccess}
                 />
             )}
 
@@ -3772,6 +3794,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                     hasMore={hasMore}
                     total={total}
                     searchQuery={debouncedSearch}
+                    selectedIds={Array.from(selectedIds)}
                 />
             )}
 

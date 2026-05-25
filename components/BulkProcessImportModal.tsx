@@ -11,6 +11,7 @@ import { getImportHeaders,
     DB_PRIORITY_IMPORT_FIELDS,
     enrichBulkColumnValuesForStorage,
     isPlaceholderImportEmail,
+    resolveBulkCandidateEmail,
     findCustomColumnByHeader,
     normalizeDniKey,
     normalizePhoneKey,
@@ -192,32 +193,6 @@ const rowHasData = (
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-/** Supabase exige email NOT NULL: usar placeholder único si falta o es inválido */
-const resolveImportEmail = (
-    email: string | undefined,
-    rowNumber: number,
-    name: string,
-    dni?: string,
-    phone?: string
-): { email: string; usedPlaceholder: boolean } => {
-    if (email && EMAIL_REGEX.test(email)) {
-        return { email, usedPlaceholder: false };
-    }
-
-    const slug = (dni || phone || name || 'candidato')
-        .toLowerCase()
-        .normalize('NFD')
-        .replace(/[\u0300-\u036f]/g, '')
-        .replace(/[^a-z0-9]+/g, '-')
-        .replace(/^-|-$/g, '')
-        .slice(0, 40) || 'candidato';
-
-    return {
-        email: `sin-email.${slug}.fila${rowNumber}@import.opalo`,
-        usedPlaceholder: true,
-    };
-};
-
 export const BulkProcessImportModal: React.FC<BulkProcessImportModalProps> = ({
     process,
     onClose,
@@ -378,12 +353,13 @@ export const BulkProcessImportModal: React.FC<BulkProcessImportModalProps> = ({
                     const email = cleanValue(candidateData.email);
                     const dni = cleanValue(candidateData.dni);
                     const phone = cleanValue(candidateData.phone);
-                    const { email: resolvedEmail } = resolveImportEmail(
+                    const { email: resolvedEmail } = resolveBulkCandidateEmail(
                         email,
                         rowNumber,
                         name,
                         dni,
-                        phone
+                        phone,
+                        'import'
                     );
 
                     if (email && !EMAIL_REGEX.test(email)) {

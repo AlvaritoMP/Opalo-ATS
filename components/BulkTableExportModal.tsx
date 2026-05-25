@@ -19,6 +19,7 @@ interface Props {
     hasMore: boolean;
     total: number;
     searchQuery: string;
+    selectedIds: string[];
 }
 
 export const BulkTableExportModal: React.FC<Props> = ({
@@ -33,6 +34,7 @@ export const BulkTableExportModal: React.FC<Props> = ({
     hasMore,
     total,
     searchQuery,
+    selectedIds,
 }) => {
     const { actions } = useAppState();
     const [scope, setScope] = useState<BulkExportScope>('current_view');
@@ -47,9 +49,9 @@ export const BulkTableExportModal: React.FC<Props> = ({
         if (!isOpen) return;
         setSelectedColIds(new Set(visibleColumns));
         setIncludedStageIds(new Set(process.stages.map(s => s.id)));
-        setScope('current_view');
+        setScope(selectedIds.length > 0 ? 'selected' : 'current_view');
         setDelimiter('\t');
-    }, [isOpen, process.id, visibleColumns, process.stages]);
+    }, [isOpen, process.id, visibleColumns, process.stages, selectedIds.length]);
 
     const orderedSelectedColumns = useMemo(() => {
         const sel = selectedColIds;
@@ -95,8 +97,36 @@ export const BulkTableExportModal: React.FC<Props> = ({
         }
 
         let candidates: BulkCandidate[] = [];
+        let exportColumnValues = columnValues;
+
         if (scope === 'current_view') {
             candidates = filterByStages(displayCandidates);
+        } else if (scope === 'selected') {
+            const selectedSet = new Set(selectedIds);
+            const fromView = filterByStages(displayCandidates.filter(c => selectedSet.has(c.id)));
+
+            if (fromView.length === selectedIds.length) {
+                candidates = fromView;
+            } else {
+                setBusy(true);
+                try {
+                    const [all, fromDb] = await Promise.all([
+                        bulkCandidatesApi.getAllCandidates(process.id, {
+                            archived: false,
+                            discarded: false,
+                        }),
+                        bulkCandidatesApi.loadAllBulkColumnValues(process.id),
+                    ]);
+                    exportColumnValues = { ...fromDb, ...columnValues };
+                    candidates = filterByStages(all.filter(c => selectedSet.has(c.id)));
+                } catch (e: any) {
+                    actions.showToast(e?.message || 'Error al cargar candidatos', 'error', 4000);
+                    setBusy(false);
+                    return;
+                } finally {
+                    setBusy(false);
+                }
+            }
         } else {
             setBusy(true);
             try {
@@ -116,13 +146,19 @@ export const BulkTableExportModal: React.FC<Props> = ({
         }
 
         if (candidates.length === 0) {
-            actions.showToast('No hay candidatos que cumplan etapas y origen elegidos', 'info', 3500);
+            actions.showToast(
+                scope === 'selected'
+                    ? 'No hay candidatos seleccionados que cumplan las etapas marcadas'
+                    : 'No hay candidatos que cumplan etapas y origen elegidos',
+                'info',
+                3500
+            );
             return;
         }
 
         const headerLabels = orderedSelectedColumns.map(id => getColumnLabel(id, customColumns));
         const body = buildBulkTableExportDocument(orderedSelectedColumns, candidates, headerLabels, {
-            columnValues,
+            columnValues: exportColumnValues,
             customColumns,
             process,
             bulkConfig,
@@ -164,6 +200,25 @@ export const BulkTableExportModal: React.FC<Props> = ({
                 <div className="flex-1 overflow-y-auto px-4 py-3 space-y-4 text-sm">
                     <div>
                         <div className="font-medium text-gray-800 mb-2">Origen de filas</div>
+                        {selectedIds.length > 0 && (
+                            <label className="flex items-start gap-2 cursor-pointer mb-2">
+                                <input
+                                    type="radio"
+                                    name="exscope"
+                                    checked={scope === 'selected'}
+                                    onChange={() => setScope('selected')}
+                                    className="mt-1"
+                                />
+                                <span>
+                                    <span className="font-medium text-gray-900">
+                                        Solo seleccionados ({selectedIds.length})
+                                    </span>
+                                    <span className="block text-xs text-gray-600">
+                                        Exporta únicamente los candidatos marcados con el checkbox en la tabla.
+                                    </span>
+                                </span>
+                            </label>
+                        )}
                         <label className="flex items-start gap-2 cursor-pointer mb-2">
                             <input
                                 type="radio"

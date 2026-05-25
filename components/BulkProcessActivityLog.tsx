@@ -21,6 +21,7 @@ const ACTION_LABELS: Record<BulkActivityActionType, string> = {
     contact_attempt: 'Intento de contacto',
     contact_status: 'Estado de contacto',
     contact_reset: 'Reinicio de contacto',
+    add_row: 'Fila añadida',
 };
 
 interface BulkProcessActivityLogProps {

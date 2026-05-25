@@ -8,7 +8,7 @@ import {
 } from '../lib/api/contactTracking';
 import type { ContactAttempt, ContactOutcome, ContactStatus } from '../lib/contactTracking';
 import type { ContactAttemptChannel } from '../lib/contactChannelConfig';
-import { CONTACT_CHANNELS } from '../lib/contactChannelConfig';
+import { CONTACT_CHANNELS, hasChannelContactTracking } from '../lib/contactChannelConfig';
 import {
     CONTACT_STATUS_META,
     QUICK_STATUS_OPTIONS,
@@ -52,7 +52,7 @@ export interface BulkContactStatusCellProps {
         actionType: 'contact_attempt' | 'contact_status',
         channel: ContactAttemptChannel
     ) => void;
-    onResetAll?: (result: ResetContactTrackingResult) => void;
+    onResetChannel?: (result: ResetContactTrackingResult) => void;
     disabled?: boolean;
 }
 
@@ -107,7 +107,7 @@ export const BulkContactStatusCell: React.FC<BulkContactStatusCellProps> = ({
     userId,
     userName,
     onSummaryChange,
-    onResetAll,
+    onResetChannel,
     disabled = false,
 }) => {
     const { status, attemptCount, lastAttemptAt, lastUserName } = summary;
@@ -307,23 +307,24 @@ export const BulkContactStatusCell: React.FC<BulkContactStatusCellProps> = ({
         await handleMarkAttempt('no_answer');
     };
 
-    const handleResetAll = async () => {
-        if (disabled || saving || !onResetAll) return;
+    const handleResetChannel = async () => {
+        if (disabled || saving || !onResetChannel) return;
         const msg =
-            `¿Reiniciar TODO el seguimiento de contacto (llamadas, WhatsApp y correo)?\n\n` +
-            `El candidato quedará como nuevo en la lista. Quedará registrado en el log quién lo hizo.`;
+            `¿Reiniciar el seguimiento de ${channelDef.label}?\n\n` +
+            `Esta columna quedará como si nunca se hubiera contactado por este canal. Quedará registrado en el log quién lo hizo.`;
         if (!window.confirm(msg)) return;
 
         setSaving(true);
         try {
-            const result = await contactTrackingApi.resetAllContactTracking({
+            const result = await contactTrackingApi.resetChannelContactTracking({
                 candidateId,
                 processId,
+                channel,
                 userId,
                 userName,
             });
             if (result) {
-                onResetAll(result);
+                onResetChannel(result);
                 closePopover();
             }
         } finally {
@@ -331,8 +332,7 @@ export const BulkContactStatusCell: React.FC<BulkContactStatusCellProps> = ({
         }
     };
 
-    const hasAnyTracking =
-        status !== 'por_contactar' || attemptCount > 0 || !!lastAttemptAt;
+    const hasTracking = hasChannelContactTracking(summary);
 
     const QuickIcon = channel === 'email' ? Mail : channel === 'whatsapp' ? MessageCircle : Phone;
 
@@ -442,15 +442,15 @@ export const BulkContactStatusCell: React.FC<BulkContactStatusCellProps> = ({
                                     ))}
                                 </div>
 
-                                {onResetAll && channel === 'call' && hasAnyTracking && (
+                                {onResetChannel && hasTracking && (
                                     <button
                                         type="button"
                                         disabled={saving}
-                                        onClick={() => void handleResetAll()}
+                                        onClick={() => void handleResetChannel()}
                                         className="w-full flex items-center justify-center gap-1.5 mt-3 py-2 text-xs font-medium text-red-700 border border-red-200 bg-red-50 rounded-lg hover:bg-red-100"
                                     >
                                         <Trash2 className="w-3.5 h-3.5" />
-                                        Borrar todo (3 canales)
+                                        Borrar seguimiento ({channelDef.shortLabel})
                                     </button>
                                 )}
 
