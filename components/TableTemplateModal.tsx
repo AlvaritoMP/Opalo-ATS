@@ -1,28 +1,44 @@
 import React, { useState, useEffect } from 'react';
 import { X, Save, Download, Upload, Trash2 } from 'lucide-react';
 import type { CustomColumn } from '../types';
+import { DEFAULT_COLUMN_ORDER } from '../lib/bulkTableColumns';
 
-interface TableTemplate {
+export interface BulkTableTemplateLayout {
+    columns: CustomColumn[];
+    columnOrder: string[];
+    hiddenColumns: string[];
+    pinnedColumns: string[];
+    columnWidths: Record<string, number>;
+}
+
+export interface BulkTableTemplate extends BulkTableTemplateLayout {
     id: string;
     name: string;
-    columns: CustomColumn[];
     createdAt: string;
 }
 
 interface TableTemplateModalProps {
     isOpen: boolean;
     onClose: () => void;
-    currentColumns: CustomColumn[];
-    onLoadTemplate: (columns: CustomColumn[]) => void;
+    currentLayout: BulkTableTemplateLayout;
+    onLoadTemplate: (template: BulkTableTemplateLayout) => void | Promise<void>;
+}
+
+function hasSaveableLayout(layout: BulkTableTemplateLayout): boolean {
+    if (layout.columns.length > 0) return true;
+    if (layout.hiddenColumns.length > 0) return true;
+    if (Object.keys(layout.columnWidths).length > 0) return true;
+    if (layout.pinnedColumns.length !== 1 || layout.pinnedColumns[0] !== 'name') return true;
+    return JSON.stringify(layout.columnOrder) !== JSON.stringify(DEFAULT_COLUMN_ORDER);
 }
 
 export const TableTemplateModal: React.FC<TableTemplateModalProps> = ({
     isOpen,
     onClose,
-    currentColumns,
+    currentLayout,
     onLoadTemplate,
 }) => {
-    const [templates, setTemplates] = useState<TableTemplate[]>([]);
+    const [templates, setTemplates] = useState<BulkTableTemplate[]>([]);
     const [templateName, setTemplateName] = useState('');
     const [selectedTemplate, setSelectedTemplate] = useState<string | null>(null);
 
@@ -47,15 +63,19 @@ export const TableTemplateModal: React.FC<TableTemplateModalProps> = ({
             return;
         }
 
-        if (currentColumns.length === 0) {
-            alert('No hay columnas personalizadas para guardar');
+        if (!hasSaveableLayout(currentLayout)) {
+            alert('No hay configuración de columnas para guardar');
             return;
         }
 
-        const template: TableTemplate = {
+        const template: BulkTableTemplate = {
             id: `template_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
             name: templateName.trim(),
-            columns: currentColumns,
+            columns: currentLayout.columns,
+            columnOrder: currentLayout.columnOrder,
+            hiddenColumns: currentLayout.hiddenColumns,
+            pinnedColumns: currentLayout.pinnedColumns,
+            columnWidths: currentLayout.columnWidths,
             createdAt: new Date().toISOString(),
         };
 
@@ -66,13 +86,25 @@ export const TableTemplateModal: React.FC<TableTemplateModalProps> = ({
         alert('Plantilla guardada exitosamente');
     };
 
-    const handleLoadTemplate = (templateId: string) => {
+    const handleLoadTemplate = async (templateId: string) => {
         const template = templates.find(t => t.id === templateId);
-        if (template) {
-            onLoadTemplate(template.columns);
-            setSelectedTemplate(templateId);
-            alert(`Plantilla "${template.name}" cargada exitosamente`);
-        }
+        if (!template) return;
+
+        const layout: BulkTableTemplateLayout = {
+            columns: template.columns || [],
+            columnOrder: template.columnOrder?.length
+                ? template.columnOrder
+                : [
+                    ...DEFAULT_COLUMN_ORDER,
+                    ...(template.columns || []).map(c => `custom_${c.id}`),
+                ],
+            hiddenColumns: template.hiddenColumns || [],
+            pinnedColumns: template.pinnedColumns?.length ? template.pinnedColumns : ['name'],
+            columnWidths: template.columnWidths || {},
+        };
+
+        await onLoadTemplate(layout);
+        setSelectedTemplate(templateId);
     };
 
     const handleDeleteTemplate = (templateId: string) => {
@@ -107,8 +139,8 @@ export const TableTemplateModal: React.FC<TableTemplateModalProps> = ({
         const reader = new FileReader();
         reader.onload = (event) => {
             try {
-                const template = JSON.parse(event.target?.result as string) as TableTemplate;
-                const newTemplate: TableTemplate = {
+                const template = JSON.parse(event.target?.result as string) as BulkTableTemplate;
+                const newTemplate: BulkTableTemplate = {
                     ...template,
                     id: `template_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
                     createdAt: new Date().toISOString(),
@@ -153,16 +185,21 @@ export const TableTemplateModal: React.FC<TableTemplateModalProps> = ({
                             />
                             <button
                                 onClick={handleSaveTemplate}
-                                disabled={!templateName.trim() || currentColumns.length === 0}
+                                disabled={!templateName.trim() || !hasSaveableLayout(currentLayout)}
                                 className="flex items-center gap-2 px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                             >
                                 <Save className="w-4 h-4" />
                                 Guardar
                             </button>
                         </div>
-                        {currentColumns.length > 0 && (
+                        {hasSaveableLayout(currentLayout) && (
                             <p className="text-xs text-gray-500 mt-2">
-                                {currentColumns.length} columna{currentColumns.length !== 1 ? 's' : ''} personalizada{currentColumns.length !== 1 ? 's' : ''} se guardará
+                                Se guardará el orden, visibilidad y {currentLayout.columns.length} columna
+                                {currentLayout.columns.length !== 1 ? 's' : ''} personalizada
+                                {currentLayout.columns.length !== 1 ? 's' : ''}
+                                {currentLayout.hiddenColumns.length > 0
+                                    ? ` (${currentLayout.hiddenColumns.length} oculta${currentLayout.hiddenColumns.length !== 1 ? 's' : ''})`
+                                    : ''}
                             </p>
                         )}
                     </div>
@@ -204,7 +241,13 @@ export const TableTemplateModal: React.FC<TableTemplateModalProps> = ({
                                             <div className="flex-1">
                                                 <h4 className="font-medium text-gray-900">{template.name}</h4>
                                                 <p className="text-xs text-gray-500">
-                                                    {template.columns.length} columna{template.columns.length !== 1 ? 's' : ''} • {new Date(template.createdAt).toLocaleDateString('es-PE')}
+                                                    {(template.columns || []).length} personalizada{(template.columns || []).length !== 1 ? 's' : ''}
+                                                    {template.columnOrder?.length ? ' • orden personalizado' : ''}
+                                                    {template.hiddenColumns?.length
+                                                        ? ` • ${template.hiddenColumns.length} oculta${template.hiddenColumns.length !== 1 ? 's' : ''}`
+                                                        : ''}
+                                                    {' • '}
+                                                    {new Date(template.createdAt).toLocaleDateString('es-PE')}
                                                 </p>
                                             </div>
                                             <div className="flex gap-2">

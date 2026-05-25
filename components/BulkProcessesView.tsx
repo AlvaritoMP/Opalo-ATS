@@ -71,7 +71,7 @@ import { BulkEmailModal } from './BulkEmailModal';
 import { QuickScheduleModal } from './QuickScheduleModal';
 import { BulkScheduleModal } from './BulkScheduleModal';
 import { AddColumnModal } from './AddColumnModal';
-import { TableTemplateModal } from './TableTemplateModal';
+import { TableTemplateModal, BulkTableTemplateLayout } from './TableTemplateModal';
 import { PsycholaboralReportModal } from './PsycholaboralReportModal';
 import { PsycholaboralBulkEvaluateModal } from './PsycholaboralBulkEvaluateModal';
 import { PsycholaboralInventoryModal } from './PsycholaboralInventoryModal';
@@ -1542,11 +1542,49 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
         actions.showToast('Columna eliminada', 'success', 2000);
     };
 
-    const handleLoadTemplate = async (columns: CustomColumn[]) => {
-        const newOrder = [...DEFAULT_COLUMN_ORDER, ...columns.map(c => `custom_${c.id}`)];
-        setCustomColumns(columns);
+    const handleLoadTemplate = async (template: BulkTableTemplateLayout) => {
+        if (!process) {
+            actions.showToast('Seleccione un proceso antes de cargar la plantilla', 'error', 3000);
+            return;
+        }
+
+        const idMap = new Map<string, string>();
+        const remappedColumns = template.columns.map((col, index) => {
+            const newId = `col_${Date.now()}_${index}_${Math.random().toString(36).substr(2, 9)}`;
+            idMap.set(col.id, newId);
+            return { ...col, id: newId };
+        });
+
+        const remapColId = (colId: string): string => {
+            if (!colId.startsWith('custom_')) return colId;
+            const oldId = colId.slice('custom_'.length);
+            const newId = idMap.get(oldId);
+            return newId ? `custom_${newId}` : colId;
+        };
+
+        const rawOrder = template.columnOrder.map(remapColId);
+        const newOrder = resolveColumnOrder({ columnOrder: rawOrder }, remappedColumns);
+        const newHidden = template.hiddenColumns.map(remapColId);
+        const newPinned = template.pinnedColumns.map(remapColId);
+        const newWidths: Record<string, number> = {};
+        for (const [colId, width] of Object.entries(template.columnWidths)) {
+            newWidths[remapColId(colId)] = width;
+        }
+
+        setCustomColumns(remappedColumns);
         setColumnOrder(newOrder);
-        await persistBulkConfig({ customColumns: columns, columnOrder: newOrder });
+        setHiddenColumns(newHidden);
+        setPinnedColumns(newPinned);
+        setColumnWidths(newWidths);
+        columnWidthsRef.current = newWidths;
+
+        await persistBulkConfig({
+            customColumns: remappedColumns,
+            columnOrder: newOrder,
+            hiddenColumns: newHidden,
+            pinnedColumns: newPinned,
+            columnWidths: newWidths,
+        });
         actions.showToast('Plantilla aplicada', 'success', 2000);
     };
 
@@ -3710,7 +3748,13 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                 <TableTemplateModal
                     isOpen={showTemplateModal}
                     onClose={() => setShowTemplateModal(false)}
-                    currentColumns={customColumns}
+                    currentLayout={{
+                        columns: customColumns,
+                        columnOrder,
+                        hiddenColumns,
+                        pinnedColumns,
+                        columnWidths,
+                    }}
                     onLoadTemplate={handleLoadTemplate}
                 />
             )}
