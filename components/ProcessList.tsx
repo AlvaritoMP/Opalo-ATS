@@ -302,8 +302,9 @@ export const ProcessList: React.FC = () => {
 
     // Filtrar procesos por estado y búsqueda
     const filteredProcesses = useMemo(() => {
-        let filtered = state.processes.filter(process => 
-            statusFilter === 'all' ? true : (process.status || 'en_proceso') === statusFilter
+        let filtered = state.processes.filter(process =>
+            !process.isBulkProcess &&
+            (statusFilter === 'all' ? true : (process.status || 'en_proceso') === statusFilter)
         );
 
         // Aplicar filtro de búsqueda si hay un término

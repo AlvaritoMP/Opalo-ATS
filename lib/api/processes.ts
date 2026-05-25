@@ -1228,5 +1228,17 @@ export const processesApi = {
             [] // Attachments se cargan lazy
         ));
     },
+
+    /** Procesos regulares + masivos (para estado global: panel, candidatos, reportes). */
+    async getAllIncludingBulk(includeAttachments: boolean = false): Promise<Process[]> {
+        const [regular, bulk] = await Promise.all([
+            this.getAll(includeAttachments),
+            this.getAllBulkProcesses().catch(err => {
+                console.warn('⚠️ No se pudieron cargar procesos masivos:', err);
+                return [] as Process[];
+            }),
+        ]);
+        return [...regular, ...bulk];
+    },
 };
 

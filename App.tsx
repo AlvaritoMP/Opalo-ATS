@@ -493,7 +493,7 @@ const App: React.FC = () => {
                 // Solo settings puede usar fallback porque puede venir de localStorage
                 // Cargar candidatos activos y descartados (aunque estén archivados) para el Dashboard
                 const [processes, activeCandidates, users, interviewEvents, settings] = await Promise.all([
-                    loadWithEmptyFallback(() => processesApi.getAll(false), initialProcesses, 'processes', true), // false = no attachments por defecto
+                    loadWithEmptyFallback(() => processesApi.getAllIncludingBulk(false), initialProcesses, 'processes', true), // regulares + masivos
                     loadWithEmptyFallback(() => candidatesApi.getAll(false, true), initialCandidates, 'candidates', true), // false = no archived, true = include relations (post-its, comments, history)
                     loadWithEmptyFallback(() => usersApi.getAll(), initialUsers, 'users', true),
                     loadWithEmptyFallback(() => interviewsApi.getAll(), initialInterviewEvents, 'interviewEvents', true),
@@ -821,7 +821,12 @@ const App: React.FC = () => {
         },
         reloadProcesses: async () => {
             try {
-                const processes = await processesApi.getAll();
+                let processes = await processesApi.getAllIncludingBulk();
+                const currentUser = state.currentUser;
+                if (currentUser?.allowedClientIds != null) {
+                    const allowed = new Set(currentUser.allowedClientIds);
+                    processes = processes.filter(p => p.clientId && allowed.has(p.clientId));
+                }
                 setState(s => ({ ...s, processes }));
             } catch (error: any) {
                 console.error('Error reloading processes:', error);
