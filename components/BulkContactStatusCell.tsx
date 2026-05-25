@@ -12,13 +12,29 @@ import { CONTACT_CHANNELS } from '../lib/contactChannelConfig';
 import {
     CONTACT_STATUS_META,
     QUICK_STATUS_OPTIONS,
-    getContactBadgeLabel,
+    getContactBadgeLabelCompact,
     isContactCooldownActive,
+    formatContactLastAtCompact,
     formatContactCooldownWarning,
     formatAttemptHistoryLine,
     CONTACT_OUTCOME_LABELS,
 } from '../lib/contactTracking';
 import { formatBulkDateTime } from '../lib/bulkTableColumns';
+
+function buildCellTooltip(
+    lastAttemptAt?: string,
+    lastUserName?: string,
+    cooldown?: boolean,
+    cooldownMsg?: string
+): string | undefined {
+    const parts: string[] = [];
+    if (lastAttemptAt) {
+        parts.push(formatBulkDateTime(lastAttemptAt));
+        if (lastUserName) parts.push(`por ${lastUserName}`);
+    }
+    if (cooldown && cooldownMsg) parts.push(cooldownMsg);
+    return parts.length ? parts.join(' · ') : undefined;
+}
 import type { ChannelContactSummary } from '../lib/contactChannelConfig';
 
 export interface BulkContactStatusCellProps {
@@ -111,7 +127,15 @@ export const BulkContactStatusCell: React.FC<BulkContactStatusCellProps> = ({
 
     const cooldown = isContactCooldownActive(lastAttemptAt);
     const meta = CONTACT_STATUS_META[status];
-    const badgeLabel = getContactBadgeLabel(status, attemptCount);
+    const badgeLabel = getContactBadgeLabelCompact(status, attemptCount);
+    const cellTooltip = buildCellTooltip(
+        lastAttemptAt,
+        lastUserName,
+        cooldown,
+        cooldown && lastAttemptAt
+            ? formatContactCooldownWarning(lastAttemptAt, lastUserName)
+            : undefined
+    );
 
     const openPopover = useCallback((mode: PopoverMode, el: HTMLElement) => {
         const rect = el.getBoundingClientRect();
@@ -478,83 +502,82 @@ export const BulkContactStatusCell: React.FC<BulkContactStatusCellProps> = ({
     return (
         <div
             ref={rootRef}
-            className={`flex flex-col gap-0.5 min-w-0 max-w-full ${cooldown ? 'ring-1 ring-red-300 rounded-md px-0.5' : ''}`}
+            className={`flex items-center gap-0.5 min-w-0 max-w-full leading-none ${cooldown ? 'ring-1 ring-red-300 rounded px-0.5' : ''}`}
             onClick={(e) => e.stopPropagation()}
+            title={cellTooltip}
         >
-            <div className="flex items-center gap-0.5">
+            <button
+                ref={badgeRef}
+                type="button"
+                disabled={disabled || saving}
+                onClick={toggleStatusPopover}
+                className={`inline-flex items-center gap-px shrink-0 px-0.5 py-px rounded border text-[10px] font-semibold leading-none whitespace-nowrap ${meta.badgeClass}`}
+                aria-expanded={popover === 'status'}
+                title="Estado de contacto"
+            >
+                <span className="text-[9px] leading-none">{meta.dot}</span>
+                {badgeLabel ? <span>{badgeLabel}</span> : null}
+                <ChevronDown
+                    className={`w-2 h-2 shrink-0 opacity-60 ${popover === 'status' ? 'rotate-180' : ''}`}
+                />
+            </button>
+
+            {attemptCount > 0 && (
                 <button
-                    ref={badgeRef}
+                    type="button"
+                    disabled={disabled}
+                    onClick={(e) => {
+                        e.stopPropagation();
+                        if (popover === 'history') closePopover();
+                        else openPopover('history', e.currentTarget);
+                    }}
+                    className="shrink-0 p-0 text-[10px] font-bold text-gray-600 hover:text-primary-700 tabular-nums leading-none"
+                    title={cellTooltip || 'Ver historial'}
+                >
+                    {status !== 'en_intento' ? attemptCount : null}
+                </button>
+            )}
+
+            {contactAddress && (
+                <button
                     type="button"
                     disabled={disabled || saving}
-                    onClick={toggleStatusPopover}
-                    className={`inline-flex items-center gap-0.5 max-w-full px-1 py-0.5 rounded border text-[10px] font-semibold leading-tight truncate ${meta.badgeClass}`}
-                    aria-expanded={popover === 'status'}
+                    onClick={(e) => {
+                        e.stopPropagation();
+                        void handleQuickAction();
+                    }}
+                    className={`shrink-0 p-0 rounded leading-none ${
+                        channel === 'whatsapp'
+                            ? 'text-green-600 hover:bg-green-50'
+                            : 'text-blue-600 hover:bg-blue-50'
+                    }`}
+                    title={`Registrar ${channelDef.shortLabel}`}
                 >
-                    <span className="shrink-0">{meta.dot}</span>
-                    <span className="truncate">{badgeLabel}</span>
-                    <ChevronDown
-                        className={`w-2.5 h-2.5 shrink-0 opacity-60 ${popover === 'status' ? 'rotate-180' : ''}`}
-                    />
+                    {saving ? (
+                        <Loader2 className="w-3 h-3 animate-spin" />
+                    ) : (
+                        <QuickIcon className="w-3 h-3" />
+                    )}
                 </button>
+            )}
 
-                {attemptCount > 0 && (
-                    <button
-                        type="button"
-                        disabled={disabled}
-                        onClick={(e) => {
-                            e.stopPropagation();
-                            if (popover === 'history') closePopover();
-                            else openPopover('history', e.currentTarget);
-                        }}
-                        className="inline-flex items-center gap-0.5 px-0.5 text-[10px] text-gray-600 hover:bg-gray-50 rounded tabular-nums"
-                        title="Ver historial"
-                    >
-                        <span className="font-bold">{attemptCount}</span>
-                    </button>
-                )}
-
-                {contactAddress && (
-                    <button
-                        type="button"
-                        disabled={disabled || saving}
-                        onClick={(e) => {
-                            e.stopPropagation();
-                            void handleQuickAction();
-                        }}
-                        className={`p-0.5 rounded ${
-                            channel === 'whatsapp'
-                                ? 'text-green-600 hover:bg-green-50'
-                                : channel === 'email'
-                                  ? 'text-blue-600 hover:bg-blue-50'
-                                  : 'text-blue-600 hover:bg-blue-50'
-                        }`}
-                        title={`Acción rápida ${channelDef.shortLabel}`}
-                    >
-                        {saving ? (
-                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                        ) : (
-                            <QuickIcon className="w-3.5 h-3.5" />
-                        )}
-                    </button>
-                )}
-
-                {cooldown && <Clock className="w-3 h-3 text-red-500 shrink-0" />}
-            </div>
+            {cooldown && <Clock className="w-2.5 h-2.5 text-red-500 shrink-0" aria-hidden />}
 
             {lastAttemptAt ? (
-                <div className="text-[10px] leading-tight text-gray-600 pl-0.5 max-w-full">
-                    <div className="truncate" title={formatBulkDateTime(lastAttemptAt)}>
-                        {formatBulkDateTime(lastAttemptAt)}
-                    </div>
-                    {lastUserName && (
-                        <div className="truncate text-gray-400" title={lastUserName}>
-                            por {lastUserName}
-                        </div>
-                    )}
-                </div>
-            ) : (
-                <span className="text-[10px] text-gray-400 pl-0.5">Sin registro</span>
-            )}
+                <button
+                    type="button"
+                    disabled={disabled}
+                    onClick={(e) => {
+                        e.stopPropagation();
+                        if (popover === 'history') closePopover();
+                        else openPopover('history', e.currentTarget);
+                    }}
+                    className="text-[9px] text-gray-500 tabular-nums whitespace-nowrap min-w-0 shrink truncate hover:text-primary-700 leading-none"
+                    title={cellTooltip}
+                >
+                    {formatContactLastAtCompact(lastAttemptAt)}
+                </button>
+            ) : null}
 
             {popoverContent}
         </div>

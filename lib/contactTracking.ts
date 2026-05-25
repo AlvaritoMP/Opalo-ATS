@@ -118,6 +118,29 @@ export function getContactBadgeLabel(status: ContactStatus, attemptCount: number
     return meta.shortLabel;
 }
 
+/** Etiqueta mínima para celda de una sola línea */
+export function getContactBadgeLabelCompact(status: ContactStatus, attemptCount: number): string {
+    if (status === 'por_contactar') return '';
+    if (status === 'en_intento' && attemptCount > 0) return String(attemptCount);
+    const short = CONTACT_STATUS_META[status].shortLabel;
+    return short.length > 8 ? `${short.slice(0, 7)}…` : short;
+}
+
+/** Hora o fecha corta para la fila de la tabla */
+export function formatContactLastAtCompact(iso?: string | null): string {
+    if (!iso) return '';
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return '';
+    const now = new Date();
+    const sameDay =
+        d.getDate() === now.getDate() &&
+        d.getMonth() === now.getMonth() &&
+        d.getFullYear() === now.getFullYear();
+    const t = d.toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' });
+    if (sameDay) return t;
+    return `${d.toLocaleDateString('es-PE', { day: '2-digit', month: '2-digit' })} ${t}`;
+}
+
 export function isContactCooldownActive(lastAttemptAt?: string | null, now = Date.now()): boolean {
     if (!lastAttemptAt) return false;
     const t = new Date(lastAttemptAt).getTime();
