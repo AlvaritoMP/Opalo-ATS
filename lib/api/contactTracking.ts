@@ -61,6 +61,36 @@ export interface SetContactStatusInput {
 
 let contactColumnsSupported: boolean | null = null;
 
+export interface ContactUndoSnapshot {
+    statusBefore: ContactStatus;
+    attemptCountBefore: number;
+}
+
+function encodeUndoNotes(snapshot: ContactUndoSnapshot, extra?: string): string {
+    return JSON.stringify({ undo: snapshot, label: extra ?? null });
+}
+
+export function parseUndoFromAttemptNotes(
+    notes?: string | null,
+    attemptNumberFallback = 0
+): ContactUndoSnapshot | null {
+    if (!notes) return null;
+    try {
+        const parsed = JSON.parse(notes) as { undo?: ContactUndoSnapshot };
+        if (parsed.undo?.statusBefore) return parsed.undo;
+    } catch {
+        /* legacy */
+    }
+    const legacy = notes.match(/^([\w_]+)\s*→\s*([\w_]+)$/);
+    if (legacy) {
+        return {
+            statusBefore: normalizeContactStatus(legacy[1]),
+            attemptCountBefore: attemptNumberFallback,
+        };
+    }
+    return null;
+}
+
 function isMissingContactColumnError(error: { message?: string; code?: string } | null): boolean {
     if (!error) return false;
     const msg = (error.message || '').toLowerCase();
@@ -136,6 +166,7 @@ export const contactTrackingApi = {
 
         if (updErr) throw updErr;
 
+        const attemptCount = (current?.contact_attempt_count as number) || 0;
         await supabase.from('candidate_contact_attempts').insert({
             candidate_id: input.candidateId,
             process_id: input.processId,
@@ -143,9 +174,12 @@ export const contactTrackingApi = {
             user_name: input.userName || null,
             channel: 'call',
             outcome: 'status_change',
-            attempt_number: (current?.contact_attempt_count as number) || 0,
+            attempt_number: attemptCount,
             status_after: input.status,
-            notes: `${prevStatus} → ${input.status}`,
+            notes: encodeUndoNotes(
+                { statusBefore: prevStatus, attemptCountBefore: attemptCount },
+                `${prevStatus} → ${input.status}`
+            ),
             app_name: APP_NAME,
         });
 
@@ -221,6 +255,13 @@ export const contactTrackingApi = {
 
         if (updErr) throw updErr;
 
+        const undoNotes =
+            input.notes ||
+            encodeUndoNotes(
+                { statusBefore: prevStatus, attemptCountBefore: prevCount },
+                `${input.channel}:${input.outcome}`
+            );
+
         const { error: insErr } = await supabase.from('candidate_contact_attempts').insert({
             candidate_id: input.candidateId,
             process_id: input.processId,
@@ -230,7 +271,7 @@ export const contactTrackingApi = {
             outcome: input.outcome,
             attempt_number: increment ? newCount : prevCount,
             status_after: newStatus,
-            notes: input.notes || null,
+            notes: undoNotes,
             app_name: APP_NAME,
         });
 
@@ -242,6 +283,74 @@ export const contactTrackingApi = {
         return {
             status: newStatus,
             attemptCount: newCount,
+            lastAttemptAt: now,
+            lastUserId: input.userId,
+            lastUserName: input.userName,
+        };
+    },
+
+    /** Restaura estado e intentos anteriores a la última acción registrada */
+    async revertLastAction(input: {
+        candidateId: string;
+        processId: string;
+        userId?: string;
+        userName?: string;
+    }): Promise<ContactSummary | null> {
+        const history = await this.getHistory(input.candidateId, 1);
+        const latest = history[0];
+        if (!latest) return null;
+
+        let snapshot = parseUndoFromAttemptNotes(latest.notes, latest.attemptNumber);
+        if (!snapshot) {
+            const older = await this.getHistory(input.candidateId, 2);
+            if (older.length < 2) {
+                snapshot = { statusBefore: 'por_contactar', attemptCountBefore: 0 };
+            } else {
+                const prev = older[1];
+                snapshot = {
+                    statusBefore: normalizeContactStatus(prev.statusAfter || 'por_contactar'),
+                    attemptCountBefore: Math.max(0, (prev.attemptNumber || 1) - 1),
+                };
+            }
+        }
+
+        const now = new Date().toISOString();
+        const { error: updErr } = await supabase
+            .from('candidates')
+            .update({
+                contact_status: snapshot.statusBefore,
+                contact_attempt_count: snapshot.attemptCountBefore,
+                contact_last_attempt_at: now,
+                contact_last_user_id: input.userId || null,
+                contact_last_user_name: input.userName || null,
+            })
+            .eq('id', input.candidateId)
+            .eq('app_name', APP_NAME);
+
+        if (updErr) throw updErr;
+
+        await supabase.from('candidate_contact_attempts').insert({
+            candidate_id: input.candidateId,
+            process_id: input.processId,
+            user_id: input.userId || null,
+            user_name: input.userName || null,
+            channel: 'call',
+            outcome: 'status_change',
+            attempt_number: snapshot.attemptCountBefore,
+            status_after: snapshot.statusBefore,
+            notes: encodeUndoNotes(
+                {
+                    statusBefore: normalizeContactStatus(latest.statusAfter),
+                    attemptCountBefore: latest.attemptNumber,
+                },
+                `Deshacer: ${latest.statusAfter ?? 'actual'} → ${snapshot.statusBefore}`
+            ),
+            app_name: APP_NAME,
+        });
+
+        return {
+            status: snapshot.statusBefore,
+            attemptCount: snapshot.attemptCountBefore,
             lastAttemptAt: now,
             lastUserId: input.userId,
             lastUserName: input.userName,
