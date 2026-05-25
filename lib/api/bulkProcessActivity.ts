@@ -14,7 +14,8 @@ export type BulkActivityActionType =
     | 'cell_meta'
     | 'paste'
     | 'contact_attempt'
-    | 'contact_status';
+    | 'contact_status'
+    | 'contact_reset';
 
 export interface BulkProcessActivityEntry {
     id: string;

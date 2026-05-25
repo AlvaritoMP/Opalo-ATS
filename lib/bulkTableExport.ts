@@ -1,5 +1,5 @@
 import { BulkCandidate } from './api/bulkCandidates';
-import { CONTACT_STATUS_META, getContactBadgeLabel, normalizeContactStatus } from './contactTracking';
+import { CONTACT_STATUS_META, getContactBadgeLabel } from './contactTracking';
 import { BulkProcessConfig, CustomColumn, Process } from '../types';
 import {
     formatCustomCellDisplay,
@@ -88,20 +88,18 @@ export function getBulkExportCellValue(
             return candidate.createdAt;
         }
     }
-    if (colId === 'lastInteraction') {
-        if (!candidate.lastWhatsAppInteractionAt) return '';
-        try {
-            return new Date(candidate.lastWhatsAppInteractionAt).toLocaleString('es-PE');
-        } catch {
-            return candidate.lastWhatsAppInteractionAt;
-        }
-    }
-    if (colId === 'contact') {
-        const status = normalizeContactStatus(candidate.contactStatus);
-        const count = candidate.contactAttemptCount ?? 0;
-        const label = getContactBadgeLabel(status, count);
-        const who = candidate.contactLastUserName ? ` (${candidate.contactLastUserName})` : '';
-        return `${CONTACT_STATUS_META[status].label}: ${label}${who}`;
+    if (colId === 'contactPhone' || colId === 'contactWhatsapp' || colId === 'contactEmail') {
+        const ch =
+            colId === 'contactPhone' ? candidate.contactPhone
+            : colId === 'contactWhatsapp' ? candidate.contactWhatsapp
+            : candidate.contactEmail;
+        if (!ch) return '';
+        const label = getContactBadgeLabel(ch.status, ch.attemptCount);
+        const when = ch.lastAttemptAt
+            ? new Date(ch.lastAttemptAt).toLocaleString('es-PE')
+            : '';
+        const who = ch.lastUserName ? ` · ${ch.lastUserName}` : '';
+        return `${CONTACT_STATUS_META[ch.status].label}: ${label}${when ? ` · ${when}` : ''}${who}`;
     }
     if (colId === 'nextInterview') {
         if (!candidate.nextInterviewAt) return '';

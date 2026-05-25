@@ -2,10 +2,16 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useAppState } from '../App';
 import { bulkCandidatesApi, BulkCandidate } from '../lib/api/bulkCandidates';
 import { bulkProcessActivityApi, BulkActivityActionType } from '../lib/api/bulkProcessActivity';
-import { contactTrackingApi } from '../lib/api/contactTracking';
+import { contactTrackingApi, type ResetContactTrackingResult } from '../lib/api/contactTracking';
+import { isContactCooldownActive } from '../lib/contactTracking';
 import { supabase } from '../lib/supabase';
-import { normalizeContactStatus, isContactCooldownActive } from '../lib/contactTracking';
-import type { ContactStatus } from '../lib/contactTracking';
+import {
+    columnIdToAttemptChannel,
+    CONTACT_COLUMN_IDS,
+    type ContactAttemptChannel,
+    type ChannelContactSummary,
+    readChannelSummaryFromRow,
+} from '../lib/contactChannelConfig';
 import { processesApi } from '../lib/api/processes';
 import { useDebouncedValue } from '../lib/useDebouncedValue';
 import { Check, X, Loader2, Send, Archive, Search, ChevronDown, ChevronUp, Plus, Edit, Trash2, ArrowLeft, MessageCircle, Phone, Upload, Download, Filter, Mail, Calendar, Settings, ArrowUp, ArrowDown, Pin, FileText, BookOpen, Paperclip, ClipboardList, UserPlus, RefreshCw, HardDrive, CaseSensitive } from 'lucide-react';
@@ -843,11 +849,9 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                     c.id === id
                         ? {
                               ...c,
-                              contactStatus: normalizeContactStatus(row.contact_status as string),
-                              contactAttemptCount: (row.contact_attempt_count as number) ?? 0,
-                              contactLastAttemptAt: (row.contact_last_attempt_at as string) || undefined,
-                              contactLastUserId: (row.contact_last_user_id as string) || undefined,
-                              contactLastUserName: (row.contact_last_user_name as string) || undefined,
+                              contactPhone: readChannelSummaryFromRow(row, 'call'),
+                              contactWhatsapp: readChannelSummaryFromRow(row, 'whatsapp'),
+                              contactEmail: readChannelSummaryFromRow(row, 'email'),
                           }
                         : c
                 )
@@ -1140,76 +1144,67 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
         }
     }, [selectedIds, candidates, state.settings, loadCandidates, currentPage, actions, logActivity]);
 
+    const CHANNEL_CANDIDATE_KEY: Record<ContactAttemptChannel, 'contactPhone' | 'contactWhatsapp' | 'contactEmail'> = {
+        call: 'contactPhone',
+        whatsapp: 'contactWhatsapp',
+        email: 'contactEmail',
+    };
+
     const handleContactSummaryChange = useCallback(
         (
             candidateId: string,
             candidateName: string | undefined,
-            summary: {
-                status: ContactStatus;
-                attemptCount: number;
-                lastAttemptAt?: string;
-                lastUserName?: string;
-            },
-            actionType: 'contact_attempt' | 'contact_status'
+            summary: ChannelContactSummary,
+            actionType: 'contact_attempt' | 'contact_status',
+            channel: ContactAttemptChannel
         ) => {
-            applyOptimisticUpdate(candidateId, {
-                contactStatus: summary.status,
-                contactAttemptCount: summary.attemptCount,
-                contactLastAttemptAt: summary.lastAttemptAt,
-                contactLastUserName: summary.lastUserName,
-            });
+            const key = CHANNEL_CANDIDATE_KEY[channel];
+            applyOptimisticUpdate(candidateId, { [key]: summary });
+            const channelLabel = channel === 'call' ? 'Llamadas' : channel === 'whatsapp' ? 'WhatsApp' : 'Correo';
             logActivity(actionType, {
                 candidateId,
                 candidateName,
-                fieldName: 'Contacto',
+                fieldName: channelLabel,
                 newValue: `${summary.status} (${summary.attemptCount} intentos)`,
             });
         },
         [applyOptimisticUpdate, logActivity]
     );
 
-    const handleWhatsAppClick = useCallback(async (candidate: BulkCandidate) => {
-        if (!candidate.phone || !process?.id) return;
-        const cleanPhone = candidate.phone.replace(/[^\d]/g, '');
-        window.open(`https://wa.me/${cleanPhone}`, '_blank', 'noopener,noreferrer');
-
-        const now = new Date().toISOString();
-        applyOptimisticUpdate(candidate.id, { lastWhatsAppInteractionAt: now });
-        void bulkCandidatesApi.recordWhatsAppInteraction(candidate.id).catch(() => {});
-
-        try {
-            const summary = await contactTrackingApi.recordAttempt({
-                candidateId: candidate.id,
-                processId: process.id,
-                channel: 'whatsapp',
-                outcome: 'no_response',
-                userId: state.currentUser?.id,
-                userName: state.currentUser?.name || state.currentUser?.email,
+    const handleContactReset = useCallback(
+        (candidateId: string, candidateName: string | undefined, result: ResetContactTrackingResult) => {
+            const empty: ChannelContactSummary = { status: 'por_contactar', attemptCount: 0 };
+            applyOptimisticUpdate(candidateId, {
+                contactPhone: empty,
+                contactWhatsapp: empty,
+                contactEmail: empty,
             });
-            if (summary) {
-                handleContactSummaryChange(
-                    candidate.id,
-                    candidate.name,
-                    {
-                        status: summary.status,
-                        attemptCount: summary.attemptCount,
-                        lastAttemptAt: summary.lastAttemptAt,
-                        lastUserName: summary.lastUserName,
-                    },
-                    'contact_attempt'
-                );
-            }
-        } catch {
-            /* contact tracking opcional si la migración no está aplicada */
-        }
-    }, [
-        process?.id,
-        state.currentUser?.id,
-        state.currentUser?.name,
-        state.currentUser?.email,
-        applyOptimisticUpdate,
-        handleContactSummaryChange,
-    ]);
+            const who = state.currentUser?.name || state.currentUser?.email || 'Usuario';
+            logActivity('contact_reset', {
+                candidateId,
+                candidateName,
+                fieldName: 'Contacto (todos los canales)',
+                oldValue: `${result.clearedAttempts} registro(s) de contacto`,
+                newValue: 'Sin seguimiento — como candidato nuevo',
+                details: {
+                    summary: `${who} reinició todo el seguimiento (teléfono, WhatsApp y correo)`,
+                    clearedAttempts: result.clearedAttempts,
+                    channelsReset: result.channelsReset,
+                    performedBy: who,
+                    performedByUserId: state.currentUser?.id,
+                },
+            });
+            actions.showToast('Candidato reiniciado en contacto (3 canales)', 'success', 2500);
+        },
+        [
+            applyOptimisticUpdate,
+            logActivity,
+            state.currentUser?.id,
+            state.currentUser?.name,
+            state.currentUser?.email,
+            actions,
+        ]
+    );
 
     const handleDeleteCandidate = useCallback(async (candidateId: string, candidateName: string) => {
         if (!confirm(`¿Estás seguro de eliminar permanentemente a ${candidateName}? Esta acción no se puede deshacer.`)) {
@@ -1601,9 +1596,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
         setSelectionAnchor({ candidateId, colId });
         setSelectedCells(new Set([toCellKey({ candidateId, colId })]));
         setEditingCell({ candidateId, field });
-        if (field === 'lastInteraction') {
-            setEditValue(isoToDatetimeLocalValue(currentValue));
-        } else if (field.startsWith('custom_')) {
+        if (field.startsWith('custom_')) {
             const colId = field.replace('custom_', '');
             const col = customColumns.find(c => c.id === colId);
             if (col?.type === 'checkbox') {
@@ -1663,27 +1656,6 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
             return;
         }
 
-        if (field === 'lastInteraction') {
-            const iso = datetimeLocalToIso(editValue);
-            const newDisplay = iso ? formatBulkDateTime(iso) : '';
-            applyOptimisticUpdate(candidateId, { lastWhatsAppInteractionAt: iso });
-            setEditingCell(null);
-            setEditValue('');
-            bulkCandidatesApi.patchFields(candidateId, { lastWhatsAppInteractionAt: iso ?? null }).catch(error => {
-                console.error('Error guardando última interacción:', error);
-                loadCandidates(currentPage, true);
-                actions.showToast('Error al guardar cambios', 'error', 3000);
-            });
-            logActivity('cell_edit', {
-                candidateId,
-                candidateName: candidate?.name,
-                fieldName: fieldLabel,
-                oldValue,
-                newValue: newDisplay,
-            });
-            return;
-        }
-
         const trimmed = editValue.trim();
         if (field === 'email' && !trimmed) {
             setEditingCell(null);
@@ -1725,15 +1697,6 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
             const col = customColumns.find(c => c.id === customColId);
             if (!col) return;
             handleColumnValueChange(candidateId, customColId, parseCustomCellInput(rawValue, col));
-            return;
-        }
-
-        if (colId === 'lastInteraction') {
-            const iso = parseBulkDateTimeInput(rawValue);
-            applyOptimisticUpdate(candidateId, { lastWhatsAppInteractionAt: iso });
-            bulkCandidatesApi.patchFields(candidateId, { lastWhatsAppInteractionAt: iso ?? null }).catch(error => {
-                console.error('Error pegando valor:', error);
-            });
             return;
         }
 
@@ -1954,11 +1917,6 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
             const raw = getColumnValue(candidateId, colId, displayCandidate);
             return formatCustomCellDisplay(raw, col);
         }
-        if (field === 'lastInteraction') {
-            return displayCandidate.lastWhatsAppInteractionAt
-                ? formatBulkDateTime(displayCandidate.lastWhatsAppInteractionAt)
-                : '';
-        }
         const direct = (displayCandidate as Record<string, unknown>)[field];
         return direct == null ? '' : String(direct);
     }, [candidates, optimisticUpdates, customColumns, columnValues]);
@@ -2050,10 +2008,19 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                     valueA = candidateA.createdAt ? new Date(candidateA.createdAt).getTime() : 0;
                     valueB = candidateB.createdAt ? new Date(candidateB.createdAt).getTime() : 0;
                     break;
-                case 'lastInteraction':
-                    valueA = candidateA.lastWhatsAppInteractionAt ? new Date(candidateA.lastWhatsAppInteractionAt).getTime() : 0;
-                    valueB = candidateB.lastWhatsAppInteractionAt ? new Date(candidateB.lastWhatsAppInteractionAt).getTime() : 0;
+                case 'contactPhone':
+                case 'contactWhatsapp':
+                case 'contactEmail': {
+                    const sortCh = columnIdToAttemptChannel(sortColumn);
+                    if (sortCh) {
+                        const key = CHANNEL_CANDIDATE_KEY[sortCh];
+                        const sa = candidateA[key];
+                        const sb = candidateB[key];
+                        valueA = sa?.lastAttemptAt ? new Date(sa.lastAttemptAt).getTime() : 0;
+                        valueB = sb?.lastAttemptAt ? new Date(sb.lastAttemptAt).getTime() : 0;
+                    }
                     break;
+                }
                 case 'nextInterview':
                     valueA = candidateA.nextInterviewAt ? new Date(candidateA.nextInterviewAt).getTime() : 0;
                     valueB = candidateB.nextInterviewAt ? new Date(candidateB.nextInterviewAt).getTime() : 0;
@@ -3032,10 +2999,10 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                             </BulkTh>
                                         );
                                     }
-                                    if (colId === 'contact') {
+                                    if (CONTACT_COLUMN_IDS.includes(colId)) {
                                         return (
                                             <BulkTh colId={colId} headerProps={commonProps} style={thStyle()} onResizeStart={handleColumnResizeStart}>
-                                                <span title="Semáforo de contacto telefónico y WhatsApp">Contacto</span>
+                                                <span title="Semáforo y última interacción">{getColumnLabel(colId, customColumns)}</span>
                                             </BulkTh>
                                         );
                                     }
@@ -3084,16 +3051,6 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                                 <button onClick={() => handleSort('createdAt')} className="flex items-center gap-1 hover:text-primary-600 transition-colors">
                                                     <span>Fecha creación</span>
                                                     {sortColumn === 'createdAt' ? (sortDirection === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />) : <div className="w-3 h-3 opacity-30"><ArrowUp className="w-3 h-3" /></div>}
-                                                </button>
-                                            </BulkTh>
-                                        );
-                                    }
-                                    if (colId === 'lastInteraction') {
-                                        return (
-                                            <BulkTh colId={colId} headerProps={commonProps} style={thStyle()} onResizeStart={handleColumnResizeStart}>
-                                                <button onClick={() => handleSort('lastInteraction')} className="flex items-center gap-1 hover:text-primary-600 transition-colors">
-                                                    <span>Última Interacción</span>
-                                                    {sortColumn === 'lastInteraction' ? (sortDirection === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />) : <div className="w-3 h-3 opacity-30"><ArrowUp className="w-3 h-3" /></div>}
                                                 </button>
                                             </BulkTh>
                                         );
@@ -3283,7 +3240,9 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                                 );
                                             }
                                             if (colId === 'phone') {
-                                                const phoneCooldown = isContactCooldownActive(displayCandidate.contactLastAttemptAt);
+                                                const phoneCooldown = isContactCooldownActive(
+                                                    displayCandidate.contactPhone?.lastAttemptAt
+                                                );
                                                 return (
                                                     <td
                                                         key="phone"
@@ -3298,29 +3257,50 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                                     </td>
                                                 );
                                             }
-                                            if (colId === 'contact' && process?.id) {
+                                            if (CONTACT_COLUMN_IDS.includes(colId) && process?.id) {
+                                                const channel = columnIdToAttemptChannel(colId)!;
+                                                const summaryKey = CHANNEL_CANDIDATE_KEY[channel];
+                                                const summary = displayCandidate[summaryKey] ?? {
+                                                    status: 'por_contactar' as const,
+                                                    attemptCount: 0,
+                                                };
+                                                const contactAddress =
+                                                    channel === 'email'
+                                                        ? displayEmail || undefined
+                                                        : displayCandidate.phone;
                                                 return (
-                                                    <td key="contact" {...tdProps(candidate.id, 'contact')}>
+                                                    <td key={colId} {...tdProps(candidate.id, colId)}>
                                                         <BulkContactStatusCell
+                                                            channel={channel}
                                                             candidateId={displayCandidate.id}
                                                             candidateName={displayCandidate.name}
                                                             processId={process.id}
-                                                            phone={displayCandidate.phone}
-                                                            status={normalizeContactStatus(displayCandidate.contactStatus)}
-                                                            attemptCount={displayCandidate.contactAttemptCount ?? 0}
-                                                            lastAttemptAt={displayCandidate.contactLastAttemptAt}
-                                                            lastUserName={displayCandidate.contactLastUserName}
+                                                            contactAddress={contactAddress}
+                                                            summary={summary}
                                                             userId={state.currentUser?.id}
-                                                            userName={state.currentUser?.name || state.currentUser?.email}
-                                                            onSummaryChange={(summary, actionType) =>
+                                                            userName={
+                                                                state.currentUser?.name ||
+                                                                state.currentUser?.email
+                                                            }
+                                                            onSummaryChange={(s, actionType, ch) =>
                                                                 handleContactSummaryChange(
                                                                     displayCandidate.id,
                                                                     displayCandidate.name,
-                                                                    summary,
-                                                                    actionType
+                                                                    s,
+                                                                    actionType,
+                                                                    ch
                                                                 )
                                                             }
-                                                            onWhatsApp={() => void handleWhatsAppClick(displayCandidate)}
+                                                            onResetAll={
+                                                                channel === 'call'
+                                                                    ? (result) =>
+                                                                          handleContactReset(
+                                                                              displayCandidate.id,
+                                                                              displayCandidate.name,
+                                                                              result
+                                                                          )
+                                                                    : undefined
+                                                            }
                                                         />
                                                     </td>
                                                 );
@@ -3364,33 +3344,6 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                                         <span className="text-xs text-gray-700" title={displayCandidate.createdAt ? new Date(displayCandidate.createdAt).toLocaleString('es-PE') : undefined}>
                                                             {formatBulkDateTime(displayCandidate.createdAt)}
                                                         </span>
-                                                    </td>
-                                                );
-                                            }
-                                            if (colId === 'lastInteraction') {
-                                                return (
-                                                    <td key="lastInteraction" {...tdProps(candidate.id, 'lastInteraction')}>
-                                                        {editingCell?.candidateId === candidate.id && editingCell?.field === 'lastInteraction' ? (
-                                                            <input
-                                                                type="datetime-local"
-                                                                value={editValue}
-                                                                onChange={(e) => setEditValue(e.target.value)}
-                                                                onBlur={() => handleSaveEdit(candidate.id, 'lastInteraction')}
-                                                                onKeyDown={(e) => { if (e.key === 'Enter') handleSaveEdit(candidate.id, 'lastInteraction'); if (e.key === 'Escape') handleCancelEdit(); }}
-                                                                autoFocus
-                                                                className="w-full px-1 py-0.5 text-xs border border-primary-500 rounded focus:ring-2 focus:ring-primary-500"
-                                                            />
-                                                        ) : (
-                                                            <span
-                                                                className="text-xs hover:bg-gray-50 px-1 py-0.5 rounded cursor-pointer"
-                                                                onDoubleClick={() => handleStartEdit(candidate.id, 'lastInteraction', displayCandidate.lastWhatsAppInteractionAt || '')}
-                                                                title="Doble clic para editar"
-                                                            >
-                                                                {displayCandidate.lastWhatsAppInteractionAt
-                                                                    ? formatBulkDateTime(displayCandidate.lastWhatsAppInteractionAt)
-                                                                    : <span className="text-gray-400">-</span>}
-                                                            </span>
-                                                        )}
                                                     </td>
                                                 );
                                             }

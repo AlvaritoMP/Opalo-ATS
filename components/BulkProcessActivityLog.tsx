@@ -20,6 +20,7 @@ const ACTION_LABELS: Record<BulkActivityActionType, string> = {
     paste: 'Pegado en celdas',
     contact_attempt: 'Intento de contacto',
     contact_status: 'Estado de contacto',
+    contact_reset: 'Reinicio de contacto',
 };
 
 interface BulkProcessActivityLogProps {

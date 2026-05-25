@@ -1,8 +1,14 @@
 import React, { useState, useEffect, useRef, useCallback, useLayoutEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { Phone, MessageCircle, Loader2, Clock, ChevronDown, X, Undo2 } from 'lucide-react';
-import { contactTrackingApi, parseUndoFromAttemptNotes } from '../lib/api/contactTracking';
+import { Phone, MessageCircle, Mail, Loader2, Clock, ChevronDown, X, Undo2, Trash2 } from 'lucide-react';
+import {
+    contactTrackingApi,
+    parseUndoFromAttemptNotes,
+    type ResetContactTrackingResult,
+} from '../lib/api/contactTracking';
 import type { ContactAttempt, ContactOutcome, ContactStatus } from '../lib/contactTracking';
+import type { ContactAttemptChannel } from '../lib/contactChannelConfig';
+import { CONTACT_CHANNELS } from '../lib/contactChannelConfig';
 import {
     CONTACT_STATUS_META,
     QUICK_STATUS_OPTIONS,
@@ -12,28 +18,25 @@ import {
     formatAttemptHistoryLine,
     CONTACT_OUTCOME_LABELS,
 } from '../lib/contactTracking';
+import { formatBulkDateTime } from '../lib/bulkTableColumns';
+import type { ChannelContactSummary } from '../lib/contactChannelConfig';
 
 export interface BulkContactStatusCellProps {
+    channel: ContactAttemptChannel;
     candidateId: string;
     candidateName?: string;
     processId: string;
-    phone?: string;
-    status: ContactStatus;
-    attemptCount: number;
-    lastAttemptAt?: string;
-    lastUserName?: string;
+    /** Teléfono o email del candidato para acciones rápidas */
+    contactAddress?: string;
+    summary: ChannelContactSummary;
     userId?: string;
     userName?: string;
     onSummaryChange: (
-        summary: {
-            status: ContactStatus;
-            attemptCount: number;
-            lastAttemptAt?: string;
-            lastUserName?: string;
-        },
-        actionType: 'contact_attempt' | 'contact_status'
+        summary: ChannelContactSummary,
+        actionType: 'contact_attempt' | 'contact_status',
+        channel: ContactAttemptChannel
     ) => void;
-    onWhatsApp?: () => void;
+    onResetAll?: (result: ResetContactTrackingResult) => void;
     disabled?: boolean;
 }
 
@@ -42,11 +45,21 @@ type PopoverMode = 'status' | 'history' | null;
 const POPOVER_WIDTH = 288;
 const POPOVER_MAX_HEIGHT = 420;
 
-const CALL_OUTCOMES: { outcome: ContactOutcome; label: string }[] = [
-    { outcome: 'no_answer', label: 'No contestó' },
-    { outcome: 'busy', label: 'Ocupado' },
-    { outcome: 'answered', label: 'Contestó' },
-];
+const ATTEMPT_OUTCOMES: Record<ContactAttemptChannel, { outcome: ContactOutcome; label: string }[]> = {
+    call: [
+        { outcome: 'no_answer', label: 'No contestó' },
+        { outcome: 'busy', label: 'Ocupado' },
+        { outcome: 'answered', label: 'Contestó' },
+    ],
+    whatsapp: [
+        { outcome: 'no_response', label: 'Sin respuesta' },
+        { outcome: 'answered', label: 'Respondió' },
+    ],
+    email: [
+        { outcome: 'no_response', label: 'Sin respuesta' },
+        { outcome: 'answered', label: 'Respondió' },
+    ],
+};
 
 function computePopoverPosition(anchorRect: DOMRect, preferHeight: number) {
     const margin = 8;
@@ -70,19 +83,20 @@ function computePopoverPosition(anchorRect: DOMRect, preferHeight: number) {
 }
 
 export const BulkContactStatusCell: React.FC<BulkContactStatusCellProps> = ({
+    channel,
     candidateId,
     processId,
-    phone,
-    status,
-    attemptCount,
-    lastAttemptAt,
-    lastUserName,
+    contactAddress,
+    summary,
     userId,
     userName,
     onSummaryChange,
-    onWhatsApp,
+    onResetAll,
     disabled = false,
 }) => {
+    const { status, attemptCount, lastAttemptAt, lastUserName } = summary;
+    const channelDef = CONTACT_CHANNELS[channel];
+
     const [popover, setPopover] = useState<PopoverMode>(null);
     const [popoverPos, setPopoverPos] = useState({ left: 0, top: 0, maxHeight: POPOVER_MAX_HEIGHT });
     const [history, setHistory] = useState<ContactAttempt[]>([]);
@@ -101,7 +115,7 @@ export const BulkContactStatusCell: React.FC<BulkContactStatusCellProps> = ({
 
     const openPopover = useCallback((mode: PopoverMode, el: HTMLElement) => {
         const rect = el.getBoundingClientRect();
-        setPopoverPos(computePopoverPosition(rect, mode === 'status' ? 380 : 320));
+        setPopoverPos(computePopoverPosition(rect, mode === 'status' ? 400 : 320));
         setPopover(mode);
     }, []);
 
@@ -119,7 +133,6 @@ export const BulkContactStatusCell: React.FC<BulkContactStatusCellProps> = ({
 
     useEffect(() => {
         if (!popover) return;
-
         const onKey = (e: KeyboardEvent) => {
             if (e.key === 'Escape') closePopover();
         };
@@ -129,23 +142,21 @@ export const BulkContactStatusCell: React.FC<BulkContactStatusCellProps> = ({
 
     useEffect(() => {
         if (!popover) return;
-
         const closeOnOutside = (e: MouseEvent) => {
             const target = e.target as Node;
             if (rootRef.current?.contains(target)) return;
-            const pop = document.getElementById(`contact-popover-${candidateId}`);
+            const pop = document.getElementById(`contact-popover-${candidateId}-${channel}`);
             if (pop?.contains(target)) return;
             closePopover();
         };
-
         document.addEventListener('mousedown', closeOnOutside);
         return () => document.removeEventListener('mousedown', closeOnOutside);
-    }, [popover, candidateId, closePopover]);
+    }, [popover, candidateId, channel, closePopover]);
 
     useLayoutEffect(() => {
         if (!popover || !badgeRef.current) return;
         const rect = badgeRef.current.getBoundingClientRect();
-        setPopoverPos(computePopoverPosition(rect, popover === 'status' ? 380 : 320));
+        setPopoverPos(computePopoverPosition(rect, popover === 'status' ? 400 : 320));
     }, [popover]);
 
     useEffect(() => {
@@ -153,7 +164,7 @@ export const BulkContactStatusCell: React.FC<BulkContactStatusCellProps> = ({
         let cancelled = false;
         setLoadingHistory(true);
         contactTrackingApi
-            .getHistory(candidateId, popover === 'history' ? 25 : 1)
+            .getHistory(candidateId, channel, popover === 'history' ? 25 : 1)
             .then((rows) => {
                 if (cancelled) return;
                 setHistory(rows);
@@ -171,7 +182,7 @@ export const BulkContactStatusCell: React.FC<BulkContactStatusCellProps> = ({
                     );
                 } else {
                     setCanUndo(true);
-                    setUndoPreview('Estado anterior (según historial)');
+                    setUndoPreview('Estado anterior');
                 }
             })
             .catch(() => {
@@ -186,40 +197,32 @@ export const BulkContactStatusCell: React.FC<BulkContactStatusCellProps> = ({
         return () => {
             cancelled = true;
         };
-    }, [popover, candidateId]);
+    }, [popover, candidateId, channel]);
 
     const applySummary = useCallback(
         (
-            summary: Awaited<ReturnType<typeof contactTrackingApi.recordAttempt>>,
+            next: Awaited<ReturnType<typeof contactTrackingApi.recordAttempt>>,
             actionType: 'contact_attempt' | 'contact_status'
         ) => {
-            if (!summary) return;
-            onSummaryChange(
-                {
-                    status: summary.status,
-                    attemptCount: summary.attemptCount,
-                    lastAttemptAt: summary.lastAttemptAt,
-                    lastUserName: summary.lastUserName,
-                },
-                actionType
-            );
+            if (!next) return;
+            onSummaryChange(next, actionType, channel);
         },
-        [onSummaryChange]
+        [onSummaryChange, channel]
     );
 
-    const handleMarkCall = async (outcome: ContactOutcome) => {
+    const handleMarkAttempt = async (outcome: ContactOutcome) => {
         if (disabled || saving) return;
         setSaving(true);
         try {
-            const summary = await contactTrackingApi.recordAttempt({
+            const result = await contactTrackingApi.recordAttempt({
                 candidateId,
                 processId,
-                channel: 'call',
+                channel,
                 outcome,
                 userId,
                 userName,
             });
-            applySummary(summary, 'contact_attempt');
+            applySummary(result, 'contact_attempt');
             closePopover();
         } finally {
             setSaving(false);
@@ -230,14 +233,15 @@ export const BulkContactStatusCell: React.FC<BulkContactStatusCellProps> = ({
         if (disabled || saving || newStatus === status) return;
         setSaving(true);
         try {
-            const summary = await contactTrackingApi.setStatus({
+            const result = await contactTrackingApi.setStatus({
                 candidateId,
                 processId,
+                channel,
                 status: newStatus,
                 userId,
                 userName,
             });
-            applySummary(summary, 'contact_status');
+            applySummary(result, 'contact_status');
             closePopover();
         } finally {
             setSaving(false);
@@ -248,18 +252,65 @@ export const BulkContactStatusCell: React.FC<BulkContactStatusCellProps> = ({
         if (disabled || saving || !canUndo) return;
         setSaving(true);
         try {
-            const summary = await contactTrackingApi.revertLastAction({
+            const result = await contactTrackingApi.revertLastAction({
                 candidateId,
                 processId,
+                channel,
                 userId,
                 userName,
             });
-            applySummary(summary, 'contact_status');
+            applySummary(result, 'contact_status');
             closePopover();
         } finally {
             setSaving(false);
         }
     };
+
+    const handleQuickAction = async () => {
+        if (disabled || saving || !contactAddress) return;
+
+        if (channel === 'whatsapp') {
+            const clean = contactAddress.replace(/[^\d]/g, '');
+            window.open(`https://wa.me/${clean}`, '_blank', 'noopener,noreferrer');
+            await handleMarkAttempt('no_response');
+            return;
+        }
+        if (channel === 'email') {
+            window.open(`mailto:${contactAddress}`, '_blank', 'noopener,noreferrer');
+            await handleMarkAttempt('no_response');
+            return;
+        }
+        await handleMarkAttempt('no_answer');
+    };
+
+    const handleResetAll = async () => {
+        if (disabled || saving || !onResetAll) return;
+        const msg =
+            `¿Reiniciar TODO el seguimiento de contacto (llamadas, WhatsApp y correo)?\n\n` +
+            `El candidato quedará como nuevo en la lista. Quedará registrado en el log quién lo hizo.`;
+        if (!window.confirm(msg)) return;
+
+        setSaving(true);
+        try {
+            const result = await contactTrackingApi.resetAllContactTracking({
+                candidateId,
+                processId,
+                userId,
+                userName,
+            });
+            if (result) {
+                onResetAll(result);
+                closePopover();
+            }
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    const hasAnyTracking =
+        status !== 'por_contactar' || attemptCount > 0 || !!lastAttemptAt;
+
+    const QuickIcon = channel === 'email' ? Mail : channel === 'whatsapp' ? MessageCircle : Phone;
 
     const popoverContent =
         popover &&
@@ -268,14 +319,13 @@ export const BulkContactStatusCell: React.FC<BulkContactStatusCellProps> = ({
                 <button
                     type="button"
                     className="fixed inset-0 z-[100] cursor-default bg-black/10"
-                    aria-label="Cerrar menú de contacto"
+                    aria-label="Cerrar menú"
                     onClick={closePopover}
                 />
                 <div
-                    id={`contact-popover-${candidateId}`}
+                    id={`contact-popover-${candidateId}-${channel}`}
                     role="dialog"
                     aria-modal="true"
-                    aria-label={popover === 'status' ? 'Estado de contacto' : 'Historial de contacto'}
                     className="fixed z-[110] flex flex-col bg-white border border-gray-200 rounded-lg shadow-2xl"
                     style={{
                         left: popoverPos.left,
@@ -288,15 +338,10 @@ export const BulkContactStatusCell: React.FC<BulkContactStatusCellProps> = ({
                 >
                     <div className="flex items-center justify-between shrink-0 px-2 py-1.5 border-b border-gray-100 bg-gray-50 rounded-t-lg">
                         <span className="text-[10px] uppercase tracking-wide text-gray-600 font-semibold">
-                            {popover === 'status' ? 'Estado de contacto' : 'Historial'}
+                            {channelDef.label}
                         </span>
-                        <button
-                            type="button"
-                            onClick={closePopover}
-                            className="p-1 rounded hover:bg-gray-200 text-gray-600"
-                            title="Cerrar (Esc)"
-                        >
-                            <X className="w-4 h-4" />
+                        <button type="button" onClick={closePopover} className="p-1 rounded hover:bg-gray-200">
+                            <X className="w-4 h-4 text-gray-500" />
                         </button>
                     </div>
 
@@ -339,7 +384,7 @@ export const BulkContactStatusCell: React.FC<BulkContactStatusCellProps> = ({
                                             type="button"
                                             disabled={saving}
                                             onClick={() => void handleSetStatus(opt.status)}
-                                            className={`w-full text-left px-3 py-2.5 rounded-lg text-sm font-medium border transition-colors ${
+                                            className={`w-full text-left px-3 py-2.5 rounded-lg text-sm font-medium border ${
                                                 status === opt.status
                                                     ? 'bg-primary-50 border-primary-300 text-primary-900'
                                                     : 'border-gray-200 hover:bg-gray-50 text-gray-800'
@@ -352,26 +397,38 @@ export const BulkContactStatusCell: React.FC<BulkContactStatusCellProps> = ({
                                 </div>
 
                                 <p className="text-[10px] uppercase tracking-wide text-gray-500 mt-3 mb-1.5 px-1">
-                                    Resultado de llamada
+                                    Registrar intento
                                 </p>
-                                <div className="flex flex-col gap-1 pb-1">
-                                    {CALL_OUTCOMES.map((o) => (
+                                <div className="flex flex-col gap-1">
+                                    {ATTEMPT_OUTCOMES[channel].map((o) => (
                                         <button
                                             key={o.outcome}
                                             type="button"
                                             disabled={saving}
-                                            onClick={() => void handleMarkCall(o.outcome)}
+                                            onClick={() => void handleMarkAttempt(o.outcome)}
                                             className="w-full text-left px-3 py-2 rounded-lg text-sm border border-gray-200 hover:bg-amber-50 text-gray-800"
                                         >
-                                            📞 {o.label}
+                                            {o.label}
                                             {o.outcome === 'no_answer' && (
                                                 <span className="text-[10px] text-gray-500 block">
-                                                    +1 intento automático
+                                                    +1 intento
                                                 </span>
                                             )}
                                         </button>
                                     ))}
                                 </div>
+
+                                {onResetAll && channel === 'call' && hasAnyTracking && (
+                                    <button
+                                        type="button"
+                                        disabled={saving}
+                                        onClick={() => void handleResetAll()}
+                                        className="w-full flex items-center justify-center gap-1.5 mt-3 py-2 text-xs font-medium text-red-700 border border-red-200 bg-red-50 rounded-lg hover:bg-red-100"
+                                    >
+                                        <Trash2 className="w-3.5 h-3.5" />
+                                        Borrar todo (3 canales)
+                                    </button>
+                                )}
 
                                 <button
                                     type="button"
@@ -390,7 +447,7 @@ export const BulkContactStatusCell: React.FC<BulkContactStatusCellProps> = ({
                                         <Loader2 className="w-5 h-5 animate-spin text-gray-400" />
                                     </div>
                                 ) : history.length === 0 ? (
-                                    <p className="text-xs text-gray-500 px-2 py-4">Sin intentos registrados.</p>
+                                    <p className="text-xs text-gray-500 px-2 py-4">Sin registros en este canal.</p>
                                 ) : (
                                     <ul className="space-y-2 pr-1">
                                         {history.map((a) => (
@@ -399,18 +456,6 @@ export const BulkContactStatusCell: React.FC<BulkContactStatusCellProps> = ({
                                                 className="text-[11px] text-gray-700 leading-snug border-l-2 border-gray-200 pl-2"
                                             >
                                                 {formatAttemptHistoryLine(a)}
-                                                {a.outcome === 'status_change' && a.notes && (
-                                                    <span className="block text-gray-500">
-                                                        {a.notes.includes('{')
-                                                            ? 'Cambio de estado'
-                                                            : a.notes}
-                                                    </span>
-                                                )}
-                                                {!['status_change'].includes(a.outcome) && (
-                                                    <span className="block text-gray-400">
-                                                        {CONTACT_OUTCOME_LABELS[a.outcome]}
-                                                    </span>
-                                                )}
                                             </li>
                                         ))}
                                     </ul>
@@ -433,85 +478,83 @@ export const BulkContactStatusCell: React.FC<BulkContactStatusCellProps> = ({
     return (
         <div
             ref={rootRef}
-            className={`flex items-center gap-0.5 min-w-0 ${cooldown ? 'ring-1 ring-red-300 rounded-md px-0.5' : ''}`}
+            className={`flex flex-col gap-0.5 min-w-0 max-w-full ${cooldown ? 'ring-1 ring-red-300 rounded-md px-0.5' : ''}`}
             onClick={(e) => e.stopPropagation()}
-            title={
-                cooldown && lastAttemptAt
-                    ? formatContactCooldownWarning(lastAttemptAt, lastUserName)
-                    : undefined
-            }
         >
-            <button
-                ref={badgeRef}
-                type="button"
-                disabled={disabled || saving}
-                onClick={toggleStatusPopover}
-                className={`inline-flex items-center gap-0.5 max-w-full px-1 py-0.5 rounded border text-[10px] font-semibold leading-tight truncate ${meta.badgeClass} hover:opacity-90 transition-opacity`}
-                aria-expanded={popover === 'status'}
-            >
-                <span className="shrink-0">{meta.dot}</span>
-                <span className="truncate">{badgeLabel}</span>
-                <ChevronDown className={`w-2.5 h-2.5 shrink-0 opacity-60 transition-transform ${popover === 'status' ? 'rotate-180' : ''}`} />
-            </button>
-
-            {attemptCount > 0 && (
+            <div className="flex items-center gap-0.5">
                 <button
-                    type="button"
-                    disabled={disabled}
-                    onClick={(e) => {
-                        e.stopPropagation();
-                        if (popover === 'history') {
-                            closePopover();
-                        } else {
-                            openPopover('history', e.currentTarget);
-                        }
-                    }}
-                    className="inline-flex items-center gap-0.5 px-0.5 text-[10px] text-gray-600 hover:text-primary-700 hover:bg-gray-50 rounded"
-                    title={
-                        lastUserName
-                            ? `Intento ${attemptCount} (por ${lastUserName}) — ver historial`
-                            : `Intento ${attemptCount} — ver historial`
-                    }
-                >
-                    <Phone className="w-3 h-3" />
-                    <span className="font-bold tabular-nums">{attemptCount}</span>
-                </button>
-            )}
-
-            {phone && (
-                <button
+                    ref={badgeRef}
                     type="button"
                     disabled={disabled || saving}
-                    onClick={(e) => {
-                        e.stopPropagation();
-                        void handleMarkCall('no_answer');
-                    }}
-                    className="p-0.5 text-blue-600 hover:bg-blue-50 rounded"
-                    title="Registrar llamada (no contestó)"
+                    onClick={toggleStatusPopover}
+                    className={`inline-flex items-center gap-0.5 max-w-full px-1 py-0.5 rounded border text-[10px] font-semibold leading-tight truncate ${meta.badgeClass}`}
+                    aria-expanded={popover === 'status'}
                 >
-                    {saving ? (
-                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                    ) : (
-                        <Phone className="w-3.5 h-3.5" />
+                    <span className="shrink-0">{meta.dot}</span>
+                    <span className="truncate">{badgeLabel}</span>
+                    <ChevronDown
+                        className={`w-2.5 h-2.5 shrink-0 opacity-60 ${popover === 'status' ? 'rotate-180' : ''}`}
+                    />
+                </button>
+
+                {attemptCount > 0 && (
+                    <button
+                        type="button"
+                        disabled={disabled}
+                        onClick={(e) => {
+                            e.stopPropagation();
+                            if (popover === 'history') closePopover();
+                            else openPopover('history', e.currentTarget);
+                        }}
+                        className="inline-flex items-center gap-0.5 px-0.5 text-[10px] text-gray-600 hover:bg-gray-50 rounded tabular-nums"
+                        title="Ver historial"
+                    >
+                        <span className="font-bold">{attemptCount}</span>
+                    </button>
+                )}
+
+                {contactAddress && (
+                    <button
+                        type="button"
+                        disabled={disabled || saving}
+                        onClick={(e) => {
+                            e.stopPropagation();
+                            void handleQuickAction();
+                        }}
+                        className={`p-0.5 rounded ${
+                            channel === 'whatsapp'
+                                ? 'text-green-600 hover:bg-green-50'
+                                : channel === 'email'
+                                  ? 'text-blue-600 hover:bg-blue-50'
+                                  : 'text-blue-600 hover:bg-blue-50'
+                        }`}
+                        title={`Acción rápida ${channelDef.shortLabel}`}
+                    >
+                        {saving ? (
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        ) : (
+                            <QuickIcon className="w-3.5 h-3.5" />
+                        )}
+                    </button>
+                )}
+
+                {cooldown && <Clock className="w-3 h-3 text-red-500 shrink-0" />}
+            </div>
+
+            {lastAttemptAt ? (
+                <div className="text-[10px] leading-tight text-gray-600 pl-0.5 max-w-full">
+                    <div className="truncate" title={formatBulkDateTime(lastAttemptAt)}>
+                        {formatBulkDateTime(lastAttemptAt)}
+                    </div>
+                    {lastUserName && (
+                        <div className="truncate text-gray-400" title={lastUserName}>
+                            por {lastUserName}
+                        </div>
                     )}
-                </button>
+                </div>
+            ) : (
+                <span className="text-[10px] text-gray-400 pl-0.5">Sin registro</span>
             )}
-
-            {phone && onWhatsApp && (
-                <button
-                    type="button"
-                    onClick={(e) => {
-                        e.stopPropagation();
-                        onWhatsApp();
-                    }}
-                    className="p-0.5 text-green-600 hover:bg-green-50 rounded"
-                    title="WhatsApp"
-                >
-                    <MessageCircle className="w-3.5 h-3.5" />
-                </button>
-            )}
-
-            {cooldown && <Clock className="w-3 h-3 text-red-500 shrink-0" aria-hidden />}
 
             {popoverContent}
         </div>

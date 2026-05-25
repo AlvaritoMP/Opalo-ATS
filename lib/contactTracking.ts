@@ -5,7 +5,7 @@ export type ContactStatus =
     | 'no_interesado'
     | 'inubicable';
 
-export type ContactChannel = 'call' | 'whatsapp';
+export type ContactChannel = 'call' | 'whatsapp' | 'email';
 
 export type ContactOutcome =
     | 'no_answer'
@@ -15,7 +15,8 @@ export type ContactOutcome =
     | 'interested'
     | 'not_interested'
     | 'unreachable'
-    | 'status_change';
+    | 'status_change'
+    | 'reset_all';
 
 export interface ContactAttempt {
     id: string;
@@ -88,6 +89,7 @@ export const CONTACT_OUTCOME_LABELS: Record<ContactOutcome, string> = {
     not_interested: 'No interesado',
     unreachable: 'Inubicable',
     status_change: 'Cambio de estado',
+    reset_all: 'Reinicio de seguimiento',
 };
 
 export const QUICK_STATUS_OPTIONS: {
@@ -132,13 +134,34 @@ export function formatContactCooldownWarning(lastAttemptAt: string, lastUserName
 export function formatAttemptHistoryLine(attempt: ContactAttempt): string {
     const time = formatHistoryTime(attempt.createdAt);
     const who = attempt.userName || 'Usuario';
+
+    if (attempt.outcome === 'reset_all') {
+        try {
+            const meta = JSON.parse(attempt.notes || '{}') as {
+                clearedAttempts?: number;
+                previous?: { status?: string; attemptCount?: number };
+            };
+            const n = meta.clearedAttempts ?? 0;
+            const prev = meta.previous?.status
+                ? CONTACT_STATUS_META[normalizeContactStatus(meta.previous.status)].label
+                : '—';
+            return `${time} - ${who}: Reinició seguimiento (${n} acción(es) borradas, antes: ${prev})`;
+        } catch {
+            return `${time} - ${who}: Reinició seguimiento de contacto`;
+        }
+    }
+
     const channel =
         attempt.channel === 'whatsapp'
             ? 'Envió WhatsApp'
-            : 'Llamó';
+            : attempt.channel === 'email'
+              ? 'Envió correo'
+              : 'Llamó';
     const outcome = CONTACT_OUTCOME_LABELS[attempt.outcome] || attempt.outcome;
     const attemptSuffix =
-        attempt.outcome !== 'status_change' && attempt.attemptNumber > 0
+        attempt.outcome !== 'status_change' &&
+        attempt.outcome !== 'reset_all' &&
+        attempt.attemptNumber > 0
             ? ` (Intento ${attempt.attemptNumber})`
             : '';
     return `${time} - ${who}: ${channel} - ${outcome}${attemptSuffix}`;

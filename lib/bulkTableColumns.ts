@@ -1,5 +1,6 @@
 import { BulkProcessConfig, CustomColumn, FieldMapping, Process } from '../types';
 import { normalizeImportTextCase } from './importTextCase.js';
+import { migrateBulkColumnOrder } from './contactChannelConfig';
 
 const BULK_NAME_KEY_PREFIX = '__name__';
 
@@ -372,15 +373,16 @@ export const BASE_COLUMNS: BaseColumn[] = [
     { id: 'name', label: 'Nombre', importKey: 'name' },
     { id: 'dni', label: 'DNI', importKey: 'dni' },
     { id: 'email', label: 'Email', importKey: 'email' },
+    { id: 'contactEmail', label: 'Correo' },
     { id: 'scoreIa', label: 'Score IA' },
     { id: 'status', label: 'Status' },
     { id: 'phone', label: 'Teléfono', importKey: 'phone' },
-    { id: 'contact', label: 'Contacto' },
+    { id: 'contactPhone', label: 'Llamadas' },
+    { id: 'contactWhatsapp', label: 'WhatsApp' },
     { id: 'source', label: 'Fuente', importKey: 'source' },
     { id: 'province', label: 'Provincia', importKey: 'province' },
     { id: 'district', label: 'Distrito', importKey: 'district' },
     { id: 'createdAt', label: 'Fecha creación' },
-    { id: 'lastInteraction', label: 'Última Interacción' },
     { id: 'nextInterview', label: 'Próxima Entrevista' },
     { id: 'schedule', label: 'Agendar' },
     { id: 'stage', label: 'Etapa' },
@@ -398,12 +400,13 @@ export const COLUMN_WIDTHS: Record<string, number> = {
     scoreIa: 64,
     status: 72,
     phone: 96,
-    contact: 128,
+    contactPhone: 132,
+    contactWhatsapp: 132,
+    contactEmail: 132,
     source: 88,
     province: 88,
     district: 88,
     createdAt: 120,
-    lastInteraction: 120,
     nextInterview: 100,
     schedule: 56,
     stage: 120,
@@ -625,7 +628,8 @@ export function resolveColumnOrder(
     const allIds = buildAllColumnIds(customColumns);
 
     if (bulkConfig?.columnOrder?.length) {
-        const ordered = bulkConfig.columnOrder.filter(id => allIds.includes(id));
+        const migrated = migrateBulkColumnOrder(bulkConfig.columnOrder);
+        const ordered = migrated.filter(id => allIds.includes(id));
         const missing = allIds.filter(id => !ordered.includes(id));
         return [...ordered, ...missing];
     }
@@ -1037,7 +1041,7 @@ export function repairDateColumnValues(
 /** Columnas donde se permite pegar desde portapapeles */
 export function isPasteEditableColumn(colId: string): boolean {
     if (colId.startsWith('custom_')) return true;
-    return ['name', 'dni', 'email', 'phone', 'source', 'province', 'district', 'lastInteraction'].includes(colId);
+    return ['name', 'dni', 'email', 'phone', 'source', 'province', 'district'].includes(colId);
 }
 
 /** Formato: "lun 15/05/2026 14:30" */

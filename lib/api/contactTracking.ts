@@ -1,17 +1,21 @@
 import { supabase } from '../supabase';
 import { APP_NAME } from '../appConfig';
-import type {
-    ContactAttempt,
-    ContactChannel,
-    ContactOutcome,
-    ContactStatus,
-    ContactSummary,
-} from '../contactTracking';
+import type { ContactAttempt, ContactOutcome, ContactStatus } from '../contactTracking';
 import {
     normalizeContactStatus,
     nextStatusAfterCallAttempt,
     shouldAutoMarkUnreachable,
 } from '../contactTracking';
+import {
+    type ContactAttemptChannel,
+    type ChannelContactSummary,
+    getChannelDbFields,
+    readChannelSummaryFromRow,
+    buildChannelResetUpdate,
+} from '../contactChannelConfig';
+
+export type { ChannelContactSummary as ContactSummary };
+export type { ContactAttemptChannel as ContactChannel };
 
 function mapAttemptRow(row: Record<string, unknown>): ContactAttempt {
     return {
@@ -20,7 +24,7 @@ function mapAttemptRow(row: Record<string, unknown>): ContactAttempt {
         processId: row.process_id as string,
         userId: (row.user_id as string) || undefined,
         userName: (row.user_name as string) || undefined,
-        channel: row.channel as ContactChannel,
+        channel: row.channel as ContactAttempt['channel'],
         outcome: row.outcome as ContactOutcome,
         attemptNumber: (row.attempt_number as number) || 1,
         statusAfter: (row.status_after as ContactStatus) || undefined,
@@ -29,42 +33,37 @@ function mapAttemptRow(row: Record<string, unknown>): ContactAttempt {
     };
 }
 
-function mapSummaryFromCandidate(row: Record<string, unknown>): ContactSummary {
-    return {
-        status: normalizeContactStatus(row.contact_status as string),
-        attemptCount: (row.contact_attempt_count as number) || 0,
-        lastAttemptAt: (row.contact_last_attempt_at as string) || undefined,
-        lastUserId: (row.contact_last_user_id as string) || undefined,
-        lastUserName: (row.contact_last_user_name as string) || undefined,
-    };
-}
-
 export interface RecordContactAttemptInput {
     candidateId: string;
     processId: string;
-    channel: ContactChannel;
+    channel: ContactAttemptChannel;
     outcome: ContactOutcome;
     userId?: string;
     userName?: string;
     notes?: string;
-    /** Si false, no incrementa el contador (p. ej. solo cambio de estado) */
     incrementAttempt?: boolean;
 }
 
 export interface SetContactStatusInput {
     candidateId: string;
     processId: string;
+    channel: ContactAttemptChannel;
     status: ContactStatus;
     userId?: string;
     userName?: string;
 }
 
-let contactColumnsSupported: boolean | null = null;
+export interface ResetContactTrackingResult {
+    clearedAttempts: number;
+    channelsReset: ContactAttemptChannel[];
+}
 
 export interface ContactUndoSnapshot {
     statusBefore: ContactStatus;
     attemptCountBefore: number;
 }
+
+let contactColumnsSupported: boolean | null = null;
 
 function encodeUndoNotes(snapshot: ContactUndoSnapshot, extra?: string): string {
     return JSON.stringify({ undo: snapshot, label: extra ?? null });
@@ -96,9 +95,33 @@ function isMissingContactColumnError(error: { message?: string; code?: string } 
     const msg = (error.message || '').toLowerCase();
     return (
         error.code === '42703' ||
+        msg.includes('contact_phone') ||
         msg.includes('contact_status') ||
         msg.includes('candidate_contact_attempts')
     );
+}
+
+const CHANNEL_SELECT_FIELDS = [
+    'contact_phone_status', 'contact_phone_attempt_count', 'contact_phone_last_at', 'contact_phone_last_user_name',
+    'contact_whatsapp_status', 'contact_whatsapp_attempt_count', 'contact_whatsapp_last_at', 'contact_whatsapp_last_user_name',
+    'contact_email_status', 'contact_email_attempt_count', 'contact_email_last_at', 'contact_email_last_user_name',
+    'contact_status', 'contact_attempt_count', 'contact_last_attempt_at', 'contact_last_user_name',
+    'last_whatsapp_interaction_at',
+].join(', ');
+
+function buildChannelUpdate(
+    channel: ContactAttemptChannel,
+    summary: ChannelContactSummary,
+    userId?: string,
+    userName?: string
+): Record<string, unknown> {
+    const f = getChannelDbFields(channel);
+    return {
+        [f.status]: summary.status,
+        [f.attemptCount]: summary.attemptCount,
+        [f.lastAt]: summary.lastAttemptAt ?? null,
+        [f.lastUserName]: summary.lastUserName ?? userName ?? null,
+    };
 }
 
 export const contactTrackingApi = {
@@ -106,13 +129,20 @@ export const contactTrackingApi = {
         return contactColumnsSupported !== false;
     },
 
-    mapSummaryFromCandidate,
+    readChannelSummary(row: Record<string, unknown>, channel: ContactAttemptChannel): ChannelContactSummary {
+        return readChannelSummaryFromRow(row, channel);
+    },
 
-    async getHistory(candidateId: string, limit = 25): Promise<ContactAttempt[]> {
+    async getHistory(
+        candidateId: string,
+        channel: ContactAttemptChannel,
+        limit = 25
+    ): Promise<ContactAttempt[]> {
         const { data, error } = await supabase
             .from('candidate_contact_attempts')
             .select('*')
             .eq('candidate_id', candidateId)
+            .eq('channel', channel)
             .eq('app_name', APP_NAME)
             .order('created_at', { ascending: false })
             .limit(limit);
@@ -128,11 +158,11 @@ export const contactTrackingApi = {
         return (data || []).map(mapAttemptRow);
     },
 
-    async setStatus(input: SetContactStatusInput): Promise<ContactSummary | null> {
+    async setStatus(input: SetContactStatusInput): Promise<ChannelContactSummary | null> {
         const now = new Date().toISOString();
         const { data: current, error: readErr } = await supabase
             .from('candidates')
-            .select('contact_status, contact_attempt_count')
+            .select(CHANNEL_SELECT_FIELDS)
             .eq('id', input.candidateId)
             .eq('app_name', APP_NAME)
             .single();
@@ -145,63 +175,51 @@ export const contactTrackingApi = {
             throw readErr;
         }
 
-        const prevStatus = normalizeContactStatus(current?.contact_status as string);
-        if (prevStatus === input.status) {
-            return {
-                status: input.status,
-                attemptCount: (current?.contact_attempt_count as number) || 0,
-            };
-        }
+        const prev = readChannelSummaryFromRow(current as Record<string, unknown>, input.channel);
+        if (prev.status === input.status) return { ...prev };
+
+        const summary: ChannelContactSummary = {
+            status: input.status,
+            attemptCount: prev.attemptCount,
+            lastAttemptAt: now,
+            lastUserName: input.userName,
+        };
 
         const { error: updErr } = await supabase
             .from('candidates')
-            .update({
-                contact_status: input.status,
-                contact_last_attempt_at: now,
-                contact_last_user_id: input.userId || null,
-                contact_last_user_name: input.userName || null,
-            })
+            .update(buildChannelUpdate(input.channel, summary, input.userId, input.userName))
             .eq('id', input.candidateId)
             .eq('app_name', APP_NAME);
 
         if (updErr) throw updErr;
 
-        const attemptCount = (current?.contact_attempt_count as number) || 0;
         await supabase.from('candidate_contact_attempts').insert({
             candidate_id: input.candidateId,
             process_id: input.processId,
             user_id: input.userId || null,
             user_name: input.userName || null,
-            channel: 'call',
+            channel: input.channel,
             outcome: 'status_change',
-            attempt_number: attemptCount,
+            attempt_number: prev.attemptCount,
             status_after: input.status,
             notes: encodeUndoNotes(
-                { statusBefore: prevStatus, attemptCountBefore: attemptCount },
-                `${prevStatus} → ${input.status}`
+                { statusBefore: prev.status, attemptCountBefore: prev.attemptCount },
+                `${prev.status} → ${input.status}`
             ),
             app_name: APP_NAME,
         });
 
         contactColumnsSupported = true;
-        return {
-            status: input.status,
-            attemptCount: (current?.contact_attempt_count as number) || 0,
-            lastAttemptAt: now,
-            lastUserId: input.userId,
-            lastUserName: input.userName,
-        };
+        return summary;
     },
 
-    async recordAttempt(input: RecordContactAttemptInput): Promise<ContactSummary | null> {
+    async recordAttempt(input: RecordContactAttemptInput): Promise<ChannelContactSummary | null> {
         const increment = input.incrementAttempt !== false;
         const now = new Date().toISOString();
 
         const { data: current, error: readErr } = await supabase
             .from('candidates')
-            .select(
-                'contact_status, contact_attempt_count, contact_last_attempt_at, contact_last_user_name'
-            )
+            .select(CHANNEL_SELECT_FIELDS)
             .eq('id', input.candidateId)
             .eq('app_name', APP_NAME)
             .single();
@@ -214,24 +232,17 @@ export const contactTrackingApi = {
             throw readErr;
         }
 
-        const prevStatus = normalizeContactStatus(current?.contact_status as string);
-        const prevCount = (current?.contact_attempt_count as number) || 0;
+        const prev = readChannelSummaryFromRow(current as Record<string, unknown>, input.channel);
+        const prevStatus = prev.status;
+        const prevCount = prev.attemptCount;
         const newCount = increment ? prevCount + 1 : prevCount;
 
         let newStatus = prevStatus;
-        if (input.outcome === 'interested') {
-            newStatus = 'interesado';
-        } else if (input.outcome === 'not_interested') {
-            newStatus = 'no_interesado';
-        } else if (input.outcome === 'unreachable') {
-            newStatus = 'inubicable';
-        } else if (increment) {
-            newStatus = nextStatusAfterCallAttempt(
-                prevStatus,
-                newCount,
-                input.channel,
-                input.outcome
-            );
+        if (input.outcome === 'interested') newStatus = 'interesado';
+        else if (input.outcome === 'not_interested') newStatus = 'no_interesado';
+        else if (input.outcome === 'unreachable') newStatus = 'inubicable';
+        else if (increment) {
+            newStatus = nextStatusAfterCallAttempt(prevStatus, newCount, input.channel, input.outcome);
         }
 
         if (
@@ -241,15 +252,26 @@ export const contactTrackingApi = {
             newStatus = 'inubicable';
         }
 
+        const summary: ChannelContactSummary = {
+            status: newStatus,
+            attemptCount: newCount,
+            lastAttemptAt: now,
+            lastUserName: input.userName,
+        };
+
+        const updatePayload: Record<string, unknown> = buildChannelUpdate(
+            input.channel,
+            summary,
+            input.userId,
+            input.userName
+        );
+        if (input.channel === 'whatsapp') {
+            updatePayload.last_whatsapp_interaction_at = now;
+        }
+
         const { error: updErr } = await supabase
             .from('candidates')
-            .update({
-                contact_status: newStatus,
-                contact_attempt_count: newCount,
-                contact_last_attempt_at: now,
-                contact_last_user_id: input.userId || null,
-                contact_last_user_name: input.userName || null,
-            })
+            .update(updatePayload)
             .eq('id', input.candidateId)
             .eq('app_name', APP_NAME);
 
@@ -276,33 +298,27 @@ export const contactTrackingApi = {
         });
 
         if (insErr && !isMissingContactColumnError(insErr)) {
-            console.warn('Intento de contacto guardado en candidato pero no en historial:', insErr.message);
+            console.warn('Historial de contacto no guardado:', insErr.message);
         }
 
         contactColumnsSupported = true;
-        return {
-            status: newStatus,
-            attemptCount: newCount,
-            lastAttemptAt: now,
-            lastUserId: input.userId,
-            lastUserName: input.userName,
-        };
+        return summary;
     },
 
-    /** Restaura estado e intentos anteriores a la última acción registrada */
     async revertLastAction(input: {
         candidateId: string;
         processId: string;
+        channel: ContactAttemptChannel;
         userId?: string;
         userName?: string;
-    }): Promise<ContactSummary | null> {
-        const history = await this.getHistory(input.candidateId, 1);
+    }): Promise<ChannelContactSummary | null> {
+        const history = await this.getHistory(input.candidateId, input.channel, 1);
         const latest = history[0];
         if (!latest) return null;
 
         let snapshot = parseUndoFromAttemptNotes(latest.notes, latest.attemptNumber);
         if (!snapshot) {
-            const older = await this.getHistory(input.candidateId, 2);
+            const older = await this.getHistory(input.candidateId, input.channel, 2);
             if (older.length < 2) {
                 snapshot = { statusBefore: 'por_contactar', attemptCountBefore: 0 };
             } else {
@@ -315,15 +331,16 @@ export const contactTrackingApi = {
         }
 
         const now = new Date().toISOString();
+        const summary: ChannelContactSummary = {
+            status: snapshot.statusBefore,
+            attemptCount: snapshot.attemptCountBefore,
+            lastAttemptAt: now,
+            lastUserName: input.userName,
+        };
+
         const { error: updErr } = await supabase
             .from('candidates')
-            .update({
-                contact_status: snapshot.statusBefore,
-                contact_attempt_count: snapshot.attemptCountBefore,
-                contact_last_attempt_at: now,
-                contact_last_user_id: input.userId || null,
-                contact_last_user_name: input.userName || null,
-            })
+            .update(buildChannelUpdate(input.channel, summary, input.userId, input.userName))
             .eq('id', input.candidateId)
             .eq('app_name', APP_NAME);
 
@@ -334,7 +351,7 @@ export const contactTrackingApi = {
             process_id: input.processId,
             user_id: input.userId || null,
             user_name: input.userName || null,
-            channel: 'call',
+            channel: input.channel,
             outcome: 'status_change',
             attempt_number: snapshot.attemptCountBefore,
             status_after: snapshot.statusBefore,
@@ -348,12 +365,51 @@ export const contactTrackingApi = {
             app_name: APP_NAME,
         });
 
+        return summary;
+    },
+
+    /** Reinicia los 3 canales — candidato como nuevo (sin historial de contacto) */
+    async resetAllContactTracking(input: {
+        candidateId: string;
+        processId: string;
+        userId?: string;
+        userName?: string;
+    }): Promise<ResetContactTrackingResult | null> {
+        const { count, error: countErr } = await supabase
+            .from('candidate_contact_attempts')
+            .select('id', { count: 'exact', head: true })
+            .eq('candidate_id', input.candidateId)
+            .eq('app_name', APP_NAME);
+
+        if (countErr && !isMissingContactColumnError(countErr)) throw countErr;
+        const clearedAttempts = count ?? 0;
+
+        const { error: delErr } = await supabase
+            .from('candidate_contact_attempts')
+            .delete()
+            .eq('candidate_id', input.candidateId)
+            .eq('app_name', APP_NAME);
+
+        if (delErr && !isMissingContactColumnError(delErr)) throw delErr;
+
+        const { error: updErr } = await supabase
+            .from('candidates')
+            .update(buildChannelResetUpdate())
+            .eq('id', input.candidateId)
+            .eq('app_name', APP_NAME);
+
+        if (updErr) {
+            if (isMissingContactColumnError(updErr)) {
+                contactColumnsSupported = false;
+                return null;
+            }
+            throw updErr;
+        }
+
+        contactColumnsSupported = true;
         return {
-            status: snapshot.statusBefore,
-            attemptCount: snapshot.attemptCountBefore,
-            lastAttemptAt: now,
-            lastUserId: input.userId,
-            lastUserName: input.userName,
+            clearedAttempts,
+            channelsReset: ['call', 'whatsapp', 'email'],
         };
     },
 };

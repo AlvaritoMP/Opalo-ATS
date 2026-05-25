@@ -11,14 +11,17 @@ import {
     repairTextCaseColumnValues,
 } from '../bulkTableColumns';
 import type { BulkProcessConfig } from '../../types';
-import type { ContactStatus } from '../contactTracking';
-import { normalizeContactStatus } from '../contactTracking';
+import { readChannelSummaryFromRow } from '../contactChannelConfig';
+import type { ChannelContactSummary } from '../contactChannelConfig';
 
 /** Select mínimo — siempre disponible */
 const BULK_SELECT_BASE =
     'id, name, email, phone, dni, age, source, province, district, score_ia, metadata_ia, stage_id, process_id, last_whatsapp_interaction_at';
 
-const BULK_SELECT_WITH_CONTACT = `${BULK_SELECT_BASE}, contact_status, contact_attempt_count, contact_last_attempt_at, contact_last_user_id, contact_last_user_name`;
+const BULK_SELECT_WITH_CONTACT = `${BULK_SELECT_BASE}, contact_status, contact_attempt_count, contact_last_attempt_at, contact_last_user_name,
+    contact_phone_status, contact_phone_attempt_count, contact_phone_last_at, contact_phone_last_user_name,
+    contact_whatsapp_status, contact_whatsapp_attempt_count, contact_whatsapp_last_at, contact_whatsapp_last_user_name,
+    contact_email_status, contact_email_attempt_count, contact_email_last_at, contact_email_last_user_name`;
 
 const BULK_SELECT_WITH_CREATED = `${BULK_SELECT_WITH_CONTACT}, created_at`;
 const BULK_SELECT_FULL = `${BULK_SELECT_WITH_CREATED}, bulk_column_values`;
@@ -68,12 +71,9 @@ function mapBulkCandidateRow(
         metadataIa: (c.metadata_ia as string) || undefined,
         stageId: c.stage_id as string,
         processId: c.process_id as string,
-        lastWhatsAppInteractionAt: (c.last_whatsapp_interaction_at as string) || undefined,
-        contactStatus: normalizeContactStatus(c.contact_status as string),
-        contactAttemptCount: (c.contact_attempt_count as number) ?? 0,
-        contactLastAttemptAt: (c.contact_last_attempt_at as string) || undefined,
-        contactLastUserId: (c.contact_last_user_id as string) || undefined,
-        contactLastUserName: (c.contact_last_user_name as string) || undefined,
+        contactPhone: readChannelSummaryFromRow(c, 'call'),
+        contactWhatsapp: readChannelSummaryFromRow(c, 'whatsapp'),
+        contactEmail: readChannelSummaryFromRow(c, 'email'),
         createdAt: (c.created_at as string) || undefined,
         nextInterviewAt: nextInterview?.start || undefined,
         nextInterviewerId: nextInterview?.interviewerId || undefined,
@@ -103,12 +103,9 @@ export interface BulkCandidate {
     metadataIa?: string;
     stageId: string;
     processId: string;
-    lastWhatsAppInteractionAt?: string; // Última interacción (editable manualmente)
-    contactStatus?: ContactStatus;
-    contactAttemptCount?: number;
-    contactLastAttemptAt?: string;
-    contactLastUserId?: string;
-    contactLastUserName?: string;
+    contactPhone?: ChannelContactSummary;
+    contactWhatsapp?: ChannelContactSummary;
+    contactEmail?: ChannelContactSummary;
     createdAt?: string;
     nextInterviewAt?: string; // Fecha/hora de la próxima entrevista
     nextInterviewerId?: string; // ID del entrevistador de la próxima entrevista
