@@ -1,0 +1,197 @@
+import { supabase } from '../supabase';
+import { APP_NAME } from '../appConfig';
+import {
+    TARGET_APP,
+    SNAPSHOT_VERSION,
+    buildWorkerSnapshot,
+    getWorkerDisplayName,
+    validateSnapshotForSend,
+    ACTIVE_PACKAGE_STATUSES,
+    type WorkerSnapshot,
+} from '../workerHandoffFields';
+import type { Candidate, Process, WorkerHandoffItem, WorkerHandoffPackage, WorkerHandoffPackageStatus, WorkerSnapshot } from '../types';
+
+export interface SendWorkerHandoffInput {
+    candidates: Candidate[];
+    processes: Process[];
+    senderNote?: string;
+    createdBy?: string;
+    createdByName?: string;
+}
+
+function mapPackage(row: Record<string, unknown>): WorkerHandoffPackage {
+    return {
+        id: row.id as string,
+        sourceApp: row.source_app as string,
+        targetApp: row.target_app as string,
+        status: row.status as WorkerHandoffPackageStatus,
+        workerCount: row.worker_count as number,
+        senderNote: (row.sender_note as string) || undefined,
+        createdBy: (row.created_by as string) || undefined,
+        createdByName: (row.created_by_name as string) || undefined,
+        sentAt: row.sent_at as string,
+        receivedAt: (row.received_at as string) || undefined,
+        completedAt: (row.completed_at as string) || undefined,
+        receiverNote: (row.receiver_note as string) || undefined,
+        payloadVersion: row.payload_version as number,
+        createdAt: row.created_at as string,
+        updatedAt: row.updated_at as string,
+    };
+}
+
+function mapItem(row: Record<string, unknown>): WorkerHandoffItem {
+    return {
+        id: row.id as string,
+        packageId: row.package_id as string,
+        sourceCandidateId: (row.source_candidate_id as string) || '',
+        sourceProcessId: (row.source_process_id as string) || undefined,
+        workerName: row.worker_name as string,
+        workerSnapshot: row.worker_snapshot as WorkerSnapshot,
+        itemStatus: row.item_status as WorkerHandoffItem['itemStatus'],
+        createdAt: row.created_at as string,
+    };
+}
+
+export const workerHandoffApi = {
+    async listPackages(limit = 100): Promise<WorkerHandoffPackage[]> {
+        const { data, error } = await supabase
+            .from('worker_handoff_packages')
+            .select('*')
+            .eq('source_app', APP_NAME)
+            .order('sent_at', { ascending: false })
+            .limit(limit);
+
+        if (error) throw error;
+        return (data || []).map(row => mapPackage(row as Record<string, unknown>));
+    },
+
+    async getPackageWithItems(packageId: string): Promise<WorkerHandoffPackage | null> {
+        const { data: pkg, error: pkgError } = await supabase
+            .from('worker_handoff_packages')
+            .select('*')
+            .eq('id', packageId)
+            .eq('source_app', APP_NAME)
+            .maybeSingle();
+
+        if (pkgError) throw pkgError;
+        if (!pkg) return null;
+
+        const { data: items, error: itemsError } = await supabase
+            .from('worker_handoff_items')
+            .select('*')
+            .eq('package_id', packageId)
+            .order('created_at', { ascending: true });
+
+        if (itemsError) throw itemsError;
+
+        return {
+            ...mapPackage(pkg as Record<string, unknown>),
+            items: (items || []).map(row => mapItem(row as Record<string, unknown>)),
+        };
+    },
+
+    async getActiveCandidateIds(candidateIds: string[]): Promise<string[]> {
+        if (candidateIds.length === 0) return [];
+
+        const { data: activePackages, error: packagesError } = await supabase
+            .from('worker_handoff_packages')
+            .select('id')
+            .eq('source_app', APP_NAME)
+            .in('status', [...ACTIVE_PACKAGE_STATUSES]);
+
+        if (packagesError) throw packagesError;
+
+        const packageIds = (activePackages || []).map(row => row.id as string);
+        if (packageIds.length === 0) return [];
+
+        const { data, error } = await supabase
+            .from('worker_handoff_items')
+            .select('source_candidate_id')
+            .in('package_id', packageIds)
+            .in('source_candidate_id', candidateIds);
+
+        if (error) throw error;
+
+        const activeIds = new Set<string>();
+        for (const row of data || []) {
+            const candidateId = row.source_candidate_id as string | null;
+            if (candidateId) activeIds.add(candidateId);
+        }
+        return [...activeIds];
+    },
+
+    async sendPackage(input: SendWorkerHandoffInput): Promise<WorkerHandoffPackage> {
+        const { candidates, processes, senderNote, createdBy, createdByName } = input;
+
+        if (candidates.length === 0) {
+            throw new Error('Selecciona al menos un candidato para enviar.');
+        }
+
+        const processById = new Map(processes.map(process => [process.id, process]));
+        const preparedItems: Array<{
+            sourceCandidateId: string;
+            sourceProcessId: string;
+            workerName: string;
+            workerSnapshot: WorkerSnapshot;
+        }> = [];
+
+        for (const candidate of candidates) {
+            const process = processById.get(candidate.processId);
+            const snapshot = buildWorkerSnapshot(candidate, process);
+            const validationError = validateSnapshotForSend(snapshot);
+            if (validationError) {
+                throw new Error(`${candidate.name || 'Candidato'}: ${validationError}`);
+            }
+            preparedItems.push({
+                sourceCandidateId: candidate.id,
+                sourceProcessId: candidate.processId,
+                workerName: getWorkerDisplayName(snapshot),
+                workerSnapshot: snapshot,
+            });
+        }
+
+        const sentAt = new Date().toISOString();
+        const trimmedNote = senderNote?.trim() || null;
+
+        const { data: pkg, error: pkgError } = await supabase
+            .from('worker_handoff_packages')
+            .insert({
+                source_app: APP_NAME,
+                target_app: TARGET_APP,
+                status: 'sent',
+                worker_count: preparedItems.length,
+                sender_note: trimmedNote,
+                created_by: createdBy || null,
+                created_by_name: createdByName || null,
+                sent_at: sentAt,
+                payload_version: SNAPSHOT_VERSION,
+                updated_at: sentAt,
+            })
+            .select('*')
+            .single();
+
+        if (pkgError) throw pkgError;
+
+        const packageId = (pkg as Record<string, unknown>).id as string;
+
+        const { error: itemsError } = await supabase
+            .from('worker_handoff_items')
+            .insert(
+                preparedItems.map(item => ({
+                    package_id: packageId,
+                    source_candidate_id: item.sourceCandidateId,
+                    source_process_id: item.sourceProcessId,
+                    worker_name: item.workerName,
+                    worker_snapshot: item.workerSnapshot,
+                    item_status: 'pending',
+                }))
+            );
+
+        if (itemsError) {
+            await supabase.from('worker_handoff_packages').delete().eq('id', packageId);
+            throw itemsError;
+        }
+
+        return mapPackage(pkg as Record<string, unknown>);
+    },
+};

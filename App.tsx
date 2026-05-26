@@ -17,11 +17,12 @@ import { Forms } from './components/Forms';
 import { CalendarView } from './components/CalendarView';
 import { BulkImportView } from './components/BulkImportView';
 import { BulkProcessesView } from './components/BulkProcessesView';
+import { OpsFlowHandoffHistory } from './components/OpsFlowHandoffHistory';
 import { Spinner } from './components/Spinner';
 import { ArchivedCandidates } from './components/ArchivedCandidates';
 import { Letters } from './components/Letters';
 import { ToastContainer } from './components/Toast';
-import { LayoutDashboard, Briefcase, FileText, Settings as SettingsIcon, Users as UsersIcon, ChevronsLeft, ChevronsRight, BarChart2, Calendar, FileUp, LogOut, X, Archive, RefreshCw, Menu, Grid3x3 } from 'lucide-react';
+import { LayoutDashboard, Briefcase, FileText, Settings as SettingsIcon, Users as UsersIcon, ChevronsLeft, ChevronsRight, BarChart2, Calendar, FileUp, LogOut, X, Archive, RefreshCw, Menu, Grid3x3, Send } from 'lucide-react';
 import { CandidateComparator } from './components/CandidateComparator';
 
 
@@ -235,8 +236,8 @@ const getVisibleSections = (user: User | null): Section[] => {
         return user.visibleSections;
     }
     const defaultSections: Record<UserRole, Section[]> = {
-        admin: ['dashboard', 'processes', 'archived', 'candidates', 'forms', 'letters', 'calendar', 'reports', 'compare', 'bulk-import', 'bulk-processes', 'users', 'settings'],
-        recruiter: ['dashboard', 'processes', 'archived', 'candidates', 'forms', 'letters', 'calendar', 'reports', 'compare', 'bulk-import', 'bulk-processes'],
+        admin: ['dashboard', 'processes', 'archived', 'candidates', 'forms', 'letters', 'calendar', 'reports', 'compare', 'bulk-import', 'bulk-processes', 'opsflow-handoffs', 'users', 'settings'],
+        recruiter: ['dashboard', 'processes', 'archived', 'candidates', 'forms', 'letters', 'calendar', 'reports', 'compare', 'bulk-import', 'bulk-processes', 'opsflow-handoffs'],
         client: ['dashboard', 'processes', 'candidates', 'calendar', 'reports', 'compare'],
         viewer: ['dashboard', 'processes', 'candidates', 'calendar', 'reports']
     };
@@ -332,6 +333,7 @@ const Sidebar: React.FC = () => {
                 {canSeeSection('bulk-processes') && <NavItem icon={Grid3x3} label={getLabel('sidebar_bulk_processes', 'Procesos Masivos')} view="bulk-processes" currentView={state.view.type} setView={actions.setView} isCollapsed={isCollapsed} />}
                 {canSeeSection('archived') && <NavItem icon={Archive} label={getLabel('sidebar_archived', 'Archivados')} view="archived" currentView={state.view.type} setView={actions.setView} isCollapsed={isCollapsed} />}
                 {canSeeSection('candidates') && <NavItem icon={UsersIcon} label={getLabel('menu_candidates', 'Candidatos')} view="candidates" currentView={state.view.type} setView={actions.setView} isCollapsed={isCollapsed} />}
+                {canSeeSection('opsflow-handoffs') && <NavItem icon={Send} label={getLabel('sidebar_opsflow_handoffs', 'Envíos OpsFlow')} view="opsflow-handoffs" currentView={state.view.type} setView={actions.setView} isCollapsed={isCollapsed} />}
                 {canSeeSection('forms') && <NavItem icon={FileText} label={getLabel('sidebar_forms', 'Formularios')} view="forms" currentView={state.view.type} setView={actions.setView} isCollapsed={isCollapsed} />}
                 {canSeeSection('letters') && <NavItem icon={FileText} label={getLabel('sidebar_letters', 'Cartas')} view="letters" currentView={state.view.type} setView={actions.setView} isCollapsed={isCollapsed} />}
                 {canSeeSection('calendar') && <NavItem icon={Calendar} label={getLabel('sidebar_calendar', 'Calendario')} view="calendar" currentView={state.view.type} setView={actions.setView} isCollapsed={isCollapsed} />}
@@ -1678,7 +1680,8 @@ const App: React.FC = () => {
                 'users': 'users',
                 'settings': 'settings',
                 'bulk-import': 'bulk-import',
-                'bulk-processes': 'bulk-processes'
+                'bulk-processes': 'bulk-processes',
+                'opsflow-handoffs': 'opsflow-handoffs'
             };
             
             const requiredSection = viewSectionMap[state.view.type];
@@ -1709,6 +1712,7 @@ const App: React.FC = () => {
             case 'settings': return <Settings />;
             case 'bulk-import': return <BulkImportView />;
             case 'bulk-processes': return <BulkProcessesView />;
+            case 'opsflow-handoffs': return <OpsFlowHandoffHistory />;
             case 'archived': return <ArchivedCandidates />;
             default: return <Dashboard />;
         }

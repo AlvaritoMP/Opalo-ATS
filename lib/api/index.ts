@@ -11,6 +11,7 @@ export * from './interviews';
 export * from './settings';
 export * from './clients';
 export * from './formIntegrations';
+export * from './workerHandoff';
 
 // Exportar funciones helper de Supabase
 export { setCurrentUser } from '../supabase';

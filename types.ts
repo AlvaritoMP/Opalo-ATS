@@ -306,6 +306,67 @@ export interface PermissionCategory {
     permissions: Permission[];
 }
 
+export type WorkerHandoffPackageStatus =
+    | 'sent'
+    | 'received'
+    | 'processing'
+    | 'completed'
+    | 'rejected'
+    | 'partially_completed';
+
+export type WorkerHandoffItemStatus = 'pending' | 'accepted' | 'rejected' | 'assigned';
+
+export interface WorkerSnapshotIdentity {
+    fullName?: string;
+    dni?: string;
+    email?: string;
+    phone?: string;
+    phone2?: string;
+}
+
+export interface WorkerSnapshot {
+    identity: WorkerSnapshotIdentity;
+    fields: Record<string, string | number | boolean>;
+    meta: {
+        sourceCandidateId: string;
+        sourceProcessId: string;
+        sourceApp: string;
+        snapshotVersion: number;
+        includedFieldKeys: string[];
+        capturedAt: string;
+    };
+}
+
+export interface WorkerHandoffPackage {
+    id: string;
+    sourceApp: string;
+    targetApp: string;
+    status: WorkerHandoffPackageStatus;
+    workerCount: number;
+    senderNote?: string;
+    createdBy?: string;
+    createdByName?: string;
+    sentAt: string;
+    receivedAt?: string;
+    completedAt?: string;
+    receiverNote?: string;
+    payloadVersion: number;
+    createdAt: string;
+    updatedAt: string;
+    items?: WorkerHandoffItem[];
+}
+
+export interface WorkerHandoffItem {
+    id: string;
+    packageId: string;
+    sourceCandidateId: string;
+    sourceProcessId?: string;
+    workerName: string;
+    workerSnapshot: WorkerSnapshot;
+    itemStatus: WorkerHandoffItemStatus;
+    createdAt: string;
+}
+
 export type Section = 
     | 'dashboard' 
     | 'processes' 
@@ -318,6 +379,7 @@ export type Section =
     | 'compare' 
     | 'bulk-import' 
     | 'bulk-processes'
+    | 'opsflow-handoffs'
     | 'users' 
     | 'settings';
 

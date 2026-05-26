@@ -1,13 +1,14 @@
 import React, { useRef, useState } from 'react';
 import { useAppState } from '../App';
 import { Candidate, Attachment, InterviewEvent, UserRole, Process, DocumentCategory } from '../types';
-import { X, Mail, Phone, Linkedin, User, FileText, Eye, Download, Upload, Trash2, Briefcase, DollarSign, Calendar, Info, MapPin, Edit, ArrowRightLeft, Copy, MessageCircle, PhoneCall, Archive, Undo2, RefreshCw, Loader } from 'lucide-react';
+import { X, Mail, Phone, Linkedin, User, FileText, Eye, Download, Upload, Trash2, Briefcase, DollarSign, Calendar, Info, MapPin, Edit, ArrowRightLeft, Copy, MessageCircle, PhoneCall, Archive, Undo2, RefreshCw, Loader, Send } from 'lucide-react';
 import { ScheduleInterviewModal } from './ScheduleInterviewModal';
 import { ChangeProcessModal } from './ChangeProcessModal';
 import { CandidateCommentsModal } from './CandidateCommentsModal';
 import { DocumentChecklist } from './DocumentChecklist';
 import { SearchableSelect } from './SearchableSelect';
 import { DiscardCandidateModal } from './DiscardCandidateModal';
+import { SendToOpsFlowModal } from './SendToOpsFlowModal';
 import JSZip from 'jszip';
 import { saveAs } from 'file-saver';
 
@@ -53,6 +54,7 @@ export const CandidateDetailsModal: React.FC<{ candidate: Candidate, onClose: ()
     const [isEditing, setIsEditing] = useState(false);
     const [editableCandidate, setEditableCandidate] = useState<Candidate>(initialCandidate);
     const [isDiscardModalOpen, setIsDiscardModalOpen] = useState(false);
+    const [isSendToOpsFlowOpen, setIsSendToOpsFlowOpen] = useState(false);
     
     // Usar useRef para rastrear el último candidato procesado y evitar bucles infinitos
     const lastProcessedCandidateRef = React.useRef<string>('');
@@ -983,6 +985,16 @@ export const CandidateDetailsModal: React.FC<{ candidate: Candidate, onClose: ()
                             <span className="sm:hidden">ZIP</span>
                         </button>
                         {canEdit && (
+                            <button
+                                onClick={() => setIsSendToOpsFlowOpen(true)}
+                                className="flex items-center px-2 md:px-3 py-1.5 bg-primary-600 text-white border border-primary-600 rounded-md shadow-sm text-xs md:text-sm font-medium hover:bg-primary-700"
+                            >
+                                <Send className="w-4 h-4 md:mr-2" />
+                                <span className="hidden sm:inline">Enviar a OpsFlow</span>
+                                <span className="sm:hidden">OpsFlow</span>
+                            </button>
+                        )}
+                        {canEdit && (
                             <>
                                 <button
                                     onClick={handleArchiveToggle}
@@ -1728,6 +1740,13 @@ export const CandidateDetailsModal: React.FC<{ candidate: Candidate, onClose: ()
                         setIsDiscardModalOpen(false);
                         onClose(); // Cerrar el modal de detalles después de descartar
                     }}
+                />
+            )}
+            {isSendToOpsFlowOpen && (
+                <SendToOpsFlowModal
+                    isOpen={isSendToOpsFlowOpen}
+                    onClose={() => setIsSendToOpsFlowOpen(false)}
+                    candidates={[initialCandidate]}
                 />
             )}
             
