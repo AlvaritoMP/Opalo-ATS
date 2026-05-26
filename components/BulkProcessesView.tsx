@@ -14,7 +14,8 @@ import {
 } from '../lib/contactChannelConfig';
 import { processesApi } from '../lib/api/processes';
 import { useDebouncedValue } from '../lib/useDebouncedValue';
-import { Check, X, Loader2, Send, Archive, Search, ChevronDown, ChevronUp, Plus, Edit, Trash2, ArrowLeft, MessageCircle, Phone, Upload, Download, Filter, Mail, Calendar, Settings, ArrowUp, ArrowDown, Pin, FileText, BookOpen, Paperclip, ClipboardList, ListPlus, RefreshCw, HardDrive, CaseSensitive, Package } from 'lucide-react';
+import { Check, X, Loader2, Send, Archive, Search, ChevronDown, ChevronUp, Plus, Edit, Trash2, ArrowLeft, MessageCircle, Phone, Upload, Download, Filter, Mail, Calendar, Settings, ArrowUp, ArrowDown, Pin, FileText, BookOpen, Paperclip, ClipboardList, ListPlus, RefreshCw, HardDrive, CaseSensitive, Package, History } from 'lucide-react';
+import { BulkCandidateTimeline } from './BulkCandidateTimeline';
 import { Process, CustomColumn, BulkProcessConfig, Candidate } from '../types';
 import { candidatesApi } from '../lib/api/candidates';
 import {
@@ -132,6 +133,8 @@ const BulkTh: React.FC<{
     </th>
 );
 
+type CandidateDrawerTab = 'details' | 'timeline';
+
 // Drawer lateral para mostrar detalles del candidato
 const CandidateDrawer: React.FC<{
     candidate: BulkCandidate | null;
@@ -144,9 +147,12 @@ const CandidateDrawer: React.FC<{
     showOpsFlow?: boolean;
     onOpsFlowSend?: () => void;
     opsFlowRefreshToken?: number;
-}> = ({ candidate, isOpen, onClose, onLoadDetails, process, onPsychReport, showPsychReport, showOpsFlow, onOpsFlowSend, opsFlowRefreshToken = 0 }) => {
+    activityLogRefreshToken?: number;
+    userNameById?: Map<string, string>;
+}> = ({ candidate, isOpen, onClose, onLoadDetails, process, onPsychReport, showPsychReport, showOpsFlow, onOpsFlowSend, opsFlowRefreshToken = 0, activityLogRefreshToken = 0, userNameById }) => {
     const [isLoading, setIsLoading] = useState(false);
     const [fullCandidate, setFullCandidate] = useState<BulkCandidate | null>(null);
+    const [activeTab, setActiveTab] = useState<CandidateDrawerTab>('timeline');
 
     useEffect(() => {
         if (isOpen && candidate && !fullCandidate) {
@@ -167,6 +173,7 @@ const CandidateDrawer: React.FC<{
     useEffect(() => {
         if (!isOpen) {
             setFullCandidate(null);
+            setActiveTab('timeline');
         }
     }, [isOpen]);
 
@@ -180,19 +187,56 @@ const CandidateDrawer: React.FC<{
         <div className="fixed inset-0 z-50 flex">
             <div className="flex-1 bg-black bg-opacity-50" onClick={onClose} />
             <div className="w-full max-w-2xl bg-white shadow-xl overflow-y-auto">
-                <div className="sticky top-0 bg-white border-b px-6 py-4 flex items-center justify-between z-10">
-                    <h2 className="text-xl font-semibold text-gray-900">{displayCandidate.name}</h2>
-                    <button onClick={onClose} className="p-2 hover:bg-gray-100 rounded-lg transition-colors">
-                        <X className="w-5 h-5 text-gray-500" />
-                    </button>
+                <div className="sticky top-0 bg-white border-b z-10">
+                    <div className="px-6 py-4 flex items-center justify-between">
+                        <h2 className="text-xl font-semibold text-gray-900">{displayCandidate.name}</h2>
+                        <button onClick={onClose} className="p-2 hover:bg-gray-100 rounded-lg transition-colors">
+                            <X className="w-5 h-5 text-gray-500" />
+                        </button>
+                    </div>
+                    <div className="flex border-t border-gray-100">
+                        <button
+                            type="button"
+                            onClick={() => setActiveTab('timeline')}
+                            className={`flex-1 flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${
+                                activeTab === 'timeline'
+                                    ? 'border-primary-600 text-primary-700 bg-primary-50/50'
+                                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:bg-gray-50'
+                            }`}
+                        >
+                            <History className="w-4 h-4" />
+                            Línea de tiempo
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => setActiveTab('details')}
+                            className={`flex-1 flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${
+                                activeTab === 'details'
+                                    ? 'border-primary-600 text-primary-700 bg-primary-50/50'
+                                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:bg-gray-50'
+                            }`}
+                        >
+                            <FileText className="w-4 h-4" />
+                            Detalles
+                        </button>
+                    </div>
                 </div>
                 <div className="p-6 space-y-6">
-                    {isLoading ? (
+                    {activeTab === 'timeline' && candidate && (
+                        <BulkCandidateTimeline
+                            candidateId={candidate.id}
+                            process={process}
+                            userNameById={userNameById}
+                            refreshToken={activityLogRefreshToken + opsFlowRefreshToken}
+                        />
+                    )}
+                    {activeTab === 'details' && isLoading && (
                         <div className="flex items-center justify-center py-12">
                             <Loader2 className="w-6 h-6 animate-spin text-primary-600" />
                             <span className="ml-2 text-gray-600">Cargando detalles...</span>
                         </div>
-                    ) : (
+                    )}
+                    {activeTab === 'details' && !isLoading && (
                         <>
                             <div className="space-y-4">
                                 <div>
@@ -262,23 +306,6 @@ const CandidateDrawer: React.FC<{
                                     onSend={onOpsFlowSend}
                                     refreshToken={opsFlowRefreshToken}
                                 />
-                            )}
-                            {displayCandidate.history && displayCandidate.history.length > 0 && (
-                                <div>
-                                    <label className="text-sm font-medium text-gray-500">Historial</label>
-                                    <div className="mt-2 space-y-2">
-                                        {displayCandidate.history.map((h: any, idx: number) => (
-                                            <div key={idx} className="p-3 bg-gray-50 rounded-lg">
-                                                <p className="text-sm text-gray-900">
-                                                    Movido a: {process?.stages.find(s => s.id === h.stage_id)?.name || h.stage_id}
-                                                </p>
-                                                <p className="text-xs text-gray-500">
-                                                    {new Date(h.moved_at).toLocaleString()} por {h.moved_by || 'Sistema'}
-                                                </p>
-                                            </div>
-                                        ))}
-                                    </div>
-                                </div>
                             )}
                         </>
                     )}
@@ -523,6 +550,14 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
     );
 
     const canSendToOpsFlow = state.currentUser?.role === 'admin' || state.currentUser?.role === 'recruiter';
+
+    const userNameById = useMemo(() => {
+        const map = new Map<string, string>();
+        for (const u of state.users) {
+            map.set(u.id, u.name);
+        }
+        return map;
+    }, [state.users]);
 
     const logActivity = useCallback((
         actionType: BulkActivityActionType,
@@ -3713,6 +3748,8 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                     if (drawerCandidate) void openOpsFlowModal([drawerCandidate.id]);
                 }}
                 opsFlowRefreshToken={opsFlowRefreshToken}
+                activityLogRefreshToken={activityLogRefreshToken}
+                userNameById={userNameById}
             />
 
             {showProcessModal && (

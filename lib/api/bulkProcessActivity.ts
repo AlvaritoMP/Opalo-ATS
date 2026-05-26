@@ -121,4 +121,17 @@ export const bulkProcessActivityApi = {
         if (error) throw error;
         return (data || []).map(mapRow);
     },
+
+    async getByCandidate(candidateId: string, limit = 300): Promise<BulkProcessActivityEntry[]> {
+        const { data, error } = await supabase
+            .from('bulk_process_activity_log')
+            .select('*')
+            .eq('candidate_id', candidateId)
+            .eq('app_name', APP_NAME)
+            .order('created_at', { ascending: false })
+            .limit(limit);
+
+        if (error) throw error;
+        return (data || []).map(mapRow);
+    },
 };
