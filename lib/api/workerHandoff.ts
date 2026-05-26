@@ -15,6 +15,8 @@ import type {
     WorkerHandoffPackage,
     WorkerHandoffPackageStatus,
     WorkerSnapshot,
+    CandidateHandoffHistoryEntry,
+    WorkerHandoffDeliveryStatus,
 } from '../types';
 
 export interface SendWorkerHandoffInput {
@@ -148,6 +150,45 @@ export const workerHandoffApi = {
             ...mapPackage(pkg as Record<string, unknown>),
             items: (items || []).map(row => mapItem(row as Record<string, unknown>)),
         };
+    },
+
+    async getCandidateHandoffHistory(candidateId: string): Promise<CandidateHandoffHistoryEntry[]> {
+        const { data, error } = await supabase
+            .from('worker_handoff_items')
+            .select(`
+                id,
+                package_id,
+                created_at,
+                worker_handoff_packages!inner (
+                    id,
+                    sent_at,
+                    sender_note,
+                    created_by_name,
+                    delivery_status,
+                    delivery_error,
+                    opsflow_package_id,
+                    source_app
+                )
+            `)
+            .eq('source_candidate_id', candidateId)
+            .eq('worker_handoff_packages.source_app', APP_NAME)
+            .order('created_at', { ascending: false });
+
+        if (error) throw error;
+
+        return (data || []).map(row => {
+            const pkg = row.worker_handoff_packages as Record<string, unknown>;
+            return {
+                itemId: row.id as string,
+                packageId: row.package_id as string,
+                sentAt: (pkg.sent_at as string) || (row.created_at as string),
+                deliveryStatus: (pkg.delivery_status as WorkerHandoffDeliveryStatus) || undefined,
+                createdByName: (pkg.created_by_name as string) || undefined,
+                senderNote: (pkg.sender_note as string) || undefined,
+                opsflowPackageId: (pkg.opsflow_package_id as string) || undefined,
+                deliveryError: (pkg.delivery_error as string) || undefined,
+            };
+        });
     },
 
     async getActiveCandidateIds(candidateIds: string[]): Promise<string[]> {

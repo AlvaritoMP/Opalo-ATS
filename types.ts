@@ -373,6 +373,17 @@ export interface WorkerHandoffItem {
     createdAt: string;
 }
 
+export interface CandidateHandoffHistoryEntry {
+    itemId: string;
+    packageId: string;
+    sentAt: string;
+    deliveryStatus?: WorkerHandoffDeliveryStatus;
+    createdByName?: string;
+    senderNote?: string;
+    opsflowPackageId?: string;
+    deliveryError?: string;
+}
+
 export type Section = 
     | 'dashboard' 
     | 'processes' 

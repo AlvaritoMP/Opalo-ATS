@@ -22,6 +22,7 @@ const ACTION_LABELS: Record<BulkActivityActionType, string> = {
     contact_status: 'Estado de contacto',
     contact_reset: 'Reinicio de contacto',
     add_row: 'Fila añadida',
+    opsflow_send: 'Envío a OpsFlow',
 };
 
 interface BulkProcessActivityLogProps {

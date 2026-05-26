@@ -16,7 +16,8 @@ export type BulkActivityActionType =
     | 'contact_attempt'
     | 'contact_status'
     | 'contact_reset'
-    | 'add_row';
+    | 'add_row'
+    | 'opsflow_send';
 
 export interface BulkProcessActivityEntry {
     id: string;

@@ -14,8 +14,9 @@ import {
 } from '../lib/contactChannelConfig';
 import { processesApi } from '../lib/api/processes';
 import { useDebouncedValue } from '../lib/useDebouncedValue';
-import { Check, X, Loader2, Send, Archive, Search, ChevronDown, ChevronUp, Plus, Edit, Trash2, ArrowLeft, MessageCircle, Phone, Upload, Download, Filter, Mail, Calendar, Settings, ArrowUp, ArrowDown, Pin, FileText, BookOpen, Paperclip, ClipboardList, ListPlus, RefreshCw, HardDrive, CaseSensitive } from 'lucide-react';
-import { Process, CustomColumn, BulkProcessConfig } from '../types';
+import { Check, X, Loader2, Send, Archive, Search, ChevronDown, ChevronUp, Plus, Edit, Trash2, ArrowLeft, MessageCircle, Phone, Upload, Download, Filter, Mail, Calendar, Settings, ArrowUp, ArrowDown, Pin, FileText, BookOpen, Paperclip, ClipboardList, ListPlus, RefreshCw, HardDrive, CaseSensitive, Package } from 'lucide-react';
+import { Process, CustomColumn, BulkProcessConfig, Candidate } from '../types';
+import { candidatesApi } from '../lib/api/candidates';
 import {
     BASE_COLUMNS,
     DEFAULT_COLUMN_ORDER,
@@ -84,6 +85,8 @@ import { BulkProcessAttachmentsModal } from './BulkProcessAttachmentsModal';
 import { BulkTableExportModal } from './BulkTableExportModal';
 import { BulkProcessActivityLog } from './BulkProcessActivityLog';
 import { BulkContactStatusCell } from './BulkContactStatusCell';
+import { SendToOpsFlowModal } from './SendToOpsFlowModal';
+import { BulkCandidateOpsFlowPanel } from './BulkCandidateOpsFlowPanel';
 
 interface BulkProcessesViewProps {}
 
@@ -138,7 +141,10 @@ const CandidateDrawer: React.FC<{
     process?: Process;
     onPsychReport?: (candidate: BulkCandidate) => void;
     showPsychReport?: boolean;
-}> = ({ candidate, isOpen, onClose, onLoadDetails, process, onPsychReport, showPsychReport }) => {
+    showOpsFlow?: boolean;
+    onOpsFlowSend?: () => void;
+    opsFlowRefreshToken?: number;
+}> = ({ candidate, isOpen, onClose, onLoadDetails, process, onPsychReport, showPsychReport, showOpsFlow, onOpsFlowSend, opsFlowRefreshToken = 0 }) => {
     const [isLoading, setIsLoading] = useState(false);
     const [fullCandidate, setFullCandidate] = useState<BulkCandidate | null>(null);
 
@@ -249,6 +255,14 @@ const CandidateDrawer: React.FC<{
                                     Generar informe psicolaboral
                                 </button>
                             )}
+                            {showOpsFlow && candidate && onOpsFlowSend && (
+                                <BulkCandidateOpsFlowPanel
+                                    candidateId={candidate.id}
+                                    candidateName={displayCandidate.name}
+                                    onSend={onOpsFlowSend}
+                                    refreshToken={opsFlowRefreshToken}
+                                />
+                            )}
                             {displayCandidate.history && displayCandidate.history.length > 0 && (
                                 <div>
                                     <label className="text-sm font-medium text-gray-500">Historial</label>
@@ -343,6 +357,8 @@ const BulkActionsFAB: React.FC<{
     onPsychReport?: () => void;
     onPsychBulkEvaluate?: () => void;
     showPsychReport?: boolean;
+    onOpsFlow?: () => void;
+    showOpsFlow?: boolean;
 }> = ({
     selectedIds,
     onApprove,
@@ -356,6 +372,8 @@ const BulkActionsFAB: React.FC<{
     onPsychReport,
     onPsychBulkEvaluate,
     showPsychReport,
+    onOpsFlow,
+    showOpsFlow,
 }) => {
     const [isOpen, setIsOpen] = useState(false);
     if (selectedIds.length === 0) return null;
@@ -391,6 +409,11 @@ const BulkActionsFAB: React.FC<{
                     <button onClick={() => { onEmail(); setIsOpen(false); }} className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg shadow-lg hover:bg-blue-700 transition-colors">
                         <Mail className="w-4 h-4" /> Email ({selectedIds.length})
                     </button>
+                    {showOpsFlow && onOpsFlow && (
+                    <button onClick={() => { onOpsFlow(); setIsOpen(false); }} className="flex items-center gap-2 px-4 py-2 bg-orange-600 text-white rounded-lg shadow-lg hover:bg-orange-700 transition-colors">
+                        <Package className="w-4 h-4" /> Enviar a OpsFlow ({selectedIds.length})
+                    </button>
+                    )}
                     <button onClick={() => { onWebhook(); setIsOpen(false); }} className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-lg shadow-lg hover:bg-purple-700 transition-colors">
                         <Send className="w-4 h-4" /> Enviar a n8n ({selectedIds.length})
                     </button>
@@ -475,6 +498,10 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
     const [showExportModal, setShowExportModal] = useState(false);
     const [isNormalizingTextCase, setIsNormalizingTextCase] = useState(false);
     const [activityLogRefreshToken, setActivityLogRefreshToken] = useState(0);
+    const [showOpsFlowModal, setShowOpsFlowModal] = useState(false);
+    const [opsFlowCandidates, setOpsFlowCandidates] = useState<Candidate[]>([]);
+    const [opsFlowRefreshToken, setOpsFlowRefreshToken] = useState(0);
+    const [opsFlowModalLoading, setOpsFlowModalLoading] = useState(false);
     const tableKeyboardRef = useRef({
         editingCell: null as { candidateId: string; field: string } | null,
         activeCell: null as CellCoord | null,
@@ -494,6 +521,8 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
         () => isPsycholaboralEnabled(process?.bulkConfig?.psycholaboral),
         [process?.bulkConfig?.psycholaboral]
     );
+
+    const canSendToOpsFlow = state.currentUser?.role === 'admin' || state.currentUser?.role === 'recruiter';
 
     const logActivity = useCallback((
         actionType: BulkActivityActionType,
@@ -1447,6 +1476,38 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
             actions.showToast('Error al enviar a n8n', 'error', 3000);
         }
     }, [selectedIds, state.settings, actions]);
+
+    const openOpsFlowModal = useCallback(async (candidateIds: string[]) => {
+        if (candidateIds.length === 0) return;
+        setOpsFlowModalLoading(true);
+        try {
+            const loaded = await Promise.all(candidateIds.map(id => candidatesApi.getById(id)));
+            const valid = loaded.filter((c): c is Candidate => c !== null);
+            if (valid.length === 0) {
+                actions.showToast('No se pudieron cargar los candidatos', 'error', 3000);
+                return;
+            }
+            setOpsFlowCandidates(valid);
+            setShowOpsFlowModal(true);
+        } catch (error) {
+            console.error('Error cargando candidatos para OpsFlow:', error);
+            actions.showToast('Error al preparar el envío a OpsFlow', 'error', 3000);
+        } finally {
+            setOpsFlowModalLoading(false);
+        }
+    }, [actions]);
+
+    const handleOpsFlowSent = useCallback(() => {
+        for (const candidate of opsFlowCandidates) {
+            logActivity('opsflow_send', {
+                candidateId: candidate.id,
+                candidateName: candidate.name,
+                details: { via: 'bulk_process' },
+            });
+        }
+        setOpsFlowRefreshToken(token => token + 1);
+        setSelectedIds(new Set());
+    }, [opsFlowCandidates, logActivity]);
 
     const toggleSelection = useCallback((candidateId: string) => {
         setSelectedIds(prev => {
@@ -3629,6 +3690,8 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                 onPsychBulkEvaluate={() =>
                     openPsychBulkEvaluate(candidates.filter(c => selectedIds.has(c.id)))
                 }
+                showOpsFlow={canSendToOpsFlow}
+                onOpsFlow={() => void openOpsFlowModal(Array.from(selectedIds))}
             />
 
             <CandidateDrawer
@@ -3645,6 +3708,11 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                 process={process}
                 showPsychReport={psycholaboralActive}
                 onPsychReport={c => openPsychReport([c])}
+                showOpsFlow={canSendToOpsFlow}
+                onOpsFlowSend={() => {
+                    if (drawerCandidate) void openOpsFlowModal([drawerCandidate.id]);
+                }}
+                opsFlowRefreshToken={opsFlowRefreshToken}
             />
 
             {showProcessModal && (
@@ -3728,6 +3796,27 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                     onClose={() => setShowEmailModal(false)}
                     candidates={candidates.filter(c => selectedIds.has(c.id))}
                     onSend={handleBulkEmail}
+                />
+            )}
+
+            {opsFlowModalLoading && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30">
+                    <div className="bg-white rounded-lg px-6 py-4 flex items-center gap-3 shadow-xl">
+                        <Loader2 className="w-5 h-5 animate-spin text-primary-600" />
+                        <span className="text-sm text-gray-700">Preparando envío a OpsFlow…</span>
+                    </div>
+                </div>
+            )}
+
+            {showOpsFlowModal && (
+                <SendToOpsFlowModal
+                    isOpen={showOpsFlowModal}
+                    onClose={() => {
+                        setShowOpsFlowModal(false);
+                        setOpsFlowCandidates([]);
+                    }}
+                    candidates={opsFlowCandidates}
+                    onSent={handleOpsFlowSent}
                 />
             )}
 
