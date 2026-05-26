@@ -4,6 +4,106 @@ import { APP_NAME } from './appConfig';
 export const SNAPSHOT_VERSION = 1;
 export const TARGET_APP = 'OpsFlow';
 
+const OPSFLOW_FIELD_PREFS_KEY = 'opsflow-handoff-field-selection';
+
+export interface WorkerHandoffFieldDef {
+    key: string;
+    label: string;
+}
+
+export interface WorkerHandoffFieldGroup {
+    id: string;
+    label: string;
+    fields: WorkerHandoffFieldDef[];
+}
+
+export const WORKER_HANDOFF_FIELD_GROUPS: WorkerHandoffFieldGroup[] = [
+    {
+        id: 'identity',
+        label: 'Identidad',
+        fields: [
+            { key: 'fullName', label: 'Nombre completo' },
+            { key: 'dni', label: 'DNI' },
+            { key: 'email', label: 'Email' },
+            { key: 'phone', label: 'Teléfono' },
+            { key: 'phone2', label: 'Teléfono 2' },
+        ],
+    },
+    {
+        id: 'candidate',
+        label: 'Datos del candidato',
+        fields: [
+            { key: 'address', label: 'Dirección' },
+            { key: 'province', label: 'Provincia' },
+            { key: 'district', label: 'Distrito' },
+            { key: 'age', label: 'Edad' },
+            { key: 'linkedinUrl', label: 'LinkedIn' },
+            { key: 'source', label: 'Fuente' },
+            { key: 'agreedSalary', label: 'Salario acordado' },
+            { key: 'agreedSalaryInWords', label: 'Salario en letras' },
+            { key: 'hireDate', label: 'Fecha de contratación' },
+            { key: 'salaryExpectation', label: 'Expectativa salarial' },
+            { key: 'offerAcceptedDate', label: 'Fecha aceptación oferta' },
+            { key: 'applicationStartedDate', label: 'Inicio postulación' },
+            { key: 'applicationCompletedDate', label: 'Fin postulación' },
+        ],
+    },
+    {
+        id: 'process',
+        label: 'Datos del proceso',
+        fields: [
+            { key: 'processTitle', label: 'Título del proceso' },
+            { key: 'serviceOrderCode', label: 'Código orden de servicio' },
+            { key: 'clientName', label: 'Cliente' },
+            { key: 'processDescription', label: 'Descripción del proceso' },
+            { key: 'stageName', label: 'Etapa actual' },
+        ],
+    },
+    {
+        id: 'evaluation',
+        label: 'Evaluación',
+        fields: [
+            { key: 'psycholaboralSuitability', label: 'Idoneidad psicolaboral' },
+            { key: 'scoreIa', label: 'Score IA' },
+        ],
+    },
+];
+
+export const ALL_WORKER_HANDOFF_FIELD_KEYS = WORKER_HANDOFF_FIELD_GROUPS.flatMap(
+    group => group.fields.map(field => field.key)
+);
+
+export function getDefaultWorkerHandoffFieldKeys(): string[] {
+    return [...ALL_WORKER_HANDOFF_FIELD_KEYS];
+}
+
+export function loadSavedWorkerHandoffFieldKeys(): string[] {
+    try {
+        const raw = localStorage.getItem(OPSFLOW_FIELD_PREFS_KEY);
+        if (!raw) return getDefaultWorkerHandoffFieldKeys();
+        const parsed = JSON.parse(raw) as unknown;
+        if (!Array.isArray(parsed)) return getDefaultWorkerHandoffFieldKeys();
+        const valid = parsed.filter(
+            (key): key is string => typeof key === 'string' && ALL_WORKER_HANDOFF_FIELD_KEYS.includes(key)
+        );
+        if (valid.length === 0) return getDefaultWorkerHandoffFieldKeys();
+        if (!valid.includes('fullName') && !valid.includes('dni')) {
+            valid.unshift('fullName');
+        }
+        return valid;
+    } catch {
+        return getDefaultWorkerHandoffFieldKeys();
+    }
+}
+
+export function saveWorkerHandoffFieldKeys(keys: string[]): void {
+    try {
+        localStorage.setItem(OPSFLOW_FIELD_PREFS_KEY, JSON.stringify(keys));
+    } catch {
+        // ignore quota / private mode
+    }
+}
+
 function hasValue(value: unknown): boolean {
     if (value === null || value === undefined) return false;
     if (typeof value === 'string') return value.trim() !== '';
@@ -39,31 +139,95 @@ const FIELD_CATALOG: Record<string, FieldExtractor> = {
     processDescription: ({ process }) => process?.description,
     stageName: ({ candidate, process }) =>
         process?.stages.find(stage => stage.id === candidate.stageId)?.name,
+    psycholaboralSuitability: ({ candidate }) =>
+        candidate.psycholaboralEvaluation?.suitabilityStatus,
+    scoreIa: ({ candidate }) => candidate.scoreIa,
 };
 
-export function buildWorkerSnapshot(candidate: Candidate, process?: Process): WorkerSnapshot {
+const IDENTITY_EXTRACTORS: Record<string, (candidate: Candidate) => unknown> = {
+    fullName: candidate => candidate.name,
+    dni: candidate => candidate.dni,
+    email: candidate => candidate.email,
+    phone: candidate => candidate.phone,
+    phone2: candidate => candidate.phone2,
+};
+
+function normalizeIncludedFields(includedFields?: Iterable<string>): Set<string> {
+    if (!includedFields) return new Set(ALL_WORKER_HANDOFF_FIELD_KEYS);
+    const set = new Set(includedFields);
+    return set.size > 0 ? set : new Set(ALL_WORKER_HANDOFF_FIELD_KEYS);
+}
+
+function shouldInclude(key: string, included: Set<string>): boolean {
+    return included.has(key);
+}
+
+export function validateFieldSelection(includedFields: Set<string>): string | null {
+    if (includedFields.size === 0) {
+        return 'Selecciona al menos un campo para enviar.';
+    }
+    if (!includedFields.has('fullName') && !includedFields.has('dni')) {
+        return 'Debes incluir al menos nombre o DNI para identificar al trabajador.';
+    }
+    return null;
+}
+
+export function fieldHasDataForCandidate(
+    fieldKey: string,
+    candidate: Candidate,
+    process?: Process
+): boolean {
+    if (fieldKey in IDENTITY_EXTRACTORS) {
+        return hasValue(IDENTITY_EXTRACTORS[fieldKey](candidate));
+    }
+    const extract = FIELD_CATALOG[fieldKey];
+    if (!extract) return false;
+    return hasValue(extract({ candidate, process }));
+}
+
+export function countCandidatesWithFieldData(
+    fieldKey: string,
+    candidates: Candidate[],
+    processById: Map<string, Process>
+): number {
+    let count = 0;
+    for (const candidate of candidates) {
+        const process = processById.get(candidate.processId);
+        if (fieldHasDataForCandidate(fieldKey, candidate, process)) count++;
+    }
+    return count;
+}
+
+export interface BuildWorkerSnapshotOptions {
+    includedFields?: Iterable<string>;
+}
+
+export function buildWorkerSnapshot(
+    candidate: Candidate,
+    process?: Process,
+    options?: BuildWorkerSnapshotOptions
+): WorkerSnapshot {
+    const included = normalizeIncludedFields(options?.includedFields);
     const identity: WorkerSnapshotIdentity = {};
+    const includedFieldKeys: string[] = [];
 
-    const fullName = asString(candidate.name);
-    if (fullName) identity.fullName = fullName;
-
-    const dni = asString(candidate.dni);
-    if (dni) identity.dni = dni;
-
-    const email = asString(candidate.email);
-    if (email) identity.email = email;
-
-    const phone = asString(candidate.phone);
-    if (phone) identity.phone = phone;
-
-    const phone2 = asString(candidate.phone2);
-    if (phone2) identity.phone2 = phone2;
+    for (const [key, extract] of Object.entries(IDENTITY_EXTRACTORS)) {
+        if (!shouldInclude(key, included)) continue;
+        const raw = extract(candidate);
+        const text = asString(raw);
+        if (key === 'fullName' && text) identity.fullName = text;
+        if (key === 'dni' && text) identity.dni = text;
+        if (key === 'email' && text) identity.email = text;
+        if (key === 'phone' && text) identity.phone = text;
+        if (key === 'phone2' && text) identity.phone2 = text;
+        if (hasValue(raw)) includedFieldKeys.push(key);
+    }
 
     const fields: Record<string, string | number | boolean> = {};
-    const includedFieldKeys: string[] = [];
     const ctx = { candidate, process };
 
     for (const [key, extract] of Object.entries(FIELD_CATALOG)) {
+        if (!shouldInclude(key, included)) continue;
         const raw = extract(ctx);
         if (!hasValue(raw)) continue;
 
@@ -76,18 +240,6 @@ export function buildWorkerSnapshot(candidate: Candidate, process?: Process): Wo
             if (text) fields[key] = text;
         }
         includedFieldKeys.push(key);
-    }
-
-    const suitability = candidate.psycholaboralEvaluation?.suitabilityStatus;
-    if (hasValue(suitability)) {
-        fields.psycholaboralSuitability = String(suitability);
-        includedFieldKeys.push('psycholaboralSuitability');
-    }
-
-    const scoreIa = candidate.scoreIa;
-    if (hasValue(scoreIa)) {
-        fields.scoreIa = scoreIa as number;
-        includedFieldKeys.push('scoreIa');
     }
 
     return {
@@ -110,7 +262,7 @@ export function getWorkerDisplayName(snapshot: WorkerSnapshot): string {
 
 export function validateSnapshotForSend(snapshot: WorkerSnapshot): string | null {
     if (snapshot.identity.fullName || snapshot.identity.dni) return null;
-    return 'El candidato debe tener al menos nombre o DNI para enviar a OpsFlow.';
+    return 'El candidato debe tener al menos nombre o DNI (entre los campos seleccionados).';
 }
 
 export const ACTIVE_PACKAGE_STATUSES = ['sent', 'received', 'processing'] as const;

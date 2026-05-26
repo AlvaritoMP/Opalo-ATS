@@ -25,6 +25,8 @@ export interface SendWorkerHandoffInput {
     senderNote?: string;
     createdBy?: string;
     createdByName?: string;
+    /** Claves de campos a incluir en el snapshot (ver WORKER_HANDOFF_FIELD_GROUPS). */
+    includedFields?: string[];
 }
 
 const DELIVER_FUNCTION_NAME = 'deliver-worker-handoff';
@@ -252,7 +254,7 @@ export const workerHandoffApi = {
     },
 
     async sendPackage(input: SendWorkerHandoffInput): Promise<WorkerHandoffPackage> {
-        const { candidates, processes, senderNote, createdBy, createdByName } = input;
+        const { candidates, processes, senderNote, createdBy, createdByName, includedFields } = input;
 
         if (candidates.length === 0) {
             throw new Error('Selecciona al menos un candidato para enviar.');
@@ -268,7 +270,7 @@ export const workerHandoffApi = {
 
         for (const candidate of candidates) {
             const process = processById.get(candidate.processId);
-            const snapshot = buildWorkerSnapshot(candidate, process);
+            const snapshot = buildWorkerSnapshot(candidate, process, { includedFields });
             const validationError = validateSnapshotForSend(snapshot);
             if (validationError) {
                 throw new Error(`${candidate.name || 'Candidato'}: ${validationError}`);
