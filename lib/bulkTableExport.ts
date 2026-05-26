@@ -132,6 +132,61 @@ export function getBulkExportCellValue(
     return '';
 }
 
+type BulkExportCellOpts = {
+    columnValues: Record<string, Record<string, unknown>>;
+    customColumns: CustomColumn[];
+    process?: Process;
+    bulkConfig?: BulkProcessConfig;
+};
+
+export type BulkSelectionCell = { candidateId: string; colId: string };
+
+/** Construye texto TSV desde celdas seleccionadas (compatible con Excel / WhatsApp). */
+export function buildBulkSelectionClipboardText(
+    cells: BulkSelectionCell[],
+    displayCandidates: BulkCandidate[],
+    visibleColumns: string[],
+    opts: BulkExportCellOpts
+): string {
+    if (cells.length === 0) return '';
+
+    const sorted = [...cells].sort((a, b) => {
+        const ra = displayCandidates.findIndex(c => c.id === a.candidateId);
+        const rb = displayCandidates.findIndex(c => c.id === b.candidateId);
+        if (ra !== rb) return ra - rb;
+        return visibleColumns.indexOf(a.colId) - visibleColumns.indexOf(b.colId);
+    });
+
+    const rowIndices = sorted.map(c => displayCandidates.findIndex(cand => cand.id === c.candidateId));
+    const colIndices = sorted.map(c => visibleColumns.indexOf(c.colId));
+    const minR = Math.min(...rowIndices);
+    const maxR = Math.max(...rowIndices);
+    const minC = Math.min(...colIndices);
+    const maxC = Math.max(...colIndices);
+
+    const selectedSet = new Set(sorted.map(c => `${c.candidateId}::${c.colId}`));
+    const lines: string[] = [];
+
+    for (let r = minR; r <= maxR; r++) {
+        const candidate = displayCandidates[r];
+        if (!candidate) continue;
+        const rowCells: string[] = [];
+        for (let c = minC; c <= maxC; c++) {
+            const colId = visibleColumns[c];
+            const key = `${candidate.id}::${colId}`;
+            if (!selectedSet.has(key) || !colId) {
+                rowCells.push('');
+                continue;
+            }
+            const value = getBulkExportCellValue(colId, candidate, opts);
+            rowCells.push(escapeDelimitedField(value, '\t'));
+        }
+        lines.push(rowCells.join('\t'));
+    }
+
+    return lines.join('\n');
+}
+
 export function buildBulkTableExportDocument(
     columnIds: string[],
     candidates: BulkCandidate[],

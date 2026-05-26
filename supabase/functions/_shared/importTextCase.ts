@@ -27,6 +27,16 @@ export function isImportTextAllCaps(text: string): boolean {
     return letters.every(c => c === c.toUpperCase() && c !== c.toLowerCase());
 }
 
+export function isImportTextAllLower(text: string): boolean {
+    const letters = text.match(IMPORT_TEXT_LETTER_RE);
+    if (!letters?.length) return false;
+    return letters.every(c => c === c.toLowerCase() && c !== c.toUpperCase());
+}
+
+function shouldNormalizeImportWord(word: string): boolean {
+    return isImportTextAllCaps(word) || isImportTextAllLower(word);
+}
+
 export function toImportProperCase(text: string): string {
     return text.replace(IMPORT_WORD_RE, word => {
         const lower = word.toLowerCase();
@@ -56,9 +66,12 @@ export function normalizeImportTextCase(
         if (match) return match;
     }
 
-    // Palabra a palabra: "CALLE Italia 325" → "Calle Italia 325"
+    if (normalizeFieldKey(field) === 'name') {
+        return toImportProperCase(value);
+    }
+
     return value.replace(IMPORT_WORD_RE, word =>
-        isImportTextAllCaps(word) ? toImportProperCase(word) : word
+        shouldNormalizeImportWord(word) ? toImportProperCase(word) : word
     );
 }
 

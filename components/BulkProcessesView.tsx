@@ -92,6 +92,7 @@ import { isPsycholaboralEnabled } from '../lib/psycholaboralUtils';
 import { BulkProcessCard } from './BulkProcessCard';
 import { BulkProcessAttachmentsModal } from './BulkProcessAttachmentsModal';
 import { BulkTableExportModal } from './BulkTableExportModal';
+import { buildBulkSelectionClipboardText } from '../lib/bulkTableExport';
 import { BulkProcessActivityLog } from './BulkProcessActivityLog';
 import { BulkContactStatusCell } from './BulkContactStatusCell';
 import { SendToOpsFlowModal } from './SendToOpsFlowModal';
@@ -2432,21 +2433,39 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
         ) as HTMLElement | null;
         if (!el) return;
 
+        const thead = container.querySelector('thead');
+        const headerHeight = thead?.getBoundingClientRect().height ?? 0;
+
+        let stickyLeft = CHECKBOX_COL_WIDTH;
+        for (const colId of visibleColumns) {
+            if (colId === coord.colId) break;
+            if (pinnedColumns.includes(colId)) {
+                stickyLeft += getColumnWidth(colId, columnWidths);
+            }
+        }
+
         const containerRect = container.getBoundingClientRect();
         const cellRect = el.getBoundingClientRect();
         const padding = 4;
 
-        if (cellRect.top < containerRect.top + padding) {
-            container.scrollTop -= containerRect.top + padding - cellRect.top;
-        } else if (cellRect.bottom > containerRect.bottom - padding) {
-            container.scrollTop += cellRect.bottom - containerRect.bottom + padding;
+        const topBound = containerRect.top + headerHeight + padding;
+        const bottomBound = containerRect.bottom - padding;
+        if (cellRect.top < topBound) {
+            container.scrollTop -= topBound - cellRect.top;
+        } else if (cellRect.bottom > bottomBound) {
+            container.scrollTop += cellRect.bottom - bottomBound;
         }
-        if (cellRect.left < containerRect.left + padding) {
-            container.scrollLeft -= containerRect.left + padding - cellRect.left;
-        } else if (cellRect.right > containerRect.right - padding) {
-            container.scrollLeft += cellRect.right - containerRect.right + padding;
+
+        const leftBound = containerRect.left + stickyLeft + padding;
+        const rightBound = containerRect.right - padding;
+        if (cellRect.left < leftBound) {
+            container.scrollLeft -= leftBound - cellRect.left;
+        } else if (cellRect.right > rightBound) {
+            container.scrollLeft += cellRect.right - rightBound;
         }
-    }, []);
+
+        requestAnimationFrame(() => tableContainerRef.current?.focus());
+    }, [visibleColumns, pinnedColumns, columnWidths]);
 
     const focusTable = useCallback(() => {
         tableContainerRef.current?.focus();
@@ -2667,6 +2686,23 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
         return () => document.removeEventListener('keydown', onKeyDown, true);
     }, [selectedProcess, handleTableKeyDown]);
 
+    // Limpiar selección si la fila activa deja de estar visible (filtros/orden)
+    useEffect(() => {
+        if (!activeCell) return;
+        const rowVisible = displayCandidates.some(c => c.id === activeCell.candidateId);
+        const colVisible = visibleColumns.includes(activeCell.colId);
+        if (!rowVisible) {
+            setActiveCell(null);
+            setSelectedCells(new Set());
+            setSelectionAnchor(null);
+        } else if (!colVisible && visibleColumns.length > 0) {
+            const next = { candidateId: activeCell.candidateId, colId: visibleColumns[0] };
+            setActiveCell(next);
+            setSelectionAnchor(next);
+            setSelectedCells(new Set([toCellKey(next)]));
+        }
+    }, [displayCandidates, visibleColumns]);
+
     const isActiveCell = (candidateId: string, colId: string) =>
         activeCell?.candidateId === candidateId && activeCell?.colId === colId;
 
@@ -2675,13 +2711,27 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
 
     const cellFocusClass = (candidateId: string, colId: string) => {
         if (isActiveCell(candidateId, colId)) {
-            return 'ring-2 ring-primary-600 ring-inset relative z-[2]';
+            return 'ring-2 ring-primary-600 ring-inset z-[30]';
         }
         if (isCellSelected(candidateId, colId)) {
-            return 'ring-1 ring-primary-300 ring-inset';
+            return 'ring-1 ring-primary-400 ring-inset z-[25]';
         }
         return '';
     };
+
+    const buildCellDisplayStyle = useCallback((candidateId: string, colId: string): React.CSSProperties => {
+        const style: React.CSSProperties = { ...buildTdStyle(candidateId, colId) };
+        const active = activeCell?.candidateId === candidateId && activeCell?.colId === colId;
+        const selected = selectedCells.has(toCellKey({ candidateId, colId }));
+        if (active) {
+            style.zIndex = Math.max(typeof style.zIndex === 'number' ? style.zIndex : 0, 30);
+            if (!style.position) style.position = 'relative';
+        } else if (selected) {
+            style.zIndex = Math.max(typeof style.zIndex === 'number' ? style.zIndex : 0, 25);
+            if (!style.position) style.position = 'relative';
+        }
+        return style;
+    }, [buildTdStyle, activeCell, selectedCells]);
 
     const renderCellCommentIndicator = (candidateId: string, colId: string) => {
         const comment = getCellMetaFor(candidateId, colId)?.comment;
@@ -2700,7 +2750,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
         return {
             ...cellDataAttrs(candidateId, colId),
             className: `${COMPACT_TD_CLASS} relative ${cellFocusClass(candidateId, colId)} ${extra}`.trim(),
-            style: buildTdStyle(candidateId, colId),
+            style: buildCellDisplayStyle(candidateId, colId),
             title: meta?.comment || undefined,
             onMouseDown: (e: React.MouseEvent) => {
                 e.stopPropagation();
@@ -2834,10 +2884,63 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
         }
     }, [activeCell, editingCell, visibleColumns, selectedIds, selectedCells, displayCandidates, setCellValue, actions, sortSelectedCellKeys, logActivity]);
 
+    const handleBulkCopy = useCallback((e: ClipboardEvent) => {
+        if (editingCell) return;
+
+        const target = e.target as HTMLElement;
+        if (['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName)) return;
+
+        const cellKeys =
+            selectedCells.size > 0
+                ? Array.from(selectedCells)
+                : activeCell
+                  ? [toCellKey(activeCell)]
+                  : [];
+        if (cellKeys.length === 0) return;
+
+        const inTable =
+            tableContainerRef.current?.contains(target) ||
+            (document.activeElement != null && tableContainerRef.current?.contains(document.activeElement));
+        if (!inTable) return;
+
+        const cells = cellKeys.map(parseCellKey);
+        const text = buildBulkSelectionClipboardText(cells, displayCandidates, visibleColumns, {
+            columnValues,
+            customColumns,
+            process,
+            bulkConfig: process?.bulkConfig,
+        });
+        if (!text) return;
+
+        e.preventDefault();
+        e.clipboardData?.setData('text/plain', text);
+        actions.showToast(
+            cellKeys.length === 1 ? 'Celda copiada al portapapeles' : `${cellKeys.length} celdas copiadas al portapapeles`,
+            'success',
+            2000
+        );
+    }, [
+        editingCell,
+        selectedCells,
+        activeCell,
+        displayCandidates,
+        visibleColumns,
+        columnValues,
+        customColumns,
+        process,
+        actions,
+    ]);
+
     useEffect(() => {
         document.addEventListener('paste', handleBulkPaste);
         return () => document.removeEventListener('paste', handleBulkPaste);
     }, [handleBulkPaste]);
+
+    useEffect(() => {
+        if (!selectedProcess) return;
+        document.addEventListener('copy', handleBulkCopy);
+        return () => document.removeEventListener('copy', handleBulkCopy);
+    }, [selectedProcess, handleBulkCopy]);
 
     return (
         <div className="h-full flex flex-col bg-white">
@@ -3202,7 +3305,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                         </div>
                     )}
                     <p className="text-[10px] text-gray-500 px-1 pb-1 shrink-0">
-                        Flechas · Shift+arrastrar selección · Ctrl+clic múltiple · Clic derecho: color/comentario · Enter/doble clic editar · Ctrl+V pegar en celdas seleccionadas · Doble clic en fila abre detalle · Arrastre el borde derecho del encabezado para ajustar el ancho de columna
+                        Flechas · Shift+arrastrar selección · Ctrl+clic múltiple · Clic derecho: color/comentario · Enter/doble clic editar · Ctrl+C copiar · Ctrl+V pegar en celdas seleccionadas · Doble clic en fila abre detalle · Arrastre el borde derecho del encabezado para ajustar el ancho de columna
                     </p>
                     <div
                         ref={tableContainerRef}
@@ -3213,7 +3316,6 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                             if ((e.target as HTMLElement).closest('input, select, textarea, button, a')) return;
                             focusTable();
                         }}
-                        onKeyDown={handleTableKeyDown}
                     >
                         <table className="w-full border-collapse" style={{ tableLayout: 'fixed', width: 'max-content', minWidth: '100%' }}>
                             <thead className="bg-gray-50 sticky top-0 z-20">

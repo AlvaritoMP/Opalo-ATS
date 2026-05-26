@@ -13,7 +13,7 @@ import {
     parseCustomCellInput,
     type TallyMappingField,
 } from './bulkTableColumns';
-import { applyImportTextCaseToCandidate } from './importTextCase';
+import { applyImportTextCaseToCandidate, normalizeImportTextCase } from './importTextCase';
 
 export interface TallyWebhookProcessRow {
     id?: string;
@@ -327,7 +327,19 @@ function getMappedValue(
 function parseValueForCustomColumn(raw: string, col: CustomColumn): unknown {
     if (!raw) return '';
     if (col.type === 'date') return normalizeBulkDateInput(raw);
-    return parseCustomCellInput(raw, col);
+    const parsed = parseCustomCellInput(raw, col);
+    if (col.type === 'text' && typeof parsed === 'string' && parsed.trim()) {
+        const mapped = mapImportHeader(col.name.toLowerCase());
+        return normalizeImportTextCase(parsed, {
+            columnType: col.type,
+            selectOptions: col.options,
+            field: mapped ?? undefined,
+        });
+    }
+    if (col.type === 'select' && typeof parsed === 'string') {
+        return normalizeImportTextCase(parsed, { columnType: col.type, selectOptions: col.options });
+    }
+    return parsed;
 }
 
 function assignStandardField(target: TallyCandidateInsert, key: string, value: string): void {

@@ -484,7 +484,11 @@ function parseValueForCustomColumn(
     const match = col.options.find((o) => o.toLowerCase() === trimmed.toLowerCase());
     return match ?? trimmed;
   }
-  return normalizeImportTextCase(trimmed, { columnType: col.type });
+  const mapped = mapImportHeader((col as { name?: string }).name?.toLowerCase() ?? '');
+  return normalizeImportTextCase(trimmed, {
+    columnType: col.type,
+    field: mapped ?? undefined,
+  });
 }
 
 export function buildTallyCandidateFromSubmission(
