@@ -337,6 +337,8 @@ export interface WorkerSnapshot {
     };
 }
 
+export type WorkerHandoffDeliveryStatus = 'pending' | 'delivered' | 'failed';
+
 export interface WorkerHandoffPackage {
     id: string;
     sourceApp: string;
@@ -351,6 +353,10 @@ export interface WorkerHandoffPackage {
     completedAt?: string;
     receiverNote?: string;
     payloadVersion: number;
+    deliveryStatus?: WorkerHandoffDeliveryStatus;
+    opsflowPackageId?: string;
+    deliveryError?: string;
+    deliveredAt?: string;
     createdAt: string;
     updatedAt: string;
     items?: WorkerHandoffItem[];

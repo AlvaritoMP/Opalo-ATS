@@ -1,4 +1,4 @@
-import { Candidate, Process, WorkerSnapshot } from '../types';
+import { Candidate, Process, WorkerSnapshot, WorkerSnapshotIdentity } from '../types';
 import { APP_NAME } from './appConfig';
 
 export const SNAPSHOT_VERSION = 1;
@@ -122,4 +122,10 @@ export const PACKAGE_STATUS_LABELS: Record<string, string> = {
     completed: 'Completado',
     rejected: 'Rechazado',
     partially_completed: 'Parcialmente completado',
+};
+
+export const DELIVERY_STATUS_LABELS: Record<string, string> = {
+    pending: 'Entregando…',
+    delivered: 'Entregado a OpsFlow',
+    failed: 'Error de entrega',
 };

@@ -358,6 +358,10 @@ allow_dynamic_registration = false
 [functions.tally-webhook]
 verify_jwt = false
 
+# Reenvío a OpsFlow: requiere sesión ATS (JWT del usuario logueado).
+[functions.deliver-worker-handoff]
+verify_jwt = true
+
 [edge_runtime]
 enabled = true
 # Supported request policies: `oneshot`, `per_worker`.

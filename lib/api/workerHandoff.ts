@@ -7,9 +7,15 @@ import {
     getWorkerDisplayName,
     validateSnapshotForSend,
     ACTIVE_PACKAGE_STATUSES,
-    type WorkerSnapshot,
 } from '../workerHandoffFields';
-import type { Candidate, Process, WorkerHandoffItem, WorkerHandoffPackage, WorkerHandoffPackageStatus, WorkerSnapshot } from '../types';
+import type {
+    Candidate,
+    Process,
+    WorkerHandoffItem,
+    WorkerHandoffPackage,
+    WorkerHandoffPackageStatus,
+    WorkerSnapshot,
+} from '../types';
 
 export interface SendWorkerHandoffInput {
     candidates: Candidate[];
@@ -17,6 +23,13 @@ export interface SendWorkerHandoffInput {
     senderNote?: string;
     createdBy?: string;
     createdByName?: string;
+}
+
+const DELIVER_FUNCTION_NAME = 'deliver-worker-handoff';
+
+function isMissingColumnError(error: { code?: string; message?: string } | null): boolean {
+    if (!error) return false;
+    return error.code === '42703' || (error.message?.includes('column') ?? false);
 }
 
 function mapPackage(row: Record<string, unknown>): WorkerHandoffPackage {
@@ -34,6 +47,10 @@ function mapPackage(row: Record<string, unknown>): WorkerHandoffPackage {
         completedAt: (row.completed_at as string) || undefined,
         receiverNote: (row.receiver_note as string) || undefined,
         payloadVersion: row.payload_version as number,
+        deliveryStatus: (row.delivery_status as WorkerHandoffPackage['deliveryStatus']) || undefined,
+        opsflowPackageId: (row.opsflow_package_id as string) || undefined,
+        deliveryError: (row.delivery_error as string) || undefined,
+        deliveredAt: (row.delivered_at as string) || undefined,
         createdAt: row.created_at as string,
         updatedAt: row.updated_at as string,
     };
@@ -49,6 +66,49 @@ function mapItem(row: Record<string, unknown>): WorkerHandoffItem {
         workerSnapshot: row.worker_snapshot as WorkerSnapshot,
         itemStatus: row.item_status as WorkerHandoffItem['itemStatus'],
         createdAt: row.created_at as string,
+    };
+}
+
+async function deliverToOpsflow(packageId: string): Promise<WorkerHandoffPackage> {
+    const { data, error } = await supabase.functions.invoke(DELIVER_FUNCTION_NAME, {
+        body: { packageId },
+    });
+
+    if (error) {
+        throw new Error(
+            error.message ||
+                'No se pudo entregar el paquete a OpsFlow. Verifica que la Edge Function deliver-worker-handoff esté desplegada.'
+        );
+    }
+
+    const result = data as { error?: string; details?: string; success?: boolean } | null;
+    if (result?.error) {
+        throw new Error(result.details || result.error);
+    }
+
+    const { data: pkg, error: pkgError } = await supabase
+        .from('worker_handoff_packages')
+        .select('*')
+        .eq('id', packageId)
+        .eq('source_app', APP_NAME)
+        .maybeSingle();
+
+    if (pkgError) throw pkgError;
+    if (!pkg) {
+        throw new Error('Paquete enviado pero no se pudo recargar el historial.');
+    }
+
+    const { data: items, error: itemsError } = await supabase
+        .from('worker_handoff_items')
+        .select('*')
+        .eq('package_id', packageId)
+        .order('created_at', { ascending: true });
+
+    if (itemsError) throw itemsError;
+
+    return {
+        ...mapPackage(pkg as Record<string, unknown>),
+        items: (items || []).map(row => mapItem(row as Record<string, unknown>)),
     };
 }
 
@@ -93,11 +153,22 @@ export const workerHandoffApi = {
     async getActiveCandidateIds(candidateIds: string[]): Promise<string[]> {
         if (candidateIds.length === 0) return [];
 
-        const { data: activePackages, error: packagesError } = await supabase
+        let { data: activePackages, error: packagesError } = await supabase
             .from('worker_handoff_packages')
             .select('id')
             .eq('source_app', APP_NAME)
-            .in('status', [...ACTIVE_PACKAGE_STATUSES]);
+            .in('status', [...ACTIVE_PACKAGE_STATUSES])
+            .in('delivery_status', ['pending', 'delivered']);
+
+        if (packagesError && isMissingColumnError(packagesError)) {
+            const fallback = await supabase
+                .from('worker_handoff_packages')
+                .select('id')
+                .eq('source_app', APP_NAME)
+                .in('status', [...ACTIVE_PACKAGE_STATUSES]);
+            activePackages = fallback.data;
+            packagesError = fallback.error;
+        }
 
         if (packagesError) throw packagesError;
 
@@ -118,6 +189,25 @@ export const workerHandoffApi = {
             if (candidateId) activeIds.add(candidateId);
         }
         return [...activeIds];
+    },
+
+    async retryDelivery(packageId: string): Promise<WorkerHandoffPackage> {
+        const now = new Date().toISOString();
+        const { error: resetError } = await supabase
+            .from('worker_handoff_packages')
+            .update({
+                delivery_status: 'pending',
+                delivery_error: null,
+                updated_at: now,
+            })
+            .eq('id', packageId)
+            .eq('source_app', APP_NAME);
+
+        if (resetError && !isMissingColumnError(resetError)) {
+            throw resetError;
+        }
+
+        return deliverToOpsflow(packageId);
     },
 
     async sendPackage(input: SendWorkerHandoffInput): Promise<WorkerHandoffPackage> {
@@ -153,22 +243,36 @@ export const workerHandoffApi = {
         const sentAt = new Date().toISOString();
         const trimmedNote = senderNote?.trim() || null;
 
-        const { data: pkg, error: pkgError } = await supabase
+        const insertPayload: Record<string, unknown> = {
+            source_app: APP_NAME,
+            target_app: TARGET_APP,
+            status: 'sent',
+            worker_count: preparedItems.length,
+            sender_note: trimmedNote,
+            created_by: createdBy || null,
+            created_by_name: createdByName || null,
+            sent_at: sentAt,
+            payload_version: SNAPSHOT_VERSION,
+            updated_at: sentAt,
+            delivery_status: 'pending',
+        };
+
+        let { data: pkg, error: pkgError } = await supabase
             .from('worker_handoff_packages')
-            .insert({
-                source_app: APP_NAME,
-                target_app: TARGET_APP,
-                status: 'sent',
-                worker_count: preparedItems.length,
-                sender_note: trimmedNote,
-                created_by: createdBy || null,
-                created_by_name: createdByName || null,
-                sent_at: sentAt,
-                payload_version: SNAPSHOT_VERSION,
-                updated_at: sentAt,
-            })
+            .insert(insertPayload)
             .select('*')
             .single();
+
+        if (pkgError && isMissingColumnError(pkgError)) {
+            delete insertPayload.delivery_status;
+            const retry = await supabase
+                .from('worker_handoff_packages')
+                .insert(insertPayload)
+                .select('*')
+                .single();
+            pkg = retry.data;
+            pkgError = retry.error;
+        }
 
         if (pkgError) throw pkgError;
 
@@ -192,6 +296,25 @@ export const workerHandoffApi = {
             throw itemsError;
         }
 
-        return mapPackage(pkg as Record<string, unknown>);
+        try {
+            return await deliverToOpsflow(packageId);
+        } catch (deliveryError) {
+            const message =
+                deliveryError instanceof Error
+                    ? deliveryError.message
+                    : 'Error al entregar a OpsFlow';
+            const failedUpdate: Record<string, unknown> = {
+                delivery_status: 'failed',
+                delivery_error: message.slice(0, 1000),
+                updated_at: new Date().toISOString(),
+            };
+            await supabase
+                .from('worker_handoff_packages')
+                .update(failedUpdate)
+                .eq('id', packageId);
+            throw new Error(
+                `${message} El paquete quedó registrado; puedes reintentar desde Envíos OpsFlow.`
+            );
+        }
     },
 };
