@@ -14,9 +14,9 @@ import {
 } from '../lib/contactChannelConfig';
 import { processesApi } from '../lib/api/processes';
 import { useDebouncedValue } from '../lib/useDebouncedValue';
-import { Check, X, Loader2, Send, Archive, Search, ChevronDown, ChevronUp, Plus, Edit, Trash2, ArrowLeft, MessageCircle, Phone, Upload, Download, Filter, Mail, Calendar, Settings, ArrowUp, ArrowDown, Pin, FileText, BookOpen, Paperclip, ClipboardList, ListPlus, RefreshCw, HardDrive, CaseSensitive, Package, History } from 'lucide-react';
+import { Check, X, Loader2, Send, Archive, Search, ChevronDown, ChevronUp, Plus, Edit, Trash2, ArrowLeft, MessageCircle, Phone, Upload, Download, Filter, Mail, Calendar, Settings, ArrowUp, ArrowDown, Pin, FileText, BookOpen, Paperclip, ClipboardList, ListPlus, RefreshCw, HardDrive, CaseSensitive, Package, History, Target } from 'lucide-react';
 import { BulkCandidateTimeline } from './BulkCandidateTimeline';
-import { Process, CustomColumn, BulkProcessConfig, Candidate } from '../types';
+import { Process, CustomColumn, BulkProcessConfig, Candidate, IdealProfileConfig } from '../types';
 import { candidatesApi } from '../lib/api/candidates';
 import {
     BASE_COLUMNS,
@@ -33,6 +33,7 @@ import {
     formatBulkDate,
     normalizeBulkDateInput,
     isScoreIaColumnVisible,
+    isProfileMatchColumnVisible,
     shouldApplyScoreAutoFilter,
     mapImportHeader,
     parseClipboardGrid,
@@ -77,6 +78,13 @@ import { TableTemplateModal, BulkTableTemplateLayout } from './TableTemplateModa
 import { PsycholaboralReportModal } from './PsycholaboralReportModal';
 import { PsycholaboralBulkEvaluateModal } from './PsycholaboralBulkEvaluateModal';
 import { PsycholaboralInventoryModal } from './PsycholaboralInventoryModal';
+import { BulkIdealProfileModal } from './BulkIdealProfileModal';
+import { BulkIdealProfileSummaryPanel } from './BulkIdealProfileSummaryPanel';
+import {
+    computeProfileMatch,
+    computeProfileMatchSummary,
+    getProfileMatchGradientStyle,
+} from '../lib/bulkIdealProfileMatch';
 import { psycholaboralApi } from '../lib/api/psycholaboral';
 import { createDefaultPsycholaboralInventory } from '../lib/psycholaboralDefaults';
 import { PsycholaboralInventory } from '../types';
@@ -523,6 +531,9 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
     const [showProcessDocsModal, setShowProcessDocsModal] = useState(false);
     const [docsModalProcess, setDocsModalProcess] = useState<Process | null>(null);
     const [showExportModal, setShowExportModal] = useState(false);
+    const [showIdealProfileModal, setShowIdealProfileModal] = useState(false);
+    const [allCandidatesForStats, setAllCandidatesForStats] = useState<BulkCandidate[]>([]);
+    const [loadingProfileStats, setLoadingProfileStats] = useState(false);
     const [isNormalizingTextCase, setIsNormalizingTextCase] = useState(false);
     const [activityLogRefreshToken, setActivityLogRefreshToken] = useState(0);
     const [showOpsFlowModal, setShowOpsFlowModal] = useState(false);
@@ -687,6 +698,18 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
         setColumnFilters({});
         columnValuesMigratedRef.current = null;
 
+        // Si hay perfil ideal activo, asegurar columna % Perfil visible en el orden
+        if (config?.idealProfile?.enabled && config.columnOrder && !config.columnOrder.includes('profileMatch')) {
+            const order = [...config.columnOrder];
+            const scoreIdx = order.indexOf('scoreIa');
+            if (scoreIdx >= 0) order.splice(scoreIdx + 1, 0, 'profileMatch');
+            else order.splice(1, 0, 'profileMatch');
+            const hidden = (config.hiddenColumns || []).filter(id => id !== 'profileMatch');
+            setColumnOrder(order);
+            setHiddenColumns(hidden);
+            void persistBulkConfig({ columnOrder: order, hiddenColumns: hidden });
+        }
+
         const legacy = buildLegacyColumnIdToName(config, cols);
         const localValues = loadLocalColumnValuesForProcess(process.id);
         if (Object.keys(localValues).length > 0) {
@@ -714,6 +737,112 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
         () => isScoreIaColumnVisible(process?.bulkConfig),
         [process?.bulkConfig]
     );
+
+    const idealProfileConfig = process?.bulkConfig?.idealProfile;
+    const profileMatchColumnVisible = useMemo(
+        () => isProfileMatchColumnVisible(process?.bulkConfig),
+        [process?.bulkConfig]
+    );
+
+    const profileMatchScores = useMemo(() => {
+        const scores = new Map<string, number>();
+        const details = new Map<string, string>();
+        if (!idealProfileConfig?.enabled) return { scores, details };
+        const legacy = buildLegacyColumnIdToName(process?.bulkConfig, customColumns);
+        for (const c of candidates) {
+            const result = computeProfileMatch(
+                c,
+                idealProfileConfig,
+                customColumns,
+                columnValues,
+                legacy
+            );
+            if (result) {
+                scores.set(c.id, result.score);
+                details.set(
+                    c.id,
+                    result.fieldScores.map(f => `${f.label}: ${f.score}%`).join('\n')
+                );
+            }
+        }
+        return { scores, details };
+    }, [candidates, idealProfileConfig, customColumns, columnValues, process?.bulkConfig]);
+
+    useEffect(() => {
+        if (!process?.id || !idealProfileConfig?.enabled) {
+            setAllCandidatesForStats([]);
+            return;
+        }
+        let cancelled = false;
+        setLoadingProfileStats(true);
+        bulkCandidatesApi
+            .getAllCandidates(process.id)
+            .then(all => {
+                if (!cancelled) setAllCandidatesForStats(all);
+            })
+            .catch(() => {
+                if (!cancelled) setAllCandidatesForStats([]);
+            })
+            .finally(() => {
+                if (!cancelled) setLoadingProfileStats(false);
+            });
+        return () => {
+            cancelled = true;
+        };
+    }, [process?.id, idealProfileConfig?.enabled, idealProfileConfig, total, columnValues]);
+
+    const profileMatchSummary = useMemo(() => {
+        if (!idealProfileConfig?.enabled) return null;
+        const legacy = buildLegacyColumnIdToName(process?.bulkConfig, customColumns);
+        const pool = allCandidatesForStats.length > 0 ? allCandidatesForStats : candidates;
+        return computeProfileMatchSummary(
+            pool,
+            idealProfileConfig,
+            customColumns,
+            columnValues,
+            legacy
+        );
+    }, [
+        idealProfileConfig,
+        allCandidatesForStats,
+        candidates,
+        customColumns,
+        columnValues,
+        process?.bulkConfig,
+    ]);
+
+    const handleSaveIdealProfile = useCallback(async (config: IdealProfileConfig) => {
+        if (!process) return;
+        let newHidden = hiddenColumns.filter(id => id !== 'profileMatch');
+        let newOrder = [...columnOrder];
+        if (config.enabled && !newOrder.includes('profileMatch')) {
+            const scoreIdx = newOrder.indexOf('scoreIa');
+            if (scoreIdx >= 0) {
+                newOrder.splice(scoreIdx + 1, 0, 'profileMatch');
+            } else {
+                const nameIdx = newOrder.indexOf('name');
+                newOrder.splice(nameIdx >= 0 ? nameIdx + 1 : 0, 0, 'profileMatch');
+            }
+        }
+        setHiddenColumns(newHidden);
+        setColumnOrder(newOrder);
+        await persistBulkConfig({
+            idealProfile: config,
+            hiddenColumns: newHidden,
+            columnOrder: newOrder,
+        });
+        setBulkProcesses(prev =>
+            prev.map(p =>
+                p.id === process.id
+                    ? { ...p, bulkConfig: { ...p.bulkConfig, idealProfile: config, hiddenColumns: newHidden, columnOrder: newOrder } }
+                    : p
+            )
+        );
+        logActivity('config_change', {
+            details: { summary: config.enabled ? 'Perfil ideal activado/actualizado' : 'Perfil ideal desactivado' },
+        });
+        actions.showToast('Perfil ideal guardado', 'success', 2500);
+    }, [process, hiddenColumns, columnOrder, persistBulkConfig, logActivity, actions]);
 
     // Cargar procesos masivos
     const loadBulkProcesses = useCallback(async () => {
@@ -2126,6 +2255,10 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                     valueA = candidateA.scoreIa ?? 0;
                     valueB = candidateB.scoreIa ?? 0;
                     break;
+                case 'profileMatch':
+                    valueA = profileMatchScores.scores.get(candidateA.id) ?? 0;
+                    valueB = profileMatchScores.scores.get(candidateB.id) ?? 0;
+                    break;
                 case 'phone':
                     valueA = (candidateA.phone || '').toLowerCase();
                     valueB = (candidateB.phone || '').toLowerCase();
@@ -2229,6 +2362,12 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                     return false;
                 }
             }
+            if (profileMatchColumnVisible && columnFilters.profileMatch) {
+                const minMatch = parseFloat(columnFilters.profileMatch);
+                if (isNaN(minMatch) || (profileMatchScores.scores.get(candidate.id) ?? 0) < minMatch) {
+                    return false;
+                }
+            }
             if (columnFilters.phone && !(displayCandidate.phone || '').includes(columnFilters.phone)) {
                 return false;
             }
@@ -2250,7 +2389,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
             return true;
         }));
     }, [
-        candidates, columnFilters, optimisticUpdates, scoreIaColumnVisible, columnValues,
+        candidates, columnFilters, optimisticUpdates, scoreIaColumnVisible, profileMatchColumnVisible, profileMatchScores, columnValues,
         customColumns, sortColumn, sortDirection, process?.stages,
     ]);
 
@@ -2852,6 +2991,19 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                     )}
                                     <button
                                         type="button"
+                                        onClick={() => setShowIdealProfileModal(true)}
+                                        className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-colors whitespace-nowrap ${
+                                            idealProfileConfig?.enabled
+                                                ? 'bg-indigo-600 text-white hover:bg-indigo-700'
+                                                : 'bg-white border border-indigo-300 text-indigo-800 hover:bg-indigo-50'
+                                        }`}
+                                        title="Definir perfil ideal y comparar candidatos"
+                                    >
+                                        <Target className="w-4 h-4 shrink-0" />
+                                        Perfil ideal
+                                    </button>
+                                    <button
+                                        type="button"
                                         onClick={() => {
                                             setImportRestoreMode(true);
                                             setShowImportModal(true);
@@ -3040,6 +3192,15 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
 
             {selectedProcess && (
                 <div className="flex-1 overflow-hidden relative flex flex-col">
+                    {idealProfileConfig?.enabled && (
+                        <div className="px-4 pt-3 shrink-0">
+                            <BulkIdealProfileSummaryPanel
+                                summary={profileMatchSummary}
+                                config={idealProfileConfig}
+                                loading={loadingProfileStats}
+                            />
+                        </div>
+                    )}
                     <p className="text-[10px] text-gray-500 px-1 pb-1 shrink-0">
                         Flechas · Shift+arrastrar selección · Ctrl+clic múltiple · Clic derecho: color/comentario · Enter/doble clic editar · Ctrl+V pegar en celdas seleccionadas · Doble clic en fila abre detalle · Arrastre el borde derecho del encabezado para ajustar el ancho de columna
                     </p>
@@ -3129,6 +3290,19 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                                         {sortColumn === 'scoreIa' ? (sortDirection === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />) : <div className="w-3 h-3 opacity-30"><ArrowUp className="w-3 h-3" /></div>}
                                                     </button>
                                                     <input type="text" placeholder="Min..." value={columnFilters.scoreIa || ''} onChange={(e) => setColumnFilters({ ...columnFilters, scoreIa: e.target.value })} className="text-xs px-2 py-1 border border-gray-300 rounded focus:ring-1 focus:ring-primary-500 focus:border-primary-500 font-normal normal-case" onClick={(e) => e.stopPropagation()} />
+                                                </div>
+                                            </BulkTh>
+                                        );
+                                    }
+                                    if (colId === 'profileMatch') {
+                                        return (
+                                            <BulkTh colId={colId} headerProps={commonProps} style={thStyle()} onResizeStart={handleColumnResizeStart}>
+                                                <div className="flex flex-col gap-1">
+                                                    <button onClick={() => handleSort('profileMatch')} className="flex items-center gap-1 hover:text-primary-600 transition-colors">
+                                                        <span>% Perfil</span>
+                                                        {sortColumn === 'profileMatch' ? (sortDirection === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />) : <div className="w-3 h-3 opacity-30"><ArrowUp className="w-3 h-3" /></div>}
+                                                    </button>
+                                                    <input type="text" placeholder="Min..." value={columnFilters.profileMatch || ''} onChange={(e) => setColumnFilters({ ...columnFilters, profileMatch: e.target.value })} className="text-xs px-2 py-1 border border-gray-300 rounded focus:ring-1 focus:ring-primary-500 focus:border-primary-500 font-normal normal-case" onClick={(e) => e.stopPropagation()} />
                                                 </div>
                                             </BulkTh>
                                         );
@@ -3375,6 +3549,25 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                                     <td key="scoreIa" {...tdProps(candidate.id, 'scoreIa')}>
                                                         {displayCandidate.scoreIa !== undefined ? (
                                                             <span className={`font-semibold ${displayCandidate.scoreIa >= 70 ? 'text-green-600' : displayCandidate.scoreIa >= 50 ? 'text-yellow-600' : 'text-red-600'}`}>{displayCandidate.scoreIa}</span>
+                                                        ) : (
+                                                            <span className="text-gray-400">-</span>
+                                                        )}
+                                                    </td>
+                                                );
+                                            }
+                                            if (colId === 'profileMatch') {
+                                                const matchScore = profileMatchScores.scores.get(candidate.id);
+                                                const tooltip = profileMatchScores.details.get(candidate.id);
+                                                return (
+                                                    <td key="profileMatch" {...tdProps(candidate.id, 'profileMatch')}>
+                                                        {matchScore !== undefined ? (
+                                                            <span
+                                                                className="inline-flex items-center justify-center min-w-[2.5rem] px-1 py-0.5 rounded font-semibold text-xs"
+                                                                style={getProfileMatchGradientStyle(matchScore)}
+                                                                title={tooltip}
+                                                            >
+                                                                {matchScore}%
+                                                            </span>
                                                         ) : (
                                                             <span className="text-gray-400">-</span>
                                                         )}
@@ -3974,6 +4167,17 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                     inventory={psychInventory}
                     customColumns={customColumns}
                     columnValues={columnValues}
+                />
+            )}
+
+            {showIdealProfileModal && process && (
+                <BulkIdealProfileModal
+                    isOpen={showIdealProfileModal}
+                    onClose={() => setShowIdealProfileModal(false)}
+                    process={process}
+                    customColumns={customColumns}
+                    columnOrder={columnOrder}
+                    onSave={handleSaveIdealProfile}
                 />
             )}
         </div>

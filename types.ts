@@ -198,6 +198,39 @@ export interface BulkProcessConfig {
     /** ID de columna personalizada → nombre (para resolver valores guardados con IDs antiguos) */
     columnKeyAliases?: Record<string, string>;
     psycholaboral?: PsycholaboralProcessConfig;
+    /** Perfil ideal para comparar candidatos del proceso masivo */
+    idealProfile?: IdealProfileConfig;
+}
+
+/** Modo de comparación por criterio del perfil ideal */
+export type IdealProfileMatchMode =
+    | 'exact'
+    | 'contains'
+    | 'minimum'
+    | 'maximum'
+    | 'range';
+
+/** Criterio individual del perfil ideal (mapea a una columna del proceso) */
+export interface IdealProfileCriterion {
+    /** ID de columna: base (p. ej. source) o custom_{uuid} */
+    fieldId: string;
+    enabled: boolean;
+    idealValue?: string | number | boolean;
+    /** Valor máximo para modo range o maximum */
+    maxValue?: number;
+    matchMode?: IdealProfileMatchMode;
+    /** Peso relativo en el score total (default 1) */
+    weight?: number;
+}
+
+/** Configuración del perfil ideal para procesos masivos */
+export interface IdealProfileConfig {
+    enabled?: boolean;
+    criteria: IdealProfileCriterion[];
+    /** Umbral verde (>=): default 80 */
+    greenThreshold?: number;
+    /** Umbral amarillo (>=): default 50 — por debajo es rojo */
+    yellowThreshold?: number;
 }
 
 // Pregunta "killer" para filtrado automático en procesos masivos

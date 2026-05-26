@@ -375,6 +375,7 @@ export const BASE_COLUMNS: BaseColumn[] = [
     { id: 'email', label: 'Email', importKey: 'email' },
     { id: 'contactEmail', label: 'Correo' },
     { id: 'scoreIa', label: 'Score IA' },
+    { id: 'profileMatch', label: '% Perfil' },
     { id: 'status', label: 'Status' },
     { id: 'phone', label: 'Teléfono', importKey: 'phone' },
     { id: 'contactPhone', label: 'Llamadas' },
@@ -398,6 +399,7 @@ export const COLUMN_WIDTHS: Record<string, number> = {
     dni: 72,
     email: 140,
     scoreIa: 64,
+    profileMatch: 72,
     status: 72,
     phone: 96,
     contactPhone: 100,
@@ -655,6 +657,10 @@ export function isColumnVisible(colId: string, bulkConfig?: BulkProcessConfig): 
 
 export function isScoreIaColumnVisible(bulkConfig?: BulkProcessConfig): boolean {
     return isColumnVisible('scoreIa', bulkConfig);
+}
+
+export function isProfileMatchColumnVisible(bulkConfig?: BulkProcessConfig): boolean {
+    return !!(bulkConfig?.idealProfile?.enabled && isColumnVisible('profileMatch', bulkConfig));
 }
 
 /** Filtrado automático por score IA: solo aplica si la columna Score IA está visible. */
