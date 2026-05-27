@@ -97,6 +97,8 @@ import { BulkProcessActivityLog } from './BulkProcessActivityLog';
 import { BulkContactStatusCell } from './BulkContactStatusCell';
 import { SendToOpsFlowModal } from './SendToOpsFlowModal';
 import { BulkCandidateOpsFlowPanel } from './BulkCandidateOpsFlowPanel';
+import { BulkRouteCell } from './BulkRouteCell';
+import { buildRouteColumnLink } from '../lib/transitRouteLinks';
 
 interface BulkProcessesViewProps {}
 
@@ -1958,7 +1960,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
     };
 
     const setCellValue = useCallback(async (candidateId: string, colId: string, rawValue: string) => {
-        if (!isPasteEditableColumn(colId)) return;
+        if (!isPasteEditableColumn(colId, customColumns)) return;
 
         if (colId.startsWith('custom_')) {
             const customColId = colId.replace('custom_', '');
@@ -2198,6 +2200,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
 
             const cellValue = getColumnValue(candidateId, col.id, candidates.find(c => c.id === candidateId));
 
+            if (col.type === 'route') continue;
             if (col.type === 'checkbox') {
                 const isChecked = cellValue === true;
                 if (filterValue === 'true' && !isChecked) return false;
@@ -2488,7 +2491,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
         });
         actions.showToast('Fila añadida — complete el resto en la tabla', 'success', 2500);
 
-        const firstEditableCol = visibleColumns.find(colId => isPasteEditableColumn(colId)) || 'name';
+        const firstEditableCol = visibleColumns.find(colId => isPasteEditableColumn(colId, customColumns)) || 'name';
         requestAnimationFrame(() => {
             setTimeout(() => {
                 scrollCellIntoView({ candidateId: newRow.id, colId: firstEditableCol });
@@ -2537,7 +2540,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
             handleStartEdit(candidateId, colId, getColumnValue(candidateId, customColId, displayCandidate));
             return;
         }
-        if (!isPasteEditableColumn(colId)) return;
+        if (!isPasteEditableColumn(colId, customColumns)) return;
 
         const fieldValues: Record<string, string> = {
             name: displayCandidate.name,
@@ -2821,7 +2824,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                     for (let c = 0; c < grid[r].length; c++) {
                         const candidateId = displayCandidates[minR + r]?.id;
                         const colId = visibleColumns[minC + c];
-                        if (!candidateId || !colId || !isPasteEditableColumn(colId)) continue;
+                        if (!candidateId || !colId || !isPasteEditableColumn(colId, customColumns)) continue;
                         await setCellValue(candidateId, colId, grid[r][c]);
                         pastedCells++;
                     }
@@ -2829,14 +2832,14 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
             } else if (flatValues.length === 1) {
                 for (const key of sortedKeys) {
                     const { candidateId, colId } = parseCellKey(key);
-                    if (!isPasteEditableColumn(colId)) continue;
+                    if (!isPasteEditableColumn(colId, customColumns)) continue;
                     await setCellValue(candidateId, colId, flatValues[0]);
                     pastedCells++;
                 }
             } else {
                 for (let i = 0; i < sortedKeys.length; i++) {
                     const { candidateId, colId } = parseCellKey(sortedKeys[i]);
-                    if (!isPasteEditableColumn(colId)) continue;
+                    if (!isPasteEditableColumn(colId, customColumns)) continue;
                     await setCellValue(candidateId, colId, flatValues[Math.min(i, flatValues.length - 1)]);
                     pastedCells++;
                 }
@@ -2870,7 +2873,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                 const colIdx = startColIdx + c;
                 if (colIdx >= visibleColumns.length) break;
                 const colId = visibleColumns[colIdx];
-                if (!isPasteEditableColumn(colId)) continue;
+                if (!isPasteEditableColumn(colId, customColumns)) continue;
                 await setCellValue(targetCandidateIds[r], colId, rowValues[c]);
                 pastedCells++;
             }
@@ -3556,6 +3559,8 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                                             <option value="true">Sí</option>
                                                             <option value="false">No</option>
                                                         </select>
+                                                    ) : col.type === 'route' ? (
+                                                        <span className="text-[10px] text-gray-400 font-normal normal-case">Enlace automático</span>
                                                     ) : (
                                                         <input
                                                             type="text"
@@ -3875,6 +3880,33 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                                 const fieldKey = `custom_${col.id}`;
                                                 const value = getColumnValue(candidate.id, col.id, displayCandidate);
                                                 const isEditing = editingCell?.candidateId === candidate.id && editingCell?.field === fieldKey;
+
+                                                if (col.type === 'route') {
+                                                    const routeUrl = buildRouteColumnLink(
+                                                        displayCandidate,
+                                                        col,
+                                                        customColumns,
+                                                        columnValues
+                                                    );
+                                                    return (
+                                                        <td
+                                                            key={col.id}
+                                                            {...tdProps(candidate.id, colId)}
+                                                        >
+                                                            {renderCellCommentIndicator(candidate.id, colId)}
+                                                            <BulkRouteCell
+                                                                url={routeUrl}
+                                                                missingDestination={!col.routeDestination?.trim()}
+                                                                missingOrigin={!routeUrl && !!col.routeDestination?.trim()}
+                                                                onCopy={(url) => {
+                                                                    void navigator.clipboard.writeText(url);
+                                                                    actions.showToast('Enlace copiado', 'success', 2000);
+                                                                }}
+                                                            />
+                                                        </td>
+                                                    );
+                                                }
+
                                                 return (
                                                     <td
                                                         key={col.id}

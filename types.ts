@@ -87,8 +87,10 @@ export type PsycholaboralReportNamePart =
 export interface CustomColumn {
     id: string;
     name: string;
-    type: 'text' | 'number' | 'checkbox' | 'date' | 'select';
+    type: 'text' | 'number' | 'checkbox' | 'date' | 'select' | 'route';
     options?: string[];
+    /** Dirección de destino para columnas tipo ruta (transporte público). */
+    routeDestination?: string;
     /** Marca explícita para el PDF psicolaboral (opcional). */
     reportNamePart?: PsycholaboralReportNamePart;
 }
@@ -468,6 +470,13 @@ export interface GoogleDriveConfig {
     rootFolderName?: string; // Nombre de la carpeta raíz
 }
 
+/** Punto de entrevista / sede para generar rutas en transporte público. */
+export interface InterviewLocation {
+    id: string;
+    name: string;
+    address: string;
+}
+
 export interface AppSettings {
     database: {
         apiUrl: string;
@@ -500,6 +509,7 @@ export interface AppSettings {
     candidateSources?: string[]; // Opciones configurables para el campo "fuentes" de candidatos
     provinces?: string[]; // Opciones configurables para el campo "provincia" de candidatos
     districts?: { [province: string]: string[] }; // Opciones configurables para el campo "distrito" de candidatos, organizadas por provincia
+    interviewLocations?: InterviewLocation[]; // Sedes para rutas en transporte público hacia entrevistas
     psycholaboralInventory?: PsycholaboralInventory;
 }
 

@@ -9,6 +9,7 @@ import { DocumentChecklist } from './DocumentChecklist';
 import { SearchableSelect } from './SearchableSelect';
 import { DiscardCandidateModal } from './DiscardCandidateModal';
 import { SendToOpsFlowModal } from './SendToOpsFlowModal';
+import { CandidateTransitRoutes } from './CandidateTransitRoutes';
 import JSZip from 'jszip';
 import { saveAs } from 'file-saver';
 
@@ -1274,6 +1275,18 @@ export const CandidateDetailsModal: React.FC<{ candidate: Candidate, onClose: ()
                                                 <DetailItem icon={MapPin} label="Dirección" value={currentCandidate.address} />
                                                 <DetailItem icon={MapPin} label="Provincia" value={currentCandidate.province} />
                                                 <DetailItem icon={MapPin} label="Distrito" value={currentCandidate.district} />
+                                                {!state.processes.find(p => p.id === currentCandidate.processId)?.isBulkProcess && (
+                                                    <div className="col-span-full">
+                                                        <CandidateTransitRoutes
+                                                            candidate={currentCandidate}
+                                                            locations={state.settings?.interviewLocations}
+                                                            onCopy={(text) => {
+                                                                void navigator.clipboard.writeText(text);
+                                                                actions.showToast('Enlace copiado', 'success', 2000);
+                                                            }}
+                                                        />
+                                                    </div>
+                                                )}
                                                 <DetailItem icon={DollarSign} label="Expectativa salarial" value={currentCandidate.salaryExpectation ? `${state.settings?.currencySymbol || ''}${currentCandidate.salaryExpectation.replace(/[$\€£S/]/g, '').trim()}` : 'N/D'} />
                                                 <DetailItem icon={DollarSign} label="Salario acordado" value={currentCandidate.agreedSalary ? `${state.settings?.currencySymbol || ''}${currentCandidate.agreedSalary.replace(/[$\€£S/]/g, '').trim()}` : 'N/D'} />
                                                     <DetailItem icon={Calendar} label="Fecha de contratación" value={currentCandidate.hireDate ? new Date(currentCandidate.hireDate).toLocaleDateString('es-ES') : undefined} />

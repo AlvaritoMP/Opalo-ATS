@@ -68,7 +68,7 @@ export function getIdealProfileAvailableFields(
 
         if (colId.startsWith('custom_')) {
             const col = customColumns.find(c => c.id === colId.replace('custom_', ''));
-            if (!col) continue;
+            if (!col || col.type === 'route') continue;
             fields.push({
                 fieldId: colId,
                 label: col.name,
@@ -99,6 +99,7 @@ export function getIdealProfileAvailableFields(
     }
 
     for (const col of customColumns) {
+        if (col.type === 'route') continue;
         const fieldId = `custom_${col.id}`;
         if (seen.has(fieldId)) continue;
         fields.push({

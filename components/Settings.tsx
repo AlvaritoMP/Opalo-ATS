@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useAppState } from '../App';
-import { AppSettings, Client } from '../types';
-import { Save, Database, HardDrive, Globe, Brush, Type, Building2, Plus, Trash2, Edit2 } from 'lucide-react';
+import { AppSettings, Client, InterviewLocation } from '../types';
+import { Save, Database, HardDrive, Globe, Brush, Type, Building2, Plus, Trash2, Edit2, MapPin } from 'lucide-react';
 import { GoogleDriveSettings } from './GoogleDriveSettings';
 import { clientsApi } from '../lib/api';
 
@@ -26,6 +26,10 @@ export const Settings: React.FC = () => {
     const [clientRazonSocial, setClientRazonSocial] = useState('');
     const [clientRuc, setClientRuc] = useState('');
     const logoInputRef = useRef<HTMLInputElement>(null);
+    const [editingInterviewLocation, setEditingInterviewLocation] = useState<InterviewLocation | null>(null);
+    const [interviewLocationName, setInterviewLocationName] = useState('');
+    const [interviewLocationAddress, setInterviewLocationAddress] = useState('');
+    const [showInterviewLocationForm, setShowInterviewLocationForm] = useState(false);
 
     useEffect(() => {
         setSettings(state.settings);
@@ -106,6 +110,64 @@ export const Settings: React.FC = () => {
             console.error('Error eliminando cliente:', error);
             alert('Error al eliminar cliente: ' + error.message);
         }
+    };
+
+    const resetInterviewLocationForm = () => {
+        setEditingInterviewLocation(null);
+        setInterviewLocationName('');
+        setInterviewLocationAddress('');
+        setShowInterviewLocationForm(false);
+    };
+
+    const handleOpenInterviewLocationForm = (location?: InterviewLocation) => {
+        if (location) {
+            setEditingInterviewLocation(location);
+            setInterviewLocationName(location.name);
+            setInterviewLocationAddress(location.address);
+        } else {
+            setEditingInterviewLocation(null);
+            setInterviewLocationName('');
+            setInterviewLocationAddress('');
+        }
+        setShowInterviewLocationForm(true);
+    };
+
+    const handleSaveInterviewLocation = () => {
+        if (!settings) return;
+        if (!interviewLocationName.trim() || !interviewLocationAddress.trim()) {
+            alert('Complete el nombre y la dirección de la sede');
+            return;
+        }
+
+        const locations = [...(settings.interviewLocations || [])];
+        if (editingInterviewLocation) {
+            const index = locations.findIndex(l => l.id === editingInterviewLocation.id);
+            if (index >= 0) {
+                locations[index] = {
+                    ...editingInterviewLocation,
+                    name: interviewLocationName.trim(),
+                    address: interviewLocationAddress.trim(),
+                };
+            }
+        } else {
+            locations.push({
+                id: `loc_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+                name: interviewLocationName.trim(),
+                address: interviewLocationAddress.trim(),
+            });
+        }
+
+        setSettings({ ...settings, interviewLocations: locations });
+        resetInterviewLocationForm();
+    };
+
+    const handleDeleteInterviewLocation = (id: string) => {
+        if (!settings) return;
+        if (!confirm('¿Eliminar esta sede de entrevista?')) return;
+        setSettings({
+            ...settings,
+            interviewLocations: (settings.interviewLocations || []).filter(l => l.id !== id),
+        });
     };
 
     if (!settings) {
@@ -437,6 +499,106 @@ export const Settings: React.FC = () => {
                                         </button>
                                         <button
                                             onClick={() => handleDeleteClient(client.id)}
+                                            className="p-2 text-gray-600 hover:text-red-600 hover:bg-red-50 rounded-md"
+                                            title="Eliminar"
+                                        >
+                                            <Trash2 className="w-4 h-4" />
+                                        </button>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                </div>
+
+                {/* Sedes de entrevista (rutas en transporte público) */}
+                <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
+                    <div className="flex justify-between items-center mb-4">
+                        <div>
+                            <h2 className="text-xl font-semibold mb-1 flex items-center"><MapPin className="mr-2"/> Sedes de entrevista</h2>
+                            <p className="text-sm text-gray-500">
+                                Puntos de destino para generar rutas en transporte público desde la ficha de candidatos en procesos normales.
+                            </p>
+                        </div>
+                        <button
+                            type="button"
+                            onClick={() => handleOpenInterviewLocationForm()}
+                            className="flex items-center px-4 py-2 bg-primary-600 text-white rounded-lg shadow-sm hover:bg-primary-700"
+                        >
+                            <Plus className="w-4 h-4 mr-2" /> Nueva sede
+                        </button>
+                    </div>
+
+                    {showInterviewLocationForm && (
+                        <div className="mb-4 p-4 border border-primary-100 bg-primary-50/40 rounded-lg space-y-3">
+                            <h3 className="text-sm font-semibold text-gray-800">
+                                {editingInterviewLocation ? 'Editar sede' : 'Nueva sede'}
+                            </h3>
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">Nombre</label>
+                                <input
+                                    type="text"
+                                    value={interviewLocationName}
+                                    onChange={(e) => setInterviewLocationName(e.target.value)}
+                                    placeholder="Ej: Sede Miraflores"
+                                    className="w-full input"
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">Dirección</label>
+                                <input
+                                    type="text"
+                                    value={interviewLocationAddress}
+                                    onChange={(e) => setInterviewLocationAddress(e.target.value)}
+                                    placeholder="Ej: Av. Javier Prado 4200, San Isidro, Lima"
+                                    className="w-full input"
+                                />
+                            </div>
+                            <div className="flex gap-2">
+                                <button
+                                    type="button"
+                                    onClick={handleSaveInterviewLocation}
+                                    className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 text-sm"
+                                >
+                                    {editingInterviewLocation ? 'Guardar' : 'Agregar'}
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={resetInterviewLocationForm}
+                                    className="px-4 py-2 border border-gray-300 rounded-lg text-sm hover:bg-gray-50"
+                                >
+                                    Cancelar
+                                </button>
+                            </div>
+                        </div>
+                    )}
+
+                    {(settings.interviewLocations || []).length === 0 ? (
+                        <div className="text-center py-8 text-gray-500">
+                            <MapPin className="w-12 h-12 mx-auto mb-2 text-gray-300" />
+                            <p>No hay sedes configuradas</p>
+                            <p className="text-sm">Agregue los puntos donde se realizan entrevistas</p>
+                        </div>
+                    ) : (
+                        <div className="space-y-2">
+                            {(settings.interviewLocations || []).map(location => (
+                                <div key={location.id} className="flex items-start justify-between p-3 border border-gray-200 rounded-md hover:bg-gray-50">
+                                    <div>
+                                        <div className="font-medium text-gray-900">{location.name}</div>
+                                        <div className="text-sm text-gray-500">{location.address}</div>
+                                    </div>
+                                    <div className="flex items-center space-x-2 shrink-0">
+                                        <button
+                                            type="button"
+                                            onClick={() => handleOpenInterviewLocationForm(location)}
+                                            className="p-2 text-gray-600 hover:text-primary-600 hover:bg-primary-50 rounded-md"
+                                            title="Editar"
+                                        >
+                                            <Edit2 className="w-4 h-4" />
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => handleDeleteInterviewLocation(location.id)}
                                             className="p-2 text-gray-600 hover:text-red-600 hover:bg-red-50 rounded-md"
                                             title="Eliminar"
                                         >

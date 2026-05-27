@@ -1086,8 +1086,13 @@ export function repairDateColumnValues(
 }
 
 /** Columnas donde se permite pegar desde portapapeles */
-export function isPasteEditableColumn(colId: string): boolean {
-    if (colId.startsWith('custom_')) return true;
+export function isPasteEditableColumn(colId: string, customColumns: CustomColumn[] = []): boolean {
+    if (colId.startsWith('custom_')) {
+        const customColId = colId.replace('custom_', '');
+        const col = customColumns.find(c => c.id === customColId);
+        if (col?.type === 'route') return false;
+        return true;
+    }
     return ['name', 'dni', 'email', 'phone', 'source', 'province', 'district'].includes(colId);
 }
 
@@ -1149,6 +1154,7 @@ export function parseClipboardGrid(text: string): string[][] {
 }
 
 export function formatCustomCellDisplay(value: any, col: CustomColumn): string {
+    if (col.type === 'route') return '-';
     if (col.type === 'checkbox') {
         if (value === true) return 'Sí';
         if (value === false) return 'No';
@@ -1160,6 +1166,7 @@ export function formatCustomCellDisplay(value: any, col: CustomColumn): string {
 }
 
 export function parseCustomCellInput(rawValue: string, col: CustomColumn): any {
+    if (col.type === 'route') return '';
     const trimmed = rawValue.trim();
     if (!trimmed) return '';
     if (col.type === 'number') {

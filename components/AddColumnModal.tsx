@@ -10,6 +10,8 @@ interface AddColumnModalProps {
     onEdit?: (column: CustomColumn) => void;
 }
 
+type ColumnType = CustomColumn['type'];
+
 export const AddColumnModal: React.FC<AddColumnModalProps> = ({
     isOpen,
     onClose,
@@ -18,9 +20,9 @@ export const AddColumnModal: React.FC<AddColumnModalProps> = ({
     onEdit,
 }) => {
     const [name, setName] = useState('');
-    const [type, setType] = useState<'text' | 'number' | 'checkbox' | 'date' | 'select'>('text');
+    const [type, setType] = useState<ColumnType>('text');
     const [options, setOptions] = useState<string[]>(['']);
-
+    const [routeDestination, setRouteDestination] = useState('');
     const [reportNamePart, setReportNamePart] = useState<'' | PsycholaboralReportNamePart>('');
 
     const isEditing = !!editingColumn;
@@ -30,11 +32,13 @@ export const AddColumnModal: React.FC<AddColumnModalProps> = ({
             setName(editingColumn.name);
             setType(editingColumn.type);
             setOptions(editingColumn.options?.length ? [...editingColumn.options] : ['']);
+            setRouteDestination(editingColumn.routeDestination || '');
             setReportNamePart(editingColumn.reportNamePart ?? '');
         } else if (isOpen) {
             setName('');
             setType('text');
             setOptions(['']);
+            setRouteDestination('');
             setReportNamePart('');
         }
     }, [isOpen, editingColumn]);
@@ -65,12 +69,18 @@ export const AddColumnModal: React.FC<AddColumnModalProps> = ({
             }
         }
 
+        if (type === 'route' && !routeDestination.trim()) {
+            alert('Ingrese la dirección de destino para la ruta en transporte público');
+            return;
+        }
+
         const column: CustomColumn = {
             id: editingColumn?.id || `col_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
             name: name.trim(),
             type,
             ...(type === 'select' && { options: options.map(o => o.trim()).filter(Boolean) }),
-            ...(reportNamePart ? { reportNamePart } : {}),
+            ...(type === 'route' && { routeDestination: routeDestination.trim() }),
+            ...(reportNamePart && type !== 'route' ? { reportNamePart } : {}),
         };
 
         if (isEditing && onEdit) {
@@ -82,6 +92,7 @@ export const AddColumnModal: React.FC<AddColumnModalProps> = ({
         setName('');
         setType('text');
         setOptions(['']);
+        setRouteDestination('');
         setReportNamePart('');
         onClose();
     };
@@ -110,7 +121,7 @@ export const AddColumnModal: React.FC<AddColumnModalProps> = ({
                             type="text"
                             value={name}
                             onChange={(e) => setName(e.target.value)}
-                            placeholder="Ej: Disponibilidad, Salario esperado..."
+                            placeholder={type === 'route' ? 'Ej: Ruta a sede Miraflores' : 'Ej: Disponibilidad, Salario esperado...'}
                             required
                             className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
                         />
@@ -123,7 +134,7 @@ export const AddColumnModal: React.FC<AddColumnModalProps> = ({
                         <select
                             value={type}
                             onChange={(e) => {
-                                const newType = e.target.value as CustomColumn['type'];
+                                const newType = e.target.value as ColumnType;
                                 setType(newType);
                                 if (newType === 'select' && options.length === 0) {
                                     setOptions(['']);
@@ -137,8 +148,28 @@ export const AddColumnModal: React.FC<AddColumnModalProps> = ({
                             <option value="checkbox">Checkbox (Sí/No)</option>
                             <option value="date">Fecha</option>
                             <option value="select">Selección (Lista desplegable)</option>
+                            <option value="route">Ruta (transporte público)</option>
                         </select>
                     </div>
+
+                    {type === 'route' && (
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">
+                                Punto de destino <span className="text-red-500">*</span>
+                            </label>
+                            <p className="text-xs text-gray-500 mb-2">
+                                Dirección del lugar de entrevista o sede. Cada fila mostrará un enlace con la ruta en bus/metro desde la ubicación del candidato.
+                            </p>
+                            <input
+                                type="text"
+                                value={routeDestination}
+                                onChange={(e) => setRouteDestination(e.target.value)}
+                                placeholder="Ej: Av. Javier Prado 4200, San Isidro, Lima"
+                                required
+                                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                            />
+                        </div>
+                    )}
 
                     {type === 'select' && (
                         <div>
@@ -182,28 +213,30 @@ export const AddColumnModal: React.FC<AddColumnModalProps> = ({
                         </div>
                     )}
 
-                    <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">
-                            Informe psicolaboral (nombre en PDF)
-                        </label>
-                        <p className="text-xs text-gray-500 mb-2">
-                            Opcional: indica si esta columna aporta nombres o apellidos. Si dejas «Automático», se
-                            infiere del título de la columna (p. ej. «Apellido Paterno»).
-                        </p>
-                        <select
-                            value={reportNamePart}
-                            onChange={(e) =>
-                                setReportNamePart((e.target.value || '') as '' | PsycholaboralReportNamePart)
-                            }
-                            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                        >
-                            <option value="">Automático (por nombre de columna)</option>
-                            <option value="given_names">Nombres</option>
-                            <option value="paternal_surname">Apellido paterno</option>
-                            <option value="maternal_surname">Apellido materno</option>
-                            <option value="surnames_combined">Apellidos (un solo campo)</option>
-                        </select>
-                    </div>
+                    {type !== 'route' && (
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">
+                                Informe psicolaboral (nombre en PDF)
+                            </label>
+                            <p className="text-xs text-gray-500 mb-2">
+                                Opcional: indica si esta columna aporta nombres o apellidos. Si dejas «Automático», se
+                                infiere del título de la columna (p. ej. «Apellido Paterno»).
+                            </p>
+                            <select
+                                value={reportNamePart}
+                                onChange={(e) =>
+                                    setReportNamePart((e.target.value || '') as '' | PsycholaboralReportNamePart)
+                                }
+                                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                            >
+                                <option value="">Automático (por nombre de columna)</option>
+                                <option value="given_names">Nombres</option>
+                                <option value="paternal_surname">Apellido paterno</option>
+                                <option value="maternal_surname">Apellido materno</option>
+                                <option value="surnames_combined">Apellidos (un solo campo)</option>
+                            </select>
+                        </div>
+                    )}
 
                     <div className="flex gap-3 pt-4">
                         <button

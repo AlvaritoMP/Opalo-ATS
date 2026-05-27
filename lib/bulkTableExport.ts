@@ -9,6 +9,7 @@ import {
     resolveStandardFieldValue,
     shouldApplyScoreAutoFilter,
 } from './bulkTableColumns';
+import { buildRouteColumnLink } from './transitRouteLinks';
 
 export type BulkExportScope = 'current_view' | 'full_process' | 'selected';
 
@@ -126,6 +127,9 @@ export function getBulkExportCellValue(
         const cid = colId.replace('custom_', '');
         const col = customColumns.find(c => c.id === cid);
         if (!col) return '';
+        if (col.type === 'route') {
+            return buildRouteColumnLink(candidate, col, customColumns, columnValues) || '';
+        }
         const raw = getCustomStoredValue(candidate.id, cid, candidate, columnValues, customColumns);
         return formatCustomCellDisplay(raw, col);
     }

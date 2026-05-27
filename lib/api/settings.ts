@@ -23,6 +23,7 @@ function dbToSettings(dbSettings: any): AppSettings {
         candidateSources: dbSettings.candidate_sources || undefined,
         provinces: dbSettings.provinces || undefined,
         districts: dbSettings.districts || undefined,
+        interviewLocations: dbSettings.interview_locations || undefined,
         psycholaboralInventory: dbSettings.psycholaboral_inventory
             ? typeof dbSettings.psycholaboral_inventory === 'string'
                 ? JSON.parse(dbSettings.psycholaboral_inventory)
@@ -65,6 +66,7 @@ function settingsToDb(settings: Partial<AppSettings>): any {
     if (settings.candidateSources !== undefined) dbSettings.candidate_sources = settings.candidateSources;
     if (settings.provinces !== undefined) dbSettings.provinces = settings.provinces;
     if (settings.districts !== undefined) dbSettings.districts = settings.districts;
+    if (settings.interviewLocations !== undefined) dbSettings.interview_locations = settings.interviewLocations;
     if (settings.psycholaboralInventory !== undefined) {
         dbSettings.psycholaboral_inventory = settings.psycholaboralInventory;
     }
@@ -248,7 +250,7 @@ export const settingsApi = {
         }
         
         // Separar campos opcionales que pueden no existir en el esquema
-        const { candidate_sources, provinces, districts, powered_by_logo_url, ...standardFields } = mergedDbData;
+        const { candidate_sources, provinces, districts, interview_locations, powered_by_logo_url, ...standardFields } = mergedDbData;
         
         // No permitir cambiar app_name
         delete standardFields.app_name;
@@ -293,6 +295,7 @@ export const settingsApi = {
         if (candidate_sources !== undefined) optionalFields.candidate_sources = candidate_sources;
         if (provinces !== undefined) optionalFields.provinces = provinces;
         if (districts !== undefined) optionalFields.districts = districts;
+        if (interview_locations !== undefined) optionalFields.interview_locations = interview_locations;
         if (powered_by_logo_url !== undefined) optionalFields.powered_by_logo_url = powered_by_logo_url;
         
         if (Object.keys(optionalFields).length > 0) {
