@@ -61,6 +61,8 @@ import {
     getColumnWidth,
     getColumnWidthStyle,
     CHECKBOX_COL_WIDTH,
+    getBulkSelectedProcessId,
+    setBulkSelectedProcessId,
 } from '../lib/bulkTableColumns';
 import { getStageSelectClass } from '../lib/stageColors';
 import { getCellMetaStorageKey, BulkCellMeta, BulkCellMetaStore } from '../lib/bulkCellMeta';
@@ -477,7 +479,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
     const [hasMore, setHasMore] = useState(false);
     const [isLoading, setIsLoading] = useState(false);
     const [isLoadingProcesses, setIsLoadingProcesses] = useState(false);
-    const [selectedProcess, setSelectedProcess] = useState<string>('');
+    const [selectedProcess, setSelectedProcess] = useState<string>(() => getBulkSelectedProcessId() ?? '');
     const [selectedStage, setSelectedStage] = useState<string>('');
     const [searchInput, setSearchInput] = useState('');
     const debouncedSearch = useDebouncedValue(searchInput, 400);
@@ -859,8 +861,18 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                 filteredProcesses = processes.filter(p => p.clientId && allowedClientIdsSet.has(p.clientId));
             }
             setBulkProcesses(filteredProcesses);
-            if (filteredProcesses.length > 0 && !selectedProcess) {
-                setSelectedProcess(filteredProcesses[0].id);
+            const savedSelection = getBulkSelectedProcessId();
+            if (filteredProcesses.length > 0) {
+                if (savedSelection === null && !selectedProcess) {
+                    setSelectedProcess(filteredProcesses[0].id);
+                    setBulkSelectedProcessId(filteredProcesses[0].id);
+                } else if (
+                    savedSelection &&
+                    filteredProcesses.some(p => p.id === savedSelection) &&
+                    selectedProcess !== savedSelection
+                ) {
+                    setSelectedProcess(savedSelection);
+                }
             }
         } catch (error) {
             console.error('Error cargando procesos masivos:', error);
@@ -873,6 +885,10 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
     useEffect(() => {
         loadBulkProcesses();
     }, []);
+
+    useEffect(() => {
+        setBulkSelectedProcessId(selectedProcess);
+    }, [selectedProcess]);
 
     const legacyColumnIdToName = useMemo(
         () => buildLegacyColumnIdToName(process?.bulkConfig, customColumns),

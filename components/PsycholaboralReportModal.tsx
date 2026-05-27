@@ -12,6 +12,7 @@ import {
     mergePsycholaboralInventory,
     buildPsycholaboralDisplayName,
 } from '../lib/psycholaboralUtils';
+import { resolveCandidateAge } from '../lib/bulkTableColumns';
 import { captureElementToPdf, downloadPsycholaboralPdf } from '../lib/psycholaboralPdf';
 import { PsycholaboralReportDocument } from './PsycholaboralReportDocument';
 
@@ -58,6 +59,16 @@ export const PsycholaboralReportModal: React.FC<Props> = ({
         const getCell = (columnId: string) => columnValues[candidate.id]?.[columnId];
         return buildPsycholaboralDisplayName(candidate.name, customColumns, getCell);
     }, [candidate, customColumns, columnValues]);
+
+    const reportAge = useMemo(() => {
+        if (!candidate) return undefined;
+        return resolveCandidateAge(candidate, customColumns, columnValues);
+    }, [candidate, customColumns, columnValues]);
+
+    const candidateForReport = useMemo(() => {
+        if (!candidate) return candidate;
+        return { ...candidate, age: reportAge };
+    }, [candidate, reportAge]);
 
     useEffect(() => {
         if (!isOpen || !candidate) return;
@@ -212,7 +223,7 @@ export const PsycholaboralReportModal: React.FC<Props> = ({
                                 </div>
                                 <div>
                                     <span className="text-gray-500">Edad:</span>{' '}
-                                    {candidate.age ? `${candidate.age} años` : '—'}
+                                    {reportAge ? `${reportAge} años` : '—'}
                                 </div>
                                 <div>
                                     <label className="text-gray-500 block mb-0.5">Puesto evaluado</label>
@@ -458,7 +469,7 @@ export const PsycholaboralReportModal: React.FC<Props> = ({
                 >
                     <PsycholaboralReportDocument
                         ref={reportRef}
-                        candidate={candidate}
+                        candidate={candidateForReport}
                         process={process}
                         evaluation={evaluation}
                         competencies={competencies}

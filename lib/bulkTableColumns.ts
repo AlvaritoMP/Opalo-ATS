@@ -822,6 +822,80 @@ export function resolveStandardFieldValue(
     return '';
 }
 
+type HomonymCandidateFields = {
+    id: string;
+    age?: number;
+    source?: string;
+    province?: string;
+    district?: string;
+    bulkColumnValues?: Record<string, unknown>;
+};
+
+/** Resuelve un campo estándar (edad, fuente, etc.) desde columnas personalizadas o el candidato. */
+export function resolveCandidateHomonymField(
+    candidate: HomonymCandidateFields,
+    field: 'age' | 'source' | 'province' | 'district',
+    customColumns: CustomColumn[],
+    columnValues: Record<string, Record<string, unknown>> = {},
+    legacyColumnIdToName: Record<string, string> = {}
+): unknown {
+    const row: Record<string, unknown> = {
+        ...(candidate.bulkColumnValues || {}),
+        ...(columnValues[candidate.id] || {}),
+    };
+
+    for (const col of customColumns) {
+        if (mapImportHeader(col.name.toLowerCase()) !== field) continue;
+        const resolved = resolveColumnValueFromRow(row, col, legacyColumnIdToName);
+        if (resolved !== undefined && resolved !== '' && resolved !== null) return resolved;
+        if (resolved === false) return false;
+    }
+
+    const direct = candidate[field];
+    if (direct != null && direct !== '') return direct;
+    return undefined;
+}
+
+/** Edad para informes: prioriza columnas personalizadas "Edad" sobre candidates.age (puede estar en 0). */
+export function resolveCandidateAge(
+    candidate: HomonymCandidateFields,
+    customColumns: CustomColumn[],
+    columnValues: Record<string, Record<string, unknown>> = {},
+    legacyColumnIdToName: Record<string, string> = {}
+): number | undefined {
+    const raw = resolveCandidateHomonymField(
+        candidate,
+        'age',
+        customColumns,
+        columnValues,
+        legacyColumnIdToName
+    );
+    if (raw !== undefined && raw !== null && raw !== '') {
+        const n = typeof raw === 'number' ? raw : parseInt(String(raw), 10);
+        if (!isNaN(n) && n > 0) return n;
+    }
+    if (candidate.age != null && candidate.age > 0) return candidate.age;
+    return undefined;
+}
+
+export const BULK_SELECTED_PROCESS_STORAGE_KEY = 'bulkProcessesSelectedId';
+
+export function getBulkSelectedProcessId(): string | null {
+    try {
+        return localStorage.getItem(BULK_SELECTED_PROCESS_STORAGE_KEY);
+    } catch {
+        return null;
+    }
+}
+
+export function setBulkSelectedProcessId(processId: string): void {
+    try {
+        localStorage.setItem(BULK_SELECTED_PROCESS_STORAGE_KEY, processId);
+    } catch {
+        /* ignore */
+    }
+}
+
 export function getColumnValuesStorageKey(processId: string): string {
     return `bulkColumnValues_${processId}`;
 }
