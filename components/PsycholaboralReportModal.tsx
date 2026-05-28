@@ -39,6 +39,7 @@ export const PsycholaboralReportModal: React.FC<Props> = ({
     inventory: initialInventory,
     customColumns = [],
     columnValues = {},
+    legacyColumnIdToName = {},
 }) => {
     const { state, actions } = useAppState();
     const inventory = useMemo(() => mergePsycholaboralInventory(initialInventory), [initialInventory]);
