@@ -2,3 +2,16 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Procesos masivos: más espacio para la tabla en pantallas bajas o cuadradas */
+@media (max-height: 900px) {
+  .bulk-table-hint {
+    display: none;
+  }
+}
+
+@media (max-height: 768px) {
+  .bulk-process-header {
+    padding-top: 0.375rem;
+    padding-bottom: 0.375rem;
+  }
+}

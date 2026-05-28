@@ -105,6 +105,22 @@ import { buildRouteColumnLink } from '../lib/transitRouteLinks';
 
 interface BulkProcessesViewProps {}
 
+/** Estilos compactos aplicados a botones dentro de cada grupo de la barra */
+const BULK_TOOLBAR_BTN_STYLES =
+    '[&_button]:inline-flex [&_button]:items-center [&_button]:gap-1 [&_button]:!px-2 [&_button]:!py-1 [&_button]:!text-xs [&_button]:font-medium [&_button]:!rounded-md [&_button]:shrink-0 [&_button_svg:not([class*=animate])]:!w-3.5 [&_button_svg:not([class*=animate])]:!h-3.5 [&_button_svg]:shrink-0';
+
+const BULK_TOOLBAR_GROUP_INNER =
+    `flex flex-wrap items-center gap-1 rounded-md border border-gray-200 bg-gray-50/80 px-1 py-0.5 ${BULK_TOOLBAR_BTN_STYLES}`;
+
+const BulkToolbarGroup: React.FC<{ label: string; children: React.ReactNode }> = ({ label, children }) => (
+    <div className="flex flex-col gap-0.5 min-w-0">
+        <span className="text-[10px] font-semibold uppercase tracking-wider text-gray-400 px-0.5 leading-none select-none">
+            {label}
+        </span>
+        <div className={BULK_TOOLBAR_GROUP_INNER}>{children}</div>
+    </div>
+);
+
 type CellCoord = { candidateId: string; colId: string };
 
 const toCellKey = (c: CellCoord) => `${c.candidateId}::${c.colId}`;
@@ -2999,13 +3015,14 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
     }, [selectedProcess, handleBulkCopy]);
 
     return (
-        <div className="h-full flex flex-col bg-white">
-            <div className="border-b bg-white p-4 space-y-4">
+        <div className="min-h-0 flex-1 flex flex-col bg-white overflow-hidden">
+            <div className={`border-b bg-white shrink-0 bulk-process-header ${selectedProcess ? 'px-2 py-2 space-y-2' : 'p-4 space-y-4'}`}>
+                {!selectedProcess && (
                 <div className="flex items-center justify-between">
                     <h1 className="text-2xl font-bold text-gray-900">Procesos Masivos</h1>
                     <div className="flex items-center gap-4">
                         <div className="text-sm text-gray-500">
-                            {selectedProcess ? `${total} candidatos` : `${bulkProcesses.length} procesos`}
+                            {bulkProcesses.length} procesos
                         </div>
                         <button
                             onClick={handleCreateProcess}
@@ -3016,6 +3033,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                         </button>
                     </div>
                 </div>
+                )}
 
                 {!selectedProcess ? (
                     <div className="space-y-2">
@@ -3055,8 +3073,8 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                     </div>
                 ) : (
                     <>
-                        <div className="flex flex-col gap-3 w-full min-w-0">
-                            <div className="flex items-center gap-3 min-w-0">
+                        <div className="flex flex-col gap-1.5 w-full min-w-0">
+                            <div className="flex items-center gap-2 min-w-0 flex-wrap">
                                 <button
                                     onClick={() => {
                                         selectBulkProcess('');
@@ -3064,295 +3082,304 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                         setSelectedStage('');
                                         setSearchInput('');
                                     }}
-                                    className="flex items-center gap-2 text-sm text-gray-600 hover:text-gray-900 shrink-0"
+                                    className="inline-flex items-center gap-1 px-2 py-1 text-xs text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-md shrink-0"
                                 >
-                                    <ArrowLeft className="w-4 h-4" />
-                                    Volver a procesos
+                                    <ArrowLeft className="w-3.5 h-3.5" />
+                                    Volver
                                 </button>
-                                <label
-                                    className="block text-sm font-medium text-gray-700 truncate min-w-0"
+                                <span
+                                    className="text-sm font-semibold text-gray-900 truncate min-w-0"
                                     title={process?.title}
                                 >
-                                    Proceso: {process?.title}
-                                </label>
+                                    {process?.title}
+                                </span>
+                                <span className="text-xs text-gray-500 shrink-0">
+                                    {total} candidatos
+                                </span>
                             </div>
                             {process && (
-                                <div className="flex flex-wrap items-center gap-2 w-full min-w-0">
-                                    <button
-                                        onClick={() => handleEditProcess(process)}
-                                        className="flex items-center gap-2 px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors"
-                                        title="Editar proceso"
-                                    >
-                                        <Settings className="w-4 h-4" />
-                                        Editar Proceso
-                                    </button>
-                                    <button
-                                        type="button"
-                                        onClick={() => {
-                                            setDocsModalProcess(process);
-                                            setShowProcessDocsModal(true);
-                                        }}
-                                        className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 text-gray-800 rounded-lg hover:bg-gray-50 transition-colors"
-                                        title="Documentos del proceso"
-                                    >
-                                        <Paperclip className="w-4 h-4" />
-                                        Documentos
-                                        {(attachmentCounts[process.id] ?? 0) > 0 && (
-                                            <span className="ml-1 px-1.5 py-0.5 text-xs bg-primary-100 text-primary-700 rounded-full">
-                                                {attachmentCounts[process.id]}
-                                            </span>
-                                        )}
-                                    </button>
-                                    {psycholaboralActive && (
-                                        <>
-                                            <button
-                                                type="button"
-                                                onClick={() => setShowPsychInventoryModal(true)}
-                                                className="flex items-center gap-2 px-4 py-2 bg-gray-100 text-gray-800 border border-gray-300 rounded-lg hover:bg-gray-200 transition-colors"
-                                                title="Inventario de definiciones y plantillas"
-                                            >
-                                                <BookOpen className="w-4 h-4" />
-                                                Inventario Psicolaboral
-                                            </button>
-                                            <button
-                                                type="button"
-                                                onClick={() => {
-                                                    const sel = candidates.filter(c => selectedIds.has(c.id));
-                                                    if (sel.length === 0) {
-                                                        actions.showToast('Seleccione al menos un candidato', 'error', 3000);
-                                                        return;
-                                                    }
-                                                    openPsychBulkEvaluate(sel);
-                                                }}
-                                                className="flex items-center gap-2 px-4 py-2 bg-cyan-700 text-white rounded-lg hover:bg-cyan-800 transition-colors whitespace-nowrap"
-                                                title="Cuadrícula de valores para varios candidatos"
-                                            >
-                                                <ClipboardList className="w-4 h-4 shrink-0" />
-                                                Evaluación masiva
-                                            </button>
-                                            <button
-                                                type="button"
-                                                onClick={() => {
-                                                    const sel = candidates.filter(c => selectedIds.has(c.id));
-                                                    if (sel.length === 0) {
-                                                        actions.showToast('Seleccione al menos un candidato', 'error', 3000);
-                                                        return;
-                                                    }
-                                                    openPsychReport(sel);
-                                                }}
-                                                className="flex items-center gap-2 px-4 py-2 bg-teal-600 text-white rounded-lg hover:bg-teal-700 transition-colors whitespace-nowrap"
-                                                title="Evaluar y generar informe PDF"
-                                            >
-                                                <FileText className="w-4 h-4 shrink-0" />
-                                                Informe Psicolaboral
-                                            </button>
-                                        </>
-                                    )}
-                                    <button
-                                        type="button"
-                                        onClick={() => setShowIdealProfileModal(true)}
-                                        className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-colors whitespace-nowrap ${
-                                            idealProfileConfig?.enabled
-                                                ? 'bg-indigo-600 text-white hover:bg-indigo-700'
-                                                : 'bg-white border border-indigo-300 text-indigo-800 hover:bg-indigo-50'
-                                        }`}
-                                        title="Definir perfil ideal y comparar candidatos"
-                                    >
-                                        <Target className="w-4 h-4 shrink-0" />
-                                        Perfil ideal
-                                    </button>
-                                    <button
-                                        type="button"
-                                        onClick={() => {
-                                            setImportRestoreMode(true);
-                                            setShowImportModal(true);
-                                        }}
-                                        className="flex items-center gap-2 px-4 py-2 bg-amber-50 border border-amber-300 text-amber-900 rounded-lg hover:bg-amber-100 transition-colors"
-                                        title="Restaurar columnas desde tu Excel original"
-                                    >
-                                        <HardDrive className="w-4 h-4" />
-                                        Restaurar desde Excel
-                                    </button>
-                                    <button
-                                        type="button"
-                                        onClick={() => refreshFromDatabase()}
-                                        className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 text-gray-800 rounded-lg hover:bg-gray-50 transition-colors"
-                                        title="Recargar candidatos y columnas personalizadas"
-                                    >
-                                        <RefreshCw className="w-4 h-4" />
-                                        Actualizar
-                                    </button>
-                                    <button
-                                        type="button"
-                                        onClick={handleNormalizeTextCase}
-                                        disabled={isNormalizingTextCase || isLoading}
-                                        className="flex items-center gap-2 px-4 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                                        title='Corregir MAYÚSCULAS en nombres, direcciones y columnas de texto (ej. "CALLE Italia" → "Calle Italia")'
-                                    >
-                                        {isNormalizingTextCase ? (
-                                            <Loader2 className="w-4 h-4 animate-spin" />
-                                        ) : (
-                                            <CaseSensitive className="w-4 h-4" />
-                                        )}
-                                        Normalizar texto
-                                    </button>
-                                    <button
-                                        onClick={() => setShowAddRowModal(true)}
-                                        className="flex items-center gap-2 px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors"
-                                        title="Añadir una fila con los campos básicos del proceso masivo"
-                                    >
-                                        <ListPlus className="w-4 h-4" />
-                                        Añadir fila
-                                    </button>
-                                    <button
-                                        onClick={() => {
-                                            setImportRestoreMode(false);
-                                            setShowImportModal(true);
-                                        }}
-                                        className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
-                                    >
-                                        <Upload className="w-4 h-4" />
-                                        Importar desde Excel
-                                    </button>
-                                    <button
-                                        type="button"
-                                        onClick={() => setShowExportModal(true)}
-                                        className="flex items-center gap-2 px-4 py-2 bg-slate-700 text-white rounded-lg hover:bg-slate-800 transition-colors"
-                                        title="Exportar tabla personalizada para el cliente"
-                                    >
-                                        <Download className="w-4 h-4" />
-                                        Exportar tabla
-                                    </button>
-                                    <button
-                                        onClick={() => setShowAddColumnModal(true)}
-                                        className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-                                        title="Agregar columna personalizada"
-                                    >
-                                        <Plus className="w-4 h-4" />
-                                        Agregar Columna
-                                    </button>
-                                    <button
-                                        onClick={() => setShowTemplateModal(true)}
-                                        className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors"
-                                        title="Gestionar plantillas de tabla"
-                                    >
-                                        <Settings className="w-4 h-4" />
-                                        Plantillas
-                                    </button>
-                                    <div className="relative">
+                                <div className="flex flex-wrap items-end gap-2 w-full min-w-0">
+                                    <BulkToolbarGroup label="Proceso">
                                         <button
-                                            onClick={() => setShowColumnConfig(!showColumnConfig)}
-                                            className="flex items-center gap-2 px-4 py-2 bg-gray-100 text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-200 transition-colors"
-                                            title="Configurar columnas"
+                                            onClick={() => handleEditProcess(process)}
+                                            className="bg-gray-600 text-white hover:bg-gray-700 transition-colors"
+                                            title="Editar proceso"
                                         >
-                                            <Filter className="w-4 h-4" />
-                                            Columnas
+                                            <Settings className="w-4 h-4" />
+                                            Editar Proceso
                                         </button>
-                                        {showColumnConfig && (
-                                            <div className="absolute right-0 mt-2 w-64 bg-white border border-gray-200 rounded-lg shadow-xl z-50 p-2 max-h-96 overflow-y-auto">
-                                                <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1 px-2">Columnas</div>
-                                                <p className="text-[10px] text-gray-400 px-2 mb-2">📌 = fijar al hacer scroll horizontal</p>
-                                                {allColumnIds.map(colId => {
-                                                    const colName = getColumnLabel(colId, customColumns);
-                                                    const isCustom = colId.startsWith('custom_');
-                                                    const customColId = isCustom ? colId.replace('custom_', '') : null;
-                                                    const isPinned = pinnedColumns.includes(colId);
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                setDocsModalProcess(process);
+                                                setShowProcessDocsModal(true);
+                                            }}
+                                            className="bg-white border border-gray-300 text-gray-800 hover:bg-gray-50 transition-colors"
+                                            title="Documentos del proceso"
+                                        >
+                                            <Paperclip className="w-4 h-4" />
+                                            Documentos
+                                            {(attachmentCounts[process.id] ?? 0) > 0 && (
+                                                <span className="ml-1 px-1.5 py-0.5 text-xs bg-primary-100 text-primary-700 rounded-full">
+                                                    {attachmentCounts[process.id]}
+                                                </span>
+                                            )}
+                                        </button>
+                                    </BulkToolbarGroup>
 
-                                                    return (
-                                                        <div key={colId} className="flex items-center gap-1 px-2 py-1 hover:bg-gray-50 rounded">
-                                                            <button
-                                                                type="button"
-                                                                onClick={() => togglePinColumn(colId)}
-                                                                className={`p-0.5 rounded shrink-0 ${isPinned ? 'text-primary-600 bg-primary-50' : 'text-gray-300 hover:text-gray-500'}`}
-                                                                title={isPinned ? 'Desfijar columna' : 'Fijar columna'}
-                                                            >
-                                                                <Pin className="w-3.5 h-3.5" />
-                                                            </button>
-                                                            <label className="flex items-center gap-2 flex-1 cursor-pointer min-w-0">
-                                                                <input
-                                                                    type="checkbox"
-                                                                    checked={!hiddenColumns.includes(colId)}
-                                                                    onChange={() => toggleColumnVisibility(colId)}
-                                                                    className="w-3.5 h-3.5 text-primary-600 rounded focus:ring-primary-500"
-                                                                />
-                                                                <span className="text-xs text-gray-700 truncate" title={colName}>{colName}</span>
-                                                            </label>
-                                                            {isCustom && customColId && (
-                                                                <div className="flex gap-0.5 shrink-0">
-                                                                    <button
-                                                                        type="button"
-                                                                        onClick={() => {
-                                                                            const col = customColumns.find(c => c.id === customColId);
-                                                                            if (col) {
-                                                                                setEditingColumn(col);
-                                                                                setShowAddColumnModal(true);
-                                                                            }
-                                                                        }}
-                                                                        className="p-1 text-gray-500 hover:text-primary-600 hover:bg-primary-50 rounded"
-                                                                        title="Editar columna"
-                                                                    >
-                                                                        <Edit className="w-3.5 h-3.5" />
-                                                                    </button>
-                                                                    <button
-                                                                        type="button"
-                                                                        onClick={() => handleDeleteColumn(customColId)}
-                                                                        className="p-1 text-gray-500 hover:text-red-600 hover:bg-red-50 rounded"
-                                                                        title="Eliminar columna"
-                                                                    >
-                                                                        <Trash2 className="w-3.5 h-3.5" />
-                                                                    </button>
-                                                                </div>
-                                                            )}
-                                                        </div>
-                                                    );
-                                                })}
-                                            </div>
+                                    <BulkToolbarGroup label="Tabla">
+                                        <button
+                                            onClick={() => setShowAddColumnModal(true)}
+                                            className="bg-blue-600 text-white hover:bg-blue-700 transition-colors"
+                                            title="Agregar columna personalizada"
+                                        >
+                                            <Plus className="w-4 h-4" />
+                                            Agregar Columna
+                                        </button>
+                                        <button
+                                            onClick={() => setShowTemplateModal(true)}
+                                            className="bg-purple-600 text-white hover:bg-purple-700 transition-colors"
+                                            title="Gestionar plantillas de tabla"
+                                        >
+                                            <Settings className="w-4 h-4" />
+                                            Plantillas
+                                        </button>
+                                        <div className="relative">
+                                            <button
+                                                onClick={() => setShowColumnConfig(!showColumnConfig)}
+                                                className="bg-gray-100 text-gray-700 border border-gray-300 hover:bg-gray-200 transition-colors"
+                                                title="Configurar columnas"
+                                            >
+                                                <Filter className="w-4 h-4" />
+                                                Columnas
+                                            </button>
+                                            {showColumnConfig && (
+                                                <div className="absolute left-0 mt-2 w-64 bg-white border border-gray-200 rounded-lg shadow-xl z-50 p-2 max-h-96 overflow-y-auto">
+                                                    <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1 px-2">Columnas</div>
+                                                    <p className="text-[10px] text-gray-400 px-2 mb-2">📌 = fijar al hacer scroll horizontal</p>
+                                                    {allColumnIds.map(colId => {
+                                                        const colName = getColumnLabel(colId, customColumns);
+                                                        const isCustom = colId.startsWith('custom_');
+                                                        const customColId = isCustom ? colId.replace('custom_', '') : null;
+                                                        const isPinned = pinnedColumns.includes(colId);
+
+                                                        return (
+                                                            <div key={colId} className="flex items-center gap-1 px-2 py-1 hover:bg-gray-50 rounded">
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => togglePinColumn(colId)}
+                                                                    className={`p-0.5 rounded shrink-0 ${isPinned ? 'text-primary-600 bg-primary-50' : 'text-gray-300 hover:text-gray-500'}`}
+                                                                    title={isPinned ? 'Desfijar columna' : 'Fijar columna'}
+                                                                >
+                                                                    <Pin className="w-3.5 h-3.5" />
+                                                                </button>
+                                                                <label className="flex items-center gap-2 flex-1 cursor-pointer min-w-0">
+                                                                    <input
+                                                                        type="checkbox"
+                                                                        checked={!hiddenColumns.includes(colId)}
+                                                                        onChange={() => toggleColumnVisibility(colId)}
+                                                                        className="w-3.5 h-3.5 text-primary-600 rounded focus:ring-primary-500"
+                                                                    />
+                                                                    <span className="text-xs text-gray-700 truncate" title={colName}>{colName}</span>
+                                                                </label>
+                                                                {isCustom && customColId && (
+                                                                    <div className="flex gap-0.5 shrink-0">
+                                                                        <button
+                                                                            type="button"
+                                                                            onClick={() => {
+                                                                                const col = customColumns.find(c => c.id === customColId);
+                                                                                if (col) {
+                                                                                    setEditingColumn(col);
+                                                                                    setShowAddColumnModal(true);
+                                                                                }
+                                                                            }}
+                                                                            className="p-1 text-gray-500 hover:text-primary-600 hover:bg-primary-50 rounded"
+                                                                            title="Editar columna"
+                                                                        >
+                                                                            <Edit className="w-3.5 h-3.5" />
+                                                                        </button>
+                                                                        <button
+                                                                            type="button"
+                                                                            onClick={() => handleDeleteColumn(customColId)}
+                                                                            className="p-1 text-gray-500 hover:text-red-600 hover:bg-red-50 rounded"
+                                                                            title="Eliminar columna"
+                                                                        >
+                                                                            <Trash2 className="w-3.5 h-3.5" />
+                                                                        </button>
+                                                                    </div>
+                                                                )}
+                                                            </div>
+                                                        );
+                                                    })}
+                                                </div>
+                                            )}
+                                        </div>
+                                        <button
+                                            onClick={() => setShowAddRowModal(true)}
+                                            className="bg-primary-600 text-white hover:bg-primary-700 transition-colors"
+                                            title="Añadir una fila con los campos básicos del proceso masivo"
+                                        >
+                                            <ListPlus className="w-4 h-4" />
+                                            Añadir fila
+                                        </button>
+                                        <button
+                                            onClick={() => {
+                                                setImportRestoreMode(false);
+                                                setShowImportModal(true);
+                                            }}
+                                            className="bg-green-600 text-white hover:bg-green-700 transition-colors"
+                                        >
+                                            <Upload className="w-4 h-4" />
+                                            Importar Excel
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                setImportRestoreMode(true);
+                                                setShowImportModal(true);
+                                            }}
+                                            className="bg-amber-50 border border-amber-300 text-amber-900 hover:bg-amber-100 transition-colors"
+                                            title="Restaurar columnas desde tu Excel original"
+                                        >
+                                            <HardDrive className="w-4 h-4" />
+                                            Restaurar Excel
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => setShowExportModal(true)}
+                                            className="bg-slate-700 text-white hover:bg-slate-800 transition-colors"
+                                            title="Exportar tabla personalizada para el cliente"
+                                        >
+                                            <Download className="w-4 h-4" />
+                                            Exportar
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={handleNormalizeTextCase}
+                                            disabled={isNormalizingTextCase || isLoading}
+                                            className="bg-amber-600 text-white hover:bg-amber-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                            title='Corregir MAYÚSCULAS en nombres, direcciones y columnas de texto (ej. "CALLE Italia" → "Calle Italia")'
+                                        >
+                                            {isNormalizingTextCase ? (
+                                                <Loader2 className="w-4 h-4 animate-spin" />
+                                            ) : (
+                                                <CaseSensitive className="w-4 h-4" />
+                                            )}
+                                            Normalizar
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => refreshFromDatabase()}
+                                            className="bg-white border border-gray-300 text-gray-800 hover:bg-gray-50 transition-colors"
+                                            title="Recargar candidatos y columnas personalizadas"
+                                        >
+                                            <RefreshCw className="w-4 h-4" />
+                                            Actualizar
+                                        </button>
+                                    </BulkToolbarGroup>
+
+                                    <BulkToolbarGroup label="Herramientas">
+                                        <button
+                                            type="button"
+                                            onClick={() => setShowIdealProfileModal(true)}
+                                            className={`transition-colors whitespace-nowrap ${
+                                                idealProfileConfig?.enabled
+                                                    ? 'bg-indigo-600 text-white hover:bg-indigo-700'
+                                                    : 'bg-white border border-indigo-300 text-indigo-800 hover:bg-indigo-50'
+                                            }`}
+                                            title="Definir perfil ideal y comparar candidatos"
+                                        >
+                                            <Target className="w-4 h-4 shrink-0" />
+                                            Perfil ideal
+                                        </button>
+                                        {psycholaboralActive && (
+                                            <>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setShowPsychInventoryModal(true)}
+                                                    className="bg-gray-100 text-gray-800 border border-gray-300 hover:bg-gray-200 transition-colors"
+                                                    title="Inventario de definiciones y plantillas"
+                                                >
+                                                    <BookOpen className="w-4 h-4" />
+                                                    Inventario
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => {
+                                                        const sel = candidates.filter(c => selectedIds.has(c.id));
+                                                        if (sel.length === 0) {
+                                                            actions.showToast('Seleccione al menos un candidato', 'error', 3000);
+                                                            return;
+                                                        }
+                                                        openPsychBulkEvaluate(sel);
+                                                    }}
+                                                    className="bg-cyan-700 text-white hover:bg-cyan-800 transition-colors whitespace-nowrap"
+                                                    title="Cuadrícula de valores para varios candidatos"
+                                                >
+                                                    <ClipboardList className="w-4 h-4 shrink-0" />
+                                                    Eval. masiva
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => {
+                                                        const sel = candidates.filter(c => selectedIds.has(c.id));
+                                                        if (sel.length === 0) {
+                                                            actions.showToast('Seleccione al menos un candidato', 'error', 3000);
+                                                            return;
+                                                        }
+                                                        openPsychReport(sel);
+                                                    }}
+                                                    className="bg-teal-600 text-white hover:bg-teal-700 transition-colors whitespace-nowrap"
+                                                    title="Evaluar y generar informe PDF"
+                                                >
+                                                    <FileText className="w-4 h-4 shrink-0" />
+                                                    Informe psico.
+                                                </button>
+                                            </>
                                         )}
-                                    </div>
+                                    </BulkToolbarGroup>
                                 </div>
                             )}
                         </div>
                         
-                        <div className="space-y-3">
-                            <div className="flex gap-4 items-end">
+                        <div className="flex flex-wrap gap-2 items-center">
                                 {process && (
-                                    <div className="flex-1">
-                                        <label className="block text-sm font-medium text-gray-700 mb-1">Etapa</label>
+                                    <div className="flex items-center gap-1.5 min-w-[120px] flex-1 max-w-xs">
+                                        <label className="text-xs font-medium text-gray-600 shrink-0">Etapa</label>
                                         <select
                                             value={selectedStage}
                                             onChange={(e) => setSelectedStage(e.target.value)}
-                                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                                            className="flex-1 min-w-0 px-2 py-1 text-xs border border-gray-300 rounded-md focus:ring-1 focus:ring-primary-500 focus:border-transparent"
                                         >
-                                            <option value="">Todas las etapas</option>
+                                            <option value="">Todas</option>
                                             {process.stages.map(s => (
                                                 <option key={s.id} value={s.id}>{s.name}</option>
                                             ))}
                                         </select>
                                     </div>
                                 )}
-                                <div className="flex-1">
-                                    <label className="block text-sm font-medium text-gray-700 mb-1">Búsqueda</label>
-                                    <div className="relative">
-                                        <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
+                                <div className="flex items-center gap-1.5 flex-1 min-w-[160px] max-w-md">
+                                    <label className="text-xs font-medium text-gray-600 shrink-0">Buscar</label>
+                                    <div className="relative flex-1 min-w-0">
+                                        <Search className="absolute left-2 top-1/2 transform -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
                                         <input
                                             type="text"
                                             value={searchInput}
                                             onChange={(e) => setSearchInput(e.target.value)}
                                             placeholder="Nombre, teléfono..."
-                                            className="w-full pl-10 pr-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                                            className="w-full pl-7 pr-2 py-1 text-xs border border-gray-300 rounded-md focus:ring-1 focus:ring-primary-500 focus:border-transparent"
                                         />
                                     </div>
                                 </div>
                             </div>
-                        </div>
                     </>
                 )}
             </div>
 
             {selectedProcess && (
                 <div className="flex-1 overflow-hidden relative flex flex-col">
-                    <p className="text-[10px] text-gray-500 px-4 pt-2 pb-1 shrink-0">
-                        Flechas · Shift+arrastrar selección · Ctrl+clic múltiple · Clic derecho: color/comentario · Enter/doble clic editar · Ctrl+C copiar · Ctrl+V pegar en celdas seleccionadas · Doble clic en fila abre detalle · Arrastre el borde derecho del encabezado para ajustar el ancho de columna
+                    <p className="bulk-table-hint text-[10px] text-gray-500 px-2 pt-1 pb-0.5 shrink-0 line-clamp-1" title="Flechas · Shift+arrastrar selección · Ctrl+clic múltiple · Clic derecho: color/comentario · Enter/doble clic editar · Ctrl+C copiar · Ctrl+V pegar · Doble clic en fila abre detalle · Arrastre el borde del encabezado para ajustar ancho">
+                        Flechas · Shift+arrastrar · Ctrl+clic · Clic derecho color/comentario · Enter editar · Ctrl+C/V · Doble clic detalle · Arrastre borde encabezado = ancho columna
                     </p>
                     <div
                         ref={tableContainerRef}
