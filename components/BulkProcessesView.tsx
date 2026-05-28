@@ -2733,35 +2733,34 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
         }
     }, [displayCandidates, visibleColumns]);
 
-    const isActiveCell = (candidateId: string, colId: string) =>
-        activeCell?.candidateId === candidateId && activeCell?.colId === colId;
-
-    const isCellSelected = (candidateId: string, colId: string) =>
-        selectedCells.has(toCellKey({ candidateId, colId }));
-
-    const cellFocusClass = (candidateId: string, colId: string) => {
-        if (isActiveCell(candidateId, colId)) {
-            return 'ring-2 ring-primary-600 ring-inset z-[30]';
-        }
-        if (isCellSelected(candidateId, colId)) {
-            return 'ring-1 ring-primary-400 ring-inset z-[25]';
-        }
-        return '';
-    };
-
     const buildCellDisplayStyle = useCallback((candidateId: string, colId: string): React.CSSProperties => {
         const style: React.CSSProperties = { ...buildTdStyle(candidateId, colId) };
         const active = activeCell?.candidateId === candidateId && activeCell?.colId === colId;
         const selected = selectedCells.has(toCellKey({ candidateId, colId }));
+        const isPinned = pinnedColumns.includes(colId);
+        const meta = getCellMetaFor(candidateId, colId);
+
+        const shadows: string[] = [];
+        if (style.boxShadow) shadows.push(String(style.boxShadow));
+
         if (active) {
-            style.zIndex = Math.max(typeof style.zIndex === 'number' ? style.zIndex : 0, 30);
-            if (!style.position) style.position = 'relative';
+            style.outline = '2px solid #2563eb';
+            style.outlineOffset = '-2px';
+            shadows.push('inset 0 0 0 1px #2563eb');
+            style.zIndex = isPinned ? 55 : 30;
+            if (!meta?.bgColor) style.backgroundColor = '#eff6ff';
         } else if (selected) {
-            style.zIndex = Math.max(typeof style.zIndex === 'number' ? style.zIndex : 0, 25);
-            if (!style.position) style.position = 'relative';
+            style.outline = '1px solid #60a5fa';
+            style.outlineOffset = '-1px';
+            shadows.push('inset 0 0 0 1px #93c5fd');
+            style.zIndex = Math.max(typeof style.zIndex === 'number' ? style.zIndex : 0, isPinned ? 50 : 25);
+            if (!meta?.bgColor) style.backgroundColor = '#f8fafc';
         }
+
+        if (shadows.length > 0) style.boxShadow = shadows.join(', ');
+
         return style;
-    }, [buildTdStyle, activeCell, selectedCells]);
+    }, [buildTdStyle, activeCell, selectedCells, pinnedColumns, getCellMetaFor]);
 
     const renderCellCommentIndicator = (candidateId: string, colId: string) => {
         const comment = getCellMetaFor(candidateId, colId)?.comment;
@@ -2779,7 +2778,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
         const coord = { candidateId, colId };
         return {
             ...cellDataAttrs(candidateId, colId),
-            className: `${COMPACT_TD_CLASS} relative ${cellFocusClass(candidateId, colId)} ${extra}`.trim(),
+            className: `${COMPACT_TD_CLASS} relative ${extra}`.trim(),
             style: buildCellDisplayStyle(candidateId, colId),
             title: meta?.comment || undefined,
             onMouseDown: (e: React.MouseEvent) => {
