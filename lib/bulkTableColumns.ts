@@ -831,6 +831,48 @@ type HomonymCandidateFields = {
     bulkColumnValues?: Record<string, unknown>;
 };
 
+export function isAgeLikeColumn(col: CustomColumn): boolean {
+    const norm = normalizeColumnNameKey(col.name);
+    if (norm === 'edad' || norm === 'age') return true;
+    if (mapImportHeader(col.name.toLowerCase()) === 'age') return true;
+    if (/^edad(\b|\s)/.test(norm)) return true;
+    return false;
+}
+
+function columnMatchesHomonymField(
+    col: CustomColumn,
+    field: 'age' | 'source' | 'province' | 'district'
+): boolean {
+    if (field === 'age') return isAgeLikeColumn(col);
+    return mapImportHeader(col.name.toLowerCase()) === field;
+}
+
+export function getCandidateColumnRow(
+    candidate: HomonymCandidateFields,
+    columnValues: Record<string, Record<string, unknown>> = {}
+): Record<string, unknown> {
+    return {
+        ...(candidate.bulkColumnValues || {}),
+        ...(columnValues[candidate.id] || {}),
+    };
+}
+
+export function getCandidateCustomColumnValue(
+    candidate: HomonymCandidateFields,
+    columnId: string,
+    customColumns: CustomColumn[],
+    columnValues: Record<string, Record<string, unknown>> = {},
+    legacyColumnIdToName: Record<string, string> = {}
+): unknown {
+    const col = customColumns.find(c => c.id === columnId);
+    if (!col) return columnValues[candidate.id]?.[columnId];
+    const row = getCandidateColumnRow(candidate, columnValues);
+    const resolved = resolveColumnValueFromRow(row, col, legacyColumnIdToName);
+    if (resolved !== undefined && resolved !== '') return resolved;
+    if (resolved === false) return false;
+    return undefined;
+}
+
 /** Resuelve un campo estándar (edad, fuente, etc.) desde columnas personalizadas o el candidato. */
 export function resolveCandidateHomonymField(
     candidate: HomonymCandidateFields,
@@ -839,13 +881,10 @@ export function resolveCandidateHomonymField(
     columnValues: Record<string, Record<string, unknown>> = {},
     legacyColumnIdToName: Record<string, string> = {}
 ): unknown {
-    const row: Record<string, unknown> = {
-        ...(candidate.bulkColumnValues || {}),
-        ...(columnValues[candidate.id] || {}),
-    };
+    const row = getCandidateColumnRow(candidate, columnValues);
 
     for (const col of customColumns) {
-        if (mapImportHeader(col.name.toLowerCase()) !== field) continue;
+        if (!columnMatchesHomonymField(col, field)) continue;
         const resolved = resolveColumnValueFromRow(row, col, legacyColumnIdToName);
         if (resolved !== undefined && resolved !== '' && resolved !== null) return resolved;
         if (resolved === false) return false;

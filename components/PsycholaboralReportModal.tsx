@@ -12,7 +12,10 @@ import {
     mergePsycholaboralInventory,
     buildPsycholaboralDisplayName,
 } from '../lib/psycholaboralUtils';
-import { resolveCandidateAge } from '../lib/bulkTableColumns';
+import {
+    resolveCandidateAge,
+    getCandidateCustomColumnValue,
+} from '../lib/bulkTableColumns';
 import { captureElementToPdf, downloadPsycholaboralPdf } from '../lib/psycholaboralPdf';
 import { PsycholaboralReportDocument } from './PsycholaboralReportDocument';
 
@@ -25,6 +28,7 @@ interface Props {
     /** Columnas masivas / valores para armar nombre + apellidos en el PDF */
     customColumns?: CustomColumn[];
     columnValues?: Record<string, Record<string, unknown>>;
+    legacyColumnIdToName?: Record<string, string>;
 }
 
 export const PsycholaboralReportModal: React.FC<Props> = ({
@@ -56,14 +60,26 @@ export const PsycholaboralReportModal: React.FC<Props> = ({
 
     const fullNameForReport = useMemo(() => {
         if (!candidate) return '';
-        const getCell = (columnId: string) => columnValues[candidate.id]?.[columnId];
+        const getCell = (columnId: string) =>
+            getCandidateCustomColumnValue(
+                candidate,
+                columnId,
+                customColumns,
+                columnValues,
+                legacyColumnIdToName
+            );
         return buildPsycholaboralDisplayName(candidate.name, customColumns, getCell);
-    }, [candidate, customColumns, columnValues]);
+    }, [candidate, customColumns, columnValues, legacyColumnIdToName]);
 
     const reportAge = useMemo(() => {
         if (!candidate) return undefined;
-        return resolveCandidateAge(candidate, customColumns, columnValues);
-    }, [candidate, customColumns, columnValues]);
+        return resolveCandidateAge(
+            candidate,
+            customColumns,
+            columnValues,
+            legacyColumnIdToName
+        );
+    }, [candidate, customColumns, columnValues, legacyColumnIdToName]);
 
     const candidateForReport = useMemo(() => {
         if (!candidate) return candidate;

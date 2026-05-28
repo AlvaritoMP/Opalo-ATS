@@ -1661,6 +1661,10 @@ const App: React.FC = () => {
     const getLabel = (key: string, fallback: string): string => {
         return state.settings?.customLabels?.[key] || fallback;
     };
+
+    const visibleSections = state.currentUser ? getVisibleSections(state.currentUser) : [];
+    const canSeeBulkProcesses = visibleSections.includes('bulk-processes');
+    const isBulkProcessesView = state.view.type === 'bulk-processes';
     
     const renderView = () => {
         // Verificar si el usuario tiene acceso a la sección actual
@@ -1711,7 +1715,7 @@ const App: React.FC = () => {
             case 'users': return <Users />;
             case 'settings': return <Settings />;
             case 'bulk-import': return <BulkImportView />;
-            case 'bulk-processes': return <BulkProcessesView />;
+            case 'bulk-processes': return null;
             case 'opsflow-handoffs': return <OpsFlowHandoffHistory />;
             case 'archived': return <ArchivedCandidates />;
             default: return <Dashboard />;
@@ -1737,7 +1741,15 @@ const App: React.FC = () => {
             <div className="flex h-screen bg-gray-50 font-sans text-gray-900">
                 <Sidebar />
                 <div className="flex-1 flex flex-col overflow-y-auto min-h-0 pt-16 md:pt-0">
-                    {renderView()}
+                    {canSeeBulkProcesses && (
+                        <div
+                            className={isBulkProcessesView ? 'flex flex-col flex-1 min-h-0' : 'hidden'}
+                            aria-hidden={!isBulkProcessesView}
+                        >
+                            <BulkProcessesView />
+                        </div>
+                    )}
+                    {!isBulkProcessesView && renderView()}
                 </div>
                 <ToastContainer toasts={state.toasts || []} onClose={(id) => hideToastHelper(id)} />
             </div>

@@ -861,18 +861,18 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                 filteredProcesses = processes.filter(p => p.clientId && allowedClientIdsSet.has(p.clientId));
             }
             setBulkProcesses(filteredProcesses);
+            if (filteredProcesses.length === 0) return;
+
             const savedSelection = getBulkSelectedProcessId();
-            if (filteredProcesses.length > 0) {
-                if (savedSelection === null && !selectedProcess) {
-                    setSelectedProcess(filteredProcesses[0].id);
-                    setBulkSelectedProcessId(filteredProcesses[0].id);
-                } else if (
-                    savedSelection &&
-                    filteredProcesses.some(p => p.id === savedSelection) &&
-                    selectedProcess !== savedSelection
-                ) {
-                    setSelectedProcess(savedSelection);
-                }
+            const activeId = selectedProcess || savedSelection || '';
+
+            if (activeId && filteredProcesses.some(p => p.id === activeId)) {
+                if (selectedProcess !== activeId) setSelectedProcess(activeId);
+                return;
+            }
+            if (savedSelection === null && !selectedProcess) {
+                setSelectedProcess(filteredProcesses[0].id);
+                setBulkSelectedProcessId(filteredProcesses[0].id);
             }
         } catch (error) {
             console.error('Error cargando procesos masivos:', error);
@@ -886,9 +886,10 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
         loadBulkProcesses();
     }, []);
 
-    useEffect(() => {
-        setBulkSelectedProcessId(selectedProcess);
-    }, [selectedProcess]);
+    const selectBulkProcess = useCallback((processId: string) => {
+        setSelectedProcess(processId);
+        setBulkSelectedProcessId(processId);
+    }, []);
 
     const legacyColumnIdToName = useMemo(
         () => buildLegacyColumnIdToName(process?.bulkConfig, customColumns),
@@ -1741,7 +1742,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
             actions.showToast('Proceso masivo eliminado', 'success', 3000);
             await loadBulkProcesses();
             if (selectedProcess === processId) {
-                setSelectedProcess('');
+                selectBulkProcess('');
                 setCandidates([]);
             }
         } catch (error: any) {
@@ -3004,7 +3005,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                         key={p.id}
                                         process={p}
                                         attachmentCount={attachmentCounts[p.id] ?? p.attachments?.length ?? 0}
-                                        onSelect={() => setSelectedProcess(p.id)}
+                                        onSelect={() => selectBulkProcess(p.id)}
                                         onEdit={() => handleEditProcess(p)}
                                         onDelete={() => handleDeleteProcess(p.id)}
                                         onDocuments={() => {
@@ -3022,7 +3023,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                             <div className="flex items-center gap-3 min-w-0">
                                 <button
                                     onClick={() => {
-                                        setSelectedProcess('');
+                                        selectBulkProcess('');
                                         setCandidates([]);
                                         setSelectedStage('');
                                         setSearchInput('');
@@ -4302,6 +4303,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                     inventory={psychInventory}
                     customColumns={customColumns}
                     columnValues={columnValues}
+                    legacyColumnIdToName={legacyColumnIdToName}
                 />
             )}
 

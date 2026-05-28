@@ -295,7 +295,7 @@ export const PsycholaboralReportDocument = React.forwardRef<
                         >
                             {[
                                 ['DNI', candidate.dni || '—'],
-                                ['Edad', candidate.age ? `${candidate.age}` : '—'],
+                                ['Edad', candidate.age != null && candidate.age > 0 ? `${candidate.age}` : '—'],
                                 ['Puesto', position || '—'],
                             ].map(([k, v]) => (
                                 <div key={String(k)}>
