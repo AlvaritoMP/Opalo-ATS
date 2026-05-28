@@ -16,7 +16,9 @@ import {
     criterionHasIdealValue,
     isActiveIdealProfileCriterion,
     normalizeIdealProfileCriteria,
+    ProfileMatchSummary,
 } from '../lib/bulkIdealProfileMatch';
+import { BulkIdealProfileSummaryPanel } from './BulkIdealProfileSummaryPanel';
 
 interface Props {
     isOpen: boolean;
@@ -25,6 +27,8 @@ interface Props {
     customColumns: CustomColumn[];
     columnOrder: string[];
     onSave: (config: IdealProfileConfig) => Promise<void>;
+    profileMatchSummary?: ProfileMatchSummary | null;
+    profileMatchSummaryLoading?: boolean;
 }
 
 const MATCH_MODE_LABELS: Record<IdealProfileMatchMode, string> = {
@@ -79,6 +83,8 @@ export const BulkIdealProfileModal: React.FC<Props> = ({
     customColumns,
     columnOrder,
     onSave,
+    profileMatchSummary = null,
+    profileMatchSummaryLoading = false,
 }) => {
     const availableFields = useMemo(
         () => getIdealProfileAvailableFields(customColumns, columnOrder),
@@ -191,6 +197,15 @@ export const BulkIdealProfileModal: React.FC<Props> = ({
                 </div>
 
                 <div className="flex-1 overflow-y-auto px-6 py-4 space-y-5">
+                    {enabled && (
+                        <BulkIdealProfileSummaryPanel
+                            summary={profileMatchSummary}
+                            config={process.bulkConfig?.idealProfile}
+                            loading={profileMatchSummaryLoading}
+                            compact
+                        />
+                    )}
+
                     <label className="flex items-center gap-3 cursor-pointer">
                         <input
                             type="checkbox"

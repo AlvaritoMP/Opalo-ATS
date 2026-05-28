@@ -7,9 +7,16 @@ interface Props {
     summary: ProfileMatchSummary | null;
     config?: IdealProfileConfig;
     loading?: boolean;
+    /** Vista compacta dentro del modal de perfil ideal */
+    compact?: boolean;
 }
 
-export const BulkIdealProfileSummaryPanel: React.FC<Props> = ({ summary, config, loading }) => {
+export const BulkIdealProfileSummaryPanel: React.FC<Props> = ({
+    summary,
+    config,
+    loading,
+    compact = false,
+}) => {
     if (!config?.enabled) return null;
 
     const { green, yellow } = getProfileMatchThresholds(config);
@@ -31,48 +38,50 @@ export const BulkIdealProfileSummaryPanel: React.FC<Props> = ({ summary, config,
             : 0;
 
     return (
-        <div className="border border-indigo-200 rounded-lg bg-gradient-to-r from-indigo-50 to-white overflow-hidden">
+        <div className={`border border-indigo-200 rounded-lg bg-gradient-to-r from-indigo-50 to-white overflow-hidden ${compact ? '' : ''}`}>
             <div className="flex items-center gap-2 px-4 py-2 border-b border-indigo-100 bg-indigo-50/80">
-                <Target className="w-4 h-4 text-indigo-600" />
+                <Target className="w-4 h-4 text-indigo-600 shrink-0" />
                 <h3 className="text-sm font-semibold text-indigo-900">
-                    Cumplimiento vs perfil ideal — base completa
+                    {compact ? 'Cumplimiento con el perfil guardado' : 'Cumplimiento vs perfil ideal — base completa'}
                 </h3>
-                <span className="text-xs text-indigo-600 ml-auto">
+                <span className="text-xs text-indigo-600 ml-auto whitespace-nowrap">
                     {summary.totalCandidates} candidato{summary.totalCandidates !== 1 ? 's' : ''}
                 </span>
             </div>
 
-            <div className="grid grid-cols-2 md:grid-cols-5 gap-3 p-4">
-                <div className="flex flex-col items-center p-3 bg-white rounded-lg border border-gray-100 shadow-sm">
-                    <TrendingUp className="w-5 h-5 text-indigo-500 mb-1" />
-                    <span className="text-2xl font-bold text-indigo-700">{summary.averageScore}%</span>
+            <div className={`grid gap-2 p-3 ${compact ? 'grid-cols-2 sm:grid-cols-4' : 'grid-cols-2 md:grid-cols-5 gap-3 p-4'}`}>
+                <div className={`flex flex-col items-center bg-white rounded-lg border border-gray-100 shadow-sm ${compact ? 'p-2' : 'p-3'}`}>
+                    <TrendingUp className={`text-indigo-500 mb-1 ${compact ? 'w-4 h-4' : 'w-5 h-5'}`} />
+                    <span className={`font-bold text-indigo-700 ${compact ? 'text-lg' : 'text-2xl'}`}>{summary.averageScore}%</span>
                     <span className="text-[10px] text-gray-500 uppercase tracking-wide">Promedio</span>
                 </div>
 
-                <div className="flex flex-col items-center p-3 bg-green-50 rounded-lg border border-green-100">
-                    <span className="text-2xl font-bold text-green-700">{summary.greenCount}</span>
-                    <span className="text-[10px] text-green-600 uppercase">≥ {green}% ({pct(summary.greenCount)}%)</span>
+                <div className={`flex flex-col items-center bg-green-50 rounded-lg border border-green-100 ${compact ? 'p-2' : 'p-3'}`}>
+                    <span className={`font-bold text-green-700 ${compact ? 'text-lg' : 'text-2xl'}`}>{summary.greenCount}</span>
+                    <span className="text-[10px] text-green-600 uppercase text-center">≥ {green}% ({pct(summary.greenCount)}%)</span>
                 </div>
 
-                <div className="flex flex-col items-center p-3 bg-yellow-50 rounded-lg border border-yellow-100">
-                    <span className="text-2xl font-bold text-yellow-700">{summary.yellowCount}</span>
-                    <span className="text-[10px] text-yellow-700 uppercase">{yellow}–{green - 1}% ({pct(summary.yellowCount)}%)</span>
+                <div className={`flex flex-col items-center bg-yellow-50 rounded-lg border border-yellow-100 ${compact ? 'p-2' : 'p-3'}`}>
+                    <span className={`font-bold text-yellow-700 ${compact ? 'text-lg' : 'text-2xl'}`}>{summary.yellowCount}</span>
+                    <span className="text-[10px] text-yellow-700 uppercase text-center">{yellow}–{green - 1}% ({pct(summary.yellowCount)}%)</span>
                 </div>
 
-                <div className="flex flex-col items-center p-3 bg-red-50 rounded-lg border border-red-100">
-                    <span className="text-2xl font-bold text-red-700">{summary.redCount}</span>
-                    <span className="text-[10px] text-red-600 uppercase">&lt; {yellow}% ({pct(summary.redCount)}%)</span>
+                <div className={`flex flex-col items-center bg-red-50 rounded-lg border border-red-100 ${compact ? 'p-2' : 'p-3'}`}>
+                    <span className={`font-bold text-red-700 ${compact ? 'text-lg' : 'text-2xl'}`}>{summary.redCount}</span>
+                    <span className="text-[10px] text-red-600 uppercase text-center">&lt; {yellow}% ({pct(summary.redCount)}%)</span>
                 </div>
 
+                {!compact && (
                 <div className="flex flex-col items-center p-3 bg-white rounded-lg border border-gray-100 shadow-sm">
                     <Users className="w-5 h-5 text-gray-400 mb-1" />
                     <span className="text-2xl font-bold text-gray-800">{summary.totalCandidates}</span>
                     <span className="text-[10px] text-gray-500 uppercase">Evaluados</span>
                 </div>
+                )}
             </div>
 
             {summary.fieldAverages.length > 0 && (
-                <div className="px-4 pb-4">
+                <div className={compact ? 'px-3 pb-3' : 'px-4 pb-4'}>
                     <p className="text-xs font-medium text-gray-600 mb-2">Cumplimiento por campo (promedio)</p>
                     <div className="flex flex-wrap gap-2">
                         {summary.fieldAverages.map(f => (

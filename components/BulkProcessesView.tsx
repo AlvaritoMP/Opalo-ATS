@@ -82,7 +82,6 @@ import { PsycholaboralReportModal } from './PsycholaboralReportModal';
 import { PsycholaboralBulkEvaluateModal } from './PsycholaboralBulkEvaluateModal';
 import { PsycholaboralInventoryModal } from './PsycholaboralInventoryModal';
 import { BulkIdealProfileModal } from './BulkIdealProfileModal';
-import { BulkIdealProfileSummaryPanel } from './BulkIdealProfileSummaryPanel';
 import {
     computeProfileMatch,
     computeProfileMatchSummary,
@@ -773,8 +772,8 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
     }, [candidates, idealProfileConfig, customColumns, columnValues, process?.bulkConfig]);
 
     useEffect(() => {
-        if (!process?.id || !idealProfileConfig?.enabled) {
-            setAllCandidatesForStats([]);
+        if (!showIdealProfileModal || !process?.id || !idealProfileConfig?.enabled) {
+            if (!showIdealProfileModal) setAllCandidatesForStats([]);
             return;
         }
         let cancelled = false;
@@ -793,7 +792,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
         return () => {
             cancelled = true;
         };
-    }, [process?.id, idealProfileConfig?.enabled, idealProfileConfig, total, columnValues]);
+    }, [showIdealProfileModal, process?.id, idealProfileConfig?.enabled, idealProfileConfig, total, columnValues]);
 
     const profileMatchSummary = useMemo(() => {
         if (!idealProfileConfig?.enabled) return null;
@@ -3324,16 +3323,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
 
             {selectedProcess && (
                 <div className="flex-1 overflow-hidden relative flex flex-col">
-                    {idealProfileConfig?.enabled && (
-                        <div className="px-4 pt-3 shrink-0">
-                            <BulkIdealProfileSummaryPanel
-                                summary={profileMatchSummary}
-                                config={idealProfileConfig}
-                                loading={loadingProfileStats}
-                            />
-                        </div>
-                    )}
-                    <p className="text-[10px] text-gray-500 px-1 pb-1 shrink-0">
+                    <p className="text-[10px] text-gray-500 px-4 pt-2 pb-1 shrink-0">
                         Flechas · Shift+arrastrar selección · Ctrl+clic múltiple · Clic derecho: color/comentario · Enter/doble clic editar · Ctrl+C copiar · Ctrl+V pegar en celdas seleccionadas · Doble clic en fila abre detalle · Arrastre el borde derecho del encabezado para ajustar el ancho de columna
                     </p>
                     <div
@@ -4339,6 +4329,8 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                     customColumns={customColumns}
                     columnOrder={columnOrder}
                     onSave={handleSaveIdealProfile}
+                    profileMatchSummary={profileMatchSummary}
+                    profileMatchSummaryLoading={loadingProfileStats}
                 />
             )}
         </div>
