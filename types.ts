@@ -309,6 +309,8 @@ export interface Candidate {
     metadataIa?: string; // Resumen/metadata generado por IA (OpenAI)
     scoreIa?: number; // Score/puntuación generado por IA
     psycholaboralEvaluation?: PsycholaboralEvaluation;
+    /** Valores de columnas personalizadas (procesos masivos / tabla alta densidad) */
+    bulkColumnValues?: Record<string, unknown>;
 }
 
 export type UserRole = 'admin' | 'recruiter' | 'client' | 'viewer';

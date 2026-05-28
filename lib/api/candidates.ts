@@ -4,6 +4,70 @@ import { processesApi } from './processes';
 import { convertirSalarioALetras } from '../numberToWords';
 import { APP_NAME } from '../appConfig';
 
+const CANDIDATE_LIST_SELECT =
+    'id, name, email, phone, phone2, process_id, stage_id, description, avatar_url, source, salary_expectation, agreed_salary, agreed_salary_in_words, age, dni, linkedin_url, address, province, district, archived, archived_at, discarded, discard_reason, discarded_at, hire_date, google_drive_folder_id, google_drive_folder_name, visible_to_clients, offer_accepted_date, application_started_date, application_completed_date, critical_stage_reviewed_at, created_at';
+
+const CANDIDATE_LIST_SELECT_WITH_BULK = `${CANDIDATE_LIST_SELECT}, bulk_column_values`;
+
+function mapBulkColumnValues(dbCandidate: { bulk_column_values?: unknown }): Record<string, unknown> | undefined {
+    const raw = dbCandidate.bulk_column_values;
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
+    return raw as Record<string, unknown>;
+}
+
+function isMissingBulkColumnValuesError(error: { message?: string; code?: string } | null): boolean {
+    if (!error) return false;
+    const msg = (error.message || '').toLowerCase();
+    return (
+        error.code === '42703' ||
+        msg.includes('bulk_column_values') ||
+        (msg.includes('column') && msg.includes('candidates'))
+    );
+}
+
+function mapListCandidate(dbCandidate: any, extras: Partial<Candidate> = {}): Candidate {
+    return {
+        id: dbCandidate.id,
+        name: dbCandidate.name,
+        email: dbCandidate.email,
+        phone: dbCandidate.phone,
+        phone2: dbCandidate.phone2,
+        processId: dbCandidate.process_id,
+        stageId: dbCandidate.stage_id,
+        description: dbCandidate.description,
+        history: [],
+        avatarUrl: dbCandidate.avatar_url,
+        attachments: [],
+        source: dbCandidate.source,
+        salaryExpectation: dbCandidate.salary_expectation,
+        agreedSalary: dbCandidate.agreed_salary,
+        agreedSalaryInWords: dbCandidate.agreed_salary_in_words,
+        age: dbCandidate.age,
+        dni: dbCandidate.dni,
+        linkedinUrl: dbCandidate.linkedin_url,
+        address: dbCandidate.address,
+        province: dbCandidate.province,
+        district: dbCandidate.district,
+        postIts: [],
+        comments: [],
+        archived: dbCandidate.archived || false,
+        archivedAt: dbCandidate.archived_at,
+        discarded: dbCandidate.discarded || false,
+        discardReason: dbCandidate.discard_reason || undefined,
+        discardedAt: dbCandidate.discarded_at || undefined,
+        hireDate: dbCandidate.hire_date,
+        googleDriveFolderId: dbCandidate.google_drive_folder_id,
+        googleDriveFolderName: dbCandidate.google_drive_folder_name,
+        visibleToClients: dbCandidate.visible_to_clients ?? false,
+        offerAcceptedDate: dbCandidate.offer_accepted_date,
+        applicationStartedDate: dbCandidate.application_started_date,
+        applicationCompletedDate: dbCandidate.application_completed_date,
+        criticalStageReviewedAt: dbCandidate.critical_stage_reviewed_at,
+        bulkColumnValues: mapBulkColumnValues(dbCandidate),
+        ...extras,
+    };
+}
+
 // Convertir de DB a tipo de aplicación
 async function dbToCandidate(dbCandidate: any): Promise<Candidate> {
     // Obtener historial (solo de esta app)
@@ -124,6 +188,7 @@ async function dbToCandidate(dbCandidate: any): Promise<Candidate> {
         applicationStartedDate: dbCandidate.application_started_date,
         applicationCompletedDate: dbCandidate.application_completed_date,
         criticalStageReviewedAt: dbCandidate.critical_stage_reviewed_at,
+        bulkColumnValues: mapBulkColumnValues(dbCandidate),
     };
 }
 
@@ -186,7 +251,7 @@ export const candidatesApi = {
         // Seleccionar solo campos básicos para reducir egress (solo de esta app)
         let query = supabase
             .from('candidates')
-            .select('id, name, email, phone, phone2, process_id, stage_id, description, avatar_url, source, salary_expectation, agreed_salary, agreed_salary_in_words, age, dni, linkedin_url, address, province, district, archived, archived_at, discarded, discard_reason, discarded_at, hire_date, google_drive_folder_id, google_drive_folder_name, visible_to_clients, offer_accepted_date, application_started_date, application_completed_date, critical_stage_reviewed_at, created_at')
+            .select(CANDIDATE_LIST_SELECT_WITH_BULK)
             .eq('app_name', APP_NAME) // Filtrar solo candidatos de esta app
             .order('created_at', { ascending: false })
             .limit(200); // Reducir límite para reducir egress
@@ -195,50 +260,27 @@ export const candidatesApi = {
             query = query.eq('archived', false);
         }
 
-        const { data, error } = await query;
+        let { data, error } = await query;
+        if (error && isMissingBulkColumnValuesError(error)) {
+            let fallbackQuery = supabase
+                .from('candidates')
+                .select(CANDIDATE_LIST_SELECT)
+                .eq('app_name', APP_NAME)
+                .order('created_at', { ascending: false })
+                .limit(200);
+            if (!includeArchived) {
+                fallbackQuery = fallbackQuery.eq('archived', false);
+            }
+            const fallback = await fallbackQuery;
+            data = fallback.data;
+            error = fallback.error;
+        }
         if (error) throw error;
         if (!data || data.length === 0) return [];
 
         // Si no se solicitan relaciones, retornar solo datos básicos (reduce egress significativamente)
         if (!includeRelations) {
-            return data.map(dbCandidate => ({
-                id: dbCandidate.id,
-                name: dbCandidate.name,
-                email: dbCandidate.email,
-                phone: dbCandidate.phone,
-                phone2: dbCandidate.phone2,
-                processId: dbCandidate.process_id,
-                stageId: dbCandidate.stage_id,
-                description: dbCandidate.description,
-                history: [],
-                avatarUrl: dbCandidate.avatar_url,
-                attachments: [],
-                source: dbCandidate.source,
-                salaryExpectation: dbCandidate.salary_expectation,
-                agreedSalary: dbCandidate.agreed_salary,
-                agreedSalaryInWords: dbCandidate.agreed_salary_in_words,
-                age: dbCandidate.age,
-                dni: dbCandidate.dni,
-                linkedinUrl: dbCandidate.linkedin_url,
-                address: dbCandidate.address,
-                province: dbCandidate.province,
-                district: dbCandidate.district,
-                postIts: [],
-                comments: [],
-                archived: dbCandidate.archived || false,
-                archivedAt: dbCandidate.archived_at,
-                discarded: dbCandidate.discarded || false,
-                discardReason: dbCandidate.discard_reason || undefined,
-                discardedAt: dbCandidate.discarded_at || undefined,
-                hireDate: dbCandidate.hire_date,
-                googleDriveFolderId: dbCandidate.google_drive_folder_id,
-                googleDriveFolderName: dbCandidate.google_drive_folder_name,
-                visibleToClients: dbCandidate.visible_to_clients ?? false,
-                offerAcceptedDate: dbCandidate.offer_accepted_date,
-                applicationStartedDate: dbCandidate.application_started_date,
-                applicationCompletedDate: dbCandidate.application_completed_date,
-                criticalStageReviewedAt: dbCandidate.critical_stage_reviewed_at,
-            }));
+            return data.map(dbCandidate => mapListCandidate(dbCandidate));
         }
 
         // Obtener todos los IDs de candidatos
@@ -342,32 +384,12 @@ export const candidatesApi = {
                 })),
             }));
 
-            return {
-                id: dbCandidate.id,
-                name: dbCandidate.name,
-                email: dbCandidate.email,
-                phone: dbCandidate.phone,
-                phone2: dbCandidate.phone2,
-                processId: dbCandidate.process_id,
-                stageId: dbCandidate.stage_id,
-                description: dbCandidate.description,
+            return mapListCandidate(dbCandidate, {
                 history: history.map(h => ({
                     stageId: h.stage_id,
                     movedAt: h.moved_at,
                     movedBy: h.moved_by || 'System',
                 })),
-                avatarUrl: dbCandidate.avatar_url,
-                attachments: [], // Attachments se cargan lazy para reducir egress
-                source: dbCandidate.source,
-                salaryExpectation: dbCandidate.salary_expectation,
-                agreedSalary: dbCandidate.agreed_salary,
-                agreedSalaryInWords: dbCandidate.agreed_salary_in_words,
-                age: dbCandidate.age,
-                dni: dbCandidate.dni,
-                linkedinUrl: dbCandidate.linkedin_url,
-                address: dbCandidate.address,
-                province: dbCandidate.province,
-                district: dbCandidate.district,
                 postIts: postIts.map(p => ({
                     id: p.id,
                     text: p.text,
@@ -376,75 +398,38 @@ export const candidatesApi = {
                     createdAt: p.created_at,
                 })),
                 comments: commentsWithAttachments,
-                archived: dbCandidate.archived || false,
-                archivedAt: dbCandidate.archived_at,
-                discarded: dbCandidate.discarded || false,
-                discardReason: dbCandidate.discard_reason || undefined,
-                discardedAt: dbCandidate.discarded_at || undefined,
-                hireDate: dbCandidate.hire_date,
-                googleDriveFolderId: dbCandidate.google_drive_folder_id,
-                googleDriveFolderName: dbCandidate.google_drive_folder_name,
-                visibleToClients: dbCandidate.visible_to_clients ?? false,
-                offerAcceptedDate: dbCandidate.offer_accepted_date,
-                applicationStartedDate: dbCandidate.application_started_date,
-                applicationCompletedDate: dbCandidate.application_completed_date,
-                criticalStageReviewedAt: dbCandidate.critical_stage_reviewed_at,
-            };
+            });
         });
     },
 
     /** Candidatos descartados y archivados (dashboard) — sin relaciones */
     async getDiscardedArchived(): Promise<Candidate[]> {
-        const { data, error } = await supabase
+        let { data, error } = await supabase
             .from('candidates')
-            .select('id, name, email, phone, phone2, process_id, stage_id, description, avatar_url, source, salary_expectation, agreed_salary, agreed_salary_in_words, age, dni, linkedin_url, address, province, district, archived, archived_at, discarded, discard_reason, discarded_at, hire_date, google_drive_folder_id, google_drive_folder_name, visible_to_clients, offer_accepted_date, application_started_date, application_completed_date, critical_stage_reviewed_at, created_at')
+            .select(CANDIDATE_LIST_SELECT_WITH_BULK)
             .eq('app_name', APP_NAME)
             .eq('discarded', true)
             .eq('archived', true)
             .order('created_at', { ascending: false })
             .limit(200);
 
+        if (error && isMissingBulkColumnValuesError(error)) {
+            const fallback = await supabase
+                .from('candidates')
+                .select(CANDIDATE_LIST_SELECT)
+                .eq('app_name', APP_NAME)
+                .eq('discarded', true)
+                .eq('archived', true)
+                .order('created_at', { ascending: false })
+                .limit(200);
+            data = fallback.data;
+            error = fallback.error;
+        }
+
         if (error) throw error;
         if (!data?.length) return [];
 
-        return data.map(dbCandidate => ({
-            id: dbCandidate.id,
-            name: dbCandidate.name,
-            email: dbCandidate.email,
-            phone: dbCandidate.phone,
-            phone2: dbCandidate.phone2,
-            processId: dbCandidate.process_id,
-            stageId: dbCandidate.stage_id,
-            description: dbCandidate.description,
-            history: [],
-            avatarUrl: dbCandidate.avatar_url,
-            attachments: [],
-            source: dbCandidate.source,
-            salaryExpectation: dbCandidate.salary_expectation,
-            agreedSalary: dbCandidate.agreed_salary,
-            agreedSalaryInWords: dbCandidate.agreed_salary_in_words,
-            age: dbCandidate.age,
-            dni: dbCandidate.dni,
-            linkedinUrl: dbCandidate.linkedin_url,
-            address: dbCandidate.address,
-            province: dbCandidate.province,
-            district: dbCandidate.district,
-            postIts: [],
-            comments: [],
-            archived: dbCandidate.archived || false,
-            archivedAt: dbCandidate.archived_at,
-            discarded: true,
-            discardReason: dbCandidate.discard_reason || undefined,
-            discardedAt: dbCandidate.discarded_at || undefined,
-            hireDate: dbCandidate.hire_date,
-            googleDriveFolderId: dbCandidate.google_drive_folder_id,
-            googleDriveFolderName: dbCandidate.google_drive_folder_name,
-            visibleToClients: dbCandidate.visible_to_clients ?? false,
-            offerAcceptedDate: dbCandidate.offer_accepted_date,
-            applicationStartedDate: dbCandidate.application_started_date,
-            applicationCompletedDate: dbCandidate.application_completed_date,
-            criticalStageReviewedAt: dbCandidate.critical_stage_reviewed_at,
-        }));
+        return data.map(dbCandidate => mapListCandidate(dbCandidate, { discarded: true }));
     },
 
     // Obtener candidatos por proceso

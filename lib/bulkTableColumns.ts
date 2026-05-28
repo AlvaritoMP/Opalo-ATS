@@ -943,6 +943,20 @@ export function resolveCandidateAge(
     return undefined;
 }
 
+/** Edad para panel/dashboard: misma lógica que la tabla en procesos masivos. */
+export function resolveCandidateAgeForProcess(
+    candidate: HomonymCandidateFields,
+    process?: Process
+): number | undefined {
+    if (process?.isBulkProcess) {
+        const customColumns = process.bulkConfig?.customColumns || [];
+        const legacy = buildLegacyColumnIdToName(process.bulkConfig, customColumns);
+        return resolveCandidateAge(candidate, customColumns, {}, legacy);
+    }
+    if (candidate.age != null && candidate.age > 0) return candidate.age;
+    return undefined;
+}
+
 /** @deprecated use getBulkSelectedProcessStorageKey(userId) */
 export const BULK_SELECTED_PROCESS_STORAGE_KEY = 'bulkProcessesSelectedId';
 

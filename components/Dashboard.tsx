@@ -3,6 +3,7 @@ import { useAppState } from '../App';
 import { Briefcase, Users, FileText, CheckCircle, Calendar, Grid3x3 } from 'lucide-react';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend, BarChart, CartesianGrid, XAxis, YAxis, Bar } from 'recharts';
 import { Candidate, Process } from '../types';
+import { resolveCandidateAgeForProcess } from '../lib/bulkTableColumns';
 
 const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#AF19FF', '#6366f1', '#14b8a6', '#f97316'];
 
@@ -223,18 +224,25 @@ export const Dashboard: React.FC = () => {
             'Sin dato': 0,
         };
         filteredCandidates.forEach(c => {
-            if (c.age) {
-                if (c.age >= 20 && c.age <= 29) ageBrackets['20-29']++;
-                else if (c.age >= 30 && c.age <= 39) ageBrackets['30-39']++;
-                else if (c.age >= 40 && c.age <= 49) ageBrackets['40-49']++;
-                else if (c.age >= 50) ageBrackets['50+']++;
-                else ageBrackets['Sin dato']++;
-            } else {
+            const process = processMap.get(c.processId);
+            const age = resolveCandidateAgeForProcess(
+                {
+                    id: c.id,
+                    age: c.age,
+                    bulkColumnValues: c.bulkColumnValues,
+                },
+                process
+            );
+            if (age == null) {
                 ageBrackets['Sin dato']++;
-            }
+            } else if (age >= 20 && age <= 29) ageBrackets['20-29']++;
+            else if (age >= 30 && age <= 39) ageBrackets['30-39']++;
+            else if (age >= 40 && age <= 49) ageBrackets['40-49']++;
+            else if (age >= 50) ageBrackets['50+']++;
+            else ageBrackets['Sin dato']++;
         });
         return Object.entries(ageBrackets).map(([name, Candidatos]) => ({ name, Candidatos }));
-    }, [filteredCandidates]);
+    }, [filteredCandidates, processMap]);
 
     const upcomingInterviews = useMemo(() => {
         const now = new Date();
