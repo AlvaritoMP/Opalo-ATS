@@ -10,7 +10,9 @@ import {
     getColumnLabel,
     mapImportHeader,
     normalizeColumnNameKey,
-    resolveColumnValueFromRow,
+    resolveBulkTableCellValue,
+    resolveCandidateHomonymField,
+    resolveStandardFieldValue,
 } from './bulkTableColumns';
 import { CONTACT_COLUMN_IDS } from './contactChannelConfig';
 
@@ -133,6 +135,29 @@ function defaultMatchMode(type: IdealProfileFieldType): IdealProfileMatchMode {
     return 'contains';
 }
 
+export function criterionHasIdealValue(criterion: IdealProfileCriterion): boolean {
+    const v = criterion.idealValue;
+    if (v === undefined || v === null) return false;
+    if (typeof v === 'number' && !Number.isNaN(v)) return true;
+    if (typeof v === 'boolean') return true;
+    if (typeof v === 'string' && v.trim() !== '') return true;
+    return false;
+}
+
+/** Criterio activo si está marcado "Usar" o tiene valor ideal configurado. */
+export function isActiveIdealProfileCriterion(criterion: IdealProfileCriterion): boolean {
+    if (criterion.enabled === false) return false;
+    if (criterion.enabled) return true;
+    return criterionHasIdealValue(criterion);
+}
+
+export function normalizeIdealProfileCriteria(criteria: IdealProfileCriterion[]): IdealProfileCriterion[] {
+    return criteria.map(c => ({
+        ...c,
+        enabled: isActiveIdealProfileCriterion(c) ? true : c.enabled,
+    }));
+}
+
 export function getCandidateFieldValue(
     candidate: BulkCandidate,
     fieldId: string,
@@ -142,23 +167,35 @@ export function getCandidateFieldValue(
 ): unknown {
     if (fieldId.startsWith('custom_')) {
         const colId = fieldId.replace('custom_', '');
-        const col = customColumns.find(c => c.id === colId);
-        const row: Record<string, unknown> = {
-            ...(candidate.bulkColumnValues || {}),
-            ...(columnValues[candidate.id] || {}),
-        };
-        if (col) {
-            const resolved = resolveColumnValueFromRow(row, col, legacyColumnIdToName);
-            if (resolved !== undefined && resolved !== '') return resolved;
-            if (resolved === false) return false;
-        }
-        if (col && candidate) {
-            const mapped = mapImportHeader(col.name.toLowerCase());
-            if (mapped === 'source' && candidate.source) return candidate.source;
-            if (mapped === 'province' && candidate.province) return candidate.province;
-            if (mapped === 'district' && candidate.district) return candidate.district;
-        }
-        return '';
+        return resolveBulkTableCellValue(
+            candidate,
+            colId,
+            customColumns,
+            columnValues,
+            legacyColumnIdToName
+        );
+    }
+
+    if (fieldId === 'source' || fieldId === 'province' || fieldId === 'district') {
+        const resolved = resolveStandardFieldValue(
+            fieldId,
+            candidate.id,
+            candidate,
+            columnValues as Record<string, Record<string, any>>,
+            customColumns
+        );
+        if (resolved) return resolved;
+    }
+
+    if (fieldId === 'age') {
+        const age = resolveCandidateHomonymField(
+            candidate,
+            'age',
+            customColumns,
+            columnValues,
+            legacyColumnIdToName
+        );
+        if (age !== undefined && age !== null && age !== '') return age;
     }
 
     const direct = (candidate as Record<string, unknown>)[fieldId];
@@ -166,12 +203,15 @@ export function getCandidateFieldValue(
 
     for (const col of customColumns) {
         if (mapImportHeader(col.name.toLowerCase()) === fieldId) {
-            const row: Record<string, unknown> = {
-                ...(candidate.bulkColumnValues || {}),
-                ...(columnValues[candidate.id] || {}),
-            };
-            const resolved = resolveColumnValueFromRow(row, col, legacyColumnIdToName);
+            const resolved = resolveBulkTableCellValue(
+                candidate,
+                col.id,
+                customColumns,
+                columnValues,
+                legacyColumnIdToName
+            );
             if (resolved !== undefined && resolved !== '') return resolved;
+            if (resolved === false) return false;
         }
     }
 
@@ -301,7 +341,7 @@ export function computeProfileMatch(
 ): ProfileMatchResult | null {
     if (!config?.enabled || !config.criteria?.length) return null;
 
-    const active = config.criteria.filter(c => c.enabled);
+    const active = config.criteria.filter(isActiveIdealProfileCriterion);
     if (active.length === 0) return null;
 
     let totalWeight = 0;
@@ -469,7 +509,7 @@ export function buildIdealProfileImportTemplate(
     fields: IdealProfileFieldDef[],
     enabledCriteria: IdealProfileCriterion[]
 ): string {
-    const active = enabledCriteria.filter(c => c.enabled);
+    const active = enabledCriteria.filter(isActiveIdealProfileCriterion);
     const headers = active.map(c => {
         const f = fields.find(x => x.fieldId === c.fieldId);
         return f?.label || c.fieldId;

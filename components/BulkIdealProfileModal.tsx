@@ -13,6 +13,9 @@ import {
     parseIdealProfileImport,
     buildIdealProfileImportTemplate,
     IdealProfileFieldDef,
+    criterionHasIdealValue,
+    isActiveIdealProfileCriterion,
+    normalizeIdealProfileCriteria,
 } from '../lib/bulkIdealProfileMatch';
 
 interface Props {
@@ -53,7 +56,12 @@ function createDefaultCriteria(
     const existingMap = new Map((existing?.criteria || []).map(c => [c.fieldId, c]));
     return fields.map(f => {
         const prev = existingMap.get(f.fieldId);
-        if (prev) return { ...prev, enabled: prev.enabled ?? false };
+        if (prev) {
+            return {
+                ...prev,
+                enabled: prev.enabled ?? criterionHasIdealValue(prev),
+            };
+        }
         return {
             fieldId: f.fieldId,
             enabled: false,
@@ -99,7 +107,14 @@ export const BulkIdealProfileModal: React.FC<Props> = ({
 
     const updateCriterion = useCallback((fieldId: string, patch: Partial<IdealProfileCriterion>) => {
         setCriteria(prev =>
-            prev.map(c => (c.fieldId === fieldId ? { ...c, ...patch } : c))
+            prev.map(c => {
+                if (c.fieldId !== fieldId) return c;
+                const next = { ...c, ...patch };
+                if (criterionHasIdealValue(next)) {
+                    next.enabled = true;
+                }
+                return next;
+            })
         );
     }, []);
 
@@ -150,7 +165,7 @@ export const BulkIdealProfileModal: React.FC<Props> = ({
                 enabled,
                 greenThreshold,
                 yellowThreshold,
-                criteria,
+                criteria: normalizeIdealProfileCriteria(criteria),
             });
             onClose();
         } finally {
@@ -160,7 +175,7 @@ export const BulkIdealProfileModal: React.FC<Props> = ({
 
     if (!isOpen) return null;
 
-    const enabledCount = criteria.filter(c => c.enabled).length;
+    const enabledCount = criteria.filter(isActiveIdealProfileCriterion).length;
 
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
@@ -312,8 +327,7 @@ export const BulkIdealProfileModal: React.FC<Props> = ({
                                                     <select
                                                         value={c.idealValue === true ? 'true' : 'false'}
                                                         onChange={e => updateCriterion(c.fieldId, { idealValue: e.target.value === 'true' })}
-                                                        disabled={!c.enabled}
-                                                        className="w-full px-2 py-1 border border-gray-300 rounded text-sm disabled:opacity-50"
+                                                        className="w-full px-2 py-1 border border-gray-300 rounded text-sm"
                                                     >
                                                         <option value="true">Sí</option>
                                                         <option value="false">No</option>
@@ -322,8 +336,7 @@ export const BulkIdealProfileModal: React.FC<Props> = ({
                                                     <select
                                                         value={String(c.idealValue ?? '')}
                                                         onChange={e => updateCriterion(c.fieldId, { idealValue: e.target.value })}
-                                                        disabled={!c.enabled}
-                                                        className="w-full px-2 py-1 border border-gray-300 rounded text-sm disabled:opacity-50"
+                                                        className="w-full px-2 py-1 border border-gray-300 rounded text-sm"
                                                     >
                                                         <option value="">—</option>
                                                         {field.options.map(opt => (
@@ -336,18 +349,16 @@ export const BulkIdealProfileModal: React.FC<Props> = ({
                                                             type="number"
                                                             value={c.idealValue ?? ''}
                                                             onChange={e => updateCriterion(c.fieldId, { idealValue: parseFloat(e.target.value) || 0 })}
-                                                            disabled={!c.enabled}
                                                             placeholder="Mín"
-                                                            className="w-20 px-2 py-1 border border-gray-300 rounded text-sm disabled:opacity-50"
+                                                            className="w-20 px-2 py-1 border border-gray-300 rounded text-sm"
                                                         />
                                                         <span className="text-gray-400">—</span>
                                                         <input
                                                             type="number"
                                                             value={c.maxValue ?? ''}
                                                             onChange={e => updateCriterion(c.fieldId, { maxValue: parseFloat(e.target.value) || 0 })}
-                                                            disabled={!c.enabled}
                                                             placeholder="Máx"
-                                                            className="w-20 px-2 py-1 border border-gray-300 rounded text-sm disabled:opacity-50"
+                                                            className="w-20 px-2 py-1 border border-gray-300 rounded text-sm"
                                                         />
                                                     </div>
                                                 ) : (
@@ -361,8 +372,7 @@ export const BulkIdealProfileModal: React.FC<Props> = ({
                                                                     : e.target.value,
                                                             })
                                                         }
-                                                        disabled={!c.enabled}
-                                                        className="w-full px-2 py-1 border border-gray-300 rounded text-sm disabled:opacity-50"
+                                                        className="w-full px-2 py-1 border border-gray-300 rounded text-sm"
                                                     />
                                                 )}
                                             </td>
@@ -370,7 +380,7 @@ export const BulkIdealProfileModal: React.FC<Props> = ({
                                                 <select
                                                     value={c.matchMode || modes[0]}
                                                     onChange={e => updateCriterion(c.fieldId, { matchMode: e.target.value as IdealProfileMatchMode })}
-                                                    disabled={!c.enabled || modes.length <= 1}
+                                                    disabled={modes.length <= 1}
                                                     className="w-full px-2 py-1 border border-gray-300 rounded text-sm disabled:opacity-50"
                                                 >
                                                     {modes.map(m => (
@@ -385,8 +395,7 @@ export const BulkIdealProfileModal: React.FC<Props> = ({
                                                     max={10}
                                                     value={c.weight ?? 1}
                                                     onChange={e => updateCriterion(c.fieldId, { weight: parseInt(e.target.value, 10) || 1 })}
-                                                    disabled={!c.enabled}
-                                                    className="w-14 px-2 py-1 border border-gray-300 rounded text-sm disabled:opacity-50"
+                                                    className="w-14 px-2 py-1 border border-gray-300 rounded text-sm"
                                                 />
                                             </td>
                                         </tr>
