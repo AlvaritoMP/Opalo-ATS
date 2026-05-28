@@ -253,6 +253,7 @@ export const BulkIdealProfileModal: React.FC<Props> = ({
                         <p className="col-span-2 text-xs text-gray-500">
                             Los candidatos con cumplimiento ≥ {greenThreshold}% se marcan en verde,
                             entre {yellowThreshold}% y {greenThreshold - 1}% en amarillo, y por debajo de {yellowThreshold}% en rojo.
+                            Las celdas de la tabla con criterio activo se colorean según su cumplimiento individual (mapa de calor).
                         </p>
                     </div>
 
@@ -377,18 +378,31 @@ export const BulkIdealProfileModal: React.FC<Props> = ({
                                                         />
                                                     </div>
                                                 ) : (
-                                                    <input
-                                                        type={field.type === 'number' ? 'number' : field.type === 'date' ? 'date' : 'text'}
-                                                        value={String(c.idealValue ?? '')}
-                                                        onChange={e =>
-                                                            updateCriterion(c.fieldId, {
-                                                                idealValue: field.type === 'number'
-                                                                    ? parseFloat(e.target.value) || 0
-                                                                    : e.target.value,
-                                                            })
-                                                        }
-                                                        className="w-full px-2 py-1 border border-gray-300 rounded text-sm"
-                                                    />
+                                                    <div className="space-y-1">
+                                                        <input
+                                                            type={field.type === 'number' ? 'number' : field.type === 'date' ? 'date' : 'text'}
+                                                            value={String(c.idealValue ?? '')}
+                                                            onChange={e =>
+                                                                updateCriterion(c.fieldId, {
+                                                                    idealValue: field.type === 'number'
+                                                                        ? parseFloat(e.target.value) || 0
+                                                                        : e.target.value,
+                                                                })
+                                                            }
+                                                            className="w-full px-2 py-1 border border-gray-300 rounded text-sm"
+                                                            placeholder={
+                                                                field.type === 'text' && (c.matchMode === 'contains' || !c.matchMode)
+                                                                    ? 'Ej: Los Olivos  o  1, 2, 3'
+                                                                    : undefined
+                                                            }
+                                                        />
+                                                        {field.type === 'text' && (c.matchMode === 'contains' || !c.matchMode) && (
+                                                            <p className="text-[10px] text-gray-400 leading-tight">
+                                                                Varias opciones (OR): sepárelas con coma, punto y coma, barra o |.
+                                                                Ej: <span className="font-mono">Los Olivos, San Miguel</span> o <span className="font-mono">1|2|3</span>
+                                                            </p>
+                                                        )}
+                                                    </div>
                                                 )}
                                             </td>
                                             <td className="px-3 py-2">

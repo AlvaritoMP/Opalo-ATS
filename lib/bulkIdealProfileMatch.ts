@@ -227,13 +227,21 @@ function scoreTextMatch(
     const i = normalizeText(idealVal);
     if (!i) return 100;
     if (!c) return 0;
-    if (mode === 'exact') return c === i ? 100 : 0;
-    if (c.includes(i) || i.includes(c)) return 100;
+
     const idealParts = i.split(/[,;|/]+/).map(p => p.trim()).filter(Boolean);
-    if (idealParts.length > 1) {
-        const matched = idealParts.filter(p => c.includes(p)).length;
-        return Math.round((matched / idealParts.length) * 100);
+
+    if (mode === 'exact') {
+        if (idealParts.length > 1) {
+            return idealParts.some(p => c === p) ? 100 : 0;
+        }
+        return c === i ? 100 : 0;
     }
+
+    // contains: una sola coincidencia (o varias alternativas OR) = 100%
+    if (idealParts.length > 1) {
+        return idealParts.some(p => c.includes(p)) ? 100 : 0;
+    }
+    if (c.includes(i) || i.includes(c)) return 100;
     return 0;
 }
 
@@ -382,6 +390,15 @@ export function getProfileMatchThresholds(config?: IdealProfileConfig): {
         green: config?.greenThreshold ?? 80,
         yellow: config?.yellowThreshold ?? 50,
     };
+}
+
+export function getIdealProfileActiveFieldIds(config?: IdealProfileConfig): Set<string> {
+    if (!config?.enabled) return new Set();
+    return new Set(
+        (config.criteria || [])
+            .filter(isActiveIdealProfileCriterion)
+            .map(c => c.fieldId)
+    );
 }
 
 export function getProfileMatchColorClass(

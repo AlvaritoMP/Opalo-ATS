@@ -86,6 +86,7 @@ import {
     computeProfileMatch,
     computeProfileMatchSummary,
     getProfileMatchGradientStyle,
+    getIdealProfileActiveFieldIds,
 } from '../lib/bulkIdealProfileMatch';
 import { psycholaboralApi } from '../lib/api/psycholaboral';
 import { createDefaultPsycholaboralInventory } from '../lib/psycholaboralDefaults';
@@ -750,7 +751,8 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
     const profileMatchScores = useMemo(() => {
         const scores = new Map<string, number>();
         const details = new Map<string, string>();
-        if (!idealProfileConfig?.enabled) return { scores, details };
+        const fieldScores = new Map<string, Map<string, number>>();
+        if (!idealProfileConfig?.enabled) return { scores, details, fieldScores };
         const legacy = buildLegacyColumnIdToName(process?.bulkConfig, customColumns);
         for (const c of candidates) {
             const result = computeProfileMatch(
@@ -766,10 +768,20 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                     c.id,
                     result.fieldScores.map(f => `${f.label}: ${f.score}%`).join('\n')
                 );
+                const perField = new Map<string, number>();
+                for (const fs of result.fieldScores) {
+                    perField.set(fs.fieldId, fs.score);
+                }
+                fieldScores.set(c.id, perField);
             }
         }
-        return { scores, details };
+        return { scores, details, fieldScores };
     }, [candidates, idealProfileConfig, customColumns, columnValues, process?.bulkConfig]);
+
+    const idealProfileHeatMapFields = useMemo(
+        () => getIdealProfileActiveFieldIds(idealProfileConfig),
+        [idealProfileConfig]
+    );
 
     useEffect(() => {
         if (!showIdealProfileModal || !process?.id || !idealProfileConfig?.enabled) {
@@ -2739,6 +2751,15 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
         const isPinned = pinnedColumns.includes(colId);
         const meta = getCellMetaFor(candidateId, colId);
 
+        if (!active && !selected && !meta?.bgColor && idealProfileHeatMapFields.has(colId)) {
+            const fieldScore = profileMatchScores.fieldScores.get(candidateId)?.get(colId);
+            if (fieldScore !== undefined) {
+                const heat = getProfileMatchGradientStyle(fieldScore);
+                style.backgroundColor = heat.backgroundColor;
+                style.color = heat.color;
+            }
+        }
+
         const shadows: string[] = [];
         if (style.boxShadow) shadows.push(String(style.boxShadow));
 
@@ -2748,18 +2769,20 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
             shadows.push('inset 0 0 0 1px #2563eb');
             style.zIndex = isPinned ? 55 : 30;
             if (!meta?.bgColor) style.backgroundColor = '#eff6ff';
+            style.color = undefined;
         } else if (selected) {
             style.outline = '1px solid #60a5fa';
             style.outlineOffset = '-1px';
             shadows.push('inset 0 0 0 1px #93c5fd');
             style.zIndex = Math.max(typeof style.zIndex === 'number' ? style.zIndex : 0, isPinned ? 50 : 25);
             if (!meta?.bgColor) style.backgroundColor = '#f8fafc';
+            style.color = undefined;
         }
 
         if (shadows.length > 0) style.boxShadow = shadows.join(', ');
 
         return style;
-    }, [buildTdStyle, activeCell, selectedCells, pinnedColumns, getCellMetaFor]);
+    }, [buildTdStyle, activeCell, selectedCells, pinnedColumns, getCellMetaFor, idealProfileHeatMapFields, profileMatchScores.fieldScores]);
 
     const renderCellCommentIndicator = (candidateId: string, colId: string) => {
         const comment = getCellMetaFor(candidateId, colId)?.comment;
@@ -2775,11 +2798,16 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
     const tdProps = (candidateId: string, colId: string, extra = '') => {
         const meta = getCellMetaFor(candidateId, colId);
         const coord = { candidateId, colId };
+        const fieldScore = profileMatchScores.fieldScores.get(candidateId)?.get(colId);
+        const heatMapTitle =
+            idealProfileHeatMapFields.has(colId) && fieldScore !== undefined
+                ? `${getColumnLabel(colId, customColumns)}: ${fieldScore}% cumplimiento`
+                : undefined;
         return {
             ...cellDataAttrs(candidateId, colId),
             className: `${COMPACT_TD_CLASS} relative ${extra}`.trim(),
             style: buildCellDisplayStyle(candidateId, colId),
-            title: meta?.comment || undefined,
+            title: meta?.comment || heatMapTitle || undefined,
             onMouseDown: (e: React.MouseEvent) => {
                 e.stopPropagation();
                 if (editingCell || e.button !== 0) return;
