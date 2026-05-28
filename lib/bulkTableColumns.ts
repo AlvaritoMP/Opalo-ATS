@@ -1,6 +1,7 @@
 import { BulkProcessConfig, CustomColumn, FieldMapping, Process } from '../types';
 import { normalizeImportTextCase } from './importTextCase.js';
 import { migrateBulkColumnOrder } from './contactChannelConfig';
+import { APP_NAME } from './appConfig';
 
 const BULK_NAME_KEY_PREFIX = '__name__';
 
@@ -895,44 +896,151 @@ export function resolveCandidateHomonymField(
     return undefined;
 }
 
-/** Edad para informes: prioriza columnas personalizadas "Edad" sobre candidates.age (puede estar en 0). */
+/** Edad para informes: misma fuente que la tabla (columna Edad, fecha nac., candidates.age). */
 export function resolveCandidateAge(
     candidate: HomonymCandidateFields,
     customColumns: CustomColumn[],
     columnValues: Record<string, Record<string, unknown>> = {},
     legacyColumnIdToName: Record<string, string> = {}
 ): number | undefined {
-    const raw = resolveCandidateHomonymField(
+    for (const col of customColumns) {
+        if (!isAgeLikeColumn(col)) continue;
+        const raw = resolveBulkTableCellValue(
+            candidate,
+            col.id,
+            customColumns,
+            columnValues,
+            legacyColumnIdToName
+        );
+        const parsed = parseAgeNumber(raw);
+        if (parsed != null) return parsed;
+    }
+
+    const homonymRaw = resolveCandidateHomonymField(
         candidate,
         'age',
         customColumns,
         columnValues,
         legacyColumnIdToName
     );
-    if (raw !== undefined && raw !== null && raw !== '') {
-        const n = typeof raw === 'number' ? raw : parseInt(String(raw), 10);
-        if (!isNaN(n) && n > 0) return n;
+    const fromHomonym = parseAgeNumber(homonymRaw);
+    if (fromHomonym != null) return fromHomonym;
+
+    for (const col of customColumns) {
+        if (!isBirthDateColumn(col)) continue;
+        const raw = resolveBulkTableCellValue(
+            candidate,
+            col.id,
+            customColumns,
+            columnValues,
+            legacyColumnIdToName
+        );
+        const fromBirth = ageFromBirthDateValue(raw);
+        if (fromBirth != null) return fromBirth;
     }
+
     if (candidate.age != null && candidate.age > 0) return candidate.age;
     return undefined;
 }
 
+/** @deprecated use getBulkSelectedProcessStorageKey(userId) */
 export const BULK_SELECTED_PROCESS_STORAGE_KEY = 'bulkProcessesSelectedId';
 
-export function getBulkSelectedProcessId(): string | null {
+export function getBulkSelectedProcessStorageKey(userId?: string | null): string {
+    const appSlug = APP_NAME.replace(/\s+/g, '_');
+    const userSlug = userId || 'anon';
+    return `bulkProcessesSelectedId_${appSlug}_${userSlug}`;
+}
+
+export function getBulkSelectedProcessId(userId?: string | null): string | null {
     try {
+        const scoped = getBulkSelectedProcessStorageKey(userId);
+        const scopedVal = localStorage.getItem(scoped);
+        if (scopedVal !== null) return scopedVal;
         return localStorage.getItem(BULK_SELECTED_PROCESS_STORAGE_KEY);
     } catch {
         return null;
     }
 }
 
-export function setBulkSelectedProcessId(processId: string): void {
+export function setBulkSelectedProcessId(processId: string, userId?: string | null): void {
     try {
-        localStorage.setItem(BULK_SELECTED_PROCESS_STORAGE_KEY, processId);
+        localStorage.setItem(getBulkSelectedProcessStorageKey(userId), processId);
     } catch {
         /* ignore */
     }
+}
+
+function parseAgeNumber(raw: unknown): number | undefined {
+    if (raw === undefined || raw === null || raw === '') return undefined;
+    if (typeof raw === 'number' && !isNaN(raw) && raw > 0 && raw < 150) return Math.round(raw);
+    const cleaned = String(raw).trim().replace(/[^\d.,]/g, '').replace(',', '.');
+    if (!cleaned) return undefined;
+    const n = parseFloat(cleaned);
+    if (!isNaN(n) && n > 0 && n < 150) return Math.round(n);
+    return undefined;
+}
+
+export function isBirthDateColumn(col: CustomColumn): boolean {
+    const norm = normalizeColumnNameKey(col.name);
+    if (!norm) return false;
+    if (norm === 'f nac' || norm.includes('fecha nac') || norm.includes('fnac') || norm.includes('fec nac')) {
+        return true;
+    }
+    const aliases = CUSTOM_COLUMN_HEADER_ALIASES['f nac'] || [];
+    return aliases.some(a => normalizeColumnNameKey(a) === norm);
+}
+
+function ageFromBirthDateValue(value: unknown): number | undefined {
+    if (value === undefined || value === null || value === '') return undefined;
+    const raw = String(value).trim();
+    let birth: Date | null = null;
+
+    const iso = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (iso) {
+        birth = new Date(Number(iso[1]), Number(iso[2]) - 1, Number(iso[3]));
+    } else {
+        const dmy = raw.match(/^(\d{1,2})[/.-](\d{1,2})[/.-](\d{2,4})$/);
+        if (dmy) {
+            let year = Number(dmy[3]);
+            if (year < 100) year += year >= 50 ? 1900 : 2000;
+            birth = new Date(year, Number(dmy[2]) - 1, Number(dmy[1]));
+        }
+    }
+
+    if (!birth || isNaN(birth.getTime())) return undefined;
+    const today = new Date();
+    let age = today.getFullYear() - birth.getFullYear();
+    const monthDiff = today.getMonth() - birth.getMonth();
+    if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birth.getDate())) age -= 1;
+    return age > 0 && age < 120 ? age : undefined;
+}
+
+/** Misma resolución que la celda de la tabla masiva (custom + legacy + homónimos). */
+export function resolveBulkTableCellValue(
+    candidate: HomonymCandidateFields,
+    columnId: string,
+    customColumns: CustomColumn[],
+    columnValues: Record<string, Record<string, unknown>> = {},
+    legacyColumnIdToName: Record<string, string> = {}
+): unknown {
+    const col = customColumns.find(c => c.id === columnId);
+    const row = getCandidateColumnRow(candidate, columnValues);
+
+    if (col) {
+        const resolved = resolveColumnValueFromRow(row, col, legacyColumnIdToName);
+        if (resolved !== undefined && resolved !== '') return resolved;
+        if (resolved === false) return false;
+
+        if (isAgeLikeColumn(col) && candidate.age != null && candidate.age > 0) return candidate.age;
+        const mapped = mapImportHeader(col.name.toLowerCase());
+        if (mapped === 'age' && candidate.age != null && candidate.age > 0) return candidate.age;
+        if (mapped === 'source' && candidate.source) return candidate.source;
+        if (mapped === 'province' && candidate.province) return candidate.province;
+        if (mapped === 'district' && candidate.district) return candidate.district;
+    }
+
+    return '';
 }
 
 export function getColumnValuesStorageKey(processId: string): string {

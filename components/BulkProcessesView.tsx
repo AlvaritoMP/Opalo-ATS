@@ -62,7 +62,8 @@ import {
     getColumnWidthStyle,
     CHECKBOX_COL_WIDTH,
     getBulkSelectedProcessId,
-    setBulkSelectedProcessId,
+    resolveCandidateAge,
+    resolveBulkTableCellValue,
 } from '../lib/bulkTableColumns';
 import { getStageSelectClass } from '../lib/stageColors';
 import { getCellMetaStorageKey, BulkCellMeta, BulkCellMetaStore } from '../lib/bulkCellMeta';
@@ -479,7 +480,11 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
     const [hasMore, setHasMore] = useState(false);
     const [isLoading, setIsLoading] = useState(false);
     const [isLoadingProcesses, setIsLoadingProcesses] = useState(false);
-    const [selectedProcess, setSelectedProcess] = useState<string>(() => getBulkSelectedProcessId() ?? '');
+    const [selectedProcess, setSelectedProcess] = useState<string>(() => {
+        const fromApp = state.lastViewedBulkProcessId;
+        if (fromApp) return fromApp;
+        return getBulkSelectedProcessId(state.currentUser?.id) ?? '';
+    });
     const [selectedStage, setSelectedStage] = useState<string>('');
     const [searchInput, setSearchInput] = useState('');
     const debouncedSearch = useDebouncedValue(searchInput, 400);
@@ -626,12 +631,6 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
         };
         loadCounts();
     }, [bulkProcesses]);
-
-    const openPsychReport = useCallback((list: BulkCandidate[]) => {
-        if (!process || list.length === 0) return;
-        setPsychReportCandidates(list);
-        setShowPsychReportModal(true);
-    }, [process]);
 
     const openPsychBulkEvaluate = useCallback((list: BulkCandidate[]) => {
         if (!process || list.length === 0) return;
@@ -863,16 +862,17 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
             setBulkProcesses(filteredProcesses);
             if (filteredProcesses.length === 0) return;
 
-            const savedSelection = getBulkSelectedProcessId();
-            const activeId = selectedProcess || savedSelection || '';
+            const activeId =
+                selectedProcess ||
+                state.lastViewedBulkProcessId ||
+                getBulkSelectedProcessId(state.currentUser?.id) ||
+                '';
 
-            if (activeId && filteredProcesses.some(p => p.id === activeId)) {
-                if (selectedProcess !== activeId) setSelectedProcess(activeId);
-                return;
-            }
-            if (savedSelection === null && !selectedProcess) {
-                setSelectedProcess(filteredProcesses[0].id);
-                setBulkSelectedProcessId(filteredProcesses[0].id);
+            if (activeId && !filteredProcesses.some(p => p.id === activeId)) {
+                setSelectedProcess('');
+                actions.setLastViewedBulkProcessId('');
+            } else if (activeId && selectedProcess !== activeId) {
+                setSelectedProcess(activeId);
             }
         } catch (error) {
             console.error('Error cargando procesos masivos:', error);
@@ -880,21 +880,43 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
         } finally {
             setIsLoadingProcesses(false);
         }
-    }, [selectedProcess, actions, state.currentUser]);
+    }, [selectedProcess, actions, state.currentUser, state.lastViewedBulkProcessId]);
 
     useEffect(() => {
         loadBulkProcesses();
     }, []);
 
+    useEffect(() => {
+        const fromApp = state.lastViewedBulkProcessId;
+        if (fromApp !== selectedProcess) {
+            setSelectedProcess(fromApp);
+        }
+    }, [state.lastViewedBulkProcessId]);
+
     const selectBulkProcess = useCallback((processId: string) => {
         setSelectedProcess(processId);
-        setBulkSelectedProcessId(processId);
-    }, []);
+        actions.setLastViewedBulkProcessId(processId);
+    }, [actions]);
 
     const legacyColumnIdToName = useMemo(
         () => buildLegacyColumnIdToName(process?.bulkConfig, customColumns),
         [process?.bulkConfig, customColumns]
     );
+
+    const openPsychReport = useCallback((list: BulkCandidate[]) => {
+        if (!process || list.length === 0) return;
+        const enriched = list.map(c => {
+            const age = resolveCandidateAge(
+                c,
+                customColumns,
+                columnValues,
+                legacyColumnIdToName
+            );
+            return age != null ? { ...c, age } : c;
+        });
+        setPsychReportCandidates(enriched);
+        setShowPsychReportModal(true);
+    }, [process, customColumns, columnValues, legacyColumnIdToName]);
 
     const syncColumnValuesFromDatabase = useCallback(async (processId: string) => {
         const cols = process?.bulkConfig?.customColumns || [];
@@ -2171,26 +2193,14 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
     };
 
     const getColumnValue = (candidateId: string, columnId: string, candidate?: BulkCandidate): any => {
-        const col = customColumns.find(c => c.id === columnId);
-        const row: Record<string, unknown> = {
-            ...(candidate?.bulkColumnValues || {}),
-            ...(columnValues[candidateId] || {}),
-        };
-
-        if (col) {
-            const resolved = resolveColumnValueFromRow(row, col, legacyColumnIdToName);
-            if (resolved !== undefined && resolved !== '') return resolved;
-            if (resolved === false) return false;
-        }
-
-        if (col && candidate) {
-            const mapped = mapImportHeader(col.name.toLowerCase());
-            if (mapped === 'age' && candidate.age != null) return candidate.age;
-            if (mapped === 'source' && candidate.source) return candidate.source;
-            if (mapped === 'province' && candidate.province) return candidate.province;
-            if (mapped === 'district' && candidate.district) return candidate.district;
-        }
-        return '';
+        if (!candidate) return '';
+        return resolveBulkTableCellValue(
+            candidate,
+            columnId,
+            customColumns,
+            columnValues,
+            legacyColumnIdToName
+        );
     };
 
     const readCandidateFieldValue = useCallback((candidateId: string, field: string): string => {
