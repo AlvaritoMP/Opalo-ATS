@@ -897,6 +897,34 @@ export function resolveCandidateHomonymField(
 }
 
 /** Edad para informes: misma fuente que la tabla (columna Edad, fecha nac., candidates.age). */
+function parseAgeLikeValue(raw: unknown): number | undefined {
+    const fromNumber = parseAgeNumber(raw);
+    if (fromNumber != null) return fromNumber;
+    return ageFromBirthDateValue(raw);
+}
+
+function isAgeLikeRowKey(key: string): boolean {
+    const bare = key.startsWith(BULK_NAME_KEY_PREFIX)
+        ? key.slice(BULK_NAME_KEY_PREFIX.length)
+        : normalizeColumnNameKey(key);
+    if (bare === 'edad' || bare === 'age') return true;
+    if (/^edad(\b|\s)/.test(bare)) return true;
+    return mapImportHeader(bare) === 'age';
+}
+
+function scanBulkRowForAge(
+    candidate: HomonymCandidateFields,
+    columnValues: Record<string, Record<string, unknown>> = {}
+): number | undefined {
+    const row = getCandidateColumnRow(candidate, columnValues);
+    for (const [key, val] of Object.entries(row)) {
+        if (!isAgeLikeRowKey(key)) continue;
+        const parsed = parseAgeLikeValue(val);
+        if (parsed != null) return parsed;
+    }
+    return undefined;
+}
+
 export function resolveCandidateAge(
     candidate: HomonymCandidateFields,
     customColumns: CustomColumn[],
@@ -912,7 +940,7 @@ export function resolveCandidateAge(
             columnValues,
             legacyColumnIdToName
         );
-        const parsed = parseAgeNumber(raw);
+        const parsed = parseAgeLikeValue(raw);
         if (parsed != null) return parsed;
     }
 
@@ -923,7 +951,7 @@ export function resolveCandidateAge(
         columnValues,
         legacyColumnIdToName
     );
-    const fromHomonym = parseAgeNumber(homonymRaw);
+    const fromHomonym = parseAgeLikeValue(homonymRaw);
     if (fromHomonym != null) return fromHomonym;
 
     for (const col of customColumns) {
@@ -939,6 +967,9 @@ export function resolveCandidateAge(
         if (fromBirth != null) return fromBirth;
     }
 
+    const fromRowScan = scanBulkRowForAge(candidate, columnValues);
+    if (fromRowScan != null) return fromRowScan;
+
     if (candidate.age != null && candidate.age > 0) return candidate.age;
     return undefined;
 }
@@ -946,12 +977,15 @@ export function resolveCandidateAge(
 /** Edad para panel/dashboard: misma lógica que la tabla en procesos masivos. */
 export function resolveCandidateAgeForProcess(
     candidate: HomonymCandidateFields,
-    process?: Process
+    process?: Process,
+    columnValues: Record<string, Record<string, unknown>> = {}
 ): number | undefined {
     if (process?.isBulkProcess) {
         const customColumns = process.bulkConfig?.customColumns || [];
         const legacy = buildLegacyColumnIdToName(process.bulkConfig, customColumns);
-        return resolveCandidateAge(candidate, customColumns, {}, legacy);
+        const localValues = loadLocalColumnValuesForProcess(process.id);
+        const mergedColumnValues = { ...localValues, ...columnValues };
+        return resolveCandidateAge(candidate, customColumns, mergedColumnValues, legacy);
     }
     if (candidate.age != null && candidate.age > 0) return candidate.age;
     return undefined;

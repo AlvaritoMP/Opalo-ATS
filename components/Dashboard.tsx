@@ -1,9 +1,10 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { useAppState } from '../App';
 import { Briefcase, Users, FileText, CheckCircle, Calendar, Grid3x3 } from 'lucide-react';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend, BarChart, CartesianGrid, XAxis, YAxis, Bar } from 'recharts';
 import { Candidate, Process } from '../types';
 import { resolveCandidateAgeForProcess } from '../lib/bulkTableColumns';
+import { bulkCandidatesApi } from '../lib/api/bulkCandidates';
 
 const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#AF19FF', '#6366f1', '#14b8a6', '#f97316'];
 
@@ -118,6 +119,50 @@ export const Dashboard: React.FC = () => {
 
     const processMap = useMemo(() => new Map(processes.map(p => [p.id, p])), [processes]);
 
+    /** Datos masivos por candidato (columnas + edad desde API de procesos masivos) */
+    const [bulkCandidateFields, setBulkCandidateFields] = useState<
+        Record<string, { bulkColumnValues?: Record<string, unknown>; age?: number }>
+    >({});
+
+    useEffect(() => {
+        const bulkProcessIds = [
+            ...new Set(
+                scopedProcesses.filter(p => p.isBulkProcess).map(p => p.id)
+            ),
+        ];
+        if (bulkProcessIds.length === 0) {
+            setBulkCandidateFields({});
+            return;
+        }
+
+        let cancelled = false;
+        (async () => {
+            const merged: Record<string, { bulkColumnValues?: Record<string, unknown>; age?: number }> = {};
+            for (const processId of bulkProcessIds) {
+                try {
+                    const all = await bulkCandidatesApi.getAllCandidates(processId);
+                    for (const c of all) {
+                        const prev = merged[c.id] || {};
+                        merged[c.id] = {
+                            age: c.age ?? prev.age,
+                            bulkColumnValues: {
+                                ...(prev.bulkColumnValues || {}),
+                                ...(c.bulkColumnValues || {}),
+                            },
+                        };
+                    }
+                } catch {
+                    /* continuar con localStorage vía resolveCandidateAgeForProcess */
+                }
+            }
+            if (!cancelled) setBulkCandidateFields(merged);
+        })();
+
+        return () => {
+            cancelled = true;
+        };
+    }, [scopedProcesses, processMap]);
+
     const filteredCandidates = useMemo(() => {
         const userRole = state.currentUser?.role;
         const isClientOrViewer = userRole === 'client' || userRole === 'viewer';
@@ -217,6 +262,7 @@ export const Dashboard: React.FC = () => {
 
     const ageDistribution = useMemo(() => {
         const ageBrackets: Record<string, number> = {
+            '<20': 0,
             '20-29': 0,
             '30-39': 0,
             '40-49': 0,
@@ -225,24 +271,34 @@ export const Dashboard: React.FC = () => {
         };
         filteredCandidates.forEach(c => {
             const process = processMap.get(c.processId);
+            const bulkExtra = bulkCandidateFields[c.id];
+            const enrichedRow = {
+                ...(c.bulkColumnValues || {}),
+                ...(bulkExtra?.bulkColumnValues || {}),
+            };
             const age = resolveCandidateAgeForProcess(
                 {
                     id: c.id,
-                    age: c.age,
-                    bulkColumnValues: c.bulkColumnValues,
+                    age: bulkExtra?.age ?? c.age,
+                    bulkColumnValues: Object.keys(enrichedRow).length > 0 ? enrichedRow : undefined,
                 },
-                process
+                process,
+                bulkExtra?.bulkColumnValues
+                    ? { [c.id]: bulkExtra.bulkColumnValues }
+                    : {}
             );
             if (age == null) {
                 ageBrackets['Sin dato']++;
-            } else if (age >= 20 && age <= 29) ageBrackets['20-29']++;
-            else if (age >= 30 && age <= 39) ageBrackets['30-39']++;
-            else if (age >= 40 && age <= 49) ageBrackets['40-49']++;
-            else if (age >= 50) ageBrackets['50+']++;
-            else ageBrackets['Sin dato']++;
+            } else if (age < 20) ageBrackets['<20']++;
+            else if (age <= 29) ageBrackets['20-29']++;
+            else if (age <= 39) ageBrackets['30-39']++;
+            else if (age <= 49) ageBrackets['40-49']++;
+            else ageBrackets['50+']++;
         });
-        return Object.entries(ageBrackets).map(([name, Candidatos]) => ({ name, Candidatos }));
-    }, [filteredCandidates, processMap]);
+        return Object.entries(ageBrackets)
+            .filter(([, count]) => count > 0)
+            .map(([name, Candidatos]) => ({ name, Candidatos }));
+    }, [filteredCandidates, processMap, bulkCandidateFields]);
 
     const upcomingInterviews = useMemo(() => {
         const now = new Date();
