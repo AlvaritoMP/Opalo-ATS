@@ -45,7 +45,10 @@ export function formatUsersApiError(error: unknown, action: 'create' | 'update' 
 
     if (err?.code === '23505' || err?.status === 409) {
         if (msg.includes('email') || msg.includes('users_email')) {
-            return 'Ya existe un usuario con ese correo electrónico. Use otro email o edite el usuario existente.';
+            return (
+                'Ese correo ya está registrado en la base de datos con una regla global (probablemente en Opalopy). ' +
+                'Ejecute MIGRATION_FIX_USERS_EMAIL_UNIQUE_PER_APP.sql en Supabase para permitir el mismo email en Opalo ATS y Opalopy.'
+            );
         }
         return 'Conflicto al guardar el usuario (registro duplicado).';
     }
@@ -84,12 +87,9 @@ export const usersApi = {
             .select('*')
             .eq('id', id)
             .eq('app_name', APP_NAME)
-            .single();
+            .maybeSingle();
         
-        if (error) {
-            if (error.code === 'PGRST116') return null; // No encontrado
-            throw error;
-        }
+        if (error) throw error;
         return data ? dbToUser(data) : null;
     },
 
@@ -98,14 +98,11 @@ export const usersApi = {
         const { data, error } = await supabase
             .from('users')
             .select('*')
-            .eq('email', email.toLowerCase())
+            .eq('email', normalizeEmail(email))
             .eq('app_name', APP_NAME)
-            .single();
+            .maybeSingle();
         
-        if (error) {
-            if (error.code === 'PGRST116') return null;
-            throw error;
-        }
+        if (error) throw error;
         return data ? dbToUser(data) : null;
     },
 
