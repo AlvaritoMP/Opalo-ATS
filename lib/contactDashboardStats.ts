@@ -79,6 +79,37 @@ export function isRecordedCallAttempt(
     return attempt.channel === 'call' && isCountableContactAction(attempt) && attempt.outcome !== 'status_change';
 }
 
+/** Interés registrado en columna Llamadas (botón o menú rápido «Interesado»). */
+export function isEffectiveCallConsultantAttempt(
+    attempt: Pick<ContactAttempt, 'channel' | 'outcome' | 'statusAfter'>
+): boolean {
+    return attempt.channel === 'call' && isEffectiveContactAttempt(attempt);
+}
+
+function accumulateCallConsultantStats(
+    attempts: ContactAttempt[]
+): Map<string, { total: number; effective: number }> {
+    const callerTotals = new Map<string, { total: number; effective: number }>();
+
+    for (const a of attempts) {
+        if (a.channel !== 'call' || !isCountableContactAction(a)) continue;
+
+        const name = normalizeUserName(a.userName);
+        const bucket = callerTotals.get(name) || { total: 0, effective: 0 };
+
+        if (isRecordedCallAttempt(a)) {
+            bucket.total += 1;
+        }
+        if (isEffectiveCallConsultantAttempt(a)) {
+            bucket.effective += 1;
+        }
+
+        callerTotals.set(name, bucket);
+    }
+
+    return callerTotals;
+}
+
 /** Contacto registrado en un canal (llamada, WhatsApp o correo). */
 export function isRecordedChannelAttempt(
     attempt: Pick<ContactAttempt, 'channel' | 'outcome'>,
@@ -228,15 +259,7 @@ export function computeContactDashboardStats(
         }
     }
 
-    const callerTotals = new Map<string, { total: number; effective: number }>();
-    for (const a of scoped) {
-        if (!isRecordedCallAttempt(a)) continue;
-        const name = normalizeUserName(a.userName);
-        const bucket = callerTotals.get(name) || { total: 0, effective: 0 };
-        bucket.total += 1;
-        if (isEffectiveContactAttempt(a)) bucket.effective += 1;
-        callerTotals.set(name, bucket);
-    }
+    const callerTotals = accumulateCallConsultantStats(scoped);
 
     let topCaller: ContactChannelDashboardStats['topCaller'] = null;
     let topEffectiveCaller: ContactChannelDashboardStats['topEffectiveCaller'] = null;
@@ -258,7 +281,7 @@ export function computeContactDashboardStats(
                 userName,
                 effectiveCalls: effective,
                 totalCalls: total,
-                rate: Math.round((effective / total) * 1000) / 10,
+                rate: total > 0 ? Math.round((effective / total) * 1000) / 10 : 100,
             };
         }
     }
@@ -283,9 +306,10 @@ export function computeContactDashboardStats(
             name,
             llamadas: total,
             efectivas: effective,
-            rate: total > 0 ? Math.round((effective / total) * 1000) / 10 : 0,
+            rate: total > 0 ? Math.round((effective / total) * 1000) / 10 : effective > 0 ? 100 : 0,
         }))
-        .sort((a, b) => b.llamadas - a.llamadas)
+        .filter(d => d.llamadas > 0 || d.efectivas > 0)
+        .sort((a, b) => b.llamadas - a.llamadas || b.efectivas - a.efectivas)
         .slice(0, 8);
 
     return {

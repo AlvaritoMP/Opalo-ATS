@@ -828,7 +828,7 @@ export const Dashboard: React.FC = () => {
 
                             <ChartContainer
                                 title="Llamadas por consultor"
-                                description="Volumen de llamadas y cuántas generaron interés (no incluye solo &quot;no contestó&quot; como efectiva)."
+                                description="Llamadas registradas (no contestó, ocupado, contestó) e interesados marcados en la columna Llamadas, incluido el menú «Interesado / En proceso»."
                                 hasData={contactStats.callerRankings.length > 0}
                                 height={Math.max(280, contactStats.callerRankings.length * 44)}
                             >
@@ -848,10 +848,14 @@ export const Dashboard: React.FC = () => {
                                     />
                                     <Tooltip
                                         formatter={(value: number, name: string, item) => {
-                                            if (name === 'Llamadas') return [`${value} llamada${value !== 1 ? 's' : ''}`, 'Total'];
+                                            if (name === 'Llamadas') return [`${value} llamada${value !== 1 ? 's' : ''}`, 'Registradas'];
                                             if (name === 'Interesado') {
                                                 const rate = item.payload.rate;
-                                                return [`${value} (${rate}% del total)`, 'Efectivas'];
+                                                const total = item.payload.llamadas as number;
+                                                if (total === 0 && value > 0) {
+                                                    return [`${value} solo por menú interesado`, 'Interesado'];
+                                                }
+                                                return [`${value} (${rate}% del total)`, 'Interesado'];
                                             }
                                             return [value, name];
                                         }}
