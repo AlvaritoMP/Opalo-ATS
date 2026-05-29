@@ -1,6 +1,7 @@
 import { BulkProcessConfig, CustomColumn, FieldMapping, Process } from '../types';
 import { normalizeImportTextCase } from './importTextCase.js';
-import { migrateBulkColumnOrder } from './contactChannelConfig';
+import { migrateBulkColumnOrder, CONTACT_COLUMN_IDS, CONTACT_LAST_USER_COLUMN_ID } from './contactChannelConfig';
+import { ensureHiredStageUserColumnInOrder, HIRED_STAGE_USER_COLUMN_ID } from './hiringStageTracking';
 import { APP_NAME } from './appConfig';
 
 const BULK_NAME_KEY_PREFIX = '__name__';
@@ -381,6 +382,7 @@ export const BASE_COLUMNS: BaseColumn[] = [
     { id: 'phone', label: 'Teléfono', importKey: 'phone' },
     { id: 'contactPhone', label: 'Llamadas' },
     { id: 'contactWhatsapp', label: 'WhatsApp' },
+    { id: 'contactLastUser', label: 'Últ. contacto por' },
     { id: 'source', label: 'Fuente', importKey: 'source' },
     { id: 'province', label: 'Provincia', importKey: 'province' },
     { id: 'district', label: 'Distrito', importKey: 'district' },
@@ -388,6 +390,7 @@ export const BASE_COLUMNS: BaseColumn[] = [
     { id: 'nextInterview', label: 'Próxima Entrevista' },
     { id: 'schedule', label: 'Agendar' },
     { id: 'stage', label: 'Etapa' },
+    { id: 'hiredStageUser', label: 'Ingreso por' },
 ];
 
 export const DEFAULT_COLUMN_ORDER = BASE_COLUMNS.map(c => c.id);
@@ -406,6 +409,7 @@ export const COLUMN_WIDTHS: Record<string, number> = {
     contactPhone: 100,
     contactWhatsapp: 100,
     contactEmail: 100,
+    contactLastUser: 108,
     source: 88,
     province: 88,
     district: 88,
@@ -413,6 +417,7 @@ export const COLUMN_WIDTHS: Record<string, number> = {
     nextInterview: 100,
     schedule: 56,
     stage: 120,
+    hiredStageUser: 112,
 };
 
 export const COMPACT_TD_CLASS = 'px-1.5 py-0.5 text-xs text-gray-700 whitespace-nowrap leading-tight';
@@ -633,8 +638,25 @@ export function resolveColumnOrder(
     if (bulkConfig?.columnOrder?.length) {
         const migrated = migrateBulkColumnOrder(bulkConfig.columnOrder);
         const ordered = migrated.filter(id => allIds.includes(id));
-        const missing = allIds.filter(id => !ordered.includes(id));
-        return [...ordered, ...missing];
+        let missing = allIds.filter(id => !ordered.includes(id));
+
+        if (missing.includes(CONTACT_LAST_USER_COLUMN_ID)) {
+            missing = missing.filter(id => id !== CONTACT_LAST_USER_COLUMN_ID);
+            let lastContactIdx = -1;
+            for (let i = 0; i < ordered.length; i++) {
+                if (CONTACT_COLUMN_IDS.includes(ordered[i])) lastContactIdx = i;
+            }
+            ordered.splice(lastContactIdx >= 0 ? lastContactIdx + 1 : ordered.length, 0, CONTACT_LAST_USER_COLUMN_ID);
+        }
+
+        if (missing.includes(HIRED_STAGE_USER_COLUMN_ID)) {
+            missing = missing.filter(id => id !== HIRED_STAGE_USER_COLUMN_ID);
+        }
+        const withHiredCol = ensureHiredStageUserColumnInOrder(ordered);
+        ordered.length = 0;
+        ordered.push(...withHiredCol.filter(id => allIds.includes(id) || id === HIRED_STAGE_USER_COLUMN_ID));
+
+        return [...ordered, ...missing.filter(id => id !== HIRED_STAGE_USER_COLUMN_ID)];
     }
 
     return allIds;

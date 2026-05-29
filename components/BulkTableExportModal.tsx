@@ -5,6 +5,7 @@ import { bulkCandidatesApi } from '../lib/api/bulkCandidates';
 import type { BulkCandidate } from '../lib/api/bulkCandidates';
 import { buildBulkTableExportDocument, BulkExportScope, CLIENT_EXPORT_EXCLUDE_COLUMN_IDS } from '../lib/bulkTableExport';
 import { getColumnLabel } from '../lib/bulkTableColumns';
+import type { HiredStageActor } from '../lib/hiringStageTracking';
 import type { CustomColumn, Process } from '../types';
 
 interface Props {
@@ -20,6 +21,7 @@ interface Props {
     total: number;
     searchQuery: string;
     selectedIds: string[];
+    hiringStageActors?: Record<string, HiredStageActor>;
 }
 
 export const BulkTableExportModal: React.FC<Props> = ({
@@ -35,6 +37,7 @@ export const BulkTableExportModal: React.FC<Props> = ({
     total,
     searchQuery,
     selectedIds,
+    hiringStageActors = {},
 }) => {
     const { actions } = useAppState();
     const [scope, setScope] = useState<BulkExportScope>('current_view');
@@ -163,6 +166,7 @@ export const BulkTableExportModal: React.FC<Props> = ({
             process,
             bulkConfig,
             delimiter,
+            hiringStageActors,
         });
         const ext = delimiter === '\t' ? 'tsv' : 'csv';
         const safeTitle = process.title

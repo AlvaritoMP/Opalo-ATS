@@ -1,10 +1,13 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { useAppState } from '../App';
-import { Briefcase, Users, FileText, CheckCircle, Calendar, Grid3x3 } from 'lucide-react';
+import { Briefcase, Users, FileText, CheckCircle, Calendar, Grid3x3, Phone, TrendingUp, UserCheck, Headphones, UserPlus } from 'lucide-react';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend, BarChart, CartesianGrid, XAxis, YAxis, Bar } from 'recharts';
 import { Candidate, Process } from '../types';
 import { resolveCandidateAgeForProcess } from '../lib/bulkTableColumns';
 import { bulkCandidatesApi } from '../lib/api/bulkCandidates';
+import { contactTrackingApi } from '../lib/api/contactTracking';
+import { computeContactDashboardStats } from '../lib/contactDashboardStats';
+import { computeHiringStageConsultantStats } from '../lib/hiringStageTracking';
 
 const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#AF19FF', '#6366f1', '#14b8a6', '#f97316'];
 
@@ -124,6 +127,9 @@ export const Dashboard: React.FC = () => {
         Record<string, { bulkColumnValues?: Record<string, unknown>; age?: number }>
     >({});
 
+    const [contactAttempts, setContactAttempts] = useState<Awaited<ReturnType<typeof contactTrackingApi.getAttemptsForProcesses>>>([]);
+    const [contactStatsLoading, setContactStatsLoading] = useState(false);
+
     useEffect(() => {
         const bulkProcessIds = [
             ...new Set(
@@ -162,6 +168,35 @@ export const Dashboard: React.FC = () => {
             cancelled = true;
         };
     }, [scopedProcesses, processMap]);
+
+    const targetProcessIds = useMemo(() => {
+        if (processFilter !== 'all') return [processFilter];
+        return scopedProcesses.map(p => p.id);
+    }, [processFilter, scopedProcesses]);
+
+    useEffect(() => {
+        if (targetProcessIds.length === 0) {
+            setContactAttempts([]);
+            return;
+        }
+
+        let cancelled = false;
+        setContactStatsLoading(true);
+        (async () => {
+            try {
+                const attempts = await contactTrackingApi.getAttemptsForProcesses(targetProcessIds);
+                if (!cancelled) setContactAttempts(attempts);
+            } catch {
+                if (!cancelled) setContactAttempts([]);
+            } finally {
+                if (!cancelled) setContactStatsLoading(false);
+            }
+        })();
+
+        return () => {
+            cancelled = true;
+        };
+    }, [targetProcessIds]);
 
     const filteredCandidates = useMemo(() => {
         const userRole = state.currentUser?.role;
@@ -419,6 +454,30 @@ export const Dashboard: React.FC = () => {
         return Math.round((completed / started) * 1000) / 10;
     }, [filteredCandidates]);
 
+    const filteredCandidateIds = useMemo(
+        () => new Set(filteredCandidates.map(c => c.id)),
+        [filteredCandidates]
+    );
+
+    const contactStats = useMemo(() => {
+        const scoped = contactAttempts.filter(a => filteredCandidateIds.has(a.candidateId));
+        return computeContactDashboardStats(scoped);
+    }, [contactAttempts, filteredCandidateIds]);
+
+    const hiringConsultantStats = useMemo(
+        () =>
+            computeHiringStageConsultantStats(
+                filteredCandidates.map(c => ({
+                    id: c.id,
+                    processId: c.processId,
+                    history: c.history,
+                })),
+                processMap,
+                users
+            ),
+        [filteredCandidates, processMap, users]
+    );
+
     const stageChartHeight = Math.max(280, candidatesByStage.length * 36);
 
     return (
@@ -570,6 +629,219 @@ export const Dashboard: React.FC = () => {
                             </BarChart>
                         </ResponsiveContainer>
                     </div>
+                )}
+            </div>
+
+            <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm mb-8">
+                <h2 className="text-xl font-semibold text-gray-800 mb-1">Canales de atención</h2>
+                <p className="text-sm text-gray-500 mb-4">
+                    Uso y efectividad de llamadas, WhatsApp y correo sobre los candidatos del filtro actual.
+                    La efectividad se mide cuando se marca &quot;Interesado&quot; al contactar.
+                </p>
+
+                {contactStatsLoading ? (
+                    <p className="text-sm text-gray-500 py-6 text-center">Cargando datos de contacto…</p>
+                ) : contactStats.totalActions === 0 ? (
+                    <p className="text-sm text-gray-500 py-6 text-center">
+                        Sin acciones de contacto registradas para los procesos y candidatos del filtro actual.
+                    </p>
+                ) : (
+                    <>
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-6">
+                            <StatCard
+                                icon={Phone}
+                                title="Canal más usado"
+                                value={contactStats.mostUsedChannel?.label ?? 'N/D'}
+                                subtitle={
+                                    contactStats.mostUsedChannel
+                                        ? `${contactStats.mostUsedChannel.count} acción${contactStats.mostUsedChannel.count !== 1 ? 'es' : ''} · ${contactStats.mostUsedChannel.pct}% del total`
+                                        : 'Sin datos'
+                                }
+                                color="bg-sky-500"
+                            />
+                            <StatCard
+                                icon={TrendingUp}
+                                title="Mayor efectividad"
+                                value={contactStats.mostEffectiveChannel?.label ?? 'N/D'}
+                                subtitle={
+                                    contactStats.mostEffectiveChannel
+                                        ? `${contactStats.mostEffectiveChannel.rate}% interesado (${contactStats.mostEffectiveChannel.effectiveCount}/${contactStats.mostEffectiveChannel.totalCount})`
+                                        : 'Sin datos'
+                                }
+                                color="bg-emerald-500"
+                            />
+                            <StatCard
+                                icon={Headphones}
+                                title="Consultor con más llamadas"
+                                value={contactStats.topCaller?.userName ?? 'N/D'}
+                                subtitle={
+                                    contactStats.topCaller
+                                        ? `${contactStats.topCaller.callCount} llamada${contactStats.topCaller.callCount !== 1 ? 's' : ''} registradas`
+                                        : 'Sin llamadas en el periodo'
+                                }
+                                color="bg-violet-500"
+                            />
+                            <StatCard
+                                icon={UserCheck}
+                                title="Consultor con más llamadas efectivas"
+                                value={contactStats.topEffectiveCaller?.userName ?? 'N/D'}
+                                subtitle={
+                                    contactStats.topEffectiveCaller
+                                        ? `${contactStats.topEffectiveCaller.effectiveCalls} interesado${contactStats.topEffectiveCaller.effectiveCalls !== 1 ? 's' : ''} · ${contactStats.topEffectiveCaller.rate}% de ${contactStats.topEffectiveCaller.totalCalls} llamadas`
+                                        : 'Ninguna llamada marcó interés aún'
+                                }
+                                color="bg-amber-500"
+                            />
+                        </div>
+
+                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                            <ChartContainer
+                                title="Acciones por canal"
+                                description="Total de contactos vs. los que terminaron en interesado."
+                                hasData={contactStats.channelVolume.length > 0}
+                            >
+                                <BarChart data={contactStats.channelVolume} margin={{ top: 10, right: 20, left: 10, bottom: 5 }}>
+                                    <CartesianGrid strokeDasharray="3 3" />
+                                    <XAxis dataKey="name" />
+                                    <YAxis allowDecimals={false} />
+                                    <Tooltip
+                                        formatter={(value: number, name: string) => {
+                                            if (name === 'total') return [`${value} acciones`, 'Total'];
+                                            if (name === 'effective') return [`${value} interesado${value !== 1 ? 's' : ''}`, 'Efectivas'];
+                                            return [value, name];
+                                        }}
+                                    />
+                                    <Legend />
+                                    <Bar dataKey="total" name="Total" fill="#0ea5e9" radius={[4, 4, 0, 0]} />
+                                    <Bar dataKey="effective" name="Interesado" fill="#10b981" radius={[4, 4, 0, 0]} />
+                                </BarChart>
+                            </ChartContainer>
+
+                            <ChartContainer
+                                title="Llamadas por consultor"
+                                description="Volumen de llamadas y cuántas generaron interés (no incluye solo &quot;no contestó&quot; como efectiva)."
+                                hasData={contactStats.callerRankings.length > 0}
+                                height={Math.max(280, contactStats.callerRankings.length * 44)}
+                            >
+                                <BarChart
+                                    data={contactStats.callerRankings}
+                                    layout="vertical"
+                                    margin={{ top: 5, right: 20, left: 10, bottom: 5 }}
+                                >
+                                    <CartesianGrid strokeDasharray="3 3" />
+                                    <XAxis type="number" allowDecimals={false} />
+                                    <YAxis
+                                        type="category"
+                                        dataKey="name"
+                                        width={120}
+                                        tick={{ fontSize: 11 }}
+                                        tickFormatter={(v: string) => truncateLabel(v, 18)}
+                                    />
+                                    <Tooltip
+                                        formatter={(value: number, name: string, item) => {
+                                            if (name === 'Llamadas') return [`${value} llamada${value !== 1 ? 's' : ''}`, 'Total'];
+                                            if (name === 'Interesado') {
+                                                const rate = item.payload.rate;
+                                                return [`${value} (${rate}% del total)`, 'Efectivas'];
+                                            }
+                                            return [value, name];
+                                        }}
+                                    />
+                                    <Legend />
+                                    <Bar dataKey="llamadas" name="Llamadas" fill="#8b5cf6" radius={[0, 4, 4, 0]} />
+                                    <Bar dataKey="efectivas" name="Interesado" fill="#f59e0b" radius={[0, 4, 4, 0]} />
+                                </BarChart>
+                            </ChartContainer>
+                        </div>
+                    </>
+                )}
+            </div>
+
+            <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm mb-8">
+                <h2 className="text-xl font-semibold text-gray-800 mb-1">Ingresos a contratación</h2>
+                <p className="text-sm text-gray-500 mb-4">
+                    Consultores que movieron candidatos a la última etapa del proceso (contratación), según el historial de etapas.
+                </p>
+
+                {hiringConsultantStats.totalHires === 0 ? (
+                    <p className="text-sm text-gray-500 py-6 text-center">
+                        Sin ingresos registrados a la etapa final para los candidatos del filtro actual.
+                    </p>
+                ) : (
+                    <>
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-6">
+                            <StatCard
+                                icon={UserPlus}
+                                title="Consultor con más ingresos"
+                                value={hiringConsultantStats.topConsultant?.userName ?? 'N/D'}
+                                subtitle={
+                                    hiringConsultantStats.topConsultant
+                                        ? `${hiringConsultantStats.topConsultant.hires} ingreso${hiringConsultantStats.topConsultant.hires !== 1 ? 's' : ''} a contratación`
+                                        : 'Sin datos'
+                                }
+                                color="bg-indigo-500"
+                            />
+                            <StatCard
+                                icon={TrendingUp}
+                                title="Participación del líder"
+                                value={
+                                    hiringConsultantStats.topConsultant
+                                        ? `${hiringConsultantStats.topConsultant.sharePct}%`
+                                        : 'N/D'
+                                }
+                                subtitle={
+                                    hiringConsultantStats.topConsultant
+                                        ? `Del total de ${hiringConsultantStats.totalHires} ingreso${hiringConsultantStats.totalHires !== 1 ? 's' : ''} en el filtro`
+                                        : 'Sin ingresos en el filtro'
+                                }
+                                color="bg-teal-500"
+                            />
+                            <StatCard
+                                icon={CheckCircle}
+                                title="Total ingresos"
+                                value={hiringConsultantStats.totalHires}
+                                subtitle="Candidatos movidos a la etapa final del proceso"
+                                color="bg-blue-500"
+                            />
+                            <StatCard
+                                icon={Users}
+                                title="Consultores activos"
+                                value={hiringConsultantStats.rankings.length}
+                                subtitle="Usuarios con al menos un ingreso a contratación"
+                                color="bg-violet-500"
+                            />
+                        </div>
+
+                        <ChartContainer
+                            title="Ingresos por consultor"
+                            description="Cantidad de candidatos que cada consultor movió a la etapa de contratación."
+                            hasData={hiringConsultantStats.rankings.length > 0}
+                            height={Math.max(280, hiringConsultantStats.rankings.length * 44)}
+                        >
+                            <BarChart
+                                data={hiringConsultantStats.rankings}
+                                layout="vertical"
+                                margin={{ top: 5, right: 20, left: 10, bottom: 5 }}
+                            >
+                                <CartesianGrid strokeDasharray="3 3" />
+                                <XAxis type="number" allowDecimals={false} />
+                                <YAxis
+                                    type="category"
+                                    dataKey="name"
+                                    width={120}
+                                    tick={{ fontSize: 11 }}
+                                    tickFormatter={(v: string) => truncateLabel(v, 18)}
+                                />
+                                <Tooltip
+                                    formatter={(value: number, _name, item) => [
+                                        `${value} ingreso${value !== 1 ? 's' : ''} (${item.payload.share}% del total)`,
+                                        'Contratación',
+                                    ]}
+                                />
+                                <Bar dataKey="ingresos" name="Ingresos" fill="#6366f1" radius={[0, 4, 4, 0]} />
+                            </BarChart>
+                        </ChartContainer>
+                    </>
                 )}
             </div>
 

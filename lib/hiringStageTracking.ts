@@ -1,0 +1,153 @@
+import type { CandidateHistory, Process, User } from '../types';
+
+export const HIRED_STAGE_USER_COLUMN_ID = 'hiredStageUser';
+
+export interface HiredStageActor {
+    userName: string;
+    movedAt: string;
+}
+
+export interface HiringStageConsultantStats {
+    totalHires: number;
+    topConsultant: {
+        userName: string;
+        hires: number;
+        sharePct: number;
+    } | null;
+    rankings: { name: string; ingresos: number; share: number }[];
+}
+
+export function getProcessLastStageId(process?: Pick<Process, 'stages'> | null): string | null {
+    const stages = process?.stages;
+    if (!stages?.length) return null;
+    return stages[stages.length - 1].id;
+}
+
+export function resolveHistoryUserName(
+    movedBy: string | null | undefined,
+    users: Pick<User, 'id' | 'name'>[] = []
+): string {
+    if (!movedBy || movedBy === 'System') return 'Sistema';
+    const byId = users.find(u => u.id === movedBy);
+    if (byId?.name) return byId.name;
+    const isLikelyId = movedBy.length > 20 || movedBy.includes('-');
+    if (isLikelyId) {
+        const byName = users.find(u => u.name === movedBy);
+        return byName?.name || 'Usuario';
+    }
+    return movedBy;
+}
+
+/** Último movimiento registrado hacia la etapa final del proceso. */
+export function findMostRecentMoveToStage(
+    history: CandidateHistory[] | undefined,
+    stageId: string
+): CandidateHistory | null {
+    if (!history?.length || !stageId) return null;
+    let best: CandidateHistory | null = null;
+    let bestTs = -1;
+    for (const entry of history) {
+        if (entry.stageId !== stageId) continue;
+        const ts = new Date(entry.movedAt).getTime();
+        if (Number.isNaN(ts) || ts <= bestTs) continue;
+        bestTs = ts;
+        best = entry;
+    }
+    return best;
+}
+
+export function getHiredStageActorFromHistory(
+    history: CandidateHistory[] | undefined,
+    process: Pick<Process, 'stages'> | undefined,
+    users: Pick<User, 'id' | 'name'>[] = []
+): HiredStageActor | null {
+    const lastStageId = getProcessLastStageId(process);
+    if (!lastStageId) return null;
+    const move = findMostRecentMoveToStage(history, lastStageId);
+    if (!move) return null;
+    return {
+        userName: resolveHistoryUserName(move.movedBy, users),
+        movedAt: move.movedAt,
+    };
+}
+
+export function formatHiredStageActorDisplay(actor: HiredStageActor | null | undefined): string {
+    if (!actor?.userName) return '-';
+    return actor.userName;
+}
+
+export function formatHiredStageActorTooltip(actor: HiredStageActor | null | undefined): string | undefined {
+    if (!actor?.movedAt) return undefined;
+    const when = new Date(actor.movedAt);
+    if (Number.isNaN(when.getTime())) return actor.userName;
+    return `${actor.userName} · ${when.toLocaleString('es-PE')}`;
+}
+
+export function mapRawHiringMoves(
+    rows: Array<{ candidate_id: string; moved_at: string; moved_by: string | null }>,
+    users: Pick<User, 'id' | 'name'>[] = []
+): Record<string, HiredStageActor> {
+    const out: Record<string, HiredStageActor> = {};
+    for (const row of rows) {
+        if (out[row.candidate_id]) continue;
+        out[row.candidate_id] = {
+            userName: resolveHistoryUserName(row.moved_by, users),
+            movedAt: row.moved_at,
+        };
+    }
+    return out;
+}
+
+export function computeHiringStageConsultantStats(
+    candidates: Array<{
+        id: string;
+        processId: string;
+        history?: CandidateHistory[];
+    }>,
+    processMap: Map<string, Process>,
+    users: Pick<User, 'id' | 'name'>[] = []
+): HiringStageConsultantStats {
+    const counts = new Map<string, number>();
+
+    for (const candidate of candidates) {
+        const process = processMap.get(candidate.processId);
+        const actor = getHiredStageActorFromHistory(candidate.history, process, users);
+        if (!actor) continue;
+        counts.set(actor.userName, (counts.get(actor.userName) || 0) + 1);
+    }
+
+    const totalHires = [...counts.values()].reduce((sum, n) => sum + n, 0);
+    const rankings = [...counts.entries()]
+        .map(([name, ingresos]) => ({
+            name,
+            ingresos,
+            share: totalHires > 0 ? Math.round((ingresos / totalHires) * 1000) / 10 : 0,
+        }))
+        .sort((a, b) => b.ingresos - a.ingresos);
+
+    const top = rankings[0];
+    return {
+        totalHires,
+        topConsultant: top
+            ? {
+                  userName: top.name,
+                  hires: top.ingresos,
+                  sharePct: top.share,
+              }
+            : null,
+        rankings: rankings.slice(0, 8),
+    };
+}
+
+/** Inserta la columna derivada después de Etapa si falta en el orden guardado. */
+export function ensureHiredStageUserColumnInOrder(order: string[]): string[] {
+    if (order.includes(HIRED_STAGE_USER_COLUMN_ID)) return order;
+    const out = [...order];
+    const stageIdx = out.indexOf('stage');
+    if (stageIdx >= 0) {
+        out.splice(stageIdx + 1, 0, HIRED_STAGE_USER_COLUMN_ID);
+    } else {
+        out.push(HIRED_STAGE_USER_COLUMN_ID);
+    }
+    return out;
+}

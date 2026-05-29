@@ -405,6 +405,10 @@ export const bulkCandidatesApi = {
             discarded?: boolean;
             discardReason?: string;
             archived?: boolean;
+        },
+        context?: {
+            movedBy?: string;
+            previousStageByCandidate?: Record<string, string | undefined>;
         }
     ): Promise<void> {
         if (candidateIds.length === 0) return;
@@ -431,6 +435,59 @@ export const bulkCandidatesApi = {
             .eq('app_name', APP_NAME);
 
         if (error) throw error;
+
+        if (updates.stageId && context?.previousStageByCandidate) {
+            const now = new Date().toISOString();
+            const rows = candidateIds
+                .map(candidateId => {
+                    const previousStageId = context.previousStageByCandidate?.[candidateId];
+                    if (!previousStageId || previousStageId === updates.stageId) return null;
+                    return {
+                        candidate_id: candidateId,
+                        stage_id: updates.stageId,
+                        moved_at: now,
+                        moved_by: context.movedBy || null,
+                        app_name: APP_NAME,
+                    };
+                })
+                .filter((row): row is NonNullable<typeof row> => row !== null);
+
+            if (rows.length > 0) {
+                const { error: historyError } = await supabase.from('candidate_history').insert(rows);
+                if (historyError) {
+                    console.warn('Historial de etapa no guardado en lote:', historyError.message);
+                }
+            }
+        }
+    },
+
+    /**
+     * Consultores que movieron candidatos a la etapa final (contratación) del proceso.
+     */
+    async getHiringStageActorsForProcess(
+        processId: string,
+        lastStageId: string
+    ): Promise<Array<{ candidate_id: string; moved_at: string; moved_by: string | null }>> {
+        const { data: candidates, error: candidatesError } = await supabase
+            .from('candidates')
+            .select('id')
+            .eq('process_id', processId)
+            .eq('app_name', APP_NAME);
+
+        if (candidatesError) throw candidatesError;
+        const candidateIds = (candidates || []).map(c => c.id as string);
+        if (candidateIds.length === 0) return [];
+
+        const { data, error } = await supabase
+            .from('candidate_history')
+            .select('candidate_id, moved_at, moved_by')
+            .in('candidate_id', candidateIds)
+            .eq('stage_id', lastStageId)
+            .eq('app_name', APP_NAME)
+            .order('moved_at', { ascending: false });
+
+        if (error) throw error;
+        return (data || []) as Array<{ candidate_id: string; moved_at: string; moved_by: string | null }>;
     },
 
     /**

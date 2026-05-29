@@ -133,6 +133,30 @@ export const contactTrackingApi = {
         return readChannelSummaryFromRow(row, channel);
     },
 
+    async getAttemptsForProcesses(processIds: string[]): Promise<ContactAttempt[]> {
+        if (processIds.length === 0) return [];
+
+        const selectFields =
+            'id, candidate_id, process_id, user_id, user_name, channel, outcome, attempt_number, status_after, created_at';
+
+        const { data, error } = await supabase
+            .from('candidate_contact_attempts')
+            .select(selectFields)
+            .in('process_id', processIds)
+            .eq('app_name', APP_NAME)
+            .order('created_at', { ascending: false });
+
+        if (error) {
+            if (isMissingContactColumnError(error)) {
+                contactColumnsSupported = false;
+                return [];
+            }
+            throw error;
+        }
+        contactColumnsSupported = true;
+        return (data || []).map(mapAttemptRow);
+    },
+
     async getHistory(
         candidateId: string,
         channel: ContactAttemptChannel,

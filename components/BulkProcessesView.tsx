@@ -8,10 +8,22 @@ import { supabase } from '../lib/supabase';
 import {
     columnIdToAttemptChannel,
     CONTACT_COLUMN_IDS,
+    CONTACT_LAST_USER_COLUMN_ID,
     type ContactAttemptChannel,
     type ChannelContactSummary,
     readChannelSummaryFromRow,
+    getLatestContactActorFromCandidate,
+    formatLatestContactActorDisplay,
+    formatLatestContactActorTooltip,
 } from '../lib/contactChannelConfig';
+import {
+    HIRED_STAGE_USER_COLUMN_ID,
+    getProcessLastStageId,
+    mapRawHiringMoves,
+    formatHiredStageActorDisplay,
+    formatHiredStageActorTooltip,
+    type HiredStageActor,
+} from '../lib/hiringStageTracking';
 import { processesApi } from '../lib/api/processes';
 import { useDebouncedValue } from '../lib/useDebouncedValue';
 import { Check, X, Loader2, Send, Archive, Search, ChevronDown, ChevronUp, Plus, Edit, Trash2, ArrowLeft, MessageCircle, Phone, Upload, Download, Filter, Mail, Calendar, Settings, ArrowUp, ArrowDown, Pin, FileText, BookOpen, Paperclip, ClipboardList, ListPlus, RefreshCw, HardDrive, CaseSensitive, Package, History, Target } from 'lucide-react';
@@ -507,6 +519,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
     const [drawerCandidate, setDrawerCandidate] = useState<BulkCandidate | null>(null);
     const [isDrawerOpen, setIsDrawerOpen] = useState(false);
     const [optimisticUpdates, setOptimisticUpdates] = useState<Map<string, Partial<BulkCandidate>>>(new Map());
+    const [hiringStageActors, setHiringStageActors] = useState<Record<string, HiredStageActor>>({});
     const [showProcessModal, setShowProcessModal] = useState(false);
     const [editingProcess, setEditingProcess] = useState<Process | null>(null);
     const [showImportModal, setShowImportModal] = useState(false);
@@ -595,6 +608,31 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
         }
         return map;
     }, [state.users]);
+
+    const processLastStageId = useMemo(() => getProcessLastStageId(process), [process]);
+
+    useEffect(() => {
+        if (!process?.id || !processLastStageId) {
+            setHiringStageActors({});
+            return;
+        }
+
+        let cancelled = false;
+        (async () => {
+            try {
+                const rows = await bulkCandidatesApi.getHiringStageActorsForProcess(process.id, processLastStageId);
+                if (!cancelled) {
+                    setHiringStageActors(mapRawHiringMoves(rows, state.users));
+                }
+            } catch {
+                if (!cancelled) setHiringStageActors({});
+            }
+        })();
+
+        return () => {
+            cancelled = true;
+        };
+    }, [process?.id, processLastStageId, state.users]);
 
     const logActivity = useCallback((
         actionType: BulkActivityActionType,
@@ -1307,24 +1345,53 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                     oldValue: prevName,
                     newValue: stageName || updates.stageId,
                 });
+                if (processLastStageId && updates.stageId === processLastStageId && state.currentUser) {
+                    setHiringStageActors(prev => ({
+                        ...prev,
+                        [candidateId]: {
+                            userName: state.currentUser!.name || state.currentUser!.email || 'Usuario',
+                            movedAt: new Date().toISOString(),
+                        },
+                    }));
+                }
             }
         } catch (error) {
             console.error('Error actualizando candidato:', error);
             loadCandidates(currentPage, true);
             actions.showToast('Error al actualizar candidato', 'error', 3000);
         }
-    }, [applyOptimisticUpdate, loadCandidates, currentPage, actions, state.currentUser?.id, process?.stages, candidates, logActivity]);
+    }, [applyOptimisticUpdate, loadCandidates, currentPage, actions, state.currentUser?.id, state.currentUser?.name, state.currentUser?.email, process?.stages, processLastStageId, candidates, logActivity]);
 
     const handleBulkApprove = useCallback(async () => {
         if (selectedIds.size === 0) return;
         const ids = Array.from(selectedIds);
+        const lastStageId = process?.stages[process.stages.length - 1]?.id;
         ids.forEach(id => {
-            applyOptimisticUpdate(id, { stageId: process?.stages[process.stages.length - 1]?.id });
+            applyOptimisticUpdate(id, { stageId: lastStageId });
         });
         try {
-            await bulkCandidatesApi.updateCandidatesBatch(ids, {
-                stageId: process?.stages[process.stages.length - 1]?.id,
-            });
+            const previousStageByCandidate = Object.fromEntries(
+                ids.map(id => [id, candidates.find(c => c.id === id)?.stageId])
+            );
+            await bulkCandidatesApi.updateCandidatesBatch(
+                ids,
+                { stageId: lastStageId },
+                {
+                    movedBy: state.currentUser?.id,
+                    previousStageByCandidate,
+                }
+            );
+            if (lastStageId && state.currentUser) {
+                const actorName = state.currentUser.name || state.currentUser.email || 'Usuario';
+                const movedAt = new Date().toISOString();
+                setHiringStageActors(prev => {
+                    const next = { ...prev };
+                    for (const id of ids) {
+                        next[id] = { userName: actorName, movedAt };
+                    }
+                    return next;
+                });
+            }
             setSelectedIds(new Set());
             actions.showToast(`${ids.length} candidatos aprobados`, 'success', 3000);
             logActivity('bulk_approve', {
@@ -1335,7 +1402,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
             loadCandidates(currentPage, true);
             actions.showToast('Error al aprobar candidatos', 'error', 3000);
         }
-    }, [selectedIds, process, applyOptimisticUpdate, loadCandidates, currentPage, actions, logActivity]);
+    }, [selectedIds, process, candidates, applyOptimisticUpdate, loadCandidates, currentPage, actions, logActivity, state.currentUser?.id, state.currentUser?.name, state.currentUser?.email]);
 
     const handleBulkReject = useCallback(async () => {
         if (selectedIds.size === 0) return;
@@ -2350,6 +2417,20 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                     }
                     break;
                 }
+                case 'contactLastUser': {
+                    const la = getLatestContactActorFromCandidate(candidateA);
+                    const lb = getLatestContactActorFromCandidate(candidateB);
+                    valueA = la?.lastAttemptAt ? new Date(la.lastAttemptAt).getTime() : 0;
+                    valueB = lb?.lastAttemptAt ? new Date(lb.lastAttemptAt).getTime() : 0;
+                    break;
+                }
+                case 'hiredStageUser': {
+                    const ha = hiringStageActors[candidateA.id];
+                    const hb = hiringStageActors[candidateB.id];
+                    valueA = ha?.movedAt ? new Date(ha.movedAt).getTime() : 0;
+                    valueB = hb?.movedAt ? new Date(hb.movedAt).getTime() : 0;
+                    break;
+                }
                 case 'nextInterview':
                     valueA = candidateA.nextInterviewAt ? new Date(candidateA.nextInterviewAt).getTime() : 0;
                     valueB = candidateB.nextInterviewAt ? new Date(candidateB.nextInterviewAt).getTime() : 0;
@@ -2429,6 +2510,16 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
             if (columnFilters.phone && !(displayCandidate.phone || '').includes(columnFilters.phone)) {
                 return false;
             }
+            if (columnFilters.contactLastUser) {
+                const actor = getLatestContactActorFromCandidate(displayCandidate);
+                const name = (actor?.userName || '').toLowerCase();
+                if (!name.includes(columnFilters.contactLastUser.toLowerCase())) return false;
+            }
+            if (columnFilters.hiredStageUser) {
+                const actor = hiringStageActors[candidate.id];
+                const name = (actor?.userName || '').toLowerCase();
+                if (!name.includes(columnFilters.hiredStageUser.toLowerCase())) return false;
+            }
             if (columnFilters.source) {
                 const sourceVal = resolveStandardFieldValue('source', candidate.id, displayCandidate, columnValues, customColumns);
                 if (!sourceVal.toLowerCase().includes(columnFilters.source.toLowerCase())) return false;
@@ -2448,7 +2539,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
         }));
     }, [
         candidates, columnFilters, optimisticUpdates, scoreIaColumnVisible, profileMatchColumnVisible, profileMatchScores, columnValues,
-        customColumns, sortColumn, sortDirection, process?.stages,
+        customColumns, sortColumn, sortDirection, process?.stages, hiringStageActors,
     ]);
 
     const getCellIndices = useCallback((candidateId: string, colId: string) => ({
@@ -2981,6 +3072,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
             customColumns,
             process,
             bulkConfig: process?.bulkConfig,
+            hiringStageActors,
         });
         if (!text) return;
 
@@ -3513,6 +3605,32 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                             </BulkTh>
                                         );
                                     }
+                                    if (colId === CONTACT_LAST_USER_COLUMN_ID) {
+                                        return (
+                                            <BulkTh colId={colId} headerProps={commonProps} style={thStyle()} onResizeStart={handleColumnResizeStart}>
+                                                <div className="flex flex-col gap-1">
+                                                    <button onClick={() => handleSort('contactLastUser')} className="flex items-center gap-1 hover:text-primary-600 transition-colors">
+                                                        <span>{getColumnLabel(colId, customColumns)}</span>
+                                                        {sortColumn === 'contactLastUser' ? (sortDirection === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />) : <div className="w-3 h-3 opacity-30"><ArrowUp className="w-3 h-3" /></div>}
+                                                    </button>
+                                                    <input type="text" placeholder="Filtrar..." value={columnFilters.contactLastUser || ''} onChange={(e) => setColumnFilters({ ...columnFilters, contactLastUser: e.target.value })} className="text-xs px-2 py-1 border border-gray-300 rounded focus:ring-1 focus:ring-primary-500 focus:border-primary-500 font-normal normal-case" onClick={(e) => e.stopPropagation()} />
+                                                </div>
+                                            </BulkTh>
+                                        );
+                                    }
+                                    if (colId === HIRED_STAGE_USER_COLUMN_ID) {
+                                        return (
+                                            <BulkTh colId={colId} headerProps={commonProps} style={thStyle()} onResizeStart={handleColumnResizeStart}>
+                                                <div className="flex flex-col gap-1">
+                                                    <button onClick={() => handleSort('hiredStageUser')} className="flex items-center gap-1 hover:text-primary-600 transition-colors">
+                                                        <span>{getColumnLabel(colId, customColumns)}</span>
+                                                        {sortColumn === 'hiredStageUser' ? (sortDirection === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />) : <div className="w-3 h-3 opacity-30"><ArrowUp className="w-3 h-3" /></div>}
+                                                    </button>
+                                                    <input type="text" placeholder="Filtrar..." value={columnFilters.hiredStageUser || ''} onChange={(e) => setColumnFilters({ ...columnFilters, hiredStageUser: e.target.value })} className="text-xs px-2 py-1 border border-gray-300 rounded focus:ring-1 focus:ring-primary-500 focus:border-primary-500 font-normal normal-case" onClick={(e) => e.stopPropagation()} />
+                                                </div>
+                                            </BulkTh>
+                                        );
+                                    }
                                     if (colId === 'source') {
                                         return (
                                             <BulkTh colId={colId} headerProps={commonProps} style={thStyle()} onResizeStart={handleColumnResizeStart}>
@@ -3828,6 +3946,38 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                                                 )
                                                             }
                                                         />
+                                                    </td>
+                                                );
+                                            }
+                                            if (colId === CONTACT_LAST_USER_COLUMN_ID) {
+                                                const latestContact = getLatestContactActorFromCandidate(displayCandidate);
+                                                const label = formatLatestContactActorDisplay(latestContact);
+                                                const tooltip = formatLatestContactActorTooltip(latestContact);
+                                                return (
+                                                    <td
+                                                        key={colId}
+                                                        {...tdProps(candidate.id, colId)}
+                                                        title={tooltip}
+                                                    >
+                                                        <span className="truncate block max-w-full text-gray-800">
+                                                            {label}
+                                                        </span>
+                                                    </td>
+                                                );
+                                            }
+                                            if (colId === HIRED_STAGE_USER_COLUMN_ID) {
+                                                const hiredActor = hiringStageActors[candidate.id];
+                                                const label = formatHiredStageActorDisplay(hiredActor);
+                                                const tooltip = formatHiredStageActorTooltip(hiredActor);
+                                                return (
+                                                    <td
+                                                        key={colId}
+                                                        {...tdProps(candidate.id, colId)}
+                                                        title={tooltip}
+                                                    >
+                                                        <span className="truncate block max-w-full text-gray-800">
+                                                            {label}
+                                                        </span>
                                                     </td>
                                                 );
                                             }
@@ -4319,6 +4469,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                     total={total}
                     searchQuery={debouncedSearch}
                     selectedIds={Array.from(selectedIds)}
+                    hiringStageActors={hiringStageActors}
                 />
             )}
 

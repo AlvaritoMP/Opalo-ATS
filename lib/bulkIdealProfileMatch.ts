@@ -44,6 +44,8 @@ const NON_COMPARABLE = new Set([
     'nextInterview',
     'schedule',
     'stage',
+    'contactLastUser',
+    'hiredStageUser',
     ...CONTACT_COLUMN_IDS,
 ]);
 

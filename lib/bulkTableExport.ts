@@ -1,5 +1,13 @@
 import { BulkCandidate } from './api/bulkCandidates';
 import { CONTACT_STATUS_META, getContactBadgeLabel } from './contactTracking';
+import {
+    getLatestContactActorFromCandidate,
+    formatLatestContactActorDisplay,
+} from './contactChannelConfig';
+import {
+    formatHiredStageActorDisplay,
+    type HiredStageActor,
+} from './hiringStageTracking';
 import { BulkProcessConfig, CustomColumn, Process } from '../types';
 import {
     formatCustomCellDisplay,
@@ -50,9 +58,10 @@ export function getBulkExportCellValue(
         customColumns: CustomColumn[];
         process?: Process;
         bulkConfig?: BulkProcessConfig;
+        hiringStageActors?: Record<string, HiredStageActor>;
     }
 ): string {
-    const { columnValues, customColumns, process, bulkConfig } = opts;
+    const { columnValues, customColumns, process, bulkConfig, hiringStageActors } = opts;
     const stages = process?.stages ?? [];
 
     if (colId === 'name') return candidate.name || '';
@@ -102,6 +111,25 @@ export function getBulkExportCellValue(
         const who = ch.lastUserName ? ` · ${ch.lastUserName}` : '';
         return `${CONTACT_STATUS_META[ch.status].label}: ${label}${when ? ` · ${when}` : ''}${who}`;
     }
+    if (colId === 'contactLastUser') {
+        const actor = getLatestContactActorFromCandidate(candidate);
+        if (!actor) return '';
+        const who = formatLatestContactActorDisplay(actor);
+        if (who === '-') return '';
+        const when = actor.lastAttemptAt
+            ? new Date(actor.lastAttemptAt).toLocaleString('es-PE')
+            : '';
+        const ch = actor.channelLabel ? `${actor.channelLabel} · ` : '';
+        return `${ch}${who}${when ? ` · ${when}` : ''}`;
+    }
+    if (colId === 'hiredStageUser') {
+        const actor = hiringStageActors?.[candidate.id];
+        if (!actor) return '';
+        const who = formatHiredStageActorDisplay(actor);
+        if (who === '-') return '';
+        const when = actor.movedAt ? new Date(actor.movedAt).toLocaleString('es-PE') : '';
+        return when ? `${who} · ${when}` : who;
+    }
     if (colId === 'nextInterview') {
         if (!candidate.nextInterviewAt) return '';
         try {
@@ -141,6 +169,7 @@ type BulkExportCellOpts = {
     customColumns: CustomColumn[];
     process?: Process;
     bulkConfig?: BulkProcessConfig;
+    hiringStageActors?: Record<string, HiredStageActor>;
 };
 
 export type BulkSelectionCell = { candidateId: string; colId: string };
@@ -201,6 +230,7 @@ export function buildBulkTableExportDocument(
         process?: Process;
         bulkConfig?: BulkProcessConfig;
         delimiter?: '\t' | ';';
+        hiringStageActors?: Record<string, HiredStageActor>;
     }
 ): string {
     const delimiter = opts.delimiter ?? '\t';
@@ -215,6 +245,7 @@ export function buildBulkTableExportDocument(
                         customColumns: opts.customColumns,
                         process: opts.process,
                         bulkConfig: opts.bulkConfig,
+                        hiringStageActors: opts.hiringStageActors,
                     }),
                     delimiter
                 )

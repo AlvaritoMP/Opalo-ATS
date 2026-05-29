@@ -39,6 +39,58 @@ export const CONTACT_CHANNELS: Record<ContactAttemptChannel, ContactChannelDef> 
 
 export const CONTACT_COLUMN_IDS = Object.values(CONTACT_CHANNELS).map(c => c.columnId);
 
+/** Columna derivada: último usuario que tocó teléfono, WhatsApp o correo de contacto */
+export const CONTACT_LAST_USER_COLUMN_ID = 'contactLastUser';
+
+export interface LatestContactActor {
+    userName?: string;
+    lastAttemptAt?: string;
+    channelLabel?: string;
+}
+
+export function getLatestContactActorFromCandidate(candidate: {
+    contactPhone?: ChannelContactSummary;
+    contactWhatsapp?: ChannelContactSummary;
+    contactEmail?: ChannelContactSummary;
+}): LatestContactActor | null {
+    const channels = Object.keys(CONTACT_CHANNELS) as ContactAttemptChannel[];
+    let best: LatestContactActor | null = null;
+    let bestTs = -1;
+
+    for (const channel of channels) {
+        const summaryKey =
+            channel === 'call' ? 'contactPhone'
+            : channel === 'whatsapp' ? 'contactWhatsapp'
+            : 'contactEmail';
+        const summary = candidate[summaryKey];
+        if (!summary?.lastAttemptAt) continue;
+        const ts = new Date(summary.lastAttemptAt).getTime();
+        if (Number.isNaN(ts) || ts <= bestTs) continue;
+        bestTs = ts;
+        best = {
+            userName: summary.lastUserName,
+            lastAttemptAt: summary.lastAttemptAt,
+            channelLabel: CONTACT_CHANNELS[channel].shortLabel,
+        };
+    }
+
+    return best;
+}
+
+export function formatLatestContactActorDisplay(actor: LatestContactActor | null): string {
+    if (!actor?.userName?.trim()) return '-';
+    return actor.userName.trim();
+}
+
+export function formatLatestContactActorTooltip(actor: LatestContactActor | null): string | undefined {
+    if (!actor?.lastAttemptAt) return actor?.userName ? `Por ${actor.userName}` : undefined;
+    const parts: string[] = [];
+    if (actor.channelLabel) parts.push(actor.channelLabel);
+    parts.push(actor.lastAttemptAt);
+    if (actor.userName) parts.push(`por ${actor.userName}`);
+    return parts.join(' · ');
+}
+
 /** Mapeo columnas antiguas → nuevas (procesos con orden guardado) */
 export const LEGACY_CONTACT_COLUMN_MAP: Record<string, string> = {
     contact: 'contactPhone',
@@ -185,6 +237,19 @@ export function migrateBulkColumnOrder(order: string[]): string[] {
 
     for (const colId of CONTACT_COLUMN_IDS) {
         if (!seen.has(colId)) out.push(colId);
+    }
+
+    if (!seen.has(CONTACT_LAST_USER_COLUMN_ID)) {
+        let lastContactIdx = -1;
+        for (let i = 0; i < out.length; i++) {
+            if (CONTACT_COLUMN_IDS.includes(out[i])) lastContactIdx = i;
+        }
+        if (lastContactIdx >= 0) {
+            out.splice(lastContactIdx + 1, 0, CONTACT_LAST_USER_COLUMN_ID);
+        } else {
+            out.push(CONTACT_LAST_USER_COLUMN_ID);
+        }
+        seen.add(CONTACT_LAST_USER_COLUMN_ID);
     }
 
     return out;
