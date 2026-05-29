@@ -29,9 +29,39 @@ function userToDb(user: Partial<User>): any {
     if (user.visibleSections !== undefined) dbUser.visible_sections = user.visibleSections;
     // No enviar null: PostgREST falla si la columna no existe o el valor es inválido
     if (user.allowedClientIds !== undefined && user.allowedClientIds !== null) {
-        dbUser.allowed_client_ids = user.allowedClientIds;
+        dbUser.allowed_client_ids =
+            user.allowedClientIds.length > 0 ? user.allowedClientIds : null;
     }
     return dbUser;
+}
+
+function normalizeEmail(email: string): string {
+    return String(email || '').trim().toLowerCase();
+}
+
+export function formatUsersApiError(error: unknown, action: 'create' | 'update' | 'delete' = 'create'): string {
+    const err = error as { code?: string; status?: number; message?: string; details?: string };
+    const msg = String(err?.message || err?.details || '').toLowerCase();
+
+    if (err?.code === '23505' || err?.status === 409) {
+        if (msg.includes('email') || msg.includes('users_email')) {
+            return 'Ya existe un usuario con ese correo electrónico. Use otro email o edite el usuario existente.';
+        }
+        return 'Conflicto al guardar el usuario (registro duplicado).';
+    }
+    if (err?.code === '23503') {
+        return 'No se pudo guardar el usuario porque referencia un dato que no existe (cliente u otro registro).';
+    }
+    if (err?.code === '42501' || err?.status === 403) {
+        return 'No tiene permisos para guardar usuarios. Revise las políticas RLS en Supabase.';
+    }
+    if (err?.code === 'PGRST116') {
+        return action === 'create'
+            ? 'El usuario se creó pero no es visible. Revise app_name y políticas RLS.'
+            : 'Usuario no encontrado.';
+    }
+
+    return String(err?.message || `No se pudo ${action === 'create' ? 'crear' : action === 'update' ? 'actualizar' : 'eliminar'} el usuario.`);
 }
 
 export const usersApi = {
@@ -81,18 +111,29 @@ export const usersApi = {
 
     // Crear usuario (con app_name automático)
     async create(userData: Omit<User, 'id'>): Promise<User> {
-        const dbData = userToDb(userData);
-        dbData.app_name = APP_NAME;
-        if (dbData.email) {
-            dbData.email = String(dbData.email).toLowerCase();
+        const email = normalizeEmail(userData.email);
+        if (!email) {
+            throw new Error('El correo electrónico es obligatorio.');
         }
+
+        const existing = await this.getByEmail(email);
+        if (existing) {
+            throw new Error('Ya existe un usuario con ese correo electrónico en Opalo ATS.');
+        }
+
+        const dbData = userToDb({ ...userData, email });
+        dbData.id = crypto.randomUUID();
+        dbData.app_name = APP_NAME;
+
         const { data, error } = await supabase
             .from('users')
             .insert(dbData)
             .select()
             .single();
         
-        if (error) throw error;
+        if (error) {
+            throw new Error(formatUsersApiError(error, 'create'));
+        }
         if (!data?.app_name || data.app_name !== APP_NAME) {
             throw new Error(
                 `El usuario se guardó con app_name="${data?.app_name ?? 'null'}" en lugar de "${APP_NAME}". ` +
@@ -112,6 +153,13 @@ export const usersApi = {
     // Actualizar usuario (solo de esta app)
     async update(id: string, userData: Partial<User>): Promise<User> {
         const dbData = userToDb(userData);
+        if (dbData.email !== undefined) {
+            dbData.email = normalizeEmail(dbData.email);
+            const existing = await this.getByEmail(dbData.email);
+            if (existing && existing.id !== id) {
+                throw new Error('Ya existe otro usuario con ese correo electrónico en Opalo ATS.');
+            }
+        }
         // No permitir cambiar app_name
         delete dbData.app_name;
         const { data, error } = await supabase
@@ -122,7 +170,9 @@ export const usersApi = {
             .select()
             .single();
         
-        if (error) throw error;
+        if (error) {
+            throw new Error(formatUsersApiError(error, 'update'));
+        }
         return dbToUser(data);
     },
 

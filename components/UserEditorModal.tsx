@@ -269,9 +269,9 @@ export const UserEditorModal: React.FC<UserEditorModalProps> = ({ user, onClose 
         }
 
         const userData: Partial<User> = { 
-            name, 
-            email, 
-            role, 
+            name: name.trim(), 
+            email: email.trim().toLowerCase(), 
+            role,
             avatarUrl,
             permissions: useCustomPermissions ? permissions : undefined,
             visibleSections: useCustomSections ? visibleSections : undefined,
