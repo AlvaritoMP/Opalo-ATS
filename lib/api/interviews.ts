@@ -29,6 +29,12 @@ function interviewEventToDb(event: Partial<InterviewEvent>): any {
     return dbEvent;
 }
 
+function isMissingInterviewColumnError(error: { message?: string; code?: string } | null): boolean {
+    if (!error) return false;
+    const msg = (error.message || '').toLowerCase();
+    return error.code === '42703' || msg.includes('created_by') || msg.includes('schema cache');
+}
+
 export const interviewsApi = {
     // Obtener todos los eventos (solo de esta app)
     async getAll(): Promise<InterviewEvent[]> {
@@ -59,15 +65,25 @@ export const interviewsApi = {
     // Crear evento (con app_name automático)
     async create(eventData: Omit<InterviewEvent, 'id'>, createdBy?: string): Promise<InterviewEvent> {
         const dbData = interviewEventToDb(eventData);
+        dbData.app_name = APP_NAME;
         if (createdBy) dbData.created_by = createdBy;
-        dbData.app_name = APP_NAME; // Asegurar que siempre se asigne el app_name
 
-        const { data, error } = await supabase
+        let { data, error } = await supabase
             .from('interview_events')
             .insert(dbData)
             .select()
             .single();
-        
+
+        if (error && createdBy && isMissingInterviewColumnError(error)) {
+            const retryPayload = { ...dbData };
+            delete retryPayload.created_by;
+            ({ data, error } = await supabase
+                .from('interview_events')
+                .insert(retryPayload)
+                .select()
+                .single());
+        }
+
         if (error) throw error;
         return dbToInterviewEvent(data);
     },

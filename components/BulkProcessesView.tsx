@@ -114,6 +114,10 @@ import { SendToOpsFlowModal } from './SendToOpsFlowModal';
 import { BulkCandidateOpsFlowPanel } from './BulkCandidateOpsFlowPanel';
 import { BulkRouteCell } from './BulkRouteCell';
 import { buildRouteColumnLink } from '../lib/transitRouteLinks';
+import {
+    enrichCandidatesWithNextInterviews,
+    interviewEventToCandidateFields,
+} from '../lib/bulkInterviewUtils';
 
 interface BulkProcessesViewProps {}
 
@@ -1056,19 +1060,24 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
             const cols = process?.bulkConfig?.customColumns || [];
             const legacy = buildLegacyColumnIdToName(process?.bulkConfig, cols);
 
+            const enriched = enrichCandidatesWithNextInterviews(
+                result.candidates,
+                state.interviewEvents
+            );
+
             if (reset) {
-                setCandidates(result.candidates);
+                setCandidates(enriched);
                 setColumnValues(prev => mergeColumnValuesFromCandidates(
                     prev,
-                    result.candidates,
+                    enriched,
                     cols,
                     legacy
                 ));
             } else {
-                setCandidates(prev => [...prev, ...result.candidates]);
+                setCandidates(prev => [...prev, ...enriched]);
                 setColumnValues(prev => mergeColumnValuesFromCandidates(
                     prev,
-                    result.candidates,
+                    enriched,
                     cols,
                     legacy
                 ));
@@ -1082,7 +1091,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
         } finally {
             setIsLoading(false);
         }
-    }, [selectedProcess, selectedStage, debouncedSearch, actions, process?.bulkConfig]);
+    }, [selectedProcess, selectedStage, debouncedSearch, actions, process?.bulkConfig, state.interviewEvents]);
 
     const refreshFromDatabase = useCallback(async () => {
         if (!selectedProcess) return;
@@ -1317,8 +1326,26 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
     }, [candidates, customColumns, process?.id]);
 
     const applyOptimisticUpdate = useCallback((candidateId: string, updates: Partial<BulkCandidate>) => {
-        setOptimisticUpdates(prev => new Map(prev).set(candidateId, updates));
+        setOptimisticUpdates(prev => {
+            const next = new Map(prev);
+            next.set(candidateId, { ...(prev.get(candidateId) || {}), ...updates });
+            return next;
+        });
         setCandidates(prev => prev.map(c => c.id === candidateId ? { ...c, ...updates } : c));
+    }, []);
+
+    const patchCandidateInterviewFields = useCallback((
+        candidateId: string,
+        fields: Pick<BulkCandidate, 'nextInterviewAt' | 'nextInterviewerId' | 'nextInterviewEventId'>
+    ) => {
+        setCandidates(prev =>
+            prev.map(c => (c.id === candidateId ? { ...c, ...fields } : c))
+        );
+        setOptimisticUpdates(prev => {
+            const next = new Map(prev);
+            next.delete(candidateId);
+            return next;
+        });
     }, []);
 
     const updateCandidateStatus = useCallback(async (candidateId: string, updates: { stageId?: string; discarded?: boolean; archived?: boolean }, previousStageId?: string) => {
@@ -1693,19 +1720,28 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
         };
 
         try {
-            await actions.addInterviewEvent(eventData);
-            applyOptimisticUpdate(candidateId, {
-                nextInterviewAt: startDateTime.toISOString(),
-                nextInterviewerId: interviewerId,
-            });
-            actions.showToast('Entrevista agendada exitosamente', 'success', 3000);
+            const newEvent = await actions.addInterviewEvent(eventData);
+            const interviewFields = interviewEventToCandidateFields(newEvent);
+            patchCandidateInterviewFields(candidateId, interviewFields);
+
+            if (newEvent.id.startsWith('evt-')) {
+                actions.showToast(
+                    'Entrevista guardada localmente; no se pudo confirmar en el servidor. Revisa permisos de entrevistas.',
+                    'info',
+                    5000
+                );
+            } else {
+                actions.showToast('Entrevista agendada exitosamente', 'success', 3000);
+            }
+
             await loadCandidates(currentPage, true);
+            patchCandidateInterviewFields(candidateId, interviewFields);
         } catch (error) {
             console.error('Error agendando entrevista:', error);
             actions.showToast('Error al agendar la entrevista', 'error', 3000);
             throw error;
         }
-    }, [schedulingCandidate, candidates, actions, applyOptimisticUpdate, loadCandidates, currentPage]);
+    }, [schedulingCandidate, candidates, actions, patchCandidateInterviewFields, loadCandidates, currentPage]);
 
     const handleBulkSchedule = useCallback(async (date: string, time: string, interviewerId: string, notes?: string) => {
         const selectedCandidates = candidates.filter(c => selectedIds.has(c.id));
@@ -1716,12 +1752,15 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
         }
 
         const startDateTime = new Date(`${date}T${time}`);
-        const endDateTime = new Date(startDateTime.getTime() + 60 * 60 * 1000); // 1 hora por defecto
+        const endDateTime = new Date(startDateTime.getTime() + 60 * 60 * 1000);
 
         let successCount = 0;
         let errorCount = 0;
+        const scheduledFields = new Map<
+            string,
+            Pick<BulkCandidate, 'nextInterviewAt' | 'nextInterviewerId' | 'nextInterviewEventId'>
+        >();
 
-        // Crear eventos de entrevista para todos los candidatos seleccionados
         for (const candidate of selectedCandidates) {
             const eventData = {
                 title: `Entrevista con ${candidate.name}`,
@@ -1733,7 +1772,8 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
             };
 
             try {
-                await actions.addInterviewEvent(eventData);
+                const newEvent = await actions.addInterviewEvent(eventData);
+                scheduledFields.set(candidate.id, interviewEventToCandidateFields(newEvent));
                 successCount++;
             } catch (error) {
                 console.error(`Error agendando entrevista para ${candidate.name}:`, error);
@@ -1742,13 +1782,25 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
         }
 
         if (successCount > 0) {
+            setCandidates(prev =>
+                prev.map(c => {
+                    const fields = scheduledFields.get(c.id);
+                    return fields ? { ...c, ...fields } : c;
+                })
+            );
+
             actions.showToast(
                 `${successCount} entrevista${successCount !== 1 ? 's' : ''} agendada${successCount !== 1 ? 's' : ''} exitosamente${errorCount > 0 ? ` (${errorCount} error${errorCount !== 1 ? 'es' : ''})` : ''}`,
                 errorCount > 0 ? 'info' : 'success',
                 4000
             );
-            // Recargar candidatos para mostrar las nuevas entrevistas
             await loadCandidates(currentPage, true);
+            setCandidates(prev =>
+                prev.map(c => {
+                    const fields = scheduledFields.get(c.id);
+                    return fields ? { ...c, ...fields } : c;
+                })
+            );
         } else {
             actions.showToast('Error al agendar las entrevistas', 'error', 3000);
         }

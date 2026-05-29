@@ -65,7 +65,7 @@ interface AppActions {
     addFormIntegration: (integrationData: Omit<FormIntegration, 'id' | 'webhookUrl'>) => Promise<FormIntegration>;
     updateFormIntegration: (integrationId: string, integrationData: Partial<FormIntegration>) => Promise<void>;
     deleteFormIntegration: (integrationId: string) => Promise<void>;
-    addInterviewEvent: (eventData: Omit<InterviewEvent, 'id'>) => Promise<void>;
+    addInterviewEvent: (eventData: Omit<InterviewEvent, 'id'>) => Promise<InterviewEvent>;
     updateInterviewEvent: (eventData: InterviewEvent) => Promise<void>;
     deleteInterviewEvent: (eventId: string) => Promise<void>;
     addPostIt: (candidateId: string, postIt: Omit<PostIt, 'id' | 'createdAt'>) => Promise<void>;
@@ -1414,10 +1414,12 @@ const App: React.FC = () => {
             try {
                 const newEvent = await interviewsApi.create(eventData, state.currentUser?.id);
                 setState(s => ({ ...s, interviewEvents: [...s.interviewEvents, newEvent] }));
+                return newEvent;
             } catch (error) {
                 console.error('Error adding interview event:', error);
                 const newEvent: InterviewEvent = { ...eventData, id: `evt-${Date.now()}` };
                 setState(s => ({ ...s, interviewEvents: [...s.interviewEvents, newEvent] }));
+                return newEvent;
             }
         },
         updateInterviewEvent: async (eventData) => {

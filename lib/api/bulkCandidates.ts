@@ -191,7 +191,7 @@ export const bulkCandidatesApi = {
         
         if (candidateIds.length > 0) {
             const now = new Date().toISOString();
-            const { data: interviews } = await supabase
+            const { data: interviews, error: interviewsError } = await supabase
                 .from('interview_events')
                 .select('id, candidate_id, start_time, interviewer_id')
                 .in('candidate_id', candidateIds)
@@ -199,7 +199,9 @@ export const bulkCandidatesApi = {
                 .gte('start_time', now)
                 .order('start_time', { ascending: true });
 
-            if (interviews) {
+            if (interviewsError) {
+                console.warn('No se pudieron cargar entrevistas de candidatos:', interviewsError.message);
+            } else if (interviews) {
                 interviews.forEach(interview => {
                     if (!nextInterviews.has(interview.candidate_id)) {
                         nextInterviews.set(interview.candidate_id, {
