@@ -26,9 +26,9 @@ import {
 } from '../lib/hiringStageTracking';
 import { processesApi } from '../lib/api/processes';
 import { useDebouncedValue } from '../lib/useDebouncedValue';
-import { Check, X, Loader2, Send, Archive, Search, ChevronDown, ChevronUp, Plus, Edit, Trash2, ArrowLeft, MessageCircle, Phone, Upload, Download, Filter, Mail, Calendar, Settings, ArrowUp, ArrowDown, Pin, FileText, BookOpen, Paperclip, ClipboardList, ListPlus, RefreshCw, HardDrive, CaseSensitive, Package, History, Target } from 'lucide-react';
+import { Check, X, Loader2, Send, Archive, Search, ChevronDown, ChevronUp, Plus, Edit, Trash2, ArrowLeft, MessageCircle, Phone, Upload, Download, Filter, Mail, Calendar, Settings, ArrowUp, ArrowDown, Pin, FileText, BookOpen, Paperclip, ClipboardList, ListPlus, RefreshCw, HardDrive, CaseSensitive, Package, History, Target, BarChart3 } from 'lucide-react';
 import { BulkCandidateTimeline } from './BulkCandidateTimeline';
-import { Process, CustomColumn, BulkProcessConfig, Candidate, IdealProfileConfig } from '../types';
+import { Process, CustomColumn, BulkProcessConfig, Candidate, IdealProfileConfig, BulkProcessStatChart } from '../types';
 import { candidatesApi } from '../lib/api/candidates';
 import {
     BASE_COLUMNS,
@@ -94,6 +94,7 @@ import { PsycholaboralReportModal } from './PsycholaboralReportModal';
 import { PsycholaboralBulkEvaluateModal } from './PsycholaboralBulkEvaluateModal';
 import { PsycholaboralInventoryModal } from './PsycholaboralInventoryModal';
 import { BulkIdealProfileModal } from './BulkIdealProfileModal';
+import { BulkProcessStatsModal } from './BulkProcessStatsModal';
 import {
     computeProfileMatch,
     computeProfileMatchSummary,
@@ -577,7 +578,9 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
     const [docsModalProcess, setDocsModalProcess] = useState<Process | null>(null);
     const [showExportModal, setShowExportModal] = useState(false);
     const [showIdealProfileModal, setShowIdealProfileModal] = useState(false);
+    const [showStatsModal, setShowStatsModal] = useState(false);
     const [allCandidatesForStats, setAllCandidatesForStats] = useState<BulkCandidate[]>([]);
+    const [loadingAllCandidatesForStats, setLoadingAllCandidatesForStats] = useState(false);
     const [loadingProfileStats, setLoadingProfileStats] = useState(false);
     const [isNormalizingTextCase, setIsNormalizingTextCase] = useState(false);
     const [activityLogRefreshToken, setActivityLogRefreshToken] = useState(0);
@@ -844,12 +847,19 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
     );
 
     useEffect(() => {
-        if (!showIdealProfileModal || !process?.id || !idealProfileConfig?.enabled) {
-            if (!showIdealProfileModal) setAllCandidatesForStats([]);
+        const needsAllCandidates =
+            (showIdealProfileModal && !!idealProfileConfig?.enabled) || showStatsModal;
+
+        if (!needsAllCandidates || !process?.id) {
+            if (!showIdealProfileModal && !showStatsModal) setAllCandidatesForStats([]);
             return;
         }
+
         let cancelled = false;
-        setLoadingProfileStats(true);
+        setLoadingAllCandidatesForStats(true);
+        if (showIdealProfileModal && idealProfileConfig?.enabled) {
+            setLoadingProfileStats(true);
+        }
         bulkCandidatesApi
             .getAllCandidates(process.id)
             .then(all => {
@@ -859,12 +869,25 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                 if (!cancelled) setAllCandidatesForStats([]);
             })
             .finally(() => {
-                if (!cancelled) setLoadingProfileStats(false);
+                if (!cancelled) {
+                    setLoadingAllCandidatesForStats(false);
+                    if (showIdealProfileModal && idealProfileConfig?.enabled) {
+                        setLoadingProfileStats(false);
+                    }
+                }
             });
         return () => {
             cancelled = true;
         };
-    }, [showIdealProfileModal, process?.id, idealProfileConfig?.enabled, idealProfileConfig, total, columnValues]);
+    }, [
+        showIdealProfileModal,
+        showStatsModal,
+        process?.id,
+        idealProfileConfig?.enabled,
+        idealProfileConfig,
+        total,
+        columnValues,
+    ]);
 
     const profileMatchSummary = useMemo(() => {
         if (!idealProfileConfig?.enabled) return null;
@@ -918,6 +941,22 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
         });
         actions.showToast('Perfil ideal guardado', 'success', 2500);
     }, [process, hiddenColumns, columnOrder, persistBulkConfig, logActivity, actions]);
+
+    const handleSaveCustomStats = useCallback(async (charts: BulkProcessStatChart[]) => {
+        if (!process) return;
+        await persistBulkConfig({ customStats: charts });
+        setBulkProcesses(prev =>
+            prev.map(p =>
+                p.id === process.id
+                    ? { ...p, bulkConfig: { ...p.bulkConfig, customStats: charts } }
+                    : p
+            )
+        );
+        logActivity('config_change', {
+            details: { summary: `Estadísticas personalizadas: ${charts.length} gráfico(s)` },
+        });
+        actions.showToast('Gráficos guardados', 'success', 2500);
+    }, [process, persistBulkConfig, logActivity, actions]);
 
     // Cargar procesos masivos
     const loadBulkProcesses = useCallback(async () => {
@@ -3434,6 +3473,15 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                     <BulkToolbarGroup label="Herramientas">
                                         <button
                                             type="button"
+                                            onClick={() => setShowStatsModal(true)}
+                                            className="bg-white border border-violet-300 text-violet-800 hover:bg-violet-50 transition-colors whitespace-nowrap"
+                                            title="Gráficos personalizados por columna del proceso"
+                                        >
+                                            <BarChart3 className="w-4 h-4 shrink-0" />
+                                            Estadísticas
+                                        </button>
+                                        <button
+                                            type="button"
                                             onClick={() => setShowIdealProfileModal(true)}
                                             className={`transition-colors whitespace-nowrap ${
                                                 idealProfileConfig?.enabled
@@ -4602,6 +4650,24 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                     onSave={handleSaveIdealProfile}
                     profileMatchSummary={profileMatchSummary}
                     profileMatchSummaryLoading={loadingProfileStats}
+                />
+            )}
+
+            {showStatsModal && process && (
+                <BulkProcessStatsModal
+                    isOpen={showStatsModal}
+                    onClose={() => setShowStatsModal(false)}
+                    process={process}
+                    customColumns={customColumns}
+                    columnOrder={columnOrder}
+                    columnValues={columnValues}
+                    legacyColumnIdToName={legacyColumnIdToName}
+                    hiringStageActors={hiringStageActors}
+                    candidates={candidates}
+                    allCandidates={allCandidatesForStats}
+                    loadingAllCandidates={loadingAllCandidatesForStats}
+                    selectedStageId={selectedStage}
+                    onSave={handleSaveCustomStats}
                 />
             )}
         </div>

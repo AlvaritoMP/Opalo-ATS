@@ -202,6 +202,19 @@ export interface BulkProcessConfig {
     psycholaboral?: PsycholaboralProcessConfig;
     /** Perfil ideal para comparar candidatos del proceso masivo */
     idealProfile?: IdealProfileConfig;
+    /** Gráficos personalizados del proceso masivo (columna + tipo) */
+    customStats?: BulkProcessStatChart[];
+}
+
+/** Tipo de gráfico para estadísticas del proceso masivo */
+export type BulkStatChartType = 'bar' | 'horizontalBar' | 'pie';
+
+/** Configuración de un gráfico personalizado en el proceso masivo */
+export interface BulkProcessStatChart {
+    id: string;
+    columnId: string;
+    chartType: BulkStatChartType;
+    title?: string;
 }
 
 /** Modo de comparación por criterio del perfil ideal */
