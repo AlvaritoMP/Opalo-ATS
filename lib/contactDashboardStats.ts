@@ -1,8 +1,11 @@
 import type { ContactAttempt, ContactChannel } from './contactTracking';
 import { CONTACT_CHANNELS, type ContactAttemptChannel } from './contactChannelConfig';
 
+export type ContactConsultantPeriod = 'week' | 'month' | 'year';
+
 export interface ContactChannelDashboardStats {
     totalActions: number;
+    periodLabel: string;
     mostUsedChannel: {
         channel: ContactAttemptChannel;
         label: string;
@@ -20,6 +23,14 @@ export interface ContactChannelDashboardStats {
         userName: string;
         callCount: number;
     } | null;
+    topWhatsappUser: {
+        userName: string;
+        count: number;
+    } | null;
+    topEmailUser: {
+        userName: string;
+        count: number;
+    } | null;
     topEffectiveCaller: {
         userName: string;
         effectiveCalls: number;
@@ -29,6 +40,25 @@ export interface ContactChannelDashboardStats {
     channelVolume: { name: string; total: number; effective: number; rate: number }[];
     callerRankings: { name: string; llamadas: number; efectivas: number; rate: number }[];
 }
+
+export interface ContactCallTrendPoint {
+    key: string;
+    label: string;
+    [userName: string]: string | number;
+}
+
+export interface ContactCallTrendSeries {
+    data: ContactCallTrendPoint[];
+    users: string[];
+    granularity: 'day' | 'month';
+    periodLabel: string;
+}
+
+const PERIOD_LABELS: Record<ContactConsultantPeriod, string> = {
+    week: 'Esta semana',
+    month: 'Este mes',
+    year: 'Este año',
+};
 
 /** Acciones que cuentan para volumen por canal (excluye reinicios). */
 export function isCountableContactAction(attempt: Pick<ContactAttempt, 'outcome'>): boolean {
@@ -49,6 +79,18 @@ export function isRecordedCallAttempt(
     return attempt.channel === 'call' && isCountableContactAction(attempt) && attempt.outcome !== 'status_change';
 }
 
+/** Contacto registrado en un canal (llamada, WhatsApp o correo). */
+export function isRecordedChannelAttempt(
+    attempt: Pick<ContactAttempt, 'channel' | 'outcome'>,
+    channel: ContactAttemptChannel
+): boolean {
+    return (
+        attempt.channel === channel &&
+        isCountableContactAction(attempt) &&
+        attempt.outcome !== 'status_change'
+    );
+}
+
 function channelLabel(channel: ContactChannel): string {
     return CONTACT_CHANNELS[channel as ContactAttemptChannel]?.shortLabel ?? channel;
 }
@@ -58,8 +100,85 @@ function normalizeUserName(name?: string): string {
     return trimmed || 'Sin consultor';
 }
 
-export function computeContactDashboardStats(attempts: ContactAttempt[]): ContactChannelDashboardStats {
-    const countable = attempts.filter(isCountableContactAction);
+function formatDateKey(d: Date): string {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+}
+
+function formatMonthKey(d: Date): string {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    return `${y}-${m}`;
+}
+
+function startOfWeekMonday(d: Date): Date {
+    const x = new Date(d);
+    x.setHours(0, 0, 0, 0);
+    const day = x.getDay();
+    const diff = day === 0 ? 6 : day - 1;
+    x.setDate(x.getDate() - diff);
+    return x;
+}
+
+export function getContactPeriodRange(
+    period: ContactConsultantPeriod,
+    refDate = new Date()
+): { start: Date; end: Date; label: string } {
+    const end = new Date(refDate);
+    end.setHours(23, 59, 59, 999);
+
+    if (period === 'week') {
+        const start = startOfWeekMonday(refDate);
+        return { start, end, label: PERIOD_LABELS.week };
+    }
+    if (period === 'month') {
+        const start = new Date(refDate.getFullYear(), refDate.getMonth(), 1, 0, 0, 0, 0);
+        return { start, end, label: PERIOD_LABELS.month };
+    }
+    const start = new Date(refDate.getFullYear(), 0, 1, 0, 0, 0, 0);
+    return { start, end, label: PERIOD_LABELS.year };
+}
+
+export function filterAttemptsInDateRange(
+    attempts: ContactAttempt[],
+    start: Date,
+    end: Date
+): ContactAttempt[] {
+    const startMs = start.getTime();
+    const endMs = end.getTime();
+    return attempts.filter(a => {
+        const ts = new Date(a.createdAt).getTime();
+        return !Number.isNaN(ts) && ts >= startMs && ts <= endMs;
+    });
+}
+
+function countTopConsultantByChannel(
+    attempts: ContactAttempt[],
+    channel: ContactAttemptChannel
+): { userName: string; count: number } | null {
+    const totals = new Map<string, number>();
+    for (const a of attempts) {
+        if (!isRecordedChannelAttempt(a, channel)) continue;
+        const name = normalizeUserName(a.userName);
+        totals.set(name, (totals.get(name) || 0) + 1);
+    }
+    let best: { userName: string; count: number } | null = null;
+    for (const [userName, count] of totals) {
+        if (!best || count > best.count) best = { userName, count };
+    }
+    return best;
+}
+
+export function computeContactDashboardStats(
+    attempts: ContactAttempt[],
+    period: ContactConsultantPeriod = 'month'
+): ContactChannelDashboardStats {
+    const { start, end, label: periodLabel } = getContactPeriodRange(period);
+    const scoped = filterAttemptsInDateRange(attempts, start, end);
+
+    const countable = scoped.filter(isCountableContactAction);
     const channels = Object.keys(CONTACT_CHANNELS) as ContactAttemptChannel[];
 
     const channelTotals = new Map<ContactAttemptChannel, { total: number; effective: number }>();
@@ -110,7 +229,7 @@ export function computeContactDashboardStats(attempts: ContactAttempt[]): Contac
     }
 
     const callerTotals = new Map<string, { total: number; effective: number }>();
-    for (const a of attempts) {
+    for (const a of scoped) {
         if (!isRecordedCallAttempt(a)) continue;
         const name = normalizeUserName(a.userName);
         const bucket = callerTotals.get(name) || { total: 0, effective: 0 };
@@ -144,6 +263,9 @@ export function computeContactDashboardStats(attempts: ContactAttempt[]): Contac
         }
     }
 
+    const topWhatsappUser = countTopConsultantByChannel(scoped, 'whatsapp');
+    const topEmailUser = countTopConsultantByChannel(scoped, 'email');
+
     const channelVolume = channels
         .map(ch => {
             const { total, effective } = channelTotals.get(ch)!;
@@ -168,11 +290,93 @@ export function computeContactDashboardStats(attempts: ContactAttempt[]): Contac
 
     return {
         totalActions,
+        periodLabel,
         mostUsedChannel,
         mostEffectiveChannel,
         topCaller,
+        topWhatsappUser,
+        topEmailUser,
         topEffectiveCaller,
         channelVolume,
         callerRankings,
+    };
+}
+
+/** Serie temporal de llamadas por consultor (día a día o mes a mes). */
+export function buildCallTrendByUser(
+    attempts: ContactAttempt[],
+    period: ContactConsultantPeriod,
+    maxUsers = 6
+): ContactCallTrendSeries {
+    const { start, end, label: periodLabel } = getContactPeriodRange(period);
+    const callAttempts = filterAttemptsInDateRange(
+        attempts.filter(isRecordedCallAttempt),
+        start,
+        end
+    );
+
+    const userTotals = new Map<string, number>();
+    for (const a of callAttempts) {
+        const name = normalizeUserName(a.userName);
+        userTotals.set(name, (userTotals.get(name) || 0) + 1);
+    }
+    const users = [...userTotals.entries()]
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, maxUsers)
+        .map(([name]) => name);
+
+    if (period === 'year') {
+        const buckets = new Map<string, ContactCallTrendPoint>();
+        for (let m = 0; m <= end.getMonth(); m++) {
+            const d = new Date(end.getFullYear(), m, 1);
+            const key = formatMonthKey(d);
+            const label = d.toLocaleDateString('es-PE', { month: 'short' });
+            const row: ContactCallTrendPoint = { key, label };
+            for (const u of users) row[u] = 0;
+            buckets.set(key, row);
+        }
+        for (const a of callAttempts) {
+            const name = normalizeUserName(a.userName);
+            if (!users.includes(name)) continue;
+            const key = formatMonthKey(new Date(a.createdAt));
+            const row = buckets.get(key);
+            if (row) row[name] = (Number(row[name]) || 0) + 1;
+        }
+        return {
+            data: [...buckets.values()],
+            users,
+            granularity: 'month',
+            periodLabel,
+        };
+    }
+
+    const buckets = new Map<string, ContactCallTrendPoint>();
+    const cursor = new Date(start);
+    cursor.setHours(0, 0, 0, 0);
+    const last = new Date(end);
+    last.setHours(0, 0, 0, 0);
+
+    while (cursor <= last) {
+        const key = formatDateKey(cursor);
+        const label = cursor.toLocaleDateString('es-PE', { weekday: 'short', day: '2-digit', month: 'short' });
+        const row: ContactCallTrendPoint = { key, label };
+        for (const u of users) row[u] = 0;
+        buckets.set(key, row);
+        cursor.setDate(cursor.getDate() + 1);
+    }
+
+    for (const a of callAttempts) {
+        const name = normalizeUserName(a.userName);
+        if (!users.includes(name)) continue;
+        const key = formatDateKey(new Date(a.createdAt));
+        const row = buckets.get(key);
+        if (row) row[name] = (Number(row[name]) || 0) + 1;
+    }
+
+    return {
+        data: [...buckets.values()],
+        users,
+        granularity: 'day',
+        periodLabel,
     };
 }

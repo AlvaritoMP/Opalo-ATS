@@ -1,12 +1,12 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { useAppState } from '../App';
-import { Briefcase, Users, FileText, CheckCircle, Calendar, Grid3x3, Phone, TrendingUp, UserCheck, Headphones, UserPlus } from 'lucide-react';
-import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend, BarChart, CartesianGrid, XAxis, YAxis, Bar } from 'recharts';
+import { Briefcase, Users, FileText, CheckCircle, Calendar, Grid3x3, Phone, TrendingUp, UserCheck, Headphones, UserPlus, MessageCircle, Mail } from 'lucide-react';
+import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend, BarChart, CartesianGrid, XAxis, YAxis, Bar, LineChart, Line } from 'recharts';
 import { Candidate, Process } from '../types';
 import { resolveCandidateAgeForProcess } from '../lib/bulkTableColumns';
 import { bulkCandidatesApi } from '../lib/api/bulkCandidates';
 import { contactTrackingApi } from '../lib/api/contactTracking';
-import { computeContactDashboardStats } from '../lib/contactDashboardStats';
+import { computeContactDashboardStats, buildCallTrendByUser, type ContactConsultantPeriod } from '../lib/contactDashboardStats';
 import { computeHiringStageConsultantStats } from '../lib/hiringStageTracking';
 
 const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#AF19FF', '#6366f1', '#14b8a6', '#f97316'];
@@ -113,6 +113,7 @@ export const Dashboard: React.FC = () => {
     const [processFilter, setProcessFilter] = useState<string>('all');
     const [processScopeFilter, setProcessScopeFilter] = useState<'all' | 'bulk' | 'standard'>('all');
     const [dateFilter, setDateFilter] = useState<{ start: string; end: string }>({ start: '', end: '' });
+    const [contactConsultantPeriod, setContactConsultantPeriod] = useState<ContactConsultantPeriod>('month');
 
     const scopedProcesses = useMemo(() => {
         if (processScopeFilter === 'bulk') return processes.filter(p => p.isBulkProcess);
@@ -459,10 +460,20 @@ export const Dashboard: React.FC = () => {
         [filteredCandidates]
     );
 
-    const contactStats = useMemo(() => {
-        const scoped = contactAttempts.filter(a => filteredCandidateIds.has(a.candidateId));
-        return computeContactDashboardStats(scoped);
-    }, [contactAttempts, filteredCandidateIds]);
+    const scopedContactAttempts = useMemo(
+        () => contactAttempts.filter(a => filteredCandidateIds.has(a.candidateId)),
+        [contactAttempts, filteredCandidateIds]
+    );
+
+    const contactStats = useMemo(
+        () => computeContactDashboardStats(scopedContactAttempts, contactConsultantPeriod),
+        [scopedContactAttempts, contactConsultantPeriod]
+    );
+
+    const callTrendSeries = useMemo(
+        () => buildCallTrendByUser(scopedContactAttempts, contactConsultantPeriod),
+        [scopedContactAttempts, contactConsultantPeriod]
+    );
 
     const hiringConsultantStats = useMemo(
         () =>
@@ -633,66 +644,164 @@ export const Dashboard: React.FC = () => {
             </div>
 
             <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm mb-8">
-                <h2 className="text-xl font-semibold text-gray-800 mb-1">Canales de atención</h2>
-                <p className="text-sm text-gray-500 mb-4">
-                    Uso y efectividad de llamadas, WhatsApp y correo sobre los candidatos del filtro actual.
-                    La efectividad se mide cuando se marca &quot;Interesado&quot; al contactar.
-                </p>
+                <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4 mb-4">
+                    <div>
+                        <h2 className="text-xl font-semibold text-gray-800 mb-1">Canales de atención</h2>
+                        <p className="text-sm text-gray-500">
+                            Uso y efectividad de llamadas, WhatsApp y correo sobre los candidatos del filtro actual.
+                            La efectividad se mide cuando se marca &quot;Interesado&quot; al contactar.
+                        </p>
+                    </div>
+                    <div className="flex flex-col gap-1 shrink-0">
+                        <span className="text-xs font-medium text-gray-600">Rango consultores</span>
+                        <div className="inline-flex rounded-lg border border-gray-200 p-0.5 bg-gray-50">
+                            {([
+                                ['week', 'Semanal'],
+                                ['month', 'Mensual'],
+                                ['year', 'Anual'],
+                            ] as const).map(([value, label]) => (
+                                <button
+                                    key={value}
+                                    type="button"
+                                    onClick={() => setContactConsultantPeriod(value)}
+                                    className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
+                                        contactConsultantPeriod === value
+                                            ? 'bg-white text-primary-700 shadow-sm border border-gray-200'
+                                            : 'text-gray-600 hover:text-gray-900'
+                                    }`}
+                                >
+                                    {label}
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+                </div>
 
                 {contactStatsLoading ? (
                     <p className="text-sm text-gray-500 py-6 text-center">Cargando datos de contacto…</p>
                 ) : contactStats.totalActions === 0 ? (
                     <p className="text-sm text-gray-500 py-6 text-center">
-                        Sin acciones de contacto registradas para los procesos y candidatos del filtro actual.
+                        Sin acciones de contacto en {contactStats.periodLabel.toLowerCase()} para los procesos y candidatos del filtro actual.
                     </p>
                 ) : (
                     <>
-                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-6">
+                        <p className="text-xs text-gray-400 mb-4">{contactStats.periodLabel}</p>
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4 mb-6">
                             <StatCard
                                 icon={Phone}
-                                title="Canal más usado"
-                                value={contactStats.mostUsedChannel?.label ?? 'N/D'}
-                                subtitle={
-                                    contactStats.mostUsedChannel
-                                        ? `${contactStats.mostUsedChannel.count} acción${contactStats.mostUsedChannel.count !== 1 ? 'es' : ''} · ${contactStats.mostUsedChannel.pct}% del total`
-                                        : 'Sin datos'
-                                }
-                                color="bg-sky-500"
-                            />
-                            <StatCard
-                                icon={TrendingUp}
-                                title="Mayor efectividad"
-                                value={contactStats.mostEffectiveChannel?.label ?? 'N/D'}
-                                subtitle={
-                                    contactStats.mostEffectiveChannel
-                                        ? `${contactStats.mostEffectiveChannel.rate}% interesado (${contactStats.mostEffectiveChannel.effectiveCount}/${contactStats.mostEffectiveChannel.totalCount})`
-                                        : 'Sin datos'
-                                }
-                                color="bg-emerald-500"
-                            />
-                            <StatCard
-                                icon={Headphones}
-                                title="Consultor con más llamadas"
+                                title="Más llamadas"
                                 value={contactStats.topCaller?.userName ?? 'N/D'}
                                 subtitle={
                                     contactStats.topCaller
-                                        ? `${contactStats.topCaller.callCount} llamada${contactStats.topCaller.callCount !== 1 ? 's' : ''} registradas`
-                                        : 'Sin llamadas en el periodo'
+                                        ? `${contactStats.topCaller.callCount} llamada${contactStats.topCaller.callCount !== 1 ? 's' : ''}`
+                                        : 'Sin llamadas'
                                 }
                                 color="bg-violet-500"
                             />
                             <StatCard
+                                icon={MessageCircle}
+                                title="Más WhatsApp"
+                                value={contactStats.topWhatsappUser?.userName ?? 'N/D'}
+                                subtitle={
+                                    contactStats.topWhatsappUser
+                                        ? `${contactStats.topWhatsappUser.count} contacto${contactStats.topWhatsappUser.count !== 1 ? 's' : ''}`
+                                        : 'Sin WhatsApp'
+                                }
+                                color="bg-emerald-500"
+                            />
+                            <StatCard
+                                icon={Mail}
+                                title="Más correos"
+                                value={contactStats.topEmailUser?.userName ?? 'N/D'}
+                                subtitle={
+                                    contactStats.topEmailUser
+                                        ? `${contactStats.topEmailUser.count} correo${contactStats.topEmailUser.count !== 1 ? 's' : ''}`
+                                        : 'Sin correos'
+                                }
+                                color="bg-sky-500"
+                            />
+                            <StatCard
                                 icon={UserCheck}
-                                title="Consultor con más llamadas efectivas"
+                                title="Llamadas efectivas"
                                 value={contactStats.topEffectiveCaller?.userName ?? 'N/D'}
                                 subtitle={
                                     contactStats.topEffectiveCaller
-                                        ? `${contactStats.topEffectiveCaller.effectiveCalls} interesado${contactStats.topEffectiveCaller.effectiveCalls !== 1 ? 's' : ''} · ${contactStats.topEffectiveCaller.rate}% de ${contactStats.topEffectiveCaller.totalCalls} llamadas`
-                                        : 'Ninguna llamada marcó interés aún'
+                                        ? `${contactStats.topEffectiveCaller.effectiveCalls} interesado${contactStats.topEffectiveCaller.effectiveCalls !== 1 ? 's' : ''} · ${contactStats.topEffectiveCaller.rate}%`
+                                        : 'Sin interés por llamada'
                                 }
                                 color="bg-amber-500"
                             />
+                            <StatCard
+                                icon={TrendingUp}
+                                title="Canal más usado"
+                                value={contactStats.mostUsedChannel?.label ?? 'N/D'}
+                                subtitle={
+                                    contactStats.mostUsedChannel
+                                        ? `${contactStats.mostUsedChannel.count} · ${contactStats.mostUsedChannel.pct}%`
+                                        : 'Sin datos'
+                                }
+                                color="bg-indigo-500"
+                            />
+                            <StatCard
+                                icon={Headphones}
+                                title="Mayor efectividad"
+                                value={contactStats.mostEffectiveChannel?.label ?? 'N/D'}
+                                subtitle={
+                                    contactStats.mostEffectiveChannel
+                                        ? `${contactStats.mostEffectiveChannel.rate}% interesado`
+                                        : 'Sin datos'
+                                }
+                                color="bg-teal-500"
+                            />
                         </div>
+
+                        <ChartContainer
+                            title={
+                                callTrendSeries.granularity === 'day'
+                                    ? 'Llamadas por día por consultor'
+                                    : 'Llamadas por mes por consultor'
+                            }
+                            description={
+                                callTrendSeries.granularity === 'day'
+                                    ? `Comparativa diaria en ${callTrendSeries.periodLabel.toLowerCase()}. Se muestran hasta ${callTrendSeries.users.length} consultores con más llamadas.`
+                                    : `Comparativa mensual en ${callTrendSeries.periodLabel.toLowerCase()}. Una línea por consultor.`
+                            }
+                            hasData={callTrendSeries.data.some(row =>
+                                callTrendSeries.users.some(u => Number(row[u]) > 0)
+                            )}
+                            height={320}
+                            className="mb-6"
+                        >
+                            <LineChart data={callTrendSeries.data} margin={{ top: 10, right: 20, left: 10, bottom: 5 }}>
+                                <CartesianGrid strokeDasharray="3 3" />
+                                <XAxis
+                                    dataKey="label"
+                                    tick={{ fontSize: 10 }}
+                                    interval={callTrendSeries.granularity === 'day' ? 'preserveStartEnd' : 0}
+                                />
+                                <YAxis allowDecimals={false} />
+                                <Tooltip
+                                    formatter={(value: number, name: string) => [
+                                        `${value} llamada${value !== 1 ? 's' : ''}`,
+                                        truncateLabel(name, 24),
+                                    ]}
+                                />
+                                <Legend formatter={(value: string) => truncateLabel(value, 20)} />
+                                {callTrendSeries.users.map((userName, index) => (
+                                    <Line
+                                        key={userName}
+                                        type="monotone"
+                                        dataKey={userName}
+                                        name={userName}
+                                        stroke={COLORS[index % COLORS.length]}
+                                        strokeWidth={2}
+                                        dot={{ r: 3 }}
+                                        activeDot={{ r: 5 }}
+                                    />
+                                ))}
+                            </LineChart>
+                        </ChartContainer>
 
                         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
                             <ChartContainer
