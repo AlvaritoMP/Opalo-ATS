@@ -68,6 +68,7 @@ interface AppActions {
     addInterviewEvent: (eventData: Omit<InterviewEvent, 'id'>) => Promise<InterviewEvent>;
     updateInterviewEvent: (eventData: InterviewEvent) => Promise<void>;
     deleteInterviewEvent: (eventId: string) => Promise<void>;
+    refreshInterviewEvents: () => Promise<void>;
     addPostIt: (candidateId: string, postIt: Omit<PostIt, 'id' | 'createdAt'>) => Promise<void>;
     deletePostIt: (candidateId: string, postItId: string) => Promise<void>;
     addComment: (candidateId: string, comment: Omit<Comment, 'id' | 'createdAt'>) => Promise<void>;
@@ -1438,6 +1439,14 @@ const App: React.FC = () => {
             } catch (error) {
                 console.error('Error deleting interview event:', error);
                 setState(s => ({ ...s, interviewEvents: s.interviewEvents.filter(e => e.id !== eventId) }));
+            }
+        },
+        refreshInterviewEvents: async () => {
+            try {
+                const events = await interviewsApi.getAll();
+                setState(s => ({ ...s, interviewEvents: events }));
+            } catch (error) {
+                console.error('Error refreshing interview events:', error);
             }
         },
         addPostIt: async (candidateId, postItData) => {

@@ -117,6 +117,8 @@ import { buildRouteColumnLink } from '../lib/transitRouteLinks';
 import {
     enrichCandidatesWithNextInterviews,
     interviewEventToCandidateFields,
+    isInterviewInPast,
+    pickInterviewForCandidateDisplay,
 } from '../lib/bulkInterviewUtils';
 
 interface BulkProcessesViewProps {}
@@ -1140,6 +1142,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
         if (!selectedProcess) return;
         let cancelled = false;
         (async () => {
+            await actions.refreshInterviewEvents();
             await syncColumnValuesFromDatabase(selectedProcess);
             if (!cancelled) await loadCandidates(0, true);
         })();
@@ -1669,11 +1672,15 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
 
     const resolveNextInterviewEventId = useCallback((candidate: BulkCandidate): string | undefined => {
         if (candidate.nextInterviewEventId) return candidate.nextInterviewEventId;
-        const now = Date.now();
-        const match = state.interviewEvents
-            .filter(e => e.candidateId === candidate.id && new Date(e.start).getTime() >= now)
-            .sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime())[0];
-        return match?.id;
+
+        const slots = state.interviewEvents
+            .filter(e => e.candidateId === candidate.id)
+            .map(e => ({
+                start: e.start instanceof Date ? e.start.toISOString() : new Date(e.start).toISOString(),
+                interviewerId: e.interviewerId,
+                eventId: e.id,
+            }));
+        return pickInterviewForCandidateDisplay(slots)?.eventId;
     }, [state.interviewEvents]);
 
     const handleClearInterview = useCallback(async (candidate: BulkCandidate) => {
@@ -1734,6 +1741,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                 actions.showToast('Entrevista agendada exitosamente', 'success', 3000);
             }
 
+            await actions.refreshInterviewEvents();
             await loadCandidates(currentPage, true);
             patchCandidateInterviewFields(candidateId, interviewFields);
         } catch (error) {
@@ -1794,6 +1802,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                 errorCount > 0 ? 'info' : 'success',
                 4000
             );
+            await actions.refreshInterviewEvents();
             await loadCandidates(currentPage, true);
             setCandidates(prev =>
                 prev.map(c => {
@@ -4079,16 +4088,20 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                                 const interviewerName = displayCandidate.nextInterviewerId
                                                     ? state.users.find(u => u.id === displayCandidate.nextInterviewerId)?.name
                                                     : undefined;
+                                                const interviewPast = isInterviewInPast(displayCandidate.nextInterviewAt);
                                                 return (
                                                     <td key="nextInterview" {...tdProps(candidate.id, 'nextInterview')}>
                                                         {displayCandidate.nextInterviewAt ? (
                                                             <div className="flex items-start gap-0.5 group">
                                                                 <div
-                                                                    className="flex flex-col flex-1 min-w-0 cursor-pointer hover:bg-gray-50 rounded px-1"
+                                                                    className={`flex flex-col flex-1 min-w-0 cursor-pointer rounded px-1 ${interviewPast ? 'hover:bg-amber-50' : 'hover:bg-gray-50'}`}
                                                                     onDoubleClick={(e) => { e.stopPropagation(); openScheduleModal(displayCandidate); }}
-                                                                    title="Doble clic para editar entrevista"
+                                                                    title={interviewPast ? 'Entrevista pasada · doble clic para reagendar' : 'Doble clic para editar entrevista'}
                                                                 >
-                                                                    <span className="text-xs text-gray-900">{new Date(displayCandidate.nextInterviewAt).toLocaleDateString('es-PE', { day: '2-digit', month: 'short', weekday: 'short' })}</span>
+                                                                    <span className={`text-xs ${interviewPast ? 'text-amber-800' : 'text-gray-900'}`}>
+                                                                        {new Date(displayCandidate.nextInterviewAt).toLocaleDateString('es-PE', { day: '2-digit', month: 'short', weekday: 'short' })}
+                                                                        {interviewPast ? ' · pasada' : ''}
+                                                                    </span>
                                                                     <span className="text-[10px] text-gray-500">{new Date(displayCandidate.nextInterviewAt).toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' })}{interviewerName ? ` · ${interviewerName}` : ''}</span>
                                                                 </div>
                                                                 <button

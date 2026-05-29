@@ -13,6 +13,7 @@ import {
 import type { BulkProcessConfig } from '../../types';
 import { readChannelSummaryFromRow } from '../contactChannelConfig';
 import type { ChannelContactSummary } from '../contactChannelConfig';
+import { buildInterviewMapFromRows } from '../bulkInterviewUtils';
 
 /** Select mínimo — siempre disponible */
 const BULK_SELECT_BASE =
@@ -190,27 +191,24 @@ export const bulkCandidatesApi = {
         let nextInterviews: Map<string, { start: string; interviewerId: string; eventId: string }> = new Map();
         
         if (candidateIds.length > 0) {
-            const now = new Date().toISOString();
             const { data: interviews, error: interviewsError } = await supabase
                 .from('interview_events')
                 .select('id, candidate_id, start_time, interviewer_id')
                 .in('candidate_id', candidateIds)
                 .eq('app_name', APP_NAME)
-                .gte('start_time', now)
                 .order('start_time', { ascending: true });
 
             if (interviewsError) {
                 console.warn('No se pudieron cargar entrevistas de candidatos:', interviewsError.message);
             } else if (interviews) {
-                interviews.forEach(interview => {
-                    if (!nextInterviews.has(interview.candidate_id)) {
-                        nextInterviews.set(interview.candidate_id, {
-                            start: interview.start_time,
-                            interviewerId: interview.interviewer_id,
-                            eventId: interview.id,
-                        });
-                    }
-                });
+                const picked = buildInterviewMapFromRows(interviews);
+                for (const [candidateId, slot] of picked) {
+                    nextInterviews.set(candidateId, {
+                        start: slot.start,
+                        interviewerId: slot.interviewerId,
+                        eventId: slot.eventId,
+                    });
+                }
             }
         }
 
