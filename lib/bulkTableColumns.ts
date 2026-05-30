@@ -101,6 +101,91 @@ export function buildLegacyFromColumnOrder(
     return aliases;
 }
 
+/** Campos de layout de tabla que el editor de proceso no debe sobrescribir al guardar */
+export const BULK_TABLE_LAYOUT_CONFIG_KEYS = [
+    'customColumns',
+    'columnOrder',
+    'hiddenColumns',
+    'pinnedColumns',
+    'columnWidths',
+    'columnKeyAliases',
+    'idealProfile',
+    'customStats',
+] as const satisfies readonly (keyof BulkProcessConfig)[];
+
+/**
+ * Reconstruye definiciones de columnas personalizadas cuando faltan en bulk_config
+ * pero siguen referenciadas en columnOrder o columnKeyAliases (p. ej. tras guardar
+ * el editor de proceso con un bulkConfig incompleto).
+ */
+export function reconcileCustomColumns(bulkConfig?: BulkProcessConfig): CustomColumn[] {
+    const existing = bulkConfig?.customColumns || [];
+    const byId = new Map<string, CustomColumn>();
+    for (const col of existing) {
+        if (col?.id && col.name?.trim()) {
+            byId.set(col.id, col);
+        }
+    }
+
+    const legacy = buildLegacyColumnIdToName(bulkConfig, existing);
+
+    const addColumn = (id: string, nameHint?: string) => {
+        if (!id || byId.has(id)) return;
+        const name = (nameHint || legacy[id] || '').trim();
+        if (!name) return;
+        byId.set(id, { id, name, type: 'text' });
+    };
+
+    for (const colId of bulkConfig?.columnOrder || []) {
+        if (!colId.startsWith('custom_')) continue;
+        addColumn(colId.slice('custom_'.length));
+    }
+
+    for (const [id, name] of Object.entries(bulkConfig?.columnKeyAliases || {})) {
+        addColumn(id, name);
+    }
+
+    if (byId.size === 0) {
+        return existing;
+    }
+
+    const orderIds = (bulkConfig?.columnOrder || [])
+        .filter(id => id.startsWith('custom_'))
+        .map(id => id.slice('custom_'.length));
+    const ordered: CustomColumn[] = [];
+    const seen = new Set<string>();
+
+    for (const id of orderIds) {
+        const col = byId.get(id);
+        if (col && !seen.has(id)) {
+            ordered.push(col);
+            seen.add(id);
+        }
+    }
+    for (const col of byId.values()) {
+        if (!seen.has(col.id)) {
+            ordered.push(col);
+        }
+    }
+
+    return ordered;
+}
+
+/** Copia campos de layout de tabla desde la config de BD (para merges seguros al guardar) */
+export function pickBulkTableLayoutConfig(
+    bulkConfig?: BulkProcessConfig
+): Partial<BulkProcessConfig> {
+    if (!bulkConfig) return {};
+    const picked: Partial<BulkProcessConfig> = {};
+    for (const key of BULK_TABLE_LAYOUT_CONFIG_KEYS) {
+        const value = bulkConfig[key];
+        if (value !== undefined) {
+            (picked as Record<string, unknown>)[key] = value;
+        }
+    }
+    return picked;
+}
+
 /**
  * Detecta claves huérfanas en bulk_column_values y las asocia a columnas vacías
  * (misma cantidad → emparejamiento por orden de creación del ID).

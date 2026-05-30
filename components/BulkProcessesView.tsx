@@ -76,6 +76,7 @@ import {
     getBulkSelectedProcessId,
     resolveCandidateAge,
     resolveBulkTableCellValue,
+    reconcileCustomColumns,
 } from '../lib/bulkTableColumns';
 import { getStageSelectClass } from '../lib/stageColors';
 import { getCellMetaStorageKey, BulkCellMeta, BulkCellMetaStore } from '../lib/bulkCellMeta';
@@ -754,8 +755,19 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
         }
 
         const config = process.bulkConfig;
-        const cols = config?.customColumns || [];
+        const storedCols = config?.customColumns || [];
+        const cols = reconcileCustomColumns(config);
         setCustomColumns(cols);
+        const restoredColumnDefs = cols.some(c => !storedCols.some(s => s.id === c.id));
+        if (restoredColumnDefs && cols.length > 0) {
+            const addedCount = cols.filter(c => !storedCols.some(s => s.id === c.id)).length;
+            void persistBulkConfig({ customColumns: cols });
+            actions.showToast(
+                `Se restauraron ${addedCount} columna${addedCount !== 1 ? 's' : ''} personalizada${addedCount !== 1 ? 's' : ''} del proceso`,
+                'success',
+                4000
+            );
+        }
         setHiddenColumns(config?.hiddenColumns || []);
         setPinnedColumns(config?.pinnedColumns?.length ? config.pinnedColumns : ['name']);
         const savedWidths = config?.columnWidths || {};
@@ -2213,6 +2225,13 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
         });
     }, [customColumns, applyOptimisticUpdate, syncCustomFieldFromStandard]);
 
+    const showAllColumns = async () => {
+        if (hiddenColumns.length === 0) return;
+        setHiddenColumns([]);
+        await persistBulkConfig({ hiddenColumns: [] });
+        actions.showToast('Todas las columnas visibles', 'success', 2000);
+    };
+
     const toggleColumnVisibility = async (colId: string) => {
         const isHiding = !hiddenColumns.includes(colId);
         const newHidden = isHiding
@@ -3347,7 +3366,18 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                             </button>
                                             {showColumnConfig && (
                                                 <div className="absolute left-0 mt-2 w-64 bg-white border border-gray-200 rounded-lg shadow-xl z-50 p-2 max-h-96 overflow-y-auto">
-                                                    <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1 px-2">Columnas</div>
+                                                    <div className="flex items-center justify-between gap-2 mb-1 px-2">
+                                                        <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Columnas</div>
+                                                        {hiddenColumns.length > 0 && (
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => void showAllColumns()}
+                                                                className="text-[10px] text-primary-600 hover:text-primary-700 font-medium whitespace-nowrap"
+                                                            >
+                                                                Mostrar todas
+                                                            </button>
+                                                        )}
+                                                    </div>
                                                     <p className="text-[10px] text-gray-400 px-2 mb-2">📌 = fijar al hacer scroll horizontal</p>
                                                     {allColumnIds.map(colId => {
                                                         const colName = getColumnLabel(colId, customColumns);
