@@ -4,7 +4,7 @@ import { Process, Stage, ProcessStatus, BulkProcessConfig, KillerQuestion, Psych
 import { X, Plus, Trash2, GripVertical, Settings, Filter, Brain, MessageCircle, Upload, FileText } from 'lucide-react';
 import { processesApi } from '../lib/api/processes';
 import { clientsApi } from '../lib/api/clients';
-import { isScoreIaColumnVisible, pickBulkTableLayoutConfig } from '../lib/bulkTableColumns';
+import { isScoreIaColumnVisible } from '../lib/bulkTableColumns';
 import { psycholaboralApi } from '../lib/api/psycholaboral';
 import { createDefaultPsycholaboralInventory } from '../lib/psycholaboralDefaults';
 import { PsycholaboralConfigSection } from './PsycholaboralConfigSection';
@@ -35,7 +35,6 @@ export const BulkProcessEditorModal: React.FC<BulkProcessEditorModalProps> = ({ 
     const [status, setStatus] = useState<ProcessStatus>(process?.status || 'en_proceso');
     const [vacancies, setVacancies] = useState<number>(process?.vacancies || 1);
     const [isSaving, setIsSaving] = useState(false);
-    const [isConfigLoaded, setIsConfigLoaded] = useState(!process?.id);
     const [activeTab, setActiveTab] = useState<'basic' | 'config'>('basic');
     
     // Configuración avanzada
@@ -96,17 +95,12 @@ export const BulkProcessEditorModal: React.FC<BulkProcessEditorModalProps> = ({ 
             setFlyerUrl('');
             setFlyerPosition('center center');
             setAttachments([]);
-            setIsConfigLoaded(true);
             return;
         }
 
         let cancelled = false;
-        setIsConfigLoaded(false);
         processesApi.getById(process.id).then(fresh => {
-            if (cancelled || !fresh) {
-                if (!cancelled) setIsConfigLoaded(true);
-                return;
-            }
+            if (cancelled || !fresh) return;
             setTitle(fresh.title);
             setDescription(fresh.description);
             setSelectedClientId(fresh.clientId);
@@ -140,10 +134,8 @@ export const BulkProcessEditorModal: React.FC<BulkProcessEditorModalProps> = ({ 
                     return local?.color ? { ...fs, color: local.color } : fs;
                 });
             });
-            setIsConfigLoaded(true);
         }).catch(err => {
             console.warn('No se pudo recargar el proceso masivo desde la BD:', err);
-            setIsConfigLoaded(true);
         });
 
         return () => { cancelled = true; };
@@ -318,13 +310,6 @@ export const BulkProcessEditorModal: React.FC<BulkProcessEditorModalProps> = ({ 
 
             const stageColorMaps = buildStageColorMaps(stagesPayload);
 
-            let dbBulkConfig = process?.bulkConfig;
-            if (process?.id) {
-                const fresh = await processesApi.getById(process.id);
-                dbBulkConfig = fresh?.bulkConfig ?? dbBulkConfig;
-            }
-            const tableLayout = pickBulkTableLayoutConfig(dbBulkConfig);
-
             const processPayload: Omit<Process, 'id'> = {
                 title: title.trim(),
                 description: description.trim(),
@@ -337,11 +322,9 @@ export const BulkProcessEditorModal: React.FC<BulkProcessEditorModalProps> = ({ 
                 clientId: selectedClientId || undefined,
                 isBulkProcess: true,
                 bulkConfig: {
-                    ...dbBulkConfig,
                     ...bulkConfig,
                     ...stageColorMaps,
                     killerQuestions: killerQuestions,
-                    ...tableLayout,
                 },
             };
 
@@ -829,10 +812,10 @@ export const BulkProcessEditorModal: React.FC<BulkProcessEditorModalProps> = ({ 
                     </button>
                     <button
                         onClick={handleSave}
-                        disabled={isSaving || !isConfigLoaded}
+                        disabled={isSaving}
                         className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                     >
-                        {isSaving ? 'Guardando...' : !isConfigLoaded ? 'Cargando...' : process ? 'Actualizar' : 'Crear'}
+                        {isSaving ? 'Guardando...' : process ? 'Actualizar' : 'Crear'}
                     </button>
                 </div>
             </div>
