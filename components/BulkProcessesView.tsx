@@ -77,6 +77,8 @@ import {
     resolveCandidateAge,
     resolveBulkTableCellValue,
     reconcileCustomColumns,
+    sanitizeBulkTableLayout,
+    resolveEffectiveCustomColumns,
 } from '../lib/bulkTableColumns';
 import { getStageSelectClass } from '../lib/stageColors';
 import { getCellMetaStorageKey, BulkCellMeta, BulkCellMetaStore } from '../lib/bulkCellMeta';
@@ -565,6 +567,8 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
     const [selectionAnchor, setSelectionAnchor] = useState<CellCoord | null>(null);
     const tableContainerRef = useRef<HTMLDivElement>(null);
     const columnValuesMigratedRef = useRef<string | null>(null);
+    const customColumnsRef = useRef<CustomColumn[]>([]);
+    const tableInitTokenRef = useRef(0);
     const isDraggingCells = useRef(false);
     const dragAnchorCell = useRef<CellCoord | null>(null);
     const didDragSelect = useRef(false);
@@ -708,6 +712,10 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
         [customColumns]
     );
 
+    useEffect(() => {
+        customColumnsRef.current = customColumns;
+    }, [customColumns]);
+
     const persistBulkConfig = useCallback(async (updates: Partial<BulkProcessConfig>) => {
         if (!process) return;
         let mergedUpdates = { ...updates };
@@ -754,21 +762,25 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
             return;
         }
 
-        const config = process.bulkConfig;
-        const storedCols = config?.customColumns || [];
-        const cols = reconcileCustomColumns(config);
+        const rawConfig = process.bulkConfig;
+        const { config, fixes } = sanitizeBulkTableLayout(rawConfig);
+        const cols = config.customColumns || [];
+        customColumnsRef.current = cols;
         setCustomColumns(cols);
-        const restoredColumnDefs = cols.some(c => !storedCols.some(s => s.id === c.id));
-        if (restoredColumnDefs && cols.length > 0) {
-            const addedCount = cols.filter(c => !storedCols.some(s => s.id === c.id)).length;
-            void persistBulkConfig({ customColumns: cols });
+        if (fixes.length > 0) {
+            void persistBulkConfig({
+                customColumns: config.customColumns,
+                columnOrder: config.columnOrder,
+                hiddenColumns: config.hiddenColumns,
+                columnKeyAliases: config.columnKeyAliases,
+            });
             actions.showToast(
-                `Se restauraron ${addedCount} columna${addedCount !== 1 ? 's' : ''} personalizada${addedCount !== 1 ? 's' : ''} del proceso`,
+                `Layout de tabla reparado: ${fixes.join('; ')}`,
                 'success',
-                4000
+                5000
             );
         }
-        setHiddenColumns(config?.hiddenColumns || []);
+        setHiddenColumns(config.hiddenColumns || []);
         setPinnedColumns(config?.pinnedColumns?.length ? config.pinnedColumns : ['name']);
         const savedWidths = config?.columnWidths || {};
         setColumnWidths(savedWidths);
@@ -789,15 +801,6 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
             void persistBulkConfig({ columnOrder: order, hiddenColumns: hidden });
         }
 
-        const legacy = buildLegacyColumnIdToName(config, cols);
-        const localValues = loadLocalColumnValuesForProcess(process.id);
-        if (Object.keys(localValues).length > 0) {
-            const normalized = normalizeBulkColumnValueKeys(localValues, cols, legacy);
-            setColumnValues(repairDateColumnValues(normalized, cols));
-        } else {
-            setColumnValues({});
-        }
-
         const savedMeta = localStorage.getItem(getCellMetaStorageKey(process.id));
         setCellMeta(savedMeta ? JSON.parse(savedMeta) : {});
 
@@ -805,6 +808,15 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
         if (config && !isScoreIaColumnVisible(config) && config.autoFilterEnabled) {
             persistBulkConfig({ autoFilterEnabled: false });
         }
+
+        const initToken = ++tableInitTokenRef.current;
+        void (async () => {
+            await actions.refreshInterviewEvents();
+            if (tableInitTokenRef.current !== initToken) return;
+            await syncColumnValuesFromDatabase(process.id, cols, config);
+            if (tableInitTokenRef.current !== initToken) return;
+            await loadCandidates(0, true);
+        })();
     }, [process?.id]);
 
     const visibleColumns = useMemo(
@@ -1040,36 +1052,36 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
         setShowPsychReportModal(true);
     }, [process, customColumns, columnValues, legacyColumnIdToName]);
 
-    const syncColumnValuesFromDatabase = useCallback(async (processId: string) => {
-        const cols = process?.bulkConfig?.customColumns || [];
+    const syncColumnValuesFromDatabase = useCallback(async (
+        processId: string,
+        colsOverride?: CustomColumn[],
+        bulkConfigOverride?: BulkProcessConfig
+    ) => {
+        const bulkConfig = bulkConfigOverride ?? process?.bulkConfig;
+        const cols = colsOverride?.length
+            ? colsOverride
+            : resolveEffectiveCustomColumns(processId, bulkConfig, customColumnsRef.current);
         try {
             const fromDb = await bulkCandidatesApi.loadAllBulkColumnValues(processId);
-            let legacy = buildLegacyColumnIdToName(process?.bulkConfig, cols);
+            let legacy = buildLegacyColumnIdToName(bulkConfig, cols);
             legacy = discoverOrphanKeyAliases(fromDb, cols, legacy);
 
-            const newAliases = { ...(process?.bulkConfig?.columnKeyAliases || {}) };
-            let aliasesChanged = false;
-            for (const [id, name] of Object.entries(legacy)) {
-                if (newAliases[id] !== name) {
-                    newAliases[id] = name;
-                    aliasesChanged = true;
-                }
-            }
-            if (aliasesChanged && process) {
-                void persistBulkConfig({ columnKeyAliases: newAliases });
-            }
-
             const localValues = loadLocalColumnValuesForProcess(processId);
-            const merged = mergeColumnValueSources(fromDb, localValues, cols, legacy);
-            const scopedMerged = Object.fromEntries(
-                Object.entries(merged).filter(([id]) => id in fromDb)
-            );
-            const repaired = repairDateColumnValues(scopedMerged, cols);
-            setColumnValues(repaired);
-            persistLocalColumnValues(processId, repaired);
+            setColumnValues(prev => {
+                const merged = mergeColumnValueSources(
+                    fromDb,
+                    { ...localValues, ...prev },
+                    cols,
+                    legacy
+                );
+                const repaired = repairDateColumnValues(merged, cols);
+                persistLocalColumnValues(processId, repaired);
+                return repaired;
+            });
 
+            const mergedForRepair = mergeColumnValueSources(fromDb, localValues, cols, legacy);
             const repairs: Record<string, Record<string, unknown>> = {};
-            for (const [candidateId, row] of Object.entries(scopedMerged)) {
+            for (const [candidateId, row] of Object.entries(mergedForRepair)) {
                 const raw = fromDb[candidateId] || {};
                 const needsRepair = cols.some(col => {
                     const resolved = resolveColumnValueFromRow(row, col, legacy);
@@ -1086,7 +1098,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
         } catch (error) {
             console.error('Error sincronizando columnas personalizadas:', error);
         }
-    }, [process?.bulkConfig, persistBulkConfig]);
+    }, [process, persistBulkConfig]);
 
     // Cargar candidatos (paginado; no escanea todo el proceso)
     const loadCandidates = useCallback(async (page: number = 0, reset: boolean = false) => {
@@ -1110,7 +1122,11 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                 }
             );
 
-            const cols = process?.bulkConfig?.customColumns || [];
+            const cols = resolveEffectiveCustomColumns(
+                selectedProcess,
+                process?.bulkConfig,
+                customColumnsRef.current
+            );
             const legacy = buildLegacyColumnIdToName(process?.bulkConfig, cols);
 
             const enriched = enrichCandidatesWithNextInterviews(
@@ -1144,13 +1160,18 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
         } finally {
             setIsLoading(false);
         }
-    }, [selectedProcess, selectedStage, debouncedSearch, actions, process?.bulkConfig, state.interviewEvents]);
+    }, [selectedProcess, selectedStage, debouncedSearch, actions, process?.bulkConfig, state.interviewEvents, customColumns]);
 
     const refreshFromDatabase = useCallback(async () => {
         if (!selectedProcess) return;
-        await syncColumnValuesFromDatabase(selectedProcess);
+        const cols = resolveEffectiveCustomColumns(
+            selectedProcess,
+            process?.bulkConfig,
+            customColumnsRef.current
+        );
+        await syncColumnValuesFromDatabase(selectedProcess, cols, process?.bulkConfig);
         await loadCandidates(0, true);
-    }, [selectedProcess, syncColumnValuesFromDatabase, loadCandidates]);
+    }, [selectedProcess, process?.bulkConfig, syncColumnValuesFromDatabase, loadCandidates]);
 
     const handleNormalizeTextCase = useCallback(async () => {
         if (!selectedProcess || !process) return;
@@ -1163,13 +1184,17 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
 
         setIsNormalizingTextCase(true);
         try {
-            const cols = process.bulkConfig?.customColumns || [];
+            const cols = resolveEffectiveCustomColumns(
+                selectedProcess,
+                process.bulkConfig,
+                customColumnsRef.current
+            );
             const result = await bulkCandidatesApi.normalizeProcessTextCase(
                 selectedProcess,
                 cols,
                 process.bulkConfig
             );
-            await syncColumnValuesFromDatabase(selectedProcess);
+            await syncColumnValuesFromDatabase(selectedProcess, cols, process.bulkConfig);
             await loadCandidates(0, true);
             if (result.candidates === 0) {
                 actions.showToast('No había celdas por normalizar', 'info', 3000);
@@ -1188,17 +1213,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
         }
     }, [selectedProcess, process, syncColumnValuesFromDatabase, loadCandidates, actions]);
 
-    // Al cambiar de proceso: sincronizar columnas completas una sola vez
-    useEffect(() => {
-        if (!selectedProcess) return;
-        let cancelled = false;
-        (async () => {
-            await actions.refreshInterviewEvents();
-            await syncColumnValuesFromDatabase(selectedProcess);
-            if (!cancelled) await loadCandidates(0, true);
-        })();
-        return () => { cancelled = true; };
-    }, [selectedProcess]);
+    // La carga inicial (columnas + valores + candidatos) se hace en el efecto de process?.id
 
     // Sincronizar semáforo de contacto entre reclutadores en la misma lista
     useEffect(() => {
@@ -1329,7 +1344,11 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
         bulkCandidatesApi.batchSetBulkColumnValues(toMigrate, customColumns)
             .then(async () => {
                 columnValuesMigratedRef.current = process.id;
-                await syncColumnValuesFromDatabase(process.id);
+                await syncColumnValuesFromDatabase(
+                    process.id,
+                    customColumns,
+                    process.bulkConfig
+                );
                 actions.showToast('Datos de columnas sincronizados a la nube', 'success', 3000);
             })
             .catch(err => {
@@ -2230,6 +2249,36 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
         setHiddenColumns([]);
         await persistBulkConfig({ hiddenColumns: [] });
         actions.showToast('Todas las columnas visibles', 'success', 2000);
+    };
+
+    const handleRestoreTableLayout = async () => {
+        if (!process) return;
+        const ok = window.confirm(
+            '¿Restaurar el diseño de la tabla?\n\n' +
+            'Se mostrarán todas las columnas, se quitarán duplicados por nombre y se reparará el orden. ' +
+            'Los datos de candidatos (nombre, email, etc.) no se borran.'
+        );
+        if (!ok) return;
+
+        const { config, fixes } = sanitizeBulkTableLayout(process.bulkConfig);
+        const cols = config.customColumns || [];
+        setCustomColumns(cols);
+        customColumnsRef.current = cols;
+        setHiddenColumns(config.hiddenColumns || []);
+        setColumnOrder(resolveColumnOrder(config, cols));
+        await persistBulkConfig({
+            customColumns: config.customColumns,
+            columnOrder: config.columnOrder,
+            hiddenColumns: config.hiddenColumns,
+            columnKeyAliases: config.columnKeyAliases,
+        });
+        await syncColumnValuesFromDatabase(process.id, cols, config);
+        await loadCandidates(0, true);
+        actions.showToast(
+            fixes.length > 0 ? `Diseño restaurado: ${fixes.join('; ')}` : 'Diseño de tabla restaurado',
+            'success',
+            4000
+        );
     };
 
     const toggleColumnVisibility = async (colId: string) => {
@@ -3436,6 +3485,15 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                                 </div>
                                             )}
                                         </div>
+                                        <button
+                                            type="button"
+                                            onClick={() => void handleRestoreTableLayout()}
+                                            className="bg-amber-50 border border-amber-400 text-amber-950 hover:bg-amber-100 transition-colors"
+                                            title="Reparar columnas ocultas, duplicadas o desordenadas (no borra candidatos)"
+                                        >
+                                            <RefreshCw className="w-4 h-4" />
+                                            Restaurar diseño
+                                        </button>
                                         <button
                                             onClick={() => setShowAddRowModal(true)}
                                             className="bg-primary-600 text-white hover:bg-primary-700 transition-colors"
