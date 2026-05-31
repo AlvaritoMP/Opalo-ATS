@@ -149,11 +149,24 @@ export function criterionHasIdealValue(criterion: IdealProfileCriterion): boolea
     return false;
 }
 
-/** Criterio activo si está marcado "Usar" o tiene valor ideal configurado. */
+export function criterionHasExcludeValue(criterion: IdealProfileCriterion): boolean {
+    const v = criterion.excludeValue;
+    if (v === undefined || v === null) return false;
+    if (typeof v === 'number' && !Number.isNaN(v)) return true;
+    if (typeof v === 'boolean') return true;
+    if (typeof v === 'string' && v.trim() !== '') return true;
+    return false;
+}
+
+export function criterionHasConstraint(criterion: IdealProfileCriterion): boolean {
+    return criterionHasIdealValue(criterion) || criterionHasExcludeValue(criterion);
+}
+
+/** Criterio activo si está marcado "Usar" o tiene valor ideal o de exclusión configurado. */
 export function isActiveIdealProfileCriterion(criterion: IdealProfileCriterion): boolean {
     if (criterion.enabled === false) return false;
     if (criterion.enabled) return true;
-    return criterionHasIdealValue(criterion);
+    return criterionHasConstraint(criterion);
 }
 
 function resolveIdealProfileColumnByName(
@@ -242,7 +255,7 @@ export function normalizeIdealProfileConfig(
         const existing = criteriaByFieldId.get(fieldId);
         if (
             !existing ||
-            (criterionHasIdealValue(normalizedCriterion) && !criterionHasIdealValue(existing))
+            (criterionHasConstraint(normalizedCriterion) && !criterionHasConstraint(existing))
         ) {
             criteriaByFieldId.set(fieldId, normalizedCriterion);
         }
@@ -357,6 +370,91 @@ function scoreTextMatch(
     return 0;
 }
 
+function scoreTextExclude(candidateVal: unknown, excludeVal: unknown): number {
+    const c = normalizeText(candidateVal);
+    const e = normalizeText(excludeVal);
+    if (!e) return 100;
+    if (!c) return 100;
+
+    const excludeParts = e.split(/[,;|/]+/).map(p => p.trim()).filter(Boolean);
+    if (excludeParts.length > 1) {
+        return excludeParts.some(p => c.includes(p)) ? 0 : 100;
+    }
+    if (c.includes(e) || e.includes(c)) return 0;
+    return 100;
+}
+
+function scorePositiveCriterion(
+    candidateVal: unknown,
+    criterion: IdealProfileCriterion,
+    fieldType: IdealProfileFieldType
+): number {
+    const mode = criterion.matchMode || defaultMatchMode(fieldType);
+
+    if (fieldType === 'number') {
+        return scoreNumberMatch(candidateVal, criterion, mode);
+    }
+    if (fieldType === 'checkbox') {
+        return scoreCheckboxMatch(candidateVal, criterion.idealValue);
+    }
+    if (fieldType === 'select') {
+        return scoreSelectMatch(candidateVal, criterion.idealValue);
+    }
+    if (fieldType === 'date') {
+        return scoreDateMatch(candidateVal, criterion, mode);
+    }
+    return scoreTextMatch(candidateVal, criterion.idealValue, mode);
+}
+
+function scoreExcludeCriterion(
+    candidateVal: unknown,
+    criterion: IdealProfileCriterion,
+    fieldType: IdealProfileFieldType
+): number {
+    if (!criterionHasExcludeValue(criterion)) return 100;
+    const exclude = criterion.excludeValue;
+
+    if (fieldType === 'number') {
+        const c = parseNumber(candidateVal);
+        if (c === null) return 100;
+        const excludedParts = String(exclude)
+            .split(/[,;|/]+/)
+            .map(p => parseNumber(p.trim()))
+            .filter((n): n is number => n !== null);
+        if (excludedParts.length === 0) {
+            const single = parseNumber(exclude);
+            return single !== null && c === single ? 0 : 100;
+        }
+        return excludedParts.some(n => c === n) ? 0 : 100;
+    }
+    if (fieldType === 'checkbox') {
+        const c = candidateVal === true || candidateVal === 'true' || candidateVal === '1';
+        const ex = exclude === true || exclude === 'true' || exclude === '1';
+        return c === ex ? 0 : 100;
+    }
+    if (fieldType === 'select') {
+        return normalizeText(candidateVal) === normalizeText(exclude) ? 0 : 100;
+    }
+    if (fieldType === 'date') {
+        const cStr = formatBulkDate(String(candidateVal ?? ''));
+        const eStr = formatBulkDate(String(exclude ?? ''));
+        if (!cStr) return 100;
+        return normalizeText(cStr) === normalizeText(eStr) ? 0 : 100;
+    }
+    return scoreTextExclude(candidateVal, exclude);
+}
+
+function formatCriterionSummary(criterion: IdealProfileCriterion): string {
+    const parts: string[] = [];
+    if (criterionHasIdealValue(criterion)) {
+        parts.push(String(criterion.idealValue ?? ''));
+    }
+    if (criterionHasExcludeValue(criterion)) {
+        parts.push(`≠ ${criterion.excludeValue}`);
+    }
+    return parts.join(' · ') || '-';
+}
+
 function scoreNumberMatch(
     candidateVal: unknown,
     criterion: IdealProfileCriterion,
@@ -430,21 +528,15 @@ export function scoreCriterion(
     criterion: IdealProfileCriterion,
     fieldType: IdealProfileFieldType
 ): number {
-    const mode = criterion.matchMode || defaultMatchMode(fieldType);
-
-    if (fieldType === 'number') {
-        return scoreNumberMatch(candidateVal, criterion, mode);
+    const parts: number[] = [];
+    if (criterionHasIdealValue(criterion)) {
+        parts.push(scorePositiveCriterion(candidateVal, criterion, fieldType));
     }
-    if (fieldType === 'checkbox') {
-        return scoreCheckboxMatch(candidateVal, criterion.idealValue);
+    if (criterionHasExcludeValue(criterion)) {
+        parts.push(scoreExcludeCriterion(candidateVal, criterion, fieldType));
     }
-    if (fieldType === 'select') {
-        return scoreSelectMatch(candidateVal, criterion.idealValue);
-    }
-    if (fieldType === 'date') {
-        return scoreDateMatch(candidateVal, criterion, mode);
-    }
-    return scoreTextMatch(candidateVal, criterion.idealValue, mode);
+    if (parts.length === 0) return 0;
+    return Math.round(parts.reduce((sum, score) => sum + score, 0) / parts.length);
 }
 
 export interface ProfileMatchResult {
@@ -494,7 +586,7 @@ export function computeProfileMatch(
             label: getColumnLabel(fieldId, customColumns),
             score,
             candidateValue: String(candidateVal ?? ''),
-            idealValue: String(criterion.idealValue ?? ''),
+            idealValue: formatCriterionSummary(criterion),
         });
     }
 

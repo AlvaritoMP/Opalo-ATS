@@ -15,6 +15,7 @@ import {
     IdealProfileFieldDef,
     criterionHasIdealValue,
     isActiveIdealProfileCriterion,
+    criterionHasExcludeValue,
     normalizeIdealProfileCriteria,
     normalizeIdealProfileConfig,
     ProfileMatchSummary,
@@ -88,6 +89,7 @@ function createDefaultCriteria(
             fieldId: f.fieldId,
             enabled: false,
             idealValue: f.type === 'checkbox' ? false : '',
+            excludeValue: '',
             matchMode: f.type === 'number' ? 'minimum' : f.type === 'select' || f.type === 'checkbox' ? 'exact' : 'contains',
             weight: 1,
         };
@@ -135,7 +137,7 @@ export const BulkIdealProfileModal: React.FC<Props> = ({
                 if (c.fieldId !== fieldId) return c;
                 const next = { ...c, ...patch };
                 if (patch.enabled === false) return next;
-                if (criterionHasIdealValue(next)) {
+                if (criterionHasIdealValue(next) || criterionHasExcludeValue(next)) {
                     next.enabled = true;
                 }
                 return next;
@@ -219,7 +221,7 @@ export const BulkIdealProfileModal: React.FC<Props> = ({
 
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-            <div className="bg-white rounded-xl shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col">
+            <div className="bg-white rounded-xl shadow-2xl w-full max-w-5xl max-h-[90vh] flex flex-col">
                 <div className="flex items-center justify-between px-6 py-4 border-b">
                     <div className="flex items-center gap-2">
                         <Target className="w-5 h-5 text-indigo-600" />
@@ -288,6 +290,7 @@ export const BulkIdealProfileModal: React.FC<Props> = ({
                             Los candidatos con cumplimiento ≥ {greenThreshold}% se marcan en verde,
                             entre {yellowThreshold}% y {greenThreshold - 1}% en amarillo, y por debajo de {yellowThreshold}% en rojo.
                             Las celdas de la tabla con criterio activo se colorean según su cumplimiento individual (mapa de calor).
+                            Puede definir un valor ideal, valores prohibidos en «No debe contener», o ambos.
                         </p>
                     </div>
 
@@ -364,6 +367,7 @@ export const BulkIdealProfileModal: React.FC<Props> = ({
                                     <th className="px-3 py-2 text-left w-10">Usar</th>
                                     <th className="px-3 py-2 text-left">Campo</th>
                                     <th className="px-3 py-2 text-left">Valor ideal</th>
+                                    <th className="px-3 py-2 text-left">No debe contener</th>
                                     <th className="px-3 py-2 text-left">Modo</th>
                                     <th className="px-3 py-2 text-left w-16">Peso</th>
                                 </tr>
@@ -451,6 +455,57 @@ export const BulkIdealProfileModal: React.FC<Props> = ({
                                                             <p className="text-[10px] text-gray-400 leading-tight">
                                                                 Varias opciones (OR): sepárelas con coma, punto y coma, barra o |.
                                                                 Ej: <span className="font-mono">Los Olivos, San Miguel</span> o <span className="font-mono">1|2|3</span>
+                                                            </p>
+                                                        )}
+                                                    </div>
+                                                )}
+                                            </td>
+                                            <td className="px-3 py-2">
+                                                {field.type === 'checkbox' ? (
+                                                    <select
+                                                        value={c.excludeValue === true ? 'true' : c.excludeValue === false ? 'false' : ''}
+                                                        onChange={e => updateCriterion(c.fieldId, {
+                                                            excludeValue: e.target.value === '' ? '' : e.target.value === 'true',
+                                                        })}
+                                                        className="w-full px-2 py-1 border border-gray-300 rounded text-sm"
+                                                    >
+                                                        <option value="">—</option>
+                                                        <option value="true">Sí</option>
+                                                        <option value="false">No</option>
+                                                    </select>
+                                                ) : field.type === 'select' && field.options?.length ? (
+                                                    <select
+                                                        value={String(c.excludeValue ?? '')}
+                                                        onChange={e => updateCriterion(c.fieldId, { excludeValue: e.target.value })}
+                                                        className="w-full px-2 py-1 border border-gray-300 rounded text-sm"
+                                                    >
+                                                        <option value="">—</option>
+                                                        {field.options.map(opt => (
+                                                            <option key={opt} value={opt}>{opt}</option>
+                                                        ))}
+                                                    </select>
+                                                ) : (
+                                                    <div className="space-y-1">
+                                                        <input
+                                                            type={field.type === 'number' ? 'number' : field.type === 'date' ? 'date' : 'text'}
+                                                            value={String(c.excludeValue ?? '')}
+                                                            onChange={e =>
+                                                                updateCriterion(c.fieldId, {
+                                                                    excludeValue: field.type === 'number'
+                                                                        ? (e.target.value === '' ? '' : parseFloat(e.target.value) || 0)
+                                                                        : e.target.value,
+                                                                })
+                                                            }
+                                                            className="w-full px-2 py-1 border border-gray-300 rounded text-sm"
+                                                            placeholder={
+                                                                field.type === 'text'
+                                                                    ? 'Ej: Callao, Ate'
+                                                                    : undefined
+                                                            }
+                                                        />
+                                                        {field.type === 'text' && (
+                                                            <p className="text-[10px] text-gray-400 leading-tight">
+                                                                Varias exclusiones (OR): sepárelas con coma, ;, / o |.
                                                             </p>
                                                         )}
                                                     </div>
