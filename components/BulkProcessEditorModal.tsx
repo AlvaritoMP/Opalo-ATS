@@ -4,7 +4,7 @@ import { Process, Stage, ProcessStatus, BulkProcessConfig, KillerQuestion, Psych
 import { X, Plus, Trash2, GripVertical, Settings, Filter, Brain, MessageCircle, Upload, FileText } from 'lucide-react';
 import { processesApi } from '../lib/api/processes';
 import { clientsApi } from '../lib/api/clients';
-import { isScoreIaColumnVisible } from '../lib/bulkTableColumns';
+import { isScoreIaColumnVisible, pickBulkTableLayoutConfig } from '../lib/bulkTableColumns';
 import { psycholaboralApi } from '../lib/api/psycholaboral';
 import { createDefaultPsycholaboralInventory } from '../lib/psycholaboralDefaults';
 import { PsycholaboralConfigSection } from './PsycholaboralConfigSection';
@@ -322,6 +322,7 @@ export const BulkProcessEditorModal: React.FC<BulkProcessEditorModalProps> = ({ 
                 clientId: selectedClientId || undefined,
                 isBulkProcess: true,
                 bulkConfig: {
+                    ...pickBulkTableLayoutConfig(process?.bulkConfig),
                     ...bulkConfig,
                     ...stageColorMaps,
                     killerQuestions: killerQuestions,

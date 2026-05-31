@@ -75,9 +75,13 @@ import {
     getBulkSelectedProcessId,
     resolveCandidateAge,
     resolveBulkTableCellValue,
-    repairIdealProfileColumnLayout,
+    resolveBulkTableLayout,
     buildColumnConfigIds,
     buildVisibleColumnIds,
+    saveBulkTableLayoutBackup,
+    loadBulkTableLayoutBackup,
+    scoreColumnLayoutInterleaving,
+    remapLayoutOrderToCurrentColumns,
 } from '../lib/bulkTableColumns';
 import { getStageSelectClass } from '../lib/stageColors';
 import { getCellMetaStorageKey, BulkCellMeta, BulkCellMetaStore } from '../lib/bulkCellMeta';
@@ -710,6 +714,27 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
         [columnOrder, customColumns]
     );
 
+    const persistBulkTableLayoutBackup = useCallback((
+        processId: string,
+        layout: { columnOrder: string[]; hiddenColumns: string[]; pinnedColumns?: string[]; columnWidths?: Record<string, number> },
+        config?: BulkProcessConfig,
+        cols: CustomColumn[] = []
+    ) => {
+        const newScore = scoreColumnLayoutInterleaving(layout.columnOrder, cols);
+        const existing = loadBulkTableLayoutBackup(processId);
+        if (existing?.columnOrder?.length) {
+            const existingOrder = remapLayoutOrderToCurrentColumns(
+                existing.columnOrder,
+                undefined,
+                cols,
+                config
+            );
+            const existingScore = scoreColumnLayoutInterleaving(existingOrder, cols);
+            if (existingScore > newScore) return;
+        }
+        saveBulkTableLayoutBackup(processId, layout);
+    }, []);
+
     const persistBulkConfig = useCallback(async (updates: Partial<BulkProcessConfig>) => {
         if (!process) return;
         let mergedUpdates = { ...updates };
@@ -740,11 +765,29 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                     details: { summary: `Configuración: ${configKeys.join(', ')}` },
                 });
             }
+            if (
+                mergedUpdates.columnOrder ||
+                mergedUpdates.hiddenColumns ||
+                mergedUpdates.pinnedColumns ||
+                mergedUpdates.columnWidths
+            ) {
+                persistBulkTableLayoutBackup(
+                    process.id,
+                    {
+                        columnOrder: newBulkConfig.columnOrder || [],
+                        hiddenColumns: newBulkConfig.hiddenColumns || [],
+                        pinnedColumns: newBulkConfig.pinnedColumns,
+                        columnWidths: newBulkConfig.columnWidths,
+                    },
+                    newBulkConfig,
+                    newBulkConfig.customColumns || customColumns
+                );
+            }
         } catch (error) {
             console.error('Error guardando configuración de tabla:', error);
             actions.showToast('Error al guardar configuración de columnas', 'error', 3000);
         }
-    }, [process, actions, logActivity]);
+    }, [process, actions, logActivity, customColumns, persistBulkTableLayoutBackup]);
 
     useEffect(() => {
         if (!process) {
@@ -756,42 +799,73 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
             return;
         }
 
-        const config = process.bulkConfig;
-        const cols = config?.customColumns || [];
-        setCustomColumns(cols);
-        const layout = repairIdealProfileColumnLayout(config, cols);
-        setHiddenColumns(layout.hiddenColumns);
-        setPinnedColumns(config?.pinnedColumns?.length ? config.pinnedColumns : ['name']);
-        const savedWidths = config?.columnWidths || {};
-        setColumnWidths(savedWidths);
-        columnWidthsRef.current = savedWidths;
-        setColumnOrder(layout.columnOrder);
-        setColumnFilters({});
-        columnValuesMigratedRef.current = null;
+        let cancelled = false;
+        const processId = process.id;
 
-        if (layout.needsPersist) {
-            void persistBulkConfig({
+        (async () => {
+            let config = process.bulkConfig;
+            try {
+                const fresh = await processesApi.getById(processId);
+                if (!cancelled && fresh?.bulkConfig) {
+                    setBulkProcesses(prev => prev.map(p => (p.id === fresh.id ? fresh : p)));
+                    config = fresh.bulkConfig;
+                }
+            } catch (err) {
+                console.warn('No se pudo recargar el proceso masivo desde la BD:', err);
+            }
+            if (cancelled) return;
+
+            const cols = config?.customColumns || [];
+            setCustomColumns(cols);
+            const layout = resolveBulkTableLayout(processId, config, cols, configProcess.title);
+            setHiddenColumns(layout.hiddenColumns);
+            setPinnedColumns(config?.pinnedColumns?.length ? config.pinnedColumns : ['name']);
+            const savedWidths = config?.columnWidths || {};
+            setColumnWidths(savedWidths);
+            columnWidthsRef.current = savedWidths;
+            setColumnOrder(layout.columnOrder);
+            setColumnFilters({});
+            columnValuesMigratedRef.current = null;
+
+            persistBulkTableLayoutBackup(processId, {
                 columnOrder: layout.columnOrder,
                 hiddenColumns: layout.hiddenColumns,
-            });
-        }
+                pinnedColumns: config?.pinnedColumns,
+                columnWidths: savedWidths,
+            }, config, cols);
 
-        const legacy = buildLegacyColumnIdToName(config, cols);
-        const localValues = loadLocalColumnValuesForProcess(process.id);
-        if (Object.keys(localValues).length > 0) {
-            const normalized = normalizeBulkColumnValueKeys(localValues, cols, legacy);
-            setColumnValues(repairDateColumnValues(normalized, cols));
-        } else {
-            setColumnValues({});
-        }
+            if (layout.needsPersist) {
+                void persistBulkConfig({
+                    columnOrder: layout.columnOrder,
+                    hiddenColumns: layout.hiddenColumns,
+                });
+            }
+            if (layout.restoredFrom === 'backup') {
+                actions.showToast('Diseño de tabla restaurado desde respaldo local', 'success', 4000);
+            } else if (layout.restoredFrom === 'template') {
+                actions.showToast('Diseño de tabla restaurado desde plantilla guardada', 'success', 4000);
+            } else if (layout.restoredFrom === 'fallback') {
+                actions.showToast('Diseño de tabla restaurado (layout Operarios de Limpieza)', 'success', 4000);
+            }
 
-        const savedMeta = localStorage.getItem(getCellMetaStorageKey(process.id));
-        setCellMeta(savedMeta ? JSON.parse(savedMeta) : {});
+            const legacy = buildLegacyColumnIdToName(config, cols);
+            const localValues = loadLocalColumnValuesForProcess(processId);
+            if (Object.keys(localValues).length > 0) {
+                const normalized = normalizeBulkColumnValueKeys(localValues, cols, legacy);
+                setColumnValues(repairDateColumnValues(normalized, cols));
+            } else {
+                setColumnValues({});
+            }
 
-        // Si Score IA está oculto, desactivar filtro automático en BD (evita estados inconsistentes)
-        if (config && !isScoreIaColumnVisible(config) && config.autoFilterEnabled) {
-            persistBulkConfig({ autoFilterEnabled: false });
-        }
+            const savedMeta = localStorage.getItem(getCellMetaStorageKey(processId));
+            setCellMeta(savedMeta ? JSON.parse(savedMeta) : {});
+
+            if (config && !isScoreIaColumnVisible(config) && config.autoFilterEnabled) {
+                persistBulkConfig({ autoFilterEnabled: false });
+            }
+        })();
+
+        return () => { cancelled = true; };
     }, [process?.id]);
 
     const visibleColumns = useMemo(
@@ -915,7 +989,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
             ...process.bulkConfig,
             idealProfile: config,
         };
-        const layout = repairIdealProfileColumnLayout(draftConfig, cols);
+        const layout = resolveBulkTableLayout(process.id, draftConfig, cols, process.title);
         setHiddenColumns(layout.hiddenColumns);
         setColumnOrder(layout.columnOrder);
         await persistBulkConfig({
@@ -3395,7 +3469,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                                                 <label className="flex items-center gap-2 flex-1 cursor-pointer min-w-0">
                                                                     <input
                                                                         type="checkbox"
-                                                                        checked={!hiddenColumns.includes(colId)}
+                                                                        checked={visibleColumns.includes(colId)}
                                                                         onChange={() => toggleColumnVisibility(colId)}
                                                                         className="w-3.5 h-3.5 text-primary-600 rounded focus:ring-primary-500"
                                                                     />
@@ -3606,8 +3680,8 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
 
             {selectedProcess && (
                 <div className="flex-1 overflow-hidden relative flex flex-col">
-                    <p className="bulk-table-hint text-[10px] text-gray-500 px-2 pt-1 pb-0.5 shrink-0 line-clamp-1" title="Flechas · Shift+arrastrar selección · Ctrl+clic múltiple · Clic derecho: color/comentario · Enter/doble clic editar · Ctrl+C copiar · Ctrl+V pegar · Doble clic en fila abre detalle · Arrastre el borde del encabezado para ajustar ancho">
-                        Flechas · Shift+arrastrar · Ctrl+clic · Clic derecho color/comentario · Enter editar · Ctrl+C/V · Doble clic detalle · Arrastre borde encabezado = ancho columna
+                    <p className="bulk-table-hint text-[10px] text-gray-500 px-2 pt-1 pb-0.5 shrink-0 line-clamp-1" title="Flechas · Shift+arrastrar selección · Ctrl+clic múltiple · Clic derecho: color/comentario · Enter/doble clic editar · Ctrl+C copiar · Ctrl+V pegar · Doble clic en fila abre detalle · Arrastre el borde del encabezado para ajustar ancho · Desplaza horizontalmente para ver más columnas">
+                        Flechas · Shift+arrastrar · Ctrl+clic · Clic derecho color/comentario · Enter editar · Ctrl+C/V · Doble clic detalle · Arrastre borde encabezado = ancho · Scroll horizontal → más columnas
                     </p>
                     <div
                         ref={tableContainerRef}
