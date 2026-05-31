@@ -33,7 +33,6 @@ import { candidatesApi } from '../lib/api/candidates';
 import {
     BASE_COLUMNS,
     DEFAULT_COLUMN_ORDER,
-    buildAllColumnIds,
     getColumnLabel,
     getColumnValuesStorageKey,
     getColumnValuesBackupStorageKey,
@@ -77,6 +76,8 @@ import {
     resolveCandidateAge,
     resolveBulkTableCellValue,
     repairIdealProfileColumnLayout,
+    buildColumnConfigIds,
+    buildVisibleColumnIds,
 } from '../lib/bulkTableColumns';
 import { getStageSelectClass } from '../lib/stageColors';
 import { getCellMetaStorageKey, BulkCellMeta, BulkCellMetaStore } from '../lib/bulkCellMeta';
@@ -703,9 +704,10 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
     }, [process]);
 
     const baseColumns = BASE_COLUMNS;
-    const allColumnIds = useMemo(
-        () => buildAllColumnIds(customColumns),
-        [customColumns]
+
+    const columnConfigIds = useMemo(
+        () => buildColumnConfigIds(columnOrder, customColumns),
+        [columnOrder, customColumns]
     );
 
     const persistBulkConfig = useCallback(async (updates: Partial<BulkProcessConfig>) => {
@@ -793,8 +795,8 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
     }, [process?.id]);
 
     const visibleColumns = useMemo(
-        () => columnOrder.filter(colId => !hiddenColumns.includes(colId)),
-        [columnOrder, hiddenColumns]
+        () => buildVisibleColumnIds(columnOrder, hiddenColumns, customColumns),
+        [columnOrder, hiddenColumns, customColumns]
     );
 
     const scoreIaColumnVisible = useMemo(
@@ -2215,8 +2217,10 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
 
     const showAllColumns = async () => {
         if (hiddenColumns.length === 0) return;
+        const newOrder = buildColumnConfigIds(columnOrder, customColumns);
         setHiddenColumns([]);
-        await persistBulkConfig({ hiddenColumns: [] });
+        setColumnOrder(newOrder);
+        await persistBulkConfig({ hiddenColumns: [], columnOrder: newOrder });
         actions.showToast('Todas las columnas visibles', 'success', 2000);
     };
 
@@ -2228,6 +2232,11 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
         setHiddenColumns(newHidden);
 
         const updates: Partial<BulkProcessConfig> = { hiddenColumns: newHidden };
+        if (!isHiding && !columnOrder.includes(colId)) {
+            const newOrder = buildColumnConfigIds([...columnOrder, colId], customColumns);
+            setColumnOrder(newOrder);
+            updates.columnOrder = newOrder;
+        }
         if (colId === 'scoreIa' && isHiding) {
             updates.autoFilterEnabled = false;
             setColumnFilters(prev => {
@@ -3367,7 +3376,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                                         )}
                                                     </div>
                                                     <p className="text-[10px] text-gray-400 px-2 mb-2">📌 = fijar al hacer scroll horizontal</p>
-                                                    {allColumnIds.map(colId => {
+                                                    {columnConfigIds.map(colId => {
                                                         const colName = getColumnLabel(colId, customColumns);
                                                         const isCustom = colId.startsWith('custom_');
                                                         const customColId = isCustom ? colId.replace('custom_', '') : null;

@@ -629,6 +629,149 @@ export function buildAllColumnIds(customColumns: CustomColumn[] = []): string[] 
     return [...DEFAULT_COLUMN_ORDER, ...getCustomColumnIds(customColumns)];
 }
 
+/** Orden de columnas para el menú Columnas: respeta columnOrder y añade las que falten al final. */
+export function buildColumnConfigIds(
+    columnOrder: string[],
+    customColumns: CustomColumn[] = []
+): string[] {
+    const allIds = buildAllColumnIds(customColumns);
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const colId of columnOrder) {
+        if (colId && allIds.includes(colId) && !seen.has(colId)) {
+            out.push(colId);
+            seen.add(colId);
+        }
+    }
+    for (const colId of allIds) {
+        if (!seen.has(colId)) out.push(colId);
+    }
+    return out;
+}
+
+/** Columnas visibles en la tabla: orden de columnOrder + visibles no listadas, menos hiddenColumns. */
+export function buildVisibleColumnIds(
+    columnOrder: string[],
+    hiddenColumns: string[],
+    customColumns: CustomColumn[] = []
+): string[] {
+    const allIds = buildAllColumnIds(customColumns);
+    const hidden = new Set(hiddenColumns);
+    const isRenderable = (colId: string) => {
+        if (!allIds.includes(colId)) return false;
+        if (colId.startsWith('custom_')) {
+            const bare = colId.slice('custom_'.length);
+            return customColumns.some(c => c.id === bare);
+        }
+        return true;
+    };
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const colId of columnOrder) {
+        if (!colId || hidden.has(colId) || !isRenderable(colId) || seen.has(colId)) continue;
+        out.push(colId);
+        seen.add(colId);
+    }
+    for (const colId of allIds) {
+        if (seen.has(colId) || hidden.has(colId) || !isRenderable(colId)) continue;
+        out.push(colId);
+        seen.add(colId);
+    }
+    return out;
+}
+
+/**
+ * Mapea IDs antiguos en columnOrder (p. ej. custom_* recreados) al ID actual
+ * usando aliases, posición en el orden guardado y nombre de columna.
+ */
+export function remapStoredColumnOrderIds(
+    storedOrder: string[] | undefined,
+    bulkConfig: BulkProcessConfig | undefined,
+    customColumns: CustomColumn[] = []
+): string[] {
+    if (!storedOrder?.length) return [];
+
+    const migrated = migrateBulkColumnOrder(storedOrder);
+    const allIds = new Set(buildAllColumnIds(customColumns));
+    const nameToCurrentId = new Map(
+        customColumns.map(c => [normalizeColumnNameKey(c.name), `custom_${c.id}`])
+    );
+    const legacyToName = buildLegacyColumnIdToName(bulkConfig, customColumns);
+    const positionAliases = buildLegacyFromColumnOrder(bulkConfig, customColumns);
+    const customSlotsInOrder = migrated.filter(id => id.startsWith('custom_'));
+    const usedCurrentCustom = new Set<string>();
+
+    const mapCustomColId = (colId: string): string | null => {
+        if (allIds.has(colId)) return colId;
+        const bare = colId.slice('custom_'.length);
+        const name = legacyToName[bare] || positionAliases[bare];
+        if (name) {
+            const mapped = nameToCurrentId.get(normalizeColumnNameKey(name));
+            if (mapped && !usedCurrentCustom.has(mapped)) {
+                usedCurrentCustom.add(mapped);
+                return mapped;
+            }
+        }
+        const slotIdx = customSlotsInOrder.indexOf(colId);
+        if (slotIdx >= 0 && slotIdx < customColumns.length) {
+            const mapped = `custom_${customColumns[slotIdx].id}`;
+            if (!usedCurrentCustom.has(mapped)) {
+                usedCurrentCustom.add(mapped);
+                return mapped;
+            }
+        }
+        return null;
+    };
+
+    const out: string[] = [];
+    const seen = new Set<string>();
+    for (const raw of migrated) {
+        if (!raw || typeof raw !== 'string') continue;
+        const id = raw.startsWith('custom_') ? mapCustomColId(raw) : (allIds.has(raw) ? raw : null);
+        if (id && !seen.has(id)) {
+            out.push(id);
+            seen.add(id);
+        }
+    }
+    return out;
+}
+
+/** Mapea hiddenColumns con IDs legacy al ID de columna actual. */
+export function remapHiddenColumnIds(
+    hiddenColumns: string[] | undefined,
+    bulkConfig: BulkProcessConfig | undefined,
+    customColumns: CustomColumn[] = []
+): string[] {
+    if (!hiddenColumns?.length) return [];
+
+    const allIds = new Set(buildAllColumnIds(customColumns));
+    const nameToCurrentId = new Map(
+        customColumns.map(c => [normalizeColumnNameKey(c.name), `custom_${c.id}`])
+    );
+    const legacyToName = buildLegacyColumnIdToName(bulkConfig, customColumns);
+    const positionAliases = buildLegacyFromColumnOrder(bulkConfig, customColumns);
+    const out: string[] = [];
+    const seen = new Set<string>();
+
+    for (const raw of hiddenColumns) {
+        if (!raw || typeof raw !== 'string') continue;
+        let id = raw;
+        if (id.startsWith('custom_') && !allIds.has(id)) {
+            const bare = id.slice('custom_'.length);
+            const name = legacyToName[bare] || positionAliases[bare];
+            if (name) {
+                const mapped = nameToCurrentId.get(normalizeColumnNameKey(name));
+                if (mapped) id = mapped;
+            }
+        }
+        if (allIds.has(id) && !seen.has(id)) {
+            out.push(id);
+            seen.add(id);
+        }
+    }
+    return out;
+}
+
 export function resolveColumnOrder(
     bulkConfig?: BulkProcessConfig,
     customColumns: CustomColumn[] = []
@@ -636,8 +779,7 @@ export function resolveColumnOrder(
     const allIds = buildAllColumnIds(customColumns);
 
     if (bulkConfig?.columnOrder?.length) {
-        const migrated = migrateBulkColumnOrder(bulkConfig.columnOrder);
-        const ordered = migrated.filter(id => allIds.includes(id));
+        const ordered = remapStoredColumnOrderIds(bulkConfig.columnOrder, bulkConfig, customColumns);
         let missing = allIds.filter(id => !ordered.includes(id));
 
         if (missing.includes(CONTACT_LAST_USER_COLUMN_ID)) {
@@ -693,47 +835,25 @@ export function repairIdealProfileColumnLayout(
     needsPersist: boolean;
 } {
     let columnOrder = resolveColumnOrder(bulkConfig, customColumns);
-    let hiddenColumns = (bulkConfig?.hiddenColumns || []).filter(
-        id => typeof id === 'string' && columnOrder.includes(id)
-    );
-    let needsPersist = false;
+    let hiddenColumns = remapHiddenColumnIds(bulkConfig?.hiddenColumns, bulkConfig, customColumns);
 
-    const storedOrder = bulkConfig?.columnOrder;
-    if (
-        storedOrder &&
-        storedOrder.length > 0 &&
-        storedOrder.some(id => typeof id === 'string' && id.length > 0 && !columnOrder.includes(id))
-    ) {
-        needsPersist = true;
-    }
+    columnOrder = buildColumnConfigIds(columnOrder, customColumns);
 
     if (bulkConfig?.idealProfile?.enabled) {
-        const withProfile = ensureProfileMatchInColumnOrder(columnOrder);
-        if (withProfile.length !== columnOrder.length || !columnOrder.includes('profileMatch')) {
-            columnOrder = withProfile;
-            needsPersist = true;
-        }
-        const prevHiddenLen = hiddenColumns.length;
+        columnOrder = ensureProfileMatchInColumnOrder(columnOrder);
         hiddenColumns = hiddenColumns.filter(id => id !== 'profileMatch');
-        if (hiddenColumns.length !== prevHiddenLen) {
-            needsPersist = true;
-        }
     }
 
     const visibleCount = columnOrder.filter(id => !hiddenColumns.includes(id)).length;
     if (columnOrder.length > 0 && visibleCount === 0) {
         hiddenColumns = [];
-        needsPersist = true;
     }
 
-    if (
-        bulkConfig?.idealProfile?.enabled &&
-        storedOrder &&
-        storedOrder.length > 0 &&
-        !storedOrder.includes('profileMatch')
-    ) {
-        needsPersist = true;
-    }
+    const storedOrder = bulkConfig?.columnOrder || [];
+    const storedHidden = bulkConfig?.hiddenColumns || [];
+    const needsPersist =
+        JSON.stringify(columnOrder) !== JSON.stringify(storedOrder) ||
+        JSON.stringify(hiddenColumns) !== JSON.stringify(storedHidden);
 
     return { columnOrder, hiddenColumns, needsPersist };
 }
