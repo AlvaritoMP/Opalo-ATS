@@ -4,6 +4,7 @@ import {
     IdealProfileConfig,
     IdealProfileCriterion,
     IdealProfileMatchMode,
+    BulkProcessConfig,
 } from '../types';
 import {
     formatBulkDate,
@@ -13,6 +14,8 @@ import {
     resolveBulkTableCellValue,
     resolveCandidateHomonymField,
     resolveStandardFieldValue,
+    buildLegacyColumnIdToName,
+    buildLegacyFromColumnOrder,
 } from './bulkTableColumns';
 import { CONTACT_COLUMN_IDS } from './contactChannelConfig';
 
@@ -153,6 +156,103 @@ export function isActiveIdealProfileCriterion(criterion: IdealProfileCriterion):
     return criterionHasIdealValue(criterion);
 }
 
+function resolveIdealProfileColumnByName(
+    name: string | undefined,
+    customColumns: CustomColumn[]
+): string | null {
+    if (!name) return null;
+    const col = customColumns.find(
+        c => normalizeColumnNameKey(c.name) === normalizeColumnNameKey(name)
+    );
+    return col ? `custom_${col.id}` : null;
+}
+
+function resolveLegacyNameForColumnId(
+    columnId: string,
+    legacyColumnIdToName: Record<string, string>,
+    bulkConfig?: BulkProcessConfig,
+    customColumns: CustomColumn[] = []
+): string | undefined {
+    return (
+        legacyColumnIdToName[columnId] ||
+        bulkConfig?.columnKeyAliases?.[columnId] ||
+        buildLegacyFromColumnOrder(bulkConfig, customColumns)[columnId]
+    );
+}
+
+export function remapIdealProfileFieldId(
+    fieldId: string,
+    customColumns: CustomColumn[],
+    legacyColumnIdToName: Record<string, string> = {},
+    bulkConfig?: BulkProcessConfig
+): string {
+    if (!fieldId) return fieldId;
+
+    const remapBareColumnId = (bareId: string): string | null => {
+        if (customColumns.some(c => c.id === bareId)) return `custom_${bareId}`;
+        const byName = resolveIdealProfileColumnByName(
+            resolveLegacyNameForColumnId(bareId, legacyColumnIdToName, bulkConfig, customColumns),
+            customColumns
+        );
+        return byName;
+    };
+
+    if (fieldId.startsWith('custom_')) {
+        const bare = fieldId.slice('custom_'.length);
+        if (customColumns.some(c => c.id === bare)) return fieldId;
+        return remapBareColumnId(bare) || fieldId;
+    }
+
+    if ((IDEAL_PROFILE_BASE_FIELDS as readonly string[]).includes(fieldId)) {
+        return fieldId;
+    }
+
+    const asCustom = remapBareColumnId(fieldId);
+    if (asCustom) return asCustom;
+
+    const byLabel = resolveIdealProfileColumnByName(fieldId, customColumns);
+    if (byLabel) return byLabel;
+
+    return fieldId;
+}
+
+/** Remapea fieldId de criterios si quedaron IDs custom antiguos tras recrear columnas. */
+export function normalizeIdealProfileConfig(
+    config: IdealProfileConfig | undefined,
+    customColumns: CustomColumn[] = [],
+    bulkConfig?: BulkProcessConfig
+): { config: IdealProfileConfig | undefined; needsPersist: boolean } {
+    if (!config?.criteria?.length) return { config, needsPersist: false };
+
+    const legacy = buildLegacyColumnIdToName(bulkConfig, customColumns);
+    let needsPersist = false;
+    const criteriaByFieldId = new Map<string, IdealProfileCriterion>();
+
+    for (const criterion of config.criteria) {
+        const fieldId = remapIdealProfileFieldId(
+            criterion.fieldId,
+            customColumns,
+            legacy,
+            bulkConfig
+        );
+        if (fieldId !== criterion.fieldId) needsPersist = true;
+
+        const normalizedCriterion =
+            fieldId === criterion.fieldId ? criterion : { ...criterion, fieldId };
+        const existing = criteriaByFieldId.get(fieldId);
+        if (
+            !existing ||
+            (criterionHasIdealValue(normalizedCriterion) && !criterionHasIdealValue(existing))
+        ) {
+            criteriaByFieldId.set(fieldId, normalizedCriterion);
+        }
+    }
+
+    const criteria = [...criteriaByFieldId.values()];
+    if (!needsPersist) return { config, needsPersist: false };
+    return { config: { ...config, criteria }, needsPersist: true };
+}
+
 export function normalizeIdealProfileCriteria(criteria: IdealProfileCriterion[]): IdealProfileCriterion[] {
     return criteria.map(c => ({
         ...c,
@@ -165,10 +265,20 @@ export function getCandidateFieldValue(
     fieldId: string,
     customColumns: CustomColumn[],
     columnValues: Record<string, Record<string, unknown>>,
-    legacyColumnIdToName: Record<string, string>
+    legacyColumnIdToName: Record<string, string>,
+    bulkConfig?: BulkProcessConfig
 ): unknown {
     if (fieldId.startsWith('custom_')) {
-        const colId = fieldId.replace('custom_', '');
+        let colId = fieldId.replace('custom_', '');
+        if (!customColumns.some(c => c.id === colId)) {
+            const mapped = remapIdealProfileFieldId(
+                fieldId,
+                customColumns,
+                legacyColumnIdToName,
+                bulkConfig
+            );
+            colId = mapped.replace('custom_', '');
+        }
         return resolveBulkTableCellValue(
             candidate,
             colId,
@@ -347,7 +457,8 @@ export function computeProfileMatch(
     config: IdealProfileConfig | undefined,
     customColumns: CustomColumn[],
     columnValues: Record<string, Record<string, unknown>>,
-    legacyColumnIdToName: Record<string, string>
+    legacyColumnIdToName: Record<string, string>,
+    bulkConfig?: BulkProcessConfig
 ): ProfileMatchResult | null {
     if (!config?.enabled || !config.criteria?.length) return null;
 
@@ -360,20 +471,27 @@ export function computeProfileMatch(
 
     for (const criterion of active) {
         const weight = criterion.weight ?? 1;
-        const fieldType = getIdealProfileFieldType(criterion.fieldId, customColumns);
-        const candidateVal = getCandidateFieldValue(
-            candidate,
+        const fieldId = remapIdealProfileFieldId(
             criterion.fieldId,
             customColumns,
+            legacyColumnIdToName,
+            bulkConfig
+        );
+        const fieldType = getIdealProfileFieldType(fieldId, customColumns);
+        const candidateVal = getCandidateFieldValue(
+            candidate,
+            fieldId,
+            customColumns,
             columnValues,
-            legacyColumnIdToName
+            legacyColumnIdToName,
+            bulkConfig
         );
         const score = scoreCriterion(candidateVal, criterion, fieldType);
         totalWeight += weight;
         weightedSum += score * weight;
         fieldScores.push({
-            fieldId: criterion.fieldId,
-            label: getColumnLabel(criterion.fieldId, customColumns),
+            fieldId,
+            label: getColumnLabel(fieldId, customColumns),
             score,
             candidateValue: String(candidateVal ?? ''),
             idealValue: String(criterion.idealValue ?? ''),
@@ -394,12 +512,17 @@ export function getProfileMatchThresholds(config?: IdealProfileConfig): {
     };
 }
 
-export function getIdealProfileActiveFieldIds(config?: IdealProfileConfig): Set<string> {
+export function getIdealProfileActiveFieldIds(
+    config?: IdealProfileConfig,
+    customColumns: CustomColumn[] = [],
+    bulkConfig?: BulkProcessConfig
+): Set<string> {
     if (!config?.enabled) return new Set();
+    const legacy = buildLegacyColumnIdToName(bulkConfig, customColumns);
     return new Set(
         (config.criteria || [])
             .filter(isActiveIdealProfileCriterion)
-            .map(c => c.fieldId)
+            .map(c => remapIdealProfileFieldId(c.fieldId, customColumns, legacy, bulkConfig))
     );
 }
 
@@ -437,7 +560,8 @@ export function computeProfileMatchSummary(
     config: IdealProfileConfig | undefined,
     customColumns: CustomColumn[],
     columnValues: Record<string, Record<string, unknown>>,
-    legacyColumnIdToName: Record<string, string>
+    legacyColumnIdToName: Record<string, string>,
+    bulkConfig?: BulkProcessConfig
 ): ProfileMatchSummary | null {
     if (!config?.enabled) return null;
 
@@ -454,7 +578,8 @@ export function computeProfileMatchSummary(
             config,
             customColumns,
             columnValues,
-            legacyColumnIdToName
+            legacyColumnIdToName,
+            bulkConfig
         );
         if (!result) continue;
         scores.push(result.score);

@@ -111,6 +111,7 @@ import {
     computeProfileMatchSummary,
     getProfileMatchGradientStyle,
     getIdealProfileActiveFieldIds,
+    normalizeIdealProfileConfig,
 } from '../lib/bulkIdealProfileMatch';
 import { psycholaboralApi } from '../lib/api/psycholaboral';
 import { createDefaultPsycholaboralInventory } from '../lib/psycholaboralDefaults';
@@ -839,6 +840,17 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                     pinnedColumns: layout.pinnedColumns,
                 });
             }
+
+            const idealNorm = normalizeIdealProfileConfig(config?.idealProfile, cols, config);
+            if (idealNorm.needsPersist && idealNorm.config) {
+                void persistBulkConfig({ idealProfile: idealNorm.config });
+                actions.showToast(
+                    'Criterios del perfil ideal reparados tras el cambio de columnas',
+                    'success',
+                    4500
+                );
+            }
+
             if (layout.recoveredFrom === 'local') {
                 const src = layout.localSource === 'template' ? 'plantilla guardada' : 'respaldo del navegador';
                 actions.showToast(`Diseño de tabla recuperado desde ${src}`, 'success', 5000);
@@ -874,7 +886,14 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
         [process?.bulkConfig]
     );
 
-    const idealProfileConfig = process?.bulkConfig?.idealProfile;
+    const idealProfileConfig = useMemo(() => {
+        const normalized = normalizeIdealProfileConfig(
+            process?.bulkConfig?.idealProfile,
+            customColumns,
+            process?.bulkConfig
+        );
+        return normalized.config;
+    }, [process?.bulkConfig?.idealProfile, process?.bulkConfig, customColumns]);
     const profileMatchColumnVisible = useMemo(
         () => isProfileMatchColumnVisible(process?.bulkConfig),
         [process?.bulkConfig]
@@ -892,7 +911,8 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                 idealProfileConfig,
                 customColumns,
                 columnValues,
-                legacy
+                legacy,
+                process?.bulkConfig
             );
             if (result) {
                 scores.set(c.id, result.score);
@@ -911,8 +931,8 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
     }, [candidates, idealProfileConfig, customColumns, columnValues, process?.bulkConfig]);
 
     const idealProfileHeatMapFields = useMemo(
-        () => getIdealProfileActiveFieldIds(idealProfileConfig),
-        [idealProfileConfig]
+        () => getIdealProfileActiveFieldIds(idealProfileConfig, customColumns, process?.bulkConfig),
+        [idealProfileConfig, customColumns, process?.bulkConfig]
     );
 
     useEffect(() => {
@@ -967,7 +987,8 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
             idealProfileConfig,
             customColumns,
             columnValues,
-            legacy
+            legacy,
+            process?.bulkConfig
         );
     }, [
         idealProfileConfig,
@@ -981,16 +1002,22 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
     const handleSaveIdealProfile = useCallback(async (config: IdealProfileConfig) => {
         if (!process) return;
         const cols = process.bulkConfig?.customColumns || customColumns;
+        const { config: normalizedConfig } = normalizeIdealProfileConfig(
+            config,
+            cols,
+            process.bulkConfig
+        );
+        const profileConfig = normalizedConfig || config;
         const draftConfig: BulkProcessConfig = {
             ...process.bulkConfig,
-            idealProfile: config,
+            idealProfile: profileConfig,
         };
         const layout = resolveBulkTableLayout(process.id, draftConfig, cols);
         setHiddenColumns(layout.hiddenColumns);
         setColumnOrder(layout.columnOrder);
         setPinnedColumns(layout.pinnedColumns);
         await persistBulkConfig({
-            idealProfile: config,
+            idealProfile: profileConfig,
             hiddenColumns: layout.hiddenColumns,
             columnOrder: layout.columnOrder,
             pinnedColumns: layout.pinnedColumns,
@@ -1002,7 +1029,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                         ...p,
                         bulkConfig: {
                             ...p.bulkConfig,
-                            idealProfile: config,
+                            idealProfile: profileConfig,
                             hiddenColumns: layout.hiddenColumns,
                             columnOrder: layout.columnOrder,
                             pinnedColumns: layout.pinnedColumns,
@@ -1012,7 +1039,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
             )
         );
         logActivity('config_change', {
-            details: { summary: config.enabled ? 'Perfil ideal activado/actualizado' : 'Perfil ideal desactivado' },
+            details: { summary: profileConfig.enabled ? 'Perfil ideal activado/actualizado' : 'Perfil ideal desactivado' },
         });
         actions.showToast('Perfil ideal guardado', 'success', 2500);
     }, [process, customColumns, persistBulkConfig, logActivity, actions]);

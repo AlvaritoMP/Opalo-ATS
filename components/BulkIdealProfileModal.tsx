@@ -16,8 +16,10 @@ import {
     criterionHasIdealValue,
     isActiveIdealProfileCriterion,
     normalizeIdealProfileCriteria,
+    normalizeIdealProfileConfig,
     ProfileMatchSummary,
 } from '../lib/bulkIdealProfileMatch';
+import { getColumnLabel, normalizeColumnNameKey } from '../lib/bulkTableColumns';
 import { BulkIdealProfileSummaryPanel } from './BulkIdealProfileSummaryPanel';
 
 interface Props {
@@ -55,14 +57,30 @@ function getMatchModesForType(type: IdealProfileFieldDef['type']): IdealProfileM
 
 function createDefaultCriteria(
     fields: IdealProfileFieldDef[],
-    existing?: IdealProfileConfig
+    existing?: IdealProfileConfig,
+    customColumns: CustomColumn[] = [],
+    bulkConfig?: Process['bulkConfig']
 ): IdealProfileCriterion[] {
-    const existingMap = new Map((existing?.criteria || []).map(c => [c.fieldId, c]));
+    const { config: normalized } = normalizeIdealProfileConfig(
+        existing,
+        customColumns,
+        bulkConfig
+    );
+    const existingByFieldId = new Map((normalized?.criteria || []).map(c => [c.fieldId, c]));
+    const existingByLabel = new Map<string, IdealProfileCriterion>();
+    for (const criterion of normalized?.criteria || []) {
+        const label = getColumnLabel(criterion.fieldId, customColumns);
+        if (label) existingByLabel.set(normalizeColumnNameKey(label), criterion);
+    }
+
     return fields.map(f => {
-        const prev = existingMap.get(f.fieldId);
+        const prev =
+            existingByFieldId.get(f.fieldId) ||
+            existingByLabel.get(normalizeColumnNameKey(f.label));
         if (prev) {
             return {
                 ...prev,
+                fieldId: f.fieldId,
                 enabled: prev.enabled ?? criterionHasIdealValue(prev),
             };
         }
@@ -106,10 +124,10 @@ export const BulkIdealProfileModal: React.FC<Props> = ({
         setEnabled(cfg?.enabled ?? false);
         setGreenThreshold(cfg?.greenThreshold ?? 80);
         setYellowThreshold(cfg?.yellowThreshold ?? 50);
-        setCriteria(createDefaultCriteria(availableFields, cfg));
+        setCriteria(createDefaultCriteria(availableFields, cfg, customColumns, process.bulkConfig));
         setImportPaste('');
         setShowImport(false);
-    }, [isOpen, process.id, process.bulkConfig?.idealProfile, availableFields]);
+    }, [isOpen, process.id, process.bulkConfig?.idealProfile, process.bulkConfig, availableFields, customColumns]);
 
     const updateCriterion = useCallback((fieldId: string, patch: Partial<IdealProfileCriterion>) => {
         setCriteria(prev =>
