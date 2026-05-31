@@ -256,7 +256,7 @@ export function normalizeIdealProfileConfig(
 export function normalizeIdealProfileCriteria(criteria: IdealProfileCriterion[]): IdealProfileCriterion[] {
     return criteria.map(c => ({
         ...c,
-        enabled: isActiveIdealProfileCriterion(c) ? true : c.enabled,
+        enabled: c.enabled === false ? false : isActiveIdealProfileCriterion(c),
     }));
 }
 

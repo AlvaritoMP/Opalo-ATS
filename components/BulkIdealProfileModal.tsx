@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { X, Save, Upload, Download, Target, Loader2 } from 'lucide-react';
+import { X, Save, Upload, Download, Target, Loader2, Trash2 } from 'lucide-react';
 import {
     Process,
     CustomColumn,
@@ -134,6 +134,7 @@ export const BulkIdealProfileModal: React.FC<Props> = ({
             prev.map(c => {
                 if (c.fieldId !== fieldId) return c;
                 const next = { ...c, ...patch };
+                if (patch.enabled === false) return next;
                 if (criterionHasIdealValue(next)) {
                     next.enabled = true;
                 }
@@ -141,6 +142,21 @@ export const BulkIdealProfileModal: React.FC<Props> = ({
             })
         );
     }, []);
+
+    const handleClearAllCriteria = () => {
+        if (
+            !window.confirm(
+                '¿Limpiar todos los criterios del perfil ideal? Se desmarcarán todos los campos y se borrarán los valores configurados.'
+            )
+        ) {
+            return;
+        }
+        setCriteria(createDefaultCriteria(availableFields, undefined, customColumns, process.bulkConfig));
+    };
+
+    const handleUncheckAllCriteria = () => {
+        setCriteria(prev => prev.map(c => ({ ...c, enabled: false })));
+    };
 
     const handleImportPaste = () => {
         const imported = parseIdealProfileImport(importPaste, availableFields);
@@ -300,6 +316,23 @@ export const BulkIdealProfileModal: React.FC<Props> = ({
                         >
                             Subir archivo
                         </button>
+                        <button
+                            type="button"
+                            onClick={handleUncheckAllCriteria}
+                            disabled={!enabled}
+                            className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-white border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 disabled:opacity-40"
+                        >
+                            Desmarcar todos
+                        </button>
+                        <button
+                            type="button"
+                            onClick={handleClearAllCriteria}
+                            disabled={!enabled}
+                            className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-red-50 border border-red-200 text-red-800 rounded-lg hover:bg-red-100 disabled:opacity-40"
+                        >
+                            <Trash2 className="w-4 h-4" />
+                            Limpiar criterios
+                        </button>
                     </div>
 
                     {showImport && (
@@ -347,7 +380,7 @@ export const BulkIdealProfileModal: React.FC<Props> = ({
                                             <td className="px-3 py-2">
                                                 <input
                                                     type="checkbox"
-                                                    checked={c.enabled}
+                                                    checked={isActiveIdealProfileCriterion(c)}
                                                     onChange={e => updateCriterion(c.fieldId, { enabled: e.target.checked })}
                                                     className="w-4 h-4 text-indigo-600 rounded"
                                                 />

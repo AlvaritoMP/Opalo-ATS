@@ -2315,6 +2315,38 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
         });
     }, [customColumns, applyOptimisticUpdate, syncCustomFieldFromStandard]);
 
+    const clearSelectedCells = useCallback(async (e?: KeyboardEvent | React.KeyboardEvent) => {
+        if (editingCell) return;
+
+        const target = (e?.target as HTMLElement | null) ?? (document.activeElement as HTMLElement | null);
+        if (target && ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName)) return;
+
+        const cellKeys =
+            selectedCells.size > 0
+                ? Array.from(selectedCells)
+                : activeCell
+                  ? [toCellKey(activeCell)]
+                  : [];
+        if (cellKeys.length === 0) return;
+
+        e?.preventDefault();
+
+        let cleared = 0;
+        for (const key of cellKeys) {
+            const { candidateId, colId } = parseCellKey(key);
+            if (!isPasteEditableColumn(colId, customColumns)) continue;
+            await setCellValue(candidateId, colId, '');
+            cleared++;
+        }
+
+        if (cleared > 0) {
+            actions.showToast(`Contenido borrado en ${cleared} celda(s)`, 'success', 2000);
+            logActivity('cell_edit', {
+                details: { count: cleared, summary: `Borrado en ${cleared} celda(s)` },
+            });
+        }
+    }, [editingCell, selectedCells, activeCell, customColumns, setCellValue, actions, logActivity]);
+
     const handleRestoreTableLayout = async () => {
         if (!process) return;
         const local = recoverLayoutFromLocalSources(process.id, process.bulkConfig, customColumns);
@@ -3017,6 +3049,11 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
         const target = e.target as HTMLElement;
         if (['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName)) return;
 
+        if (e.key === 'Delete' || e.key === 'Backspace') {
+            void clearSelectedCells(e);
+            return;
+        }
+
         const navKeys = ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Tab', 'Enter', 'Escape'];
         if (!navKeys.includes(e.key)) return;
 
@@ -3072,7 +3109,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
             default:
                 break;
         }
-    }, [selectSingleCell, moveActiveCell, beginEditCell]);
+    }, [selectSingleCell, moveActiveCell, beginEditCell, clearSelectedCells]);
 
     tableKeyboardRef.current = {
         editingCell,
