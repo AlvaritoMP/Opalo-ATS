@@ -662,6 +662,82 @@ export function resolveColumnOrder(
     return allIds;
 }
 
+/** Inserta profileMatch en el orden sin dejar huecos (evita splice(1,0) sobre array vacío). */
+export function ensureProfileMatchInColumnOrder(order: string[]): string[] {
+    if (order.includes('profileMatch')) {
+        return order.filter((id): id is string => typeof id === 'string' && id.length > 0);
+    }
+    const clean = order.filter((id): id is string => typeof id === 'string' && id.length > 0);
+    const scoreIdx = clean.indexOf('scoreIa');
+    if (scoreIdx >= 0) {
+        const next = [...clean];
+        next.splice(scoreIdx + 1, 0, 'profileMatch');
+        return next;
+    }
+    const nameIdx = clean.indexOf('name');
+    const next = [...clean];
+    next.splice(nameIdx >= 0 ? nameIdx + 1 : 0, 0, 'profileMatch');
+    return next;
+}
+
+/**
+ * Repara layout de tabla al activar perfil ideal: orden completo, profileMatch visible,
+ * y recuperación si todas las columnas quedaron ocultas por error.
+ */
+export function repairIdealProfileColumnLayout(
+    bulkConfig: BulkProcessConfig | undefined,
+    customColumns: CustomColumn[] = []
+): {
+    columnOrder: string[];
+    hiddenColumns: string[];
+    needsPersist: boolean;
+} {
+    let columnOrder = resolveColumnOrder(bulkConfig, customColumns);
+    let hiddenColumns = (bulkConfig?.hiddenColumns || []).filter(
+        id => typeof id === 'string' && columnOrder.includes(id)
+    );
+    let needsPersist = false;
+
+    const storedOrder = bulkConfig?.columnOrder;
+    if (
+        storedOrder &&
+        storedOrder.length > 0 &&
+        storedOrder.some(id => typeof id === 'string' && id.length > 0 && !columnOrder.includes(id))
+    ) {
+        needsPersist = true;
+    }
+
+    if (bulkConfig?.idealProfile?.enabled) {
+        const withProfile = ensureProfileMatchInColumnOrder(columnOrder);
+        if (withProfile.length !== columnOrder.length || !columnOrder.includes('profileMatch')) {
+            columnOrder = withProfile;
+            needsPersist = true;
+        }
+        const prevHiddenLen = hiddenColumns.length;
+        hiddenColumns = hiddenColumns.filter(id => id !== 'profileMatch');
+        if (hiddenColumns.length !== prevHiddenLen) {
+            needsPersist = true;
+        }
+    }
+
+    const visibleCount = columnOrder.filter(id => !hiddenColumns.includes(id)).length;
+    if (columnOrder.length > 0 && visibleCount === 0) {
+        hiddenColumns = [];
+        needsPersist = true;
+    }
+
+    if (
+        bulkConfig?.idealProfile?.enabled &&
+        storedOrder &&
+        storedOrder.length > 0 &&
+        !storedOrder.includes('profileMatch')
+    ) {
+        needsPersist = true;
+    }
+
+    return { columnOrder, hiddenColumns, needsPersist };
+}
+
 export function getColumnLabel(
     colId: string,
     customColumns: CustomColumn[] = []

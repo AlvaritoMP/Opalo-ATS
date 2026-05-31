@@ -76,6 +76,7 @@ import {
     getBulkSelectedProcessId,
     resolveCandidateAge,
     resolveBulkTableCellValue,
+    repairIdealProfileColumnLayout,
 } from '../lib/bulkTableColumns';
 import { getStageSelectClass } from '../lib/stageColors';
 import { getCellMetaStorageKey, BulkCellMeta, BulkCellMetaStore } from '../lib/bulkCellMeta';
@@ -756,25 +757,21 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
         const config = process.bulkConfig;
         const cols = config?.customColumns || [];
         setCustomColumns(cols);
-        setHiddenColumns(config?.hiddenColumns || []);
+        const layout = repairIdealProfileColumnLayout(config, cols);
+        setHiddenColumns(layout.hiddenColumns);
         setPinnedColumns(config?.pinnedColumns?.length ? config.pinnedColumns : ['name']);
         const savedWidths = config?.columnWidths || {};
         setColumnWidths(savedWidths);
         columnWidthsRef.current = savedWidths;
-        setColumnOrder(resolveColumnOrder(config, cols));
+        setColumnOrder(layout.columnOrder);
         setColumnFilters({});
         columnValuesMigratedRef.current = null;
 
-        // Si hay perfil ideal activo, asegurar columna % Perfil visible en el orden
-        if (config?.idealProfile?.enabled && config.columnOrder && !config.columnOrder.includes('profileMatch')) {
-            const order = [...config.columnOrder];
-            const scoreIdx = order.indexOf('scoreIa');
-            if (scoreIdx >= 0) order.splice(scoreIdx + 1, 0, 'profileMatch');
-            else order.splice(1, 0, 'profileMatch');
-            const hidden = (config.hiddenColumns || []).filter(id => id !== 'profileMatch');
-            setColumnOrder(order);
-            setHiddenColumns(hidden);
-            void persistBulkConfig({ columnOrder: order, hiddenColumns: hidden });
+        if (layout.needsPersist) {
+            void persistBulkConfig({
+                columnOrder: layout.columnOrder,
+                hiddenColumns: layout.hiddenColumns,
+            });
         }
 
         const legacy = buildLegacyColumnIdToName(config, cols);
@@ -911,28 +908,31 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
 
     const handleSaveIdealProfile = useCallback(async (config: IdealProfileConfig) => {
         if (!process) return;
-        let newHidden = hiddenColumns.filter(id => id !== 'profileMatch');
-        let newOrder = [...columnOrder];
-        if (config.enabled && !newOrder.includes('profileMatch')) {
-            const scoreIdx = newOrder.indexOf('scoreIa');
-            if (scoreIdx >= 0) {
-                newOrder.splice(scoreIdx + 1, 0, 'profileMatch');
-            } else {
-                const nameIdx = newOrder.indexOf('name');
-                newOrder.splice(nameIdx >= 0 ? nameIdx + 1 : 0, 0, 'profileMatch');
-            }
-        }
-        setHiddenColumns(newHidden);
-        setColumnOrder(newOrder);
+        const cols = process.bulkConfig?.customColumns || customColumns;
+        const draftConfig: BulkProcessConfig = {
+            ...process.bulkConfig,
+            idealProfile: config,
+        };
+        const layout = repairIdealProfileColumnLayout(draftConfig, cols);
+        setHiddenColumns(layout.hiddenColumns);
+        setColumnOrder(layout.columnOrder);
         await persistBulkConfig({
             idealProfile: config,
-            hiddenColumns: newHidden,
-            columnOrder: newOrder,
+            hiddenColumns: layout.hiddenColumns,
+            columnOrder: layout.columnOrder,
         });
         setBulkProcesses(prev =>
             prev.map(p =>
                 p.id === process.id
-                    ? { ...p, bulkConfig: { ...p.bulkConfig, idealProfile: config, hiddenColumns: newHidden, columnOrder: newOrder } }
+                    ? {
+                        ...p,
+                        bulkConfig: {
+                            ...p.bulkConfig,
+                            idealProfile: config,
+                            hiddenColumns: layout.hiddenColumns,
+                            columnOrder: layout.columnOrder,
+                        },
+                    }
                     : p
             )
         );
@@ -940,7 +940,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
             details: { summary: config.enabled ? 'Perfil ideal activado/actualizado' : 'Perfil ideal desactivado' },
         });
         actions.showToast('Perfil ideal guardado', 'success', 2500);
-    }, [process, hiddenColumns, columnOrder, persistBulkConfig, logActivity, actions]);
+    }, [process, customColumns, persistBulkConfig, logActivity, actions]);
 
     const handleSaveCustomStats = useCallback(async (charts: BulkProcessStatChart[]) => {
         if (!process) return;
@@ -2213,6 +2213,13 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
         });
     }, [customColumns, applyOptimisticUpdate, syncCustomFieldFromStandard]);
 
+    const showAllColumns = async () => {
+        if (hiddenColumns.length === 0) return;
+        setHiddenColumns([]);
+        await persistBulkConfig({ hiddenColumns: [] });
+        actions.showToast('Todas las columnas visibles', 'success', 2000);
+    };
+
     const toggleColumnVisibility = async (colId: string) => {
         const isHiding = !hiddenColumns.includes(colId);
         const newHidden = isHiding
@@ -3347,7 +3354,18 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                             </button>
                                             {showColumnConfig && (
                                                 <div className="absolute left-0 mt-2 w-64 bg-white border border-gray-200 rounded-lg shadow-xl z-50 p-2 max-h-96 overflow-y-auto">
-                                                    <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1 px-2">Columnas</div>
+                                                    <div className="flex items-center justify-between gap-2 mb-1 px-2">
+                                                        <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Columnas</div>
+                                                        {hiddenColumns.length > 0 && (
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => void showAllColumns()}
+                                                                className="text-[10px] text-primary-600 hover:text-primary-700 font-medium whitespace-nowrap"
+                                                            >
+                                                                Mostrar todas
+                                                            </button>
+                                                        )}
+                                                    </div>
                                                     <p className="text-[10px] text-gray-400 px-2 mb-2">📌 = fijar al hacer scroll horizontal</p>
                                                     {allColumnIds.map(colId => {
                                                         const colName = getColumnLabel(colId, customColumns);
