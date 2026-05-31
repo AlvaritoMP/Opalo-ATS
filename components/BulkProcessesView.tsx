@@ -82,6 +82,11 @@ import {
     loadBulkTableLayoutBackup,
     scoreColumnLayoutInterleaving,
     remapLayoutOrderToCurrentColumns,
+    reorderBulkColumnOrderByVisibleDrag,
+    recoverLayoutFromLocalSources,
+    remapHiddenColumnIds,
+    remapPinnedColumnIds,
+    ensureProfileMatchInColumnOrder,
 } from '../lib/bulkTableColumns';
 import { getStageSelectClass } from '../lib/stageColors';
 import { getCellMetaStorageKey, BulkCellMeta, BulkCellMetaStore } from '../lib/bulkCellMeta';
@@ -817,9 +822,9 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
 
             const cols = config?.customColumns || [];
             setCustomColumns(cols);
-            const layout = resolveBulkTableLayout(processId, config, cols, configProcess.title);
+            const layout = resolveBulkTableLayout(processId, config, cols);
             setHiddenColumns(layout.hiddenColumns);
-            setPinnedColumns(config?.pinnedColumns?.length ? config.pinnedColumns : ['name']);
+            setPinnedColumns(layout.pinnedColumns);
             const savedWidths = config?.columnWidths || {};
             setColumnWidths(savedWidths);
             columnWidthsRef.current = savedWidths;
@@ -827,25 +832,16 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
             setColumnFilters({});
             columnValuesMigratedRef.current = null;
 
-            persistBulkTableLayoutBackup(processId, {
-                columnOrder: layout.columnOrder,
-                hiddenColumns: layout.hiddenColumns,
-                pinnedColumns: config?.pinnedColumns,
-                columnWidths: savedWidths,
-            }, config, cols);
-
             if (layout.needsPersist) {
                 void persistBulkConfig({
                     columnOrder: layout.columnOrder,
                     hiddenColumns: layout.hiddenColumns,
+                    pinnedColumns: layout.pinnedColumns,
                 });
             }
-            if (layout.restoredFrom === 'backup') {
-                actions.showToast('Diseño de tabla restaurado desde respaldo local', 'success', 4000);
-            } else if (layout.restoredFrom === 'template') {
-                actions.showToast('Diseño de tabla restaurado desde plantilla guardada', 'success', 4000);
-            } else if (layout.restoredFrom === 'fallback') {
-                actions.showToast('Diseño de tabla restaurado (layout Operarios de Limpieza)', 'success', 4000);
+            if (layout.recoveredFrom === 'local') {
+                const src = layout.localSource === 'template' ? 'plantilla guardada' : 'respaldo del navegador';
+                actions.showToast(`Diseño de tabla recuperado desde ${src}`, 'success', 5000);
             }
 
             const legacy = buildLegacyColumnIdToName(config, cols);
@@ -989,13 +985,15 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
             ...process.bulkConfig,
             idealProfile: config,
         };
-        const layout = resolveBulkTableLayout(process.id, draftConfig, cols, process.title);
+        const layout = resolveBulkTableLayout(process.id, draftConfig, cols);
         setHiddenColumns(layout.hiddenColumns);
         setColumnOrder(layout.columnOrder);
+        setPinnedColumns(layout.pinnedColumns);
         await persistBulkConfig({
             idealProfile: config,
             hiddenColumns: layout.hiddenColumns,
             columnOrder: layout.columnOrder,
+            pinnedColumns: layout.pinnedColumns,
         });
         setBulkProcesses(prev =>
             prev.map(p =>
@@ -1007,6 +1005,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                             idealProfile: config,
                             hiddenColumns: layout.hiddenColumns,
                             columnOrder: layout.columnOrder,
+                            pinnedColumns: layout.pinnedColumns,
                         },
                     }
                     : p
@@ -2289,6 +2288,44 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
         });
     }, [customColumns, applyOptimisticUpdate, syncCustomFieldFromStandard]);
 
+    const handleRestoreTableLayout = async () => {
+        if (!process) return;
+        const local = recoverLayoutFromLocalSources(process.id, process.bulkConfig, customColumns);
+        if (!local) {
+            actions.showToast(
+                'No hay respaldo local ni plantilla compatible. Si tienes el JSON del backup, puedes pegar solo columnOrder/hiddenColumns/pinnedColumns en bulk_config sin restaurar candidatos.',
+                'error',
+                6000
+            );
+            return;
+        }
+        const hidden = remapHiddenColumnIds(local.hiddenColumns, process.bulkConfig, customColumns);
+        const pinned = remapPinnedColumnIds(local.pinnedColumns, process.bulkConfig, customColumns);
+        let order = local.columnOrder;
+        let layoutHidden = hidden;
+        if (process.bulkConfig?.idealProfile?.enabled) {
+            order = ensureProfileMatchInColumnOrder(order);
+            layoutHidden = layoutHidden.filter(id => id !== 'profileMatch');
+        }
+        setColumnOrder(order);
+        setHiddenColumns(layoutHidden);
+        setPinnedColumns(pinned);
+        const backup = loadBulkTableLayoutBackup(process.id);
+        const widthUpdates = backup?.columnWidths ? { columnWidths: backup.columnWidths } : {};
+        if (backup?.columnWidths) {
+            setColumnWidths(backup.columnWidths);
+            columnWidthsRef.current = backup.columnWidths;
+        }
+        await persistBulkConfig({
+            columnOrder: order,
+            hiddenColumns: layoutHidden,
+            pinnedColumns: pinned,
+            ...widthUpdates,
+        });
+        const src = local.source === 'template' ? 'plantilla' : 'respaldo local';
+        actions.showToast(`Diseño restaurado desde ${src}`, 'success', 4000);
+    };
+
     const showAllColumns = async () => {
         if (hiddenColumns.length === 0) return;
         const newOrder = buildColumnConfigIds(columnOrder, customColumns);
@@ -2460,13 +2497,14 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
         e.preventDefault();
         if (!draggedColumn || draggedColumn === targetColId) return;
 
-        const newOrder = [...columnOrder];
-        const fromIndex = newOrder.indexOf(draggedColumn);
-        const toIndex = newOrder.indexOf(targetColId);
-        if (fromIndex === -1 || toIndex === -1) return;
+        const newOrder = reorderBulkColumnOrderByVisibleDrag(
+            columnOrder,
+            hiddenColumns,
+            draggedColumn,
+            targetColId
+        );
+        if (!newOrder) return;
 
-        newOrder.splice(fromIndex, 1);
-        newOrder.splice(toIndex, 0, draggedColumn);
         setColumnOrder(newOrder);
         setDraggedColumn(null);
         await persistBulkConfig({ columnOrder: newOrder });
@@ -3426,6 +3464,15 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                             <Settings className="w-4 h-4" />
                                             Plantillas
                                         </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => void handleRestoreTableLayout()}
+                                            className="bg-amber-50 text-amber-950 border border-amber-300 hover:bg-amber-100 transition-colors"
+                                            title="Recuperar orden, columnas ocultas y fijadas desde respaldo local o plantilla (no borra candidatos)"
+                                        >
+                                            <RefreshCw className="w-4 h-4" />
+                                            Restaurar diseño
+                                        </button>
                                         <div className="relative">
                                             <button
                                                 onClick={() => setShowColumnConfig(!showColumnConfig)}
@@ -3469,7 +3516,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                                                 <label className="flex items-center gap-2 flex-1 cursor-pointer min-w-0">
                                                                     <input
                                                                         type="checkbox"
-                                                                        checked={visibleColumns.includes(colId)}
+                                                                        checked={!hiddenColumns.includes(colId)}
                                                                         onChange={() => toggleColumnVisibility(colId)}
                                                                         className="w-3.5 h-3.5 text-primary-600 rounded focus:ring-primary-500"
                                                                     />
