@@ -3,6 +3,7 @@ import { normalizeImportTextCase } from './importTextCase.js';
 import { migrateBulkColumnOrder, CONTACT_COLUMN_IDS, CONTACT_LAST_USER_COLUMN_ID } from './contactChannelConfig';
 import { ensureHiredStageUserColumnInOrder, HIRED_STAGE_USER_COLUMN_ID } from './hiringStageTracking';
 import { APP_NAME } from './appConfig';
+import { readBulkTableTemplatesCache } from './bulkTableTemplates';
 
 const BULK_NAME_KEY_PREFIX = '__name__';
 
@@ -21,13 +22,11 @@ export function bulkColumnNameKey(name: string): string {
     return `${BULK_NAME_KEY_PREFIX}${normalizeColumnNameKey(name)}`;
 }
 
-/** IDs de columna conocidos en plantillas guardadas en localStorage */
+/** IDs de columna conocidos en plantillas guardadas (caché local sincronizada con Supabase) */
 function loadTemplateColumnIdToName(): Record<string, string> {
     const out: Record<string, string> = {};
     try {
-        const saved = localStorage.getItem('bulkProcessesTableTemplates');
-        if (!saved) return out;
-        const templates = JSON.parse(saved) as { columns?: { id: string; name: string }[] }[];
+        const templates = readBulkTableTemplatesCache();
         for (const t of templates) {
             for (const c of t.columns || []) {
                 if (c.id && c.name) out[c.id] = c.name;
@@ -169,17 +168,12 @@ interface TableTemplateCandidate {
     columns: CustomColumn[];
 }
 
-/** Busca plantilla guardada en localStorage que coincida con las columnas del proceso */
+/** Busca plantilla guardada (caché compartida) que coincida con las columnas del proceso */
 export function findBestTableTemplate(customColumns: CustomColumn[] = []): TableTemplateCandidate | null {
     if (customColumns.length === 0) return null;
     try {
-        const saved = localStorage.getItem('bulkProcessesTableTemplates');
-        if (!saved) return null;
-        const templates = JSON.parse(saved) as {
-            columnOrder?: string[];
-            hiddenColumns?: string[];
-            columns?: CustomColumn[];
-        }[];
+        const templates = readBulkTableTemplatesCache();
+        if (templates.length === 0) return null;
         const targetNames = new Set(customColumns.map(c => normalizeColumnNameKey(c.name)));
         let best: TableTemplateCandidate | null = null;
         let bestScore = 0;

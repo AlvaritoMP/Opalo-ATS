@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { useAppState } from '../App';
 import { Briefcase, Users, FileText, CheckCircle, Calendar, Grid3x3, Phone, TrendingUp, UserCheck, Headphones, UserPlus, MessageCircle, Mail } from 'lucide-react';
-import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend, BarChart, CartesianGrid, XAxis, YAxis, Bar } from 'recharts';
+import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend, BarChart, CartesianGrid, XAxis, YAxis, Bar, LineChart, Line } from 'recharts';
 import { Candidate, Process } from '../types';
 import { resolveCandidateAgeForProcess } from '../lib/bulkTableColumns';
 import { bulkCandidatesApi } from '../lib/api/bulkCandidates';
@@ -136,7 +136,7 @@ const ContactDailyTrendChart: React.FC<{ series: ContactDailyTrendSeries }> = ({
             height={320}
             className="mb-6"
         >
-            <BarChart data={series.data} margin={{ top: 10, right: 20, left: 10, bottom: 5 }}>
+            <LineChart data={series.data} margin={{ top: 10, right: 20, left: 10, bottom: 5 }}>
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis
                     dataKey="label"
@@ -152,15 +152,18 @@ const ContactDailyTrendChart: React.FC<{ series: ContactDailyTrendSeries }> = ({
                 />
                 <Legend formatter={(value: string) => truncateLabel(value, 20)} />
                 {series.users.map((userName, index) => (
-                    <Bar
+                    <Line
                         key={userName}
+                        type="monotone"
                         dataKey={userName}
                         name={userName}
-                        fill={COLORS[index % COLORS.length]}
-                        radius={[2, 2, 0, 0]}
+                        stroke={COLORS[index % COLORS.length]}
+                        strokeWidth={2}
+                        dot={{ r: 3 }}
+                        activeDot={{ r: 5 }}
                     />
                 ))}
-            </BarChart>
+            </LineChart>
         </ChartContainer>
     );
 };

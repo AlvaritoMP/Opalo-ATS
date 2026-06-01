@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useAppState } from '../App';
 import { bulkCandidatesApi, BulkCandidate } from '../lib/api/bulkCandidates';
+import { bulkTableTemplatesApi } from '../lib/api/bulkTableTemplates';
 import { bulkProcessActivityApi, BulkActivityActionType } from '../lib/api/bulkProcessActivity';
 import { contactTrackingApi, type ResetContactTrackingResult } from '../lib/api/contactTracking';
 import { isContactCooldownActive } from '../lib/contactTracking';
@@ -631,6 +632,13 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
     }, [state.users]);
 
     const processLastStageId = useMemo(() => getProcessLastStageId(process), [process]);
+
+    useEffect(() => {
+        void bulkTableTemplatesApi.refreshCache({
+            id: state.currentUser?.id,
+            name: state.currentUser?.name || state.currentUser?.email,
+        });
+    }, [state.currentUser?.id, state.currentUser?.name, state.currentUser?.email]);
 
     useEffect(() => {
         if (!process?.id || !processLastStageId) {

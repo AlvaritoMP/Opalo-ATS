@@ -13,6 +13,7 @@ export * from './settings';
 export * from './clients';
 export * from './formIntegrations';
 export * from './workerHandoff';
+export { bulkTableTemplatesApi } from './bulkTableTemplates';
 
 // Exportar funciones helper de Supabase
 export { setCurrentUser } from '../supabase';
