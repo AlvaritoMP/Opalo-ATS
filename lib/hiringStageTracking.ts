@@ -17,6 +17,8 @@ export interface HiringStageConsultantStats {
     rankings: { name: string; ingresos: number; share: number }[];
 }
 
+type HistoryUserLookup = Pick<User, 'id' | 'name'> & Partial<Pick<User, 'email'>>;
+
 export function getProcessLastStageId(process?: Pick<Process, 'stages'> | null): string | null {
     const stages = process?.stages;
     if (!stages?.length) return null;
@@ -25,7 +27,7 @@ export function getProcessLastStageId(process?: Pick<Process, 'stages'> | null):
 
 export function resolveHistoryUserName(
     movedBy: string | null | undefined,
-    users: Pick<User, 'id' | 'name' | 'email'>[] = []
+    users: HistoryUserLookup[] = []
 ): string {
     if (!movedBy || movedBy === 'System') return 'Sistema';
     const byId = users.find(u => u.id === movedBy);
@@ -64,7 +66,7 @@ export function findMostRecentMoveToStage(
 export function getHiredStageActorFromHistory(
     history: CandidateHistory[] | undefined,
     process: Pick<Process, 'stages'> | undefined,
-    users: Pick<User, 'id' | 'name'>[] = []
+    users: HistoryUserLookup[] = []
 ): HiredStageActor | null {
     const lastStageId = getProcessLastStageId(process);
     if (!lastStageId) return null;
@@ -90,7 +92,7 @@ export function formatHiredStageActorTooltip(actor: HiredStageActor | null | und
 
 export function mapRawHiringMoves(
     rows: Array<{ candidate_id: string; moved_at: string; moved_by: string | null }>,
-    users: Pick<User, 'id' | 'name'>[] = []
+    users: HistoryUserLookup[] = []
 ): Record<string, HiredStageActor> {
     const out: Record<string, HiredStageActor> = {};
     for (const row of rows) {
@@ -110,7 +112,7 @@ export function computeHiringStageConsultantStats(
         history?: CandidateHistory[];
     }>,
     processMap: Map<string, Process>,
-    users: Pick<User, 'id' | 'name'>[] = []
+    users: HistoryUserLookup[] = []
 ): HiringStageConsultantStats {
     const counts = new Map<string, number>();
 
