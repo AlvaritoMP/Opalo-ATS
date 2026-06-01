@@ -57,6 +57,21 @@ export interface ContactDailyTrendSeries {
     unitLabel: string;
 }
 
+export interface ContactHourlyPoint {
+    hour: number;
+    label: string;
+    count: number;
+}
+
+export interface ContactHourlyDistribution {
+    data: ContactHourlyPoint[];
+    channel: ContactAttemptChannel;
+    channelLabel: string;
+    unitLabel: string;
+    periodLabel: string;
+    peakHour: { label: string; count: number } | null;
+}
+
 /** @deprecated alias */
 export type ContactCallTrendSeries = ContactDailyTrendSeries;
 
@@ -452,4 +467,60 @@ export function buildCallTrendByUser(
     maxUsers = 6
 ): ContactDailyTrendSeries {
     return buildChannelDailyTrendByUser(attempts, period, 'call', maxUsers);
+}
+
+function getHourInLima(iso: string): number {
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return -1;
+    const parts = new Intl.DateTimeFormat('en-US', {
+        hour: 'numeric',
+        hour12: false,
+        timeZone: 'America/Lima',
+    }).formatToParts(d);
+    const hourPart = parts.find(p => p.type === 'hour');
+    return hourPart ? parseInt(hourPart.value, 10) : d.getHours();
+}
+
+/** Distribución por hora del día (0–23, hora Lima) en el periodo seleccionado. */
+export function buildChannelHourlyDistribution(
+    attempts: ContactAttempt[],
+    period: ContactConsultantPeriod,
+    channel: ContactAttemptChannel
+): ContactHourlyDistribution {
+    const meta = CHANNEL_TREND_META[channel];
+    const { start, end, label: periodLabel } = getContactPeriodRange(period);
+    const channelAttempts = filterAttemptsInDateRange(
+        attempts.filter(a => isRecordedChannelAttempt(a, channel)),
+        start,
+        end
+    );
+
+    const counts = new Array<number>(24).fill(0);
+    for (const a of channelAttempts) {
+        const h = getHourInLima(a.createdAt);
+        if (h >= 0 && h < 24) counts[h] += 1;
+    }
+
+    const data: ContactHourlyPoint[] = counts.map((count, hour) => ({
+        hour,
+        label: `${String(hour).padStart(2, '0')}:00`,
+        count,
+    }));
+
+    let peakHour: ContactHourlyDistribution['peakHour'] = null;
+    for (const row of data) {
+        if (row.count === 0) continue;
+        if (!peakHour || row.count > peakHour.count) {
+            peakHour = { label: row.label, count: row.count };
+        }
+    }
+
+    return {
+        data,
+        channel,
+        channelLabel: meta.label,
+        unitLabel: meta.unitPlural,
+        periodLabel,
+        peakHour,
+    };
 }

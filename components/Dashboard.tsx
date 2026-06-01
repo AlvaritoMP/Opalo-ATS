@@ -9,8 +9,10 @@ import { contactTrackingApi } from '../lib/api/contactTracking';
 import {
     computeContactDashboardStats,
     buildChannelDailyTrendByUser,
+    buildChannelHourlyDistribution,
     type ContactConsultantPeriod,
     type ContactDailyTrendSeries,
+    type ContactHourlyDistribution,
 } from '../lib/contactDashboardStats';
 import { computeHiringStageConsultantStats } from '../lib/hiringStageTracking';
 import {
@@ -115,42 +117,59 @@ const topNWithOthers = (
     ];
 };
 
+const COMPACT_CHART_HEIGHT = 200;
+
+const CompactChartContainer: React.FC<{
+    title: string;
+    description?: string;
+    children: React.ReactNode;
+    hasData: boolean;
+}> = ({ title, description, children, hasData }) => (
+    <div className="bg-gray-50/80 p-3 rounded-lg border border-gray-200 min-w-0">
+        <h3 className="text-sm font-semibold text-gray-800">{title}</h3>
+        {description && <p className="text-[11px] text-gray-500 mt-0.5 mb-2 leading-snug">{description}</p>}
+        {!description && <div className="mb-2" />}
+        {hasData ? (
+            <ResponsiveContainer width="100%" height={COMPACT_CHART_HEIGHT}>
+                {children}
+            </ResponsiveContainer>
+        ) : (
+            <div
+                className="flex items-center justify-center text-gray-400 text-xs"
+                style={{ height: COMPACT_CHART_HEIGHT }}
+            >
+                Sin datos en el periodo.
+            </div>
+        )}
+    </div>
+);
+
 const ContactDailyTrendChart: React.FC<{ series: ContactDailyTrendSeries }> = ({ series }) => {
     const hasData = series.data.some(row => series.users.some(u => Number(row[u]) > 0));
     const isDaily = series.granularity === 'day';
     const unitSingular = series.unitLabel.replace(/s$/, '') || series.unitLabel;
 
     return (
-        <ChartContainer
-            title={
-                isDaily
-                    ? `${series.channelLabel} por día por usuario`
-                    : `${series.channelLabel} por mes por usuario`
-            }
-            description={
-                isDaily
-                    ? `Cantidad ejecutada cada día en ${series.periodLabel.toLowerCase()} (no acumulativa). Hasta ${series.users.length} usuarios con más actividad.`
-                    : `Cantidad ejecutada cada mes en ${series.periodLabel.toLowerCase()} (no acumulativa).`
-            }
+        <CompactChartContainer
+            title={isDaily ? 'Por día y usuario' : 'Por mes y usuario'}
+            description={`${series.channelLabel} · ${series.periodLabel.toLowerCase()} · cantidad diaria (no acumulativa)`}
             hasData={hasData}
-            height={320}
-            className="mb-6"
         >
-            <LineChart data={series.data} margin={{ top: 10, right: 20, left: 10, bottom: 5 }}>
+            <LineChart data={series.data} margin={{ top: 4, right: 8, left: -10, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis
                     dataKey="label"
-                    tick={{ fontSize: 10 }}
+                    tick={{ fontSize: 9 }}
                     interval={isDaily ? 'preserveStartEnd' : 0}
                 />
-                <YAxis allowDecimals={false} />
+                <YAxis allowDecimals={false} tick={{ fontSize: 9 }} width={28} />
                 <Tooltip
                     formatter={(value: number, name: string) => [
                         `${value} ${value === 1 ? unitSingular : series.unitLabel}`,
-                        truncateLabel(name, 24),
+                        truncateLabel(name, 20),
                     ]}
                 />
-                <Legend formatter={(value: string) => truncateLabel(value, 20)} />
+                <Legend formatter={(value: string) => truncateLabel(value, 14)} wrapperStyle={{ fontSize: 10 }} />
                 {series.users.map((userName, index) => (
                     <Line
                         key={userName}
@@ -159,14 +178,64 @@ const ContactDailyTrendChart: React.FC<{ series: ContactDailyTrendSeries }> = ({
                         name={userName}
                         stroke={COLORS[index % COLORS.length]}
                         strokeWidth={2}
-                        dot={{ r: 3 }}
-                        activeDot={{ r: 5 }}
+                        dot={false}
+                        activeDot={{ r: 4 }}
                     />
                 ))}
             </LineChart>
-        </ChartContainer>
+        </CompactChartContainer>
     );
 };
+
+const CHANNEL_CHART_COLORS: Record<string, string> = {
+    call: '#8b5cf6',
+    whatsapp: '#10b981',
+    email: '#0ea5e9',
+};
+
+const ContactHourlyChart: React.FC<{ series: ContactHourlyDistribution }> = ({ series }) => {
+    const hasData = series.data.some(d => d.count > 0);
+    const unitSingular = series.unitLabel.replace(/s$/, '') || series.unitLabel;
+    const peakNote = series.peakHour
+        ? ` · pico ${series.peakHour.label} (${series.peakHour.count})`
+        : '';
+    const fill = CHANNEL_CHART_COLORS[series.channel] || '#6366f1';
+
+    return (
+        <CompactChartContainer
+            title="Distribución horaria"
+            description={`${series.channelLabel} · hora Lima${peakNote}`}
+            hasData={hasData}
+        >
+            <BarChart data={series.data} margin={{ top: 4, right: 8, left: -10, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="label" tick={{ fontSize: 9 }} interval={1} />
+                <YAxis allowDecimals={false} tick={{ fontSize: 9 }} width={28} />
+                <Tooltip
+                    formatter={(value: number) => [
+                        `${value} ${value === 1 ? unitSingular : series.unitLabel}`,
+                        'Contactos',
+                    ]}
+                    labelFormatter={label => `Hora ${label}`}
+                />
+                <Bar dataKey="count" name="Contactos" fill={fill} radius={[2, 2, 0, 0]} />
+            </BarChart>
+        </CompactChartContainer>
+    );
+};
+
+const ContactChannelChartsRow: React.FC<{
+    userSeries: ContactDailyTrendSeries;
+    hourlySeries: ContactHourlyDistribution;
+}> = ({ userSeries, hourlySeries }) => (
+    <div className="mb-4">
+        <h3 className="text-sm font-semibold text-gray-700 mb-2">{userSeries.channelLabel}</h3>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+            <ContactDailyTrendChart series={userSeries} />
+            <ContactHourlyChart series={hourlySeries} />
+        </div>
+    </div>
+);
 
 export const Dashboard: React.FC = () => {
     const { state, getLabel, actions } = useAppState();
@@ -580,6 +649,21 @@ export const Dashboard: React.FC = () => {
         [enrichedContactAttempts, contactConsultantPeriod, contactTrendOpts]
     );
 
+    const callHourlySeries = useMemo(
+        () => buildChannelHourlyDistribution(enrichedContactAttempts, contactConsultantPeriod, 'call'),
+        [enrichedContactAttempts, contactConsultantPeriod]
+    );
+
+    const whatsappHourlySeries = useMemo(
+        () => buildChannelHourlyDistribution(enrichedContactAttempts, contactConsultantPeriod, 'whatsapp'),
+        [enrichedContactAttempts, contactConsultantPeriod]
+    );
+
+    const emailHourlySeries = useMemo(
+        () => buildChannelHourlyDistribution(enrichedContactAttempts, contactConsultantPeriod, 'email'),
+        [enrichedContactAttempts, contactConsultantPeriod]
+    );
+
     const hiringConsultantStats = useMemo(
         () =>
             computeHiringStageConsultantStats(
@@ -860,9 +944,9 @@ export const Dashboard: React.FC = () => {
                             />
                         </div>
 
-                        <ContactDailyTrendChart series={callTrendSeries} />
-                        <ContactDailyTrendChart series={whatsappTrendSeries} />
-                        <ContactDailyTrendChart series={emailTrendSeries} />
+                        <ContactChannelChartsRow userSeries={callTrendSeries} hourlySeries={callHourlySeries} />
+                        <ContactChannelChartsRow userSeries={whatsappTrendSeries} hourlySeries={whatsappHourlySeries} />
+                        <ContactChannelChartsRow userSeries={emailTrendSeries} hourlySeries={emailHourlySeries} />
 
                         <ChartContainer
                             title="Acciones por canal"
