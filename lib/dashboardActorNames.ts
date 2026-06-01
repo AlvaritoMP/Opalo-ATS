@@ -18,13 +18,23 @@ export function buildUserLookupForStats(
     return [...users, currentUser];
 }
 
+const GENERIC_ACTOR_LABELS = new Set(['', 'Usuario', 'Sin consultor', 'usuario']);
+
+function findUserByLooseName(users: DashboardActorUser[], raw: string): DashboardActorUser | undefined {
+    const norm = raw.trim().toLowerCase();
+    if (!norm) return undefined;
+    return users.find(u => {
+        const name = u.name?.trim().toLowerCase();
+        const email = u.email?.trim().toLowerCase();
+        const local = email?.split('@')[0];
+        return name === norm || email === norm || local === norm;
+    });
+}
+
 export function resolveActorDisplayName(
     actor: { userId?: string; userName?: string },
     users: DashboardActorUser[]
 ): string {
-    const trimmed = actor.userName?.trim();
-    if (trimmed && trimmed !== 'Usuario') return trimmed;
-
     if (actor.userId) {
         const byId = users.find(u => u.id === actor.userId);
         if (byId?.name?.trim()) return byId.name.trim();
@@ -34,7 +44,14 @@ export function resolveActorDisplayName(
         }
     }
 
-    return trimmed || 'Sin consultor';
+    const trimmed = actor.userName?.trim();
+    if (trimmed && !GENERIC_ACTOR_LABELS.has(trimmed)) {
+        const matched = findUserByLooseName(users, trimmed);
+        if (matched?.name?.trim()) return matched.name.trim();
+        return trimmed;
+    }
+
+    return 'Sin consultor';
 }
 
 export function enrichContactAttemptsForStats(

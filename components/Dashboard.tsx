@@ -1,12 +1,17 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { useAppState } from '../App';
 import { Briefcase, Users, FileText, CheckCircle, Calendar, Grid3x3, Phone, TrendingUp, UserCheck, Headphones, UserPlus, MessageCircle, Mail } from 'lucide-react';
-import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend, BarChart, CartesianGrid, XAxis, YAxis, Bar, LineChart, Line } from 'recharts';
+import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend, BarChart, CartesianGrid, XAxis, YAxis, Bar } from 'recharts';
 import { Candidate, Process } from '../types';
 import { resolveCandidateAgeForProcess } from '../lib/bulkTableColumns';
 import { bulkCandidatesApi } from '../lib/api/bulkCandidates';
 import { contactTrackingApi } from '../lib/api/contactTracking';
-import { computeContactDashboardStats, buildCallTrendByUser, type ContactConsultantPeriod } from '../lib/contactDashboardStats';
+import {
+    computeContactDashboardStats,
+    buildChannelDailyTrendByUser,
+    type ContactConsultantPeriod,
+    type ContactDailyTrendSeries,
+} from '../lib/contactDashboardStats';
 import { computeHiringStageConsultantStats } from '../lib/hiringStageTracking';
 import {
     buildUserLookupForStats,
@@ -108,6 +113,56 @@ const topNWithOthers = (
         ...top.map(([name, Candidatos]) => ({ name, Candidatos })),
         { name: 'Otros', Candidatos: others },
     ];
+};
+
+const ContactDailyTrendChart: React.FC<{ series: ContactDailyTrendSeries }> = ({ series }) => {
+    const hasData = series.data.some(row => series.users.some(u => Number(row[u]) > 0));
+    const isDaily = series.granularity === 'day';
+    const unitSingular = series.unitLabel.replace(/s$/, '') || series.unitLabel;
+
+    return (
+        <ChartContainer
+            title={
+                isDaily
+                    ? `${series.channelLabel} por día por usuario`
+                    : `${series.channelLabel} por mes por usuario`
+            }
+            description={
+                isDaily
+                    ? `Cantidad ejecutada cada día en ${series.periodLabel.toLowerCase()} (no acumulativa). Hasta ${series.users.length} usuarios con más actividad.`
+                    : `Cantidad ejecutada cada mes en ${series.periodLabel.toLowerCase()} (no acumulativa).`
+            }
+            hasData={hasData}
+            height={320}
+            className="mb-6"
+        >
+            <BarChart data={series.data} margin={{ top: 10, right: 20, left: 10, bottom: 5 }}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis
+                    dataKey="label"
+                    tick={{ fontSize: 10 }}
+                    interval={isDaily ? 'preserveStartEnd' : 0}
+                />
+                <YAxis allowDecimals={false} />
+                <Tooltip
+                    formatter={(value: number, name: string) => [
+                        `${value} ${value === 1 ? unitSingular : series.unitLabel}`,
+                        truncateLabel(name, 24),
+                    ]}
+                />
+                <Legend formatter={(value: string) => truncateLabel(value, 20)} />
+                {series.users.map((userName, index) => (
+                    <Bar
+                        key={userName}
+                        dataKey={userName}
+                        name={userName}
+                        fill={COLORS[index % COLORS.length]}
+                        radius={[2, 2, 0, 0]}
+                    />
+                ))}
+            </BarChart>
+        </ChartContainer>
+    );
 };
 
 export const Dashboard: React.FC = () => {
@@ -481,14 +536,14 @@ export const Dashboard: React.FC = () => {
         return Math.round((completed / started) * 1000) / 10;
     }, [filteredCandidates]);
 
-    const filteredCandidateIds = useMemo(
-        () => new Set(filteredCandidates.map(c => c.id)),
-        [filteredCandidates]
+    const scopedProcessIds = useMemo(
+        () => new Set(targetProcessIds),
+        [targetProcessIds]
     );
 
     const scopedContactAttempts = useMemo(
-        () => contactAttempts.filter(a => filteredCandidateIds.has(a.candidateId)),
-        [contactAttempts, filteredCandidateIds]
+        () => contactAttempts.filter(a => scopedProcessIds.has(a.processId)),
+        [contactAttempts, scopedProcessIds]
     );
 
     const enrichedContactAttempts = useMemo(
@@ -501,9 +556,25 @@ export const Dashboard: React.FC = () => {
         [enrichedContactAttempts, contactConsultantPeriod]
     );
 
+    const contactTrendOpts = useMemo(() => {
+        const names: string[] = [];
+        if (currentUser?.name?.trim()) names.push(currentUser.name.trim());
+        return names;
+    }, [currentUser?.name]);
+
     const callTrendSeries = useMemo(
-        () => buildCallTrendByUser(enrichedContactAttempts, contactConsultantPeriod),
-        [enrichedContactAttempts, contactConsultantPeriod]
+        () => buildChannelDailyTrendByUser(enrichedContactAttempts, contactConsultantPeriod, 'call', 6, contactTrendOpts),
+        [enrichedContactAttempts, contactConsultantPeriod, contactTrendOpts]
+    );
+
+    const whatsappTrendSeries = useMemo(
+        () => buildChannelDailyTrendByUser(enrichedContactAttempts, contactConsultantPeriod, 'whatsapp', 6, contactTrendOpts),
+        [enrichedContactAttempts, contactConsultantPeriod, contactTrendOpts]
+    );
+
+    const emailTrendSeries = useMemo(
+        () => buildChannelDailyTrendByUser(enrichedContactAttempts, contactConsultantPeriod, 'email', 6, contactTrendOpts),
+        [enrichedContactAttempts, contactConsultantPeriod, contactTrendOpts]
     );
 
     const hiringConsultantStats = useMemo(
@@ -786,116 +857,32 @@ export const Dashboard: React.FC = () => {
                             />
                         </div>
 
+                        <ContactDailyTrendChart series={callTrendSeries} />
+                        <ContactDailyTrendChart series={whatsappTrendSeries} />
+                        <ContactDailyTrendChart series={emailTrendSeries} />
+
                         <ChartContainer
-                            title={
-                                callTrendSeries.granularity === 'day'
-                                    ? 'Llamadas por día por consultor'
-                                    : 'Llamadas por mes por consultor'
-                            }
-                            description={
-                                callTrendSeries.granularity === 'day'
-                                    ? `Comparativa diaria en ${callTrendSeries.periodLabel.toLowerCase()}. Se muestran hasta ${callTrendSeries.users.length} usuarios con más llamadas (incluye administrador).`
-                                    : `Comparativa mensual en ${callTrendSeries.periodLabel.toLowerCase()}. Una línea por usuario (consultores y administrador).`
-                            }
-                            hasData={callTrendSeries.data.some(row =>
-                                callTrendSeries.users.some(u => Number(row[u]) > 0)
-                            )}
-                            height={320}
-                            className="mb-6"
+                            title="Acciones por canal"
+                            description="Total de contactos vs. los que terminaron en interesado en el periodo seleccionado."
+                            hasData={contactStats.channelVolume.length > 0}
+                            className="mt-2"
                         >
-                            <LineChart data={callTrendSeries.data} margin={{ top: 10, right: 20, left: 10, bottom: 5 }}>
+                            <BarChart data={contactStats.channelVolume} margin={{ top: 10, right: 20, left: 10, bottom: 5 }}>
                                 <CartesianGrid strokeDasharray="3 3" />
-                                <XAxis
-                                    dataKey="label"
-                                    tick={{ fontSize: 10 }}
-                                    interval={callTrendSeries.granularity === 'day' ? 'preserveStartEnd' : 0}
-                                />
+                                <XAxis dataKey="name" />
                                 <YAxis allowDecimals={false} />
                                 <Tooltip
-                                    formatter={(value: number, name: string) => [
-                                        `${value} llamada${value !== 1 ? 's' : ''}`,
-                                        truncateLabel(name, 24),
-                                    ]}
+                                    formatter={(value: number, name: string) => {
+                                        if (name === 'total') return [`${value} acciones`, 'Total'];
+                                        if (name === 'effective') return [`${value} interesado${value !== 1 ? 's' : ''}`, 'Efectivas'];
+                                        return [value, name];
+                                    }}
                                 />
-                                <Legend formatter={(value: string) => truncateLabel(value, 20)} />
-                                {callTrendSeries.users.map((userName, index) => (
-                                    <Line
-                                        key={userName}
-                                        type="monotone"
-                                        dataKey={userName}
-                                        name={userName}
-                                        stroke={COLORS[index % COLORS.length]}
-                                        strokeWidth={2}
-                                        dot={{ r: 3 }}
-                                        activeDot={{ r: 5 }}
-                                    />
-                                ))}
-                            </LineChart>
+                                <Legend />
+                                <Bar dataKey="total" name="Total" fill="#0ea5e9" radius={[4, 4, 0, 0]} />
+                                <Bar dataKey="effective" name="Interesado" fill="#10b981" radius={[4, 4, 0, 0]} />
+                            </BarChart>
                         </ChartContainer>
-
-                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                            <ChartContainer
-                                title="Acciones por canal"
-                                description="Total de contactos vs. los que terminaron en interesado."
-                                hasData={contactStats.channelVolume.length > 0}
-                            >
-                                <BarChart data={contactStats.channelVolume} margin={{ top: 10, right: 20, left: 10, bottom: 5 }}>
-                                    <CartesianGrid strokeDasharray="3 3" />
-                                    <XAxis dataKey="name" />
-                                    <YAxis allowDecimals={false} />
-                                    <Tooltip
-                                        formatter={(value: number, name: string) => {
-                                            if (name === 'total') return [`${value} acciones`, 'Total'];
-                                            if (name === 'effective') return [`${value} interesado${value !== 1 ? 's' : ''}`, 'Efectivas'];
-                                            return [value, name];
-                                        }}
-                                    />
-                                    <Legend />
-                                    <Bar dataKey="total" name="Total" fill="#0ea5e9" radius={[4, 4, 0, 0]} />
-                                    <Bar dataKey="effective" name="Interesado" fill="#10b981" radius={[4, 4, 0, 0]} />
-                                </BarChart>
-                            </ChartContainer>
-
-                            <ChartContainer
-                                title="Llamadas por usuario"
-                                description="Llamadas registradas (no contestó, ocupado, contestó) e interesados marcados en la columna Llamadas, incluido el menú «Interesado / En proceso»."
-                                hasData={contactStats.callerRankings.length > 0}
-                                height={Math.max(280, contactStats.callerRankings.length * 44)}
-                            >
-                                <BarChart
-                                    data={contactStats.callerRankings}
-                                    layout="vertical"
-                                    margin={{ top: 5, right: 20, left: 10, bottom: 5 }}
-                                >
-                                    <CartesianGrid strokeDasharray="3 3" />
-                                    <XAxis type="number" allowDecimals={false} />
-                                    <YAxis
-                                        type="category"
-                                        dataKey="name"
-                                        width={120}
-                                        tick={{ fontSize: 11 }}
-                                        tickFormatter={(v: string) => truncateLabel(v, 18)}
-                                    />
-                                    <Tooltip
-                                        formatter={(value: number, name: string, item) => {
-                                            if (name === 'Llamadas') return [`${value} llamada${value !== 1 ? 's' : ''}`, 'Registradas'];
-                                            if (name === 'Interesado') {
-                                                const rate = item.payload.rate;
-                                                const total = item.payload.llamadas as number;
-                                                if (total === 0 && value > 0) {
-                                                    return [`${value} solo por menú interesado`, 'Interesado'];
-                                                }
-                                                return [`${value} (${rate}% del total)`, 'Interesado'];
-                                            }
-                                            return [value, name];
-                                        }}
-                                    />
-                                    <Legend />
-                                    <Bar dataKey="llamadas" name="Llamadas" fill="#8b5cf6" radius={[0, 4, 4, 0]} />
-                                    <Bar dataKey="efectivas" name="Interesado" fill="#f59e0b" radius={[0, 4, 4, 0]} />
-                                </BarChart>
-                            </ChartContainer>
-                        </div>
                     </>
                 )}
             </div>

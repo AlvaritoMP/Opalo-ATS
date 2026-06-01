@@ -47,12 +47,18 @@ export interface ContactCallTrendPoint {
     [userName: string]: string | number;
 }
 
-export interface ContactCallTrendSeries {
+export interface ContactDailyTrendSeries {
     data: ContactCallTrendPoint[];
     users: string[];
     granularity: 'day' | 'month';
     periodLabel: string;
+    channel: ContactAttemptChannel;
+    channelLabel: string;
+    unitLabel: string;
 }
+
+/** @deprecated alias */
+export type ContactCallTrendSeries = ContactDailyTrendSeries;
 
 const PERIOD_LABELS: Record<ContactConsultantPeriod, string> = {
     week: 'Esta semana',
@@ -326,28 +332,56 @@ export function computeContactDashboardStats(
     };
 }
 
-/** Serie temporal de llamadas por consultor (día a día o mes a mes). */
-export function buildCallTrendByUser(
+const CHANNEL_TREND_META: Record<
+    ContactAttemptChannel,
+    { label: string; unitSingular: string; unitPlural: string }
+> = {
+    call: { label: 'Llamadas', unitSingular: 'llamada', unitPlural: 'llamadas' },
+    whatsapp: { label: 'WhatsApp', unitSingular: 'chat', unitPlural: 'chats' },
+    email: { label: 'Correos', unitSingular: 'correo', unitPlural: 'correos' },
+};
+
+/**
+ * Cantidad ejecutada por día (o por mes en vista anual) — no acumulativa.
+ * Una barra = acciones de ese usuario solo en ese día/mes.
+ */
+export function buildChannelDailyTrendByUser(
     attempts: ContactAttempt[],
     period: ContactConsultantPeriod,
-    maxUsers = 6
-): ContactCallTrendSeries {
+    channel: ContactAttemptChannel,
+    maxUsers = 6,
+    alwaysIncludeNames: string[] = []
+): ContactDailyTrendSeries {
+    const meta = CHANNEL_TREND_META[channel];
     const { start, end, label: periodLabel } = getContactPeriodRange(period);
-    const callAttempts = filterAttemptsInDateRange(
-        attempts.filter(isRecordedCallAttempt),
+    const channelAttempts = filterAttemptsInDateRange(
+        attempts.filter(a => isRecordedChannelAttempt(a, channel)),
         start,
         end
     );
 
     const userTotals = new Map<string, number>();
-    for (const a of callAttempts) {
+    for (const a of channelAttempts) {
         const name = normalizeUserName(a.userName);
         userTotals.set(name, (userTotals.get(name) || 0) + 1);
     }
-    const users = [...userTotals.entries()]
-        .sort((a, b) => b[1] - a[1])
-        .slice(0, maxUsers)
-        .map(([name]) => name);
+    const ranked = [...userTotals.entries()].sort((a, b) => b[1] - a[1]);
+    const users: string[] = [];
+    const seen = new Set<string>();
+    for (const [name] of ranked) {
+        if (users.length >= maxUsers) break;
+        if (seen.has(name)) continue;
+        users.push(name);
+        seen.add(name);
+    }
+    for (const name of alwaysIncludeNames) {
+        const trimmed = name?.trim();
+        if (!trimmed || trimmed === 'Sin consultor' || seen.has(trimmed)) continue;
+        if (userTotals.has(trimmed)) {
+            users.push(trimmed);
+            seen.add(trimmed);
+        }
+    }
 
     if (period === 'year') {
         const buckets = new Map<string, ContactCallTrendPoint>();
@@ -359,7 +393,7 @@ export function buildCallTrendByUser(
             for (const u of users) row[u] = 0;
             buckets.set(key, row);
         }
-        for (const a of callAttempts) {
+        for (const a of channelAttempts) {
             const name = normalizeUserName(a.userName);
             if (!users.includes(name)) continue;
             const key = formatMonthKey(new Date(a.createdAt));
@@ -371,6 +405,9 @@ export function buildCallTrendByUser(
             users,
             granularity: 'month',
             periodLabel,
+            channel,
+            channelLabel: meta.label,
+            unitLabel: meta.unitPlural,
         };
     }
 
@@ -389,7 +426,7 @@ export function buildCallTrendByUser(
         cursor.setDate(cursor.getDate() + 1);
     }
 
-    for (const a of callAttempts) {
+    for (const a of channelAttempts) {
         const name = normalizeUserName(a.userName);
         if (!users.includes(name)) continue;
         const key = formatDateKey(new Date(a.createdAt));
@@ -402,5 +439,17 @@ export function buildCallTrendByUser(
         users,
         granularity: 'day',
         periodLabel,
+        channel,
+        channelLabel: meta.label,
+        unitLabel: meta.unitPlural,
     };
+}
+
+/** @deprecated use buildChannelDailyTrendByUser */
+export function buildCallTrendByUser(
+    attempts: ContactAttempt[],
+    period: ContactConsultantPeriod,
+    maxUsers = 6
+): ContactDailyTrendSeries {
+    return buildChannelDailyTrendByUser(attempts, period, 'call', maxUsers);
 }
