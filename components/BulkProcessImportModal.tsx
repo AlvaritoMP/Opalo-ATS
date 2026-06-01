@@ -418,6 +418,7 @@ export const BulkProcessImportModal: React.FC<BulkProcessImportModalProps> = ({
                             processId: process.id,
                             stageId: firstStageId,
                             attachments: [],
+                            applicationStartedDate: new Date().toISOString(),
                         };
 
                         OPTIONAL_IMPORT_FIELDS.forEach(field => {

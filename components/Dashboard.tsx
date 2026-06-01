@@ -19,6 +19,13 @@ import {
     buildUserLookupForStats,
     enrichContactAttemptsForStats,
 } from '../lib/dashboardActorNames';
+import {
+    resolveProcessPublishedDate,
+    resolveHireAcceptedDate,
+    resolveApplicationStartedDate,
+    resolveApplicationCompletedDate,
+    getLastStageId,
+} from '../lib/dashboardEfficiencyMetrics';
 
 const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#AF19FF', '#6366f1', '#14b8a6', '#f97316'];
 
@@ -500,17 +507,15 @@ export const Dashboard: React.FC = () => {
 
     const timeToHire = useMemo(() => {
         const hiredCandidatesWithDates = filteredCandidates
-            .filter(c => {
-                const process = processMap.get(c.processId);
-                if (!process?.stages?.length) return false;
-                const lastStageId = process.stages[process.stages.length - 1]?.id;
-                return c.stageId === lastStageId && (c.offerAcceptedDate || c.hireDate);
-            })
             .map(c => {
                 const process = processMap.get(c.processId);
-                const publishedDate = process?.publishedDate || process?.startDate;
-                const acceptedDate = c.offerAcceptedDate || c.hireDate;
+                const lastStageId = getLastStageId(process);
+                if (!lastStageId || c.stageId !== lastStageId) return null;
+
+                const publishedDate = resolveProcessPublishedDate(process);
+                const acceptedDate = resolveHireAcceptedDate(c, process);
                 if (!publishedDate || !acceptedDate) return null;
+
                 const published = new Date(publishedDate);
                 const accepted = new Date(acceptedDate);
                 const days = Math.ceil((accepted.getTime() - published.getTime()) / (1000 * 60 * 60 * 24));
@@ -528,27 +533,26 @@ export const Dashboard: React.FC = () => {
             .filter(p => {
                 if (!p.needIdentifiedDate) return false;
                 const processCandidates = filteredCandidates.filter(c => c.processId === p.id);
-                if (!p.stages?.length) return false;
-                const lastStageId = p.stages[p.stages.length - 1]?.id;
-                const hiredCount = processCandidates.filter(c => c.stageId === lastStageId).length;
+                const lastStageId = getLastStageId(p);
+                if (!lastStageId) return false;
+                const hiredCount = processCandidates.filter(c => c.stageId === lastStageId && !c.discarded).length;
                 return hiredCount >= p.vacancies;
             })
             .map(p => {
                 const processCandidates = filteredCandidates.filter(c => c.processId === p.id);
-                if (!p.stages?.length) return null;
-                const lastStageId = p.stages[p.stages.length - 1]?.id;
+                const lastStageId = getLastStageId(p);
+                if (!lastStageId) return null;
+
                 const lastHired = processCandidates
-                    .filter(c => c.stageId === lastStageId)
-                    .sort((a, b) => {
-                        const dateA = a.offerAcceptedDate || a.hireDate || '';
-                        const dateB = b.offerAcceptedDate || b.hireDate || '';
-                        return dateB.localeCompare(dateA);
-                    })[0];
+                    .filter(c => c.stageId === lastStageId && !c.discarded)
+                    .map(c => ({ candidate: c, acceptedDate: resolveHireAcceptedDate(c, p) }))
+                    .filter((entry): entry is { candidate: Candidate; acceptedDate: string } => Boolean(entry.acceptedDate))
+                    .sort((a, b) => b.acceptedDate.localeCompare(a.acceptedDate))[0];
 
                 if (!lastHired || !p.needIdentifiedDate) return null;
 
                 const needDate = new Date(p.needIdentifiedDate);
-                const fillDate = new Date(lastHired.offerAcceptedDate || lastHired.hireDate || '');
+                const fillDate = new Date(lastHired.acceptedDate);
                 const days = Math.ceil((fillDate.getTime() - needDate.getTime()) / (1000 * 60 * 60 * 24));
                 return days >= 0 ? days : null;
             })
@@ -602,11 +606,14 @@ export const Dashboard: React.FC = () => {
     }, [filteredCandidates, processMap]);
 
     const applicationCompletionRate = useMemo(() => {
-        const started = filteredCandidates.filter(c => c.applicationStartedDate).length;
-        const completed = filteredCandidates.filter(c => c.applicationCompletedDate).length;
+        const started = filteredCandidates.filter(c => resolveApplicationStartedDate(c)).length;
+        const completed = filteredCandidates.filter(c => {
+            const process = processMap.get(c.processId);
+            return resolveApplicationCompletedDate(c, process);
+        }).length;
         if (started === 0) return null;
         return Math.round((completed / started) * 1000) / 10;
-    }, [filteredCandidates]);
+    }, [filteredCandidates, processMap]);
 
     const scopedProcessIds = useMemo(
         () => new Set(targetProcessIds),
@@ -798,7 +805,7 @@ export const Dashboard: React.FC = () => {
                         <p className="text-2xl font-bold text-purple-900">
                             {applicationCompletionRate !== null ? `${applicationCompletionRate}%` : 'N/D'}
                         </p>
-                        <p className="text-xs text-purple-600 mt-1">Postulaciones completadas vs. iniciadas (formularios Tally)</p>
+                        <p className="text-xs text-purple-600 mt-1">Postulaciones completadas vs. iniciadas</p>
                     </div>
                     <div className="p-4 bg-orange-50 rounded-lg border border-orange-200">
                         <h3 className="text-sm font-medium text-orange-800 mb-1">Tasa de Conversión</h3>

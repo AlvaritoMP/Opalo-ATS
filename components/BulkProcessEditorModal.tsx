@@ -34,6 +34,9 @@ export const BulkProcessEditorModal: React.FC<BulkProcessEditorModalProps> = ({ 
     const [stages, setStages] = useState<Stage[]>(process?.stages || [{ id: `new-${Date.now()}`, name: 'Postulación Inicial' }]);
     const [status, setStatus] = useState<ProcessStatus>(process?.status || 'en_proceso');
     const [vacancies, setVacancies] = useState<number>(process?.vacancies || 1);
+    const [startDate, setStartDate] = useState(process?.startDate || '');
+    const [publishedDate, setPublishedDate] = useState(process?.publishedDate || '');
+    const [needIdentifiedDate, setNeedIdentifiedDate] = useState(process?.needIdentifiedDate || '');
     const [isSaving, setIsSaving] = useState(false);
     const [activeTab, setActiveTab] = useState<'basic' | 'config'>('basic');
     
@@ -82,6 +85,9 @@ export const BulkProcessEditorModal: React.FC<BulkProcessEditorModalProps> = ({ 
             setStages([{ id: `new-${Date.now()}`, name: 'Postulación Inicial' }]);
             setStatus('en_proceso');
             setVacancies(1);
+            setStartDate('');
+            setPublishedDate('');
+            setNeedIdentifiedDate('');
             setBulkConfig({
                 killerQuestions: [],
                 aiPrompt: '',
@@ -106,6 +112,9 @@ export const BulkProcessEditorModal: React.FC<BulkProcessEditorModalProps> = ({ 
             setSelectedClientId(fresh.clientId);
             setStatus(fresh.status || 'en_proceso');
             setVacancies(fresh.vacancies || 1);
+            setStartDate(fresh.startDate || '');
+            setPublishedDate(fresh.publishedDate || '');
+            setNeedIdentifiedDate(fresh.needIdentifiedDate || '');
             setBulkConfig(
                 fresh.bulkConfig || {
                     killerQuestions: [],
@@ -316,6 +325,9 @@ export const BulkProcessEditorModal: React.FC<BulkProcessEditorModalProps> = ({ 
                 stages: stagesPayload,
                 status,
                 vacancies,
+                startDate: startDate || undefined,
+                publishedDate: publishedDate || undefined,
+                needIdentifiedDate: needIdentifiedDate || undefined,
                 attachments,
                 flyerUrl: flyerUrl || undefined,
                 flyerPosition: flyerPosition || undefined,
@@ -619,6 +631,51 @@ export const BulkProcessEditorModal: React.FC<BulkProcessEditorModalProps> = ({ 
                                         min="1"
                                         className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
                                     />
+                                </div>
+                            </div>
+
+                            <div className="border-t border-gray-200 pt-4">
+                                <h3 className="text-sm font-medium text-gray-800 mb-1">Indicadores del Panel</h3>
+                                <p className="text-xs text-gray-500 mb-3">
+                                    Estas fechas permiten calcular Time to Hire y Time to Fill en el Panel de estadísticas.
+                                </p>
+                                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                                            Fecha de inicio del proceso
+                                        </label>
+                                        <input
+                                            type="date"
+                                            value={startDate}
+                                            onChange={(e) => setStartDate(e.target.value)}
+                                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                                            title="Respaldo para Time to Hire si no hay fecha de publicación"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                                            Fecha de publicación de la oferta
+                                        </label>
+                                        <input
+                                            type="date"
+                                            value={publishedDate}
+                                            onChange={(e) => setPublishedDate(e.target.value)}
+                                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                                            title="Inicio del cómputo de Time to Hire"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                                            Fecha de identificación de necesidad
+                                        </label>
+                                        <input
+                                            type="date"
+                                            value={needIdentifiedDate}
+                                            onChange={(e) => setNeedIdentifiedDate(e.target.value)}
+                                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                                            title="Inicio del cómputo de Time to Fill"
+                                        />
+                                    </div>
                                 </div>
                             </div>
                         </div>

@@ -1506,6 +1506,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
             await bulkCandidatesApi.updateCandidate(candidateId, updates, {
                 previousStageId,
                 movedBy: state.currentUser?.id,
+                lastStageId: processLastStageId,
             });
             setOptimisticUpdates(prev => {
                 const newMap = new Map(prev);
@@ -1558,6 +1559,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                 {
                     movedBy: state.currentUser?.id,
                     previousStageByCandidate,
+                    lastStageId,
                 }
             );
             if (lastStageId && state.currentUser) {

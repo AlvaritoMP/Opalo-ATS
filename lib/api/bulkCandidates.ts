@@ -307,7 +307,7 @@ export const bulkCandidatesApi = {
         discarded?: boolean;
         discardReason?: string;
         archived?: boolean;
-    }, context?: { previousStageId?: string; movedBy?: string }): Promise<void> {
+    }, context?: { previousStageId?: string; movedBy?: string; lastStageId?: string }): Promise<void> {
         const dbUpdates: any = {};
         
         if (updates.stageId !== undefined) dbUpdates.stage_id = updates.stageId;
@@ -321,6 +321,19 @@ export const bulkCandidatesApi = {
 
         if (updates.archived) {
             dbUpdates.archived_at = new Date().toISOString();
+        }
+
+        if (updates.stageId && context?.lastStageId && updates.stageId === context.lastStageId) {
+            const { data: existing } = await supabase
+                .from('candidates')
+                .select('hire_date, offer_accepted_date, application_completed_date')
+                .eq('id', candidateId)
+                .eq('app_name', APP_NAME)
+                .maybeSingle();
+            const now = new Date().toISOString();
+            if (!existing?.hire_date) dbUpdates.hire_date = now;
+            if (!existing?.offer_accepted_date) dbUpdates.offer_accepted_date = now;
+            if (!existing?.application_completed_date) dbUpdates.application_completed_date = now;
         }
 
         const { error } = await supabase
@@ -409,6 +422,7 @@ export const bulkCandidatesApi = {
         context?: {
             movedBy?: string;
             previousStageByCandidate?: Record<string, string | undefined>;
+            lastStageId?: string;
         }
     ): Promise<void> {
         if (candidateIds.length === 0) return;
@@ -426,6 +440,37 @@ export const bulkCandidatesApi = {
 
         if (updates.archived) {
             dbUpdates.archived_at = new Date().toISOString();
+        }
+
+        const isHiringMove =
+            updates.stageId &&
+            context?.lastStageId &&
+            updates.stageId === context.lastStageId;
+
+        if (isHiringMove) {
+            const now = new Date().toISOString();
+            const { data: existingRows } = await supabase
+                .from('candidates')
+                .select('id, hire_date, offer_accepted_date, application_completed_date')
+                .in('id', candidateIds)
+                .eq('app_name', APP_NAME);
+
+            for (const row of existingRows || []) {
+                const patch: Record<string, string> = {};
+                if (!row.hire_date) patch.hire_date = now;
+                if (!row.offer_accepted_date) patch.offer_accepted_date = now;
+                if (!row.application_completed_date) patch.application_completed_date = now;
+                if (Object.keys(patch).length === 0) continue;
+
+                const { error: patchError } = await supabase
+                    .from('candidates')
+                    .update(patch)
+                    .eq('id', row.id)
+                    .eq('app_name', APP_NAME);
+                if (patchError) {
+                    console.warn('No se pudieron registrar fechas de contratación:', patchError.message);
+                }
+            }
         }
 
         const { error } = await supabase
