@@ -8,6 +8,10 @@ import { bulkCandidatesApi } from '../lib/api/bulkCandidates';
 import { contactTrackingApi } from '../lib/api/contactTracking';
 import { computeContactDashboardStats, buildCallTrendByUser, type ContactConsultantPeriod } from '../lib/contactDashboardStats';
 import { computeHiringStageConsultantStats } from '../lib/hiringStageTracking';
+import {
+    buildUserLookupForStats,
+    enrichContactAttemptsForStats,
+} from '../lib/dashboardActorNames';
 
 const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#AF19FF', '#6366f1', '#14b8a6', '#f97316'];
 
@@ -107,19 +111,41 @@ const topNWithOthers = (
 };
 
 export const Dashboard: React.FC = () => {
-    const { state, getLabel } = useAppState();
-    const { processes, candidates: allCandidates, interviewEvents, users } = state;
+    const { state, getLabel, actions } = useAppState();
+    const { processes, candidates: allCandidates, interviewEvents, users, currentUser, dashboardFilters } = state;
 
-    const [processFilter, setProcessFilter] = useState<string>('all');
-    const [processScopeFilter, setProcessScopeFilter] = useState<'all' | 'bulk' | 'standard'>('all');
-    const [dateFilter, setDateFilter] = useState<{ start: string; end: string }>({ start: '', end: '' });
-    const [contactConsultantPeriod, setContactConsultantPeriod] = useState<ContactConsultantPeriod>('month');
+    const {
+        processFilter,
+        processScopeFilter,
+        dateFilter,
+        contactConsultantPeriod,
+    } = dashboardFilters;
+
+    const setProcessFilter = (value: string) => actions.setDashboardFilters({ processFilter: value });
+    const setProcessScopeFilter = (value: 'all' | 'bulk' | 'standard') =>
+        actions.setDashboardFilters({ processScopeFilter: value, processFilter: 'all' });
+    const setDateFilter = (patch: Partial<{ start: string; end: string }>) =>
+        actions.setDashboardFilters({ dateFilter: { ...dateFilter, ...patch } });
+    const setContactConsultantPeriod = (value: ContactConsultantPeriod) =>
+        actions.setDashboardFilters({ contactConsultantPeriod: value });
+
+    const statsUsers = useMemo(
+        () => buildUserLookupForStats(users, currentUser),
+        [users, currentUser]
+    );
 
     const scopedProcesses = useMemo(() => {
         if (processScopeFilter === 'bulk') return processes.filter(p => p.isBulkProcess);
         if (processScopeFilter === 'standard') return processes.filter(p => !p.isBulkProcess);
         return processes;
     }, [processes, processScopeFilter]);
+
+    useEffect(() => {
+        const validIds = new Set(scopedProcesses.map(p => p.id));
+        if (processFilter !== 'all' && !validIds.has(processFilter)) {
+            actions.setDashboardFilters({ processFilter: 'all' });
+        }
+    }, [scopedProcesses, processFilter, actions]);
 
     const processMap = useMemo(() => new Map(processes.map(p => [p.id, p])), [processes]);
 
@@ -465,14 +491,19 @@ export const Dashboard: React.FC = () => {
         [contactAttempts, filteredCandidateIds]
     );
 
+    const enrichedContactAttempts = useMemo(
+        () => enrichContactAttemptsForStats(scopedContactAttempts, statsUsers),
+        [scopedContactAttempts, statsUsers]
+    );
+
     const contactStats = useMemo(
-        () => computeContactDashboardStats(scopedContactAttempts, contactConsultantPeriod),
-        [scopedContactAttempts, contactConsultantPeriod]
+        () => computeContactDashboardStats(enrichedContactAttempts, contactConsultantPeriod),
+        [enrichedContactAttempts, contactConsultantPeriod]
     );
 
     const callTrendSeries = useMemo(
-        () => buildCallTrendByUser(scopedContactAttempts, contactConsultantPeriod),
-        [scopedContactAttempts, contactConsultantPeriod]
+        () => buildCallTrendByUser(enrichedContactAttempts, contactConsultantPeriod),
+        [enrichedContactAttempts, contactConsultantPeriod]
     );
 
     const hiringConsultantStats = useMemo(
@@ -484,9 +515,9 @@ export const Dashboard: React.FC = () => {
                     history: c.history,
                 })),
                 processMap,
-                users
+                statsUsers
             ),
-        [filteredCandidates, processMap, users]
+        [filteredCandidates, processMap, statsUsers]
     );
 
     const stageChartHeight = Math.max(280, candidatesByStage.length * 36);
@@ -505,7 +536,6 @@ export const Dashboard: React.FC = () => {
                         value={processScopeFilter}
                         onChange={(e) => {
                             setProcessScopeFilter(e.target.value as 'all' | 'bulk' | 'standard');
-                            setProcessFilter('all');
                         }}
                         className="border-gray-300 rounded-md shadow-sm text-sm w-full md:w-auto"
                     >
@@ -536,7 +566,7 @@ export const Dashboard: React.FC = () => {
                         type="date"
                         id="startDate"
                         value={dateFilter.start}
-                        onChange={(e) => setDateFilter(prev => ({ ...prev, start: e.target.value }))}
+                        onChange={(e) => setDateFilter({ start: e.target.value })}
                         className="border-gray-300 rounded-md shadow-sm text-sm"
                     />
                 </div>
@@ -546,7 +576,7 @@ export const Dashboard: React.FC = () => {
                         type="date"
                         id="endDate"
                         value={dateFilter.end}
-                        onChange={(e) => setDateFilter(prev => ({ ...prev, end: e.target.value }))}
+                        onChange={(e) => setDateFilter({ end: e.target.value })}
                         className="border-gray-300 rounded-md shadow-sm text-sm"
                     />
                 </div>
@@ -653,7 +683,7 @@ export const Dashboard: React.FC = () => {
                         </p>
                     </div>
                     <div className="flex flex-col gap-1 shrink-0">
-                        <span className="text-xs font-medium text-gray-600">Rango consultores</span>
+                        <span className="text-xs font-medium text-gray-600">Rango (consultores y admin)</span>
                         <div className="inline-flex rounded-lg border border-gray-200 p-0.5 bg-gray-50">
                             {([
                                 ['week', 'Semanal'],
@@ -764,8 +794,8 @@ export const Dashboard: React.FC = () => {
                             }
                             description={
                                 callTrendSeries.granularity === 'day'
-                                    ? `Comparativa diaria en ${callTrendSeries.periodLabel.toLowerCase()}. Se muestran hasta ${callTrendSeries.users.length} consultores con más llamadas.`
-                                    : `Comparativa mensual en ${callTrendSeries.periodLabel.toLowerCase()}. Una línea por consultor.`
+                                    ? `Comparativa diaria en ${callTrendSeries.periodLabel.toLowerCase()}. Se muestran hasta ${callTrendSeries.users.length} usuarios con más llamadas (incluye administrador).`
+                                    : `Comparativa mensual en ${callTrendSeries.periodLabel.toLowerCase()}. Una línea por usuario (consultores y administrador).`
                             }
                             hasData={callTrendSeries.data.some(row =>
                                 callTrendSeries.users.some(u => Number(row[u]) > 0)
@@ -827,7 +857,7 @@ export const Dashboard: React.FC = () => {
                             </ChartContainer>
 
                             <ChartContainer
-                                title="Llamadas por consultor"
+                                title="Llamadas por usuario"
                                 description="Llamadas registradas (no contestó, ocupado, contestó) e interesados marcados en la columna Llamadas, incluido el menú «Interesado / En proceso»."
                                 hasData={contactStats.callerRankings.length > 0}
                                 height={Math.max(280, contactStats.callerRankings.length * 44)}
@@ -873,7 +903,7 @@ export const Dashboard: React.FC = () => {
             <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm mb-8">
                 <h2 className="text-xl font-semibold text-gray-800 mb-1">Ingresos a contratación</h2>
                 <p className="text-sm text-gray-500 mb-4">
-                    Consultores que movieron candidatos a la última etapa del proceso (contratación), según el historial de etapas.
+                    Usuarios del equipo (consultores y administrador) que movieron candidatos a la última etapa del proceso, según el historial de etapas.
                 </p>
 
                 {hiringConsultantStats.totalHires === 0 ? (
@@ -885,7 +915,7 @@ export const Dashboard: React.FC = () => {
                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-6">
                             <StatCard
                                 icon={UserPlus}
-                                title="Consultor con más ingresos"
+                                title="Usuario con más ingresos"
                                 value={hiringConsultantStats.topConsultant?.userName ?? 'N/D'}
                                 subtitle={
                                     hiringConsultantStats.topConsultant
@@ -918,16 +948,16 @@ export const Dashboard: React.FC = () => {
                             />
                             <StatCard
                                 icon={Users}
-                                title="Consultores activos"
+                                title="Usuarios activos"
                                 value={hiringConsultantStats.rankings.length}
-                                subtitle="Usuarios con al menos un ingreso a contratación"
+                                subtitle="Consultores y administrador con al menos un ingreso"
                                 color="bg-violet-500"
                             />
                         </div>
 
                         <ChartContainer
-                            title="Ingresos por consultor"
-                            description="Cantidad de candidatos que cada consultor movió a la etapa de contratación."
+                            title="Ingresos por usuario"
+                            description="Candidatos que cada consultor o administrador movió a la etapa de contratación."
                             hasData={hiringConsultantStats.rankings.length > 0}
                             height={Math.max(280, hiringConsultantStats.rankings.length * 44)}
                         >

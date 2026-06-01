@@ -25,15 +25,20 @@ export function getProcessLastStageId(process?: Pick<Process, 'stages'> | null):
 
 export function resolveHistoryUserName(
     movedBy: string | null | undefined,
-    users: Pick<User, 'id' | 'name'>[] = []
+    users: Pick<User, 'id' | 'name' | 'email'>[] = []
 ): string {
     if (!movedBy || movedBy === 'System') return 'Sistema';
     const byId = users.find(u => u.id === movedBy);
-    if (byId?.name) return byId.name;
+    if (byId?.name?.trim()) return byId.name.trim();
+    if (byId?.email?.trim()) {
+        const local = byId.email.trim().split('@')[0];
+        if (local) return local;
+    }
     const isLikelyId = movedBy.length > 20 || movedBy.includes('-');
     if (isLikelyId) {
         const byName = users.find(u => u.name === movedBy);
-        return byName?.name || 'Usuario';
+        if (byName?.name?.trim()) return byName.name.trim();
+        return 'Usuario';
     }
     return movedBy;
 }

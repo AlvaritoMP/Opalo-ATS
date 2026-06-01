@@ -7,6 +7,11 @@ import { isCorsError, getErrorMessage, isSupabaseConfigured } from './lib/supaba
 import { googleDriveService } from './lib/googleDrive';
 import { debugLog } from './lib/debugLog';
 import { getBulkSelectedProcessId, setBulkSelectedProcessId } from './lib/bulkTableColumns';
+import {
+    loadDashboardFilters,
+    saveDashboardFilters,
+    type DashboardFiltersState,
+} from './lib/dashboardFilters';
 import { Dashboard } from './components/Dashboard';
 import { ProcessList } from './components/ProcessList';
 import { ProcessView } from './components/ProcessView';
@@ -41,6 +46,7 @@ interface AppState {
     lastViewedProcessId: string | null; // ID del último proceso visto
     /** Proceso masivo abierto; '' = lista de procesos masivos */
     lastViewedBulkProcessId: string;
+    dashboardFilters: DashboardFiltersState;
     loading: boolean;
     toasts: Array<{ id: string; message: string; type: 'success' | 'error' | 'loading' | 'info'; duration?: number }>;
 }
@@ -79,6 +85,7 @@ interface AppActions {
     loadArchivedCandidates: () => Promise<void>;
     setView: (type: string, payload?: any) => void;
     setLastViewedBulkProcessId: (processId: string) => void;
+    setDashboardFilters: (patch: Partial<DashboardFiltersState>) => void;
     showToast: (message: string, type: 'success' | 'error' | 'loading' | 'info', duration?: number) => string;
     hideToast: (id: string) => void;
 }
@@ -442,6 +449,7 @@ const App: React.FC = () => {
         view: { type: 'dashboard' },
         lastViewedProcessId: null,
         lastViewedBulkProcessId: '',
+        dashboardFilters: loadDashboardFilters(),
         loading: true,
         toasts: [],
     });
@@ -596,6 +604,7 @@ const App: React.FC = () => {
                     view: { type: 'dashboard' },
                     lastViewedProcessId: null,
                     lastViewedBulkProcessId: bulkProcessId,
+                    dashboardFilters: loadDashboardFilters(currentUser?.id),
                     loading: false,
                     toasts: [],
                 });
@@ -629,6 +638,7 @@ const App: React.FC = () => {
                     lastViewedBulkProcessId: currentUser
                         ? getBulkSelectedProcessId(currentUser.id) ?? ''
                         : '',
+                    dashboardFilters: loadDashboardFilters(currentUser?.id),
                     loading: false,
                     toasts: [],
                 });
@@ -708,6 +718,13 @@ const App: React.FC = () => {
             setState(s => {
                 setBulkSelectedProcessId(processId, s.currentUser?.id);
                 return { ...s, lastViewedBulkProcessId: processId };
+            });
+        },
+        setDashboardFilters: (patch) => {
+            setState(s => {
+                const dashboardFilters = { ...s.dashboardFilters, ...patch };
+                saveDashboardFilters(dashboardFilters, s.currentUser?.id);
+                return { ...s, dashboardFilters };
             });
         },
         saveSettings: async (settings) => {
