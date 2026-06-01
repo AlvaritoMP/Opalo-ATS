@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { X, Save, Upload, Download, Target, Loader2 } from 'lucide-react';
+import { X, Save, Upload, Download, Target, Loader2, Trash2 } from 'lucide-react';
 import {
     Process,
     CustomColumn,
@@ -15,9 +15,12 @@ import {
     IdealProfileFieldDef,
     criterionHasIdealValue,
     isActiveIdealProfileCriterion,
+    criterionHasExcludeValue,
     normalizeIdealProfileCriteria,
+    normalizeIdealProfileConfig,
     ProfileMatchSummary,
 } from '../lib/bulkIdealProfileMatch';
+import { getColumnLabel, normalizeColumnNameKey } from '../lib/bulkTableColumns';
 import { BulkIdealProfileSummaryPanel } from './BulkIdealProfileSummaryPanel';
 
 interface Props {
@@ -55,14 +58,30 @@ function getMatchModesForType(type: IdealProfileFieldDef['type']): IdealProfileM
 
 function createDefaultCriteria(
     fields: IdealProfileFieldDef[],
-    existing?: IdealProfileConfig
+    existing?: IdealProfileConfig,
+    customColumns: CustomColumn[] = [],
+    bulkConfig?: Process['bulkConfig']
 ): IdealProfileCriterion[] {
-    const existingMap = new Map((existing?.criteria || []).map(c => [c.fieldId, c]));
+    const { config: normalized } = normalizeIdealProfileConfig(
+        existing,
+        customColumns,
+        bulkConfig
+    );
+    const existingByFieldId = new Map((normalized?.criteria || []).map(c => [c.fieldId, c]));
+    const existingByLabel = new Map<string, IdealProfileCriterion>();
+    for (const criterion of normalized?.criteria || []) {
+        const label = getColumnLabel(criterion.fieldId, customColumns);
+        if (label) existingByLabel.set(normalizeColumnNameKey(label), criterion);
+    }
+
     return fields.map(f => {
-        const prev = existingMap.get(f.fieldId);
+        const prev =
+            existingByFieldId.get(f.fieldId) ||
+            existingByLabel.get(normalizeColumnNameKey(f.label));
         if (prev) {
             return {
                 ...prev,
+                fieldId: f.fieldId,
                 enabled: prev.enabled ?? criterionHasIdealValue(prev),
             };
         }
@@ -70,6 +89,7 @@ function createDefaultCriteria(
             fieldId: f.fieldId,
             enabled: false,
             idealValue: f.type === 'checkbox' ? false : '',
+            excludeValue: '',
             matchMode: f.type === 'number' ? 'minimum' : f.type === 'select' || f.type === 'checkbox' ? 'exact' : 'contains',
             weight: 1,
         };
@@ -106,23 +126,39 @@ export const BulkIdealProfileModal: React.FC<Props> = ({
         setEnabled(cfg?.enabled ?? false);
         setGreenThreshold(cfg?.greenThreshold ?? 80);
         setYellowThreshold(cfg?.yellowThreshold ?? 50);
-        setCriteria(createDefaultCriteria(availableFields, cfg));
+        setCriteria(createDefaultCriteria(availableFields, cfg, customColumns, process.bulkConfig));
         setImportPaste('');
         setShowImport(false);
-    }, [isOpen, process.id, process.bulkConfig?.idealProfile, availableFields]);
+    }, [isOpen, process.id, process.bulkConfig?.idealProfile, process.bulkConfig, availableFields, customColumns]);
 
     const updateCriterion = useCallback((fieldId: string, patch: Partial<IdealProfileCriterion>) => {
         setCriteria(prev =>
             prev.map(c => {
                 if (c.fieldId !== fieldId) return c;
                 const next = { ...c, ...patch };
-                if (criterionHasIdealValue(next)) {
+                if (patch.enabled === false) return next;
+                if (criterionHasIdealValue(next) || criterionHasExcludeValue(next)) {
                     next.enabled = true;
                 }
                 return next;
             })
         );
     }, []);
+
+    const handleClearAllCriteria = () => {
+        if (
+            !window.confirm(
+                '¿Limpiar todos los criterios del perfil ideal? Se desmarcarán todos los campos y se borrarán los valores configurados.'
+            )
+        ) {
+            return;
+        }
+        setCriteria(createDefaultCriteria(availableFields, undefined, customColumns, process.bulkConfig));
+    };
+
+    const handleUncheckAllCriteria = () => {
+        setCriteria(prev => prev.map(c => ({ ...c, enabled: false })));
+    };
 
     const handleImportPaste = () => {
         const imported = parseIdealProfileImport(importPaste, availableFields);
@@ -185,7 +221,7 @@ export const BulkIdealProfileModal: React.FC<Props> = ({
 
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-            <div className="bg-white rounded-xl shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col">
+            <div className="bg-white rounded-xl shadow-2xl w-full max-w-5xl max-h-[90vh] flex flex-col">
                 <div className="flex items-center justify-between px-6 py-4 border-b">
                     <div className="flex items-center gap-2">
                         <Target className="w-5 h-5 text-indigo-600" />
@@ -254,6 +290,7 @@ export const BulkIdealProfileModal: React.FC<Props> = ({
                             Los candidatos con cumplimiento ≥ {greenThreshold}% se marcan en verde,
                             entre {yellowThreshold}% y {greenThreshold - 1}% en amarillo, y por debajo de {yellowThreshold}% en rojo.
                             Las celdas de la tabla con criterio activo se colorean según su cumplimiento individual (mapa de calor).
+                            Puede definir un valor ideal, valores prohibidos en «No debe contener», o ambos.
                         </p>
                     </div>
 
@@ -281,6 +318,23 @@ export const BulkIdealProfileModal: React.FC<Props> = ({
                             className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-white border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50"
                         >
                             Subir archivo
+                        </button>
+                        <button
+                            type="button"
+                            onClick={handleUncheckAllCriteria}
+                            disabled={!enabled}
+                            className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-white border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 disabled:opacity-40"
+                        >
+                            Desmarcar todos
+                        </button>
+                        <button
+                            type="button"
+                            onClick={handleClearAllCriteria}
+                            disabled={!enabled}
+                            className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-red-50 border border-red-200 text-red-800 rounded-lg hover:bg-red-100 disabled:opacity-40"
+                        >
+                            <Trash2 className="w-4 h-4" />
+                            Limpiar criterios
                         </button>
                     </div>
 
@@ -313,6 +367,7 @@ export const BulkIdealProfileModal: React.FC<Props> = ({
                                     <th className="px-3 py-2 text-left w-10">Usar</th>
                                     <th className="px-3 py-2 text-left">Campo</th>
                                     <th className="px-3 py-2 text-left">Valor ideal</th>
+                                    <th className="px-3 py-2 text-left">No debe contener</th>
                                     <th className="px-3 py-2 text-left">Modo</th>
                                     <th className="px-3 py-2 text-left w-16">Peso</th>
                                 </tr>
@@ -329,7 +384,7 @@ export const BulkIdealProfileModal: React.FC<Props> = ({
                                             <td className="px-3 py-2">
                                                 <input
                                                     type="checkbox"
-                                                    checked={c.enabled}
+                                                    checked={isActiveIdealProfileCriterion(c)}
                                                     onChange={e => updateCriterion(c.fieldId, { enabled: e.target.checked })}
                                                     className="w-4 h-4 text-indigo-600 rounded"
                                                 />
@@ -400,6 +455,57 @@ export const BulkIdealProfileModal: React.FC<Props> = ({
                                                             <p className="text-[10px] text-gray-400 leading-tight">
                                                                 Varias opciones (OR): sepárelas con coma, punto y coma, barra o |.
                                                                 Ej: <span className="font-mono">Los Olivos, San Miguel</span> o <span className="font-mono">1|2|3</span>
+                                                            </p>
+                                                        )}
+                                                    </div>
+                                                )}
+                                            </td>
+                                            <td className="px-3 py-2">
+                                                {field.type === 'checkbox' ? (
+                                                    <select
+                                                        value={c.excludeValue === true ? 'true' : c.excludeValue === false ? 'false' : ''}
+                                                        onChange={e => updateCriterion(c.fieldId, {
+                                                            excludeValue: e.target.value === '' ? '' : e.target.value === 'true',
+                                                        })}
+                                                        className="w-full px-2 py-1 border border-gray-300 rounded text-sm"
+                                                    >
+                                                        <option value="">—</option>
+                                                        <option value="true">Sí</option>
+                                                        <option value="false">No</option>
+                                                    </select>
+                                                ) : field.type === 'select' && field.options?.length ? (
+                                                    <select
+                                                        value={String(c.excludeValue ?? '')}
+                                                        onChange={e => updateCriterion(c.fieldId, { excludeValue: e.target.value })}
+                                                        className="w-full px-2 py-1 border border-gray-300 rounded text-sm"
+                                                    >
+                                                        <option value="">—</option>
+                                                        {field.options.map(opt => (
+                                                            <option key={opt} value={opt}>{opt}</option>
+                                                        ))}
+                                                    </select>
+                                                ) : (
+                                                    <div className="space-y-1">
+                                                        <input
+                                                            type={field.type === 'number' ? 'number' : field.type === 'date' ? 'date' : 'text'}
+                                                            value={String(c.excludeValue ?? '')}
+                                                            onChange={e =>
+                                                                updateCriterion(c.fieldId, {
+                                                                    excludeValue: field.type === 'number'
+                                                                        ? (e.target.value === '' ? '' : parseFloat(e.target.value) || 0)
+                                                                        : e.target.value,
+                                                                })
+                                                            }
+                                                            className="w-full px-2 py-1 border border-gray-300 rounded text-sm"
+                                                            placeholder={
+                                                                field.type === 'text'
+                                                                    ? 'Ej: Callao, Ate'
+                                                                    : undefined
+                                                            }
+                                                        />
+                                                        {field.type === 'text' && (
+                                                            <p className="text-[10px] text-gray-400 leading-tight">
+                                                                Varias exclusiones (OR): sepárelas con coma, ;, / o |.
                                                             </p>
                                                         )}
                                                     </div>

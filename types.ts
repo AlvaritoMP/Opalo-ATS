@@ -231,6 +231,8 @@ export interface IdealProfileCriterion {
     fieldId: string;
     enabled: boolean;
     idealValue?: string | number | boolean;
+    /** Valor o texto que NO debe aparecer en el campo del candidato */
+    excludeValue?: string | number | boolean;
     /** Valor máximo para modo range o maximum */
     maxValue?: number;
     matchMode?: IdealProfileMatchMode;

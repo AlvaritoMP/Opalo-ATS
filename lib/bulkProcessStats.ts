@@ -223,7 +223,8 @@ export function resolveBulkStatCellLabel(
             idealProfileConfig,
             customColumns,
             columnValues,
-            legacyColumnIdToName
+            legacyColumnIdToName,
+            bulkConfig
         );
         if (!match) return EMPTY_LABEL;
         return bucketScore(match.score);

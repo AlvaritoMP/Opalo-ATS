@@ -101,6 +101,178 @@ export function buildLegacyFromColumnOrder(
     return aliases;
 }
 
+/** Campos de layout de tabla que el editor de proceso no debe sobrescribir al guardar */
+export const BULK_TABLE_LAYOUT_CONFIG_KEYS = [
+    'customColumns',
+    'columnOrder',
+    'hiddenColumns',
+    'pinnedColumns',
+    'columnWidths',
+    'columnKeyAliases',
+    'idealProfile',
+    'customStats',
+] as const satisfies readonly (keyof BulkProcessConfig)[];
+
+/** Copia campos de layout de tabla desde la config de BD (para merges seguros al guardar) */
+export function pickBulkTableLayoutConfig(
+    bulkConfig?: BulkProcessConfig
+): Partial<BulkProcessConfig> {
+    if (!bulkConfig) return {};
+    const picked: Partial<BulkProcessConfig> = {};
+    for (const key of BULK_TABLE_LAYOUT_CONFIG_KEYS) {
+        const value = bulkConfig[key];
+        if (value !== undefined) {
+            (picked as Record<string, unknown>)[key] = value;
+        }
+    }
+    return picked;
+}
+
+export interface BulkTableLayoutSnapshot {
+    columnOrder: string[];
+    hiddenColumns: string[];
+    pinnedColumns?: string[];
+    columnWidths?: Record<string, number>;
+    savedAt?: string;
+}
+
+export function getBulkTableLayoutBackupKey(processId: string): string {
+    return `opalo_bulk_table_layout_v1_${processId}`;
+}
+
+export function loadBulkTableLayoutBackup(processId: string): BulkTableLayoutSnapshot | null {
+    try {
+        const raw = localStorage.getItem(getBulkTableLayoutBackupKey(processId));
+        if (!raw) return null;
+        const parsed = JSON.parse(raw) as BulkTableLayoutSnapshot;
+        if (!parsed?.columnOrder?.length) return null;
+        return parsed;
+    } catch {
+        return null;
+    }
+}
+
+export function saveBulkTableLayoutBackup(processId: string, layout: BulkTableLayoutSnapshot): void {
+    try {
+        localStorage.setItem(
+            getBulkTableLayoutBackupKey(processId),
+            JSON.stringify({ ...layout, savedAt: new Date().toISOString() })
+        );
+    } catch {
+        /* ignore quota */
+    }
+}
+
+interface TableTemplateCandidate {
+    columnOrder: string[];
+    hiddenColumns: string[];
+    columns: CustomColumn[];
+}
+
+/** Busca plantilla guardada en localStorage que coincida con las columnas del proceso */
+export function findBestTableTemplate(customColumns: CustomColumn[] = []): TableTemplateCandidate | null {
+    if (customColumns.length === 0) return null;
+    try {
+        const saved = localStorage.getItem('bulkProcessesTableTemplates');
+        if (!saved) return null;
+        const templates = JSON.parse(saved) as {
+            columnOrder?: string[];
+            hiddenColumns?: string[];
+            columns?: CustomColumn[];
+        }[];
+        const targetNames = new Set(customColumns.map(c => normalizeColumnNameKey(c.name)));
+        let best: TableTemplateCandidate | null = null;
+        let bestScore = 0;
+        for (const t of templates) {
+            const tCols = t.columns || [];
+            if (tCols.length === 0) continue;
+            const tNames = tCols.map(c => normalizeColumnNameKey(c.name));
+            let matches = 0;
+            for (const n of tNames) {
+                if (targetNames.has(n)) matches++;
+            }
+            const score = matches / Math.max(targetNames.size, tNames.length);
+            if (score > bestScore && score >= 0.55) {
+                bestScore = score;
+                best = {
+                    columnOrder: t.columnOrder || [],
+                    hiddenColumns: t.hiddenColumns || [],
+                    columns: tCols,
+                };
+            }
+        }
+        return best;
+    } catch {
+        return null;
+    }
+}
+
+/** Puntuación: más columnas custom mezcladas entre columnas base (no solo al final). */
+export function scoreColumnLayoutInterleaving(
+    order: string[],
+    customColumns: CustomColumn[] = []
+): number {
+    if (order.length === 0 || customColumns.length === 0) return 0;
+    const customs = order.filter(id => id.startsWith('custom_'));
+    if (customs.length === 0) return 0;
+    const lastStandardIdx = DEFAULT_COLUMN_ORDER.reduce((max, id) => {
+        const idx = order.indexOf(id);
+        return idx > max ? idx : max;
+    }, -1);
+    const interleavedCount = customs.filter(id => order.indexOf(id) <= lastStandardIdx).length;
+    const trailingCount = customs.length - interleavedCount;
+    return interleavedCount * 100 - trailingCount * 5 + customs.length;
+}
+
+/** Remapea un columnOrder guardado (plantilla/backup) a los IDs actuales de columnas custom */
+export function remapLayoutOrderToCurrentColumns(
+    order: string[],
+    layoutCustomColumns: CustomColumn[] | undefined,
+    currentCustomColumns: CustomColumn[],
+    bulkConfig?: BulkProcessConfig
+): string[] {
+    const allIds = new Set(buildAllColumnIds(currentCustomColumns));
+    const nameToCurrentId = new Map(
+        currentCustomColumns.map(c => [normalizeColumnNameKey(c.name), `custom_${c.id}`])
+    );
+    const layoutIdToName = new Map<string, string>();
+    for (const col of layoutCustomColumns || []) {
+        if (col.id && col.name) layoutIdToName.set(col.id, col.name);
+    }
+    const legacyToName = buildLegacyColumnIdToName(bulkConfig, currentCustomColumns);
+
+    const out: string[] = [];
+    const seen = new Set<string>();
+    const usedCustom = new Set<string>();
+
+    const mapCustom = (colId: string): string | null => {
+        if (allIds.has(colId) && !usedCustom.has(colId)) {
+            usedCustom.add(colId);
+            return colId;
+        }
+        const bare = colId.slice('custom_'.length);
+        const name = layoutIdToName.get(bare) || legacyToName[bare];
+        if (name) {
+            const mapped = nameToCurrentId.get(normalizeColumnNameKey(name));
+            if (mapped && !usedCustom.has(mapped)) {
+                usedCustom.add(mapped);
+                return mapped;
+            }
+        }
+        return null;
+    };
+
+    for (const raw of order) {
+        if (!raw || typeof raw !== 'string') continue;
+        const id = raw.startsWith('custom_') ? mapCustom(raw) : (allIds.has(raw) ? raw : null);
+        if (id && !seen.has(id)) {
+            out.push(id);
+            seen.add(id);
+        }
+    }
+    return out;
+}
+
 /**
  * Detecta claves huérfanas en bulk_column_values y las asocia a columnas vacías
  * (misma cantidad → emparejamiento por orden de creación del ID).
@@ -629,6 +801,178 @@ export function buildAllColumnIds(customColumns: CustomColumn[] = []): string[] 
     return [...DEFAULT_COLUMN_ORDER, ...getCustomColumnIds(customColumns)];
 }
 
+/** Orden de columnas para el menú Columnas: respeta columnOrder y añade las que falten al final. */
+export function buildColumnConfigIds(
+    columnOrder: string[],
+    customColumns: CustomColumn[] = []
+): string[] {
+    const allIds = buildAllColumnIds(customColumns);
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const colId of columnOrder) {
+        if (colId && allIds.includes(colId) && !seen.has(colId)) {
+            out.push(colId);
+            seen.add(colId);
+        }
+    }
+    for (const colId of allIds) {
+        if (!seen.has(colId)) out.push(colId);
+    }
+    return out;
+}
+
+/** Columnas visibles en la tabla: respeta columnOrder e hiddenColumns de bulk_config. */
+export function buildVisibleColumnIds(
+    columnOrder: string[],
+    hiddenColumns: string[],
+    customColumns: CustomColumn[] = []
+): string[] {
+    const hidden = new Set(hiddenColumns);
+    return columnOrder.filter(colId => {
+        if (!colId || hidden.has(colId)) return false;
+        if (colId.startsWith('custom_')) {
+            const bare = colId.slice('custom_'.length);
+            return customColumns.some(c => c.id === bare);
+        }
+        return (
+            DEFAULT_COLUMN_ORDER.includes(colId) ||
+            colId === HIRED_STAGE_USER_COLUMN_ID
+        );
+    });
+}
+
+/**
+ * Mapea IDs antiguos en columnOrder (p. ej. custom_* recreados) al ID actual
+ * usando aliases, posición en el orden guardado y nombre de columna.
+ */
+export function remapStoredColumnOrderIds(
+    storedOrder: string[] | undefined,
+    bulkConfig: BulkProcessConfig | undefined,
+    customColumns: CustomColumn[] = []
+): string[] {
+    if (!storedOrder?.length) return [];
+
+    const migrated = migrateBulkColumnOrder(storedOrder);
+    const allIds = new Set(buildAllColumnIds(customColumns));
+    const nameToCurrentId = new Map(
+        customColumns.map(c => [normalizeColumnNameKey(c.name), `custom_${c.id}`])
+    );
+    const legacyToName = buildLegacyColumnIdToName(bulkConfig, customColumns);
+    const positionAliases = buildLegacyFromColumnOrder(bulkConfig, customColumns);
+    const customSlotsInOrder = migrated.filter(id => id.startsWith('custom_'));
+    const usedCurrentCustom = new Set<string>();
+
+    const mapCustomColId = (colId: string): string | null => {
+        if (allIds.has(colId) && !usedCurrentCustom.has(colId)) {
+            usedCurrentCustom.add(colId);
+            return colId;
+        }
+        const bare = colId.slice('custom_'.length);
+        const name = legacyToName[bare] || positionAliases[bare];
+        if (name) {
+            const mapped = nameToCurrentId.get(normalizeColumnNameKey(name));
+            if (mapped && !usedCurrentCustom.has(mapped)) {
+                usedCurrentCustom.add(mapped);
+                return mapped;
+            }
+        }
+        const slotIdx = customSlotsInOrder.indexOf(colId);
+        if (slotIdx >= 0) {
+            for (let i = slotIdx; i < customColumns.length; i++) {
+                const mapped = `custom_${customColumns[i].id}`;
+                if (!usedCurrentCustom.has(mapped)) {
+                    usedCurrentCustom.add(mapped);
+                    return mapped;
+                }
+            }
+        }
+        for (const col of customColumns) {
+            const mapped = `custom_${col.id}`;
+            if (!usedCurrentCustom.has(mapped)) {
+                usedCurrentCustom.add(mapped);
+                return mapped;
+            }
+        }
+        return null;
+    };
+
+    const out: string[] = [];
+    const seen = new Set<string>();
+    for (const raw of migrated) {
+        if (!raw || typeof raw !== 'string') continue;
+        const id = raw.startsWith('custom_') ? mapCustomColId(raw) : (allIds.has(raw) ? raw : null);
+        if (id && !seen.has(id)) {
+            out.push(id);
+            seen.add(id);
+        }
+    }
+    return out;
+}
+
+/** Mapea hiddenColumns con IDs legacy al ID de columna actual. */
+export function remapHiddenColumnIds(
+    hiddenColumns: string[] | undefined,
+    bulkConfig: BulkProcessConfig | undefined,
+    customColumns: CustomColumn[] = []
+): string[] {
+    if (!hiddenColumns?.length) return [];
+
+    const allIds = new Set(buildAllColumnIds(customColumns));
+    const nameToCurrentId = new Map(
+        customColumns.map(c => [normalizeColumnNameKey(c.name), `custom_${c.id}`])
+    );
+    const legacyToName = buildLegacyColumnIdToName(bulkConfig, customColumns);
+    const positionAliases = buildLegacyFromColumnOrder(bulkConfig, customColumns);
+    const out: string[] = [];
+    const seen = new Set<string>();
+
+    for (const raw of hiddenColumns) {
+        if (!raw || typeof raw !== 'string') continue;
+        let id = raw;
+        if (id.startsWith('custom_') && !allIds.has(id)) {
+            const bare = id.slice('custom_'.length);
+            const name = legacyToName[bare] || positionAliases[bare];
+            if (name) {
+                const mapped = nameToCurrentId.get(normalizeColumnNameKey(name));
+                if (mapped) id = mapped;
+            }
+        }
+        if (allIds.has(id) && !seen.has(id)) {
+            out.push(id);
+            seen.add(id);
+        }
+    }
+    return out;
+}
+
+/** Mapea pinnedColumns con IDs legacy al ID de columna actual. */
+export function remapPinnedColumnIds(
+    pinnedColumns: string[] | undefined,
+    bulkConfig: BulkProcessConfig | undefined,
+    customColumns: CustomColumn[] = []
+): string[] {
+    const remapped = remapHiddenColumnIds(pinnedColumns, bulkConfig, customColumns);
+    return remapped.length > 0 ? remapped : ['name'];
+}
+
+/** ¿El layout guardado usa IDs custom antiguos distintos a los actuales? */
+function storedLayoutUsesLegacyCustomIds(
+    bulkConfig: BulkProcessConfig | undefined,
+    customColumns: CustomColumn[] = []
+): boolean {
+    const currentIds = new Set(buildAllColumnIds(customColumns));
+    for (const id of bulkConfig?.columnOrder || []) {
+        if (id?.startsWith('custom_') && !currentIds.has(id)) return true;
+    }
+    for (const id of bulkConfig?.hiddenColumns || []) {
+        if (id?.startsWith('custom_') && !currentIds.has(id)) return true;
+    }
+    for (const id of bulkConfig?.pinnedColumns || []) {
+        if (id?.startsWith('custom_') && !currentIds.has(id)) return true;
+    }
+    return false;
+}
+
 export function resolveColumnOrder(
     bulkConfig?: BulkProcessConfig,
     customColumns: CustomColumn[] = []
@@ -636,30 +980,215 @@ export function resolveColumnOrder(
     const allIds = buildAllColumnIds(customColumns);
 
     if (bulkConfig?.columnOrder?.length) {
-        const migrated = migrateBulkColumnOrder(bulkConfig.columnOrder);
-        const ordered = migrated.filter(id => allIds.includes(id));
-        let missing = allIds.filter(id => !ordered.includes(id));
+        let ordered = remapStoredColumnOrderIds(bulkConfig.columnOrder, bulkConfig, customColumns);
+        ordered = migrateBulkColumnOrder(ordered).filter(
+            id => allIds.includes(id) || id === HIRED_STAGE_USER_COLUMN_ID
+        );
+        ordered = ensureHiredStageUserColumnInOrder(ordered).filter(
+            id => allIds.includes(id) || id === HIRED_STAGE_USER_COLUMN_ID
+        );
 
-        if (missing.includes(CONTACT_LAST_USER_COLUMN_ID)) {
-            missing = missing.filter(id => id !== CONTACT_LAST_USER_COLUMN_ID);
-            let lastContactIdx = -1;
-            for (let i = 0; i < ordered.length; i++) {
-                if (CONTACT_COLUMN_IDS.includes(ordered[i])) lastContactIdx = i;
-            }
-            ordered.splice(lastContactIdx >= 0 ? lastContactIdx + 1 : ordered.length, 0, CONTACT_LAST_USER_COLUMN_ID);
+        // Solo columnas custom nuevas (creadas después del backup), no reinsertar estándar omitidas en BD
+        const present = new Set(ordered);
+        for (const id of getCustomColumnIds(customColumns)) {
+            if (!present.has(id)) ordered.push(id);
         }
-
-        if (missing.includes(HIRED_STAGE_USER_COLUMN_ID)) {
-            missing = missing.filter(id => id !== HIRED_STAGE_USER_COLUMN_ID);
-        }
-        const withHiredCol = ensureHiredStageUserColumnInOrder(ordered);
-        ordered.length = 0;
-        ordered.push(...withHiredCol.filter(id => allIds.includes(id) || id === HIRED_STAGE_USER_COLUMN_ID));
-
-        return [...ordered, ...missing.filter(id => id !== HIRED_STAGE_USER_COLUMN_ID)];
+        return ordered;
     }
 
     return allIds;
+}
+
+/** Reordena columnas visibles tras drag & drop preservando posiciones de columnas ocultas. */
+export function reorderBulkColumnOrderByVisibleDrag(
+    columnOrder: string[],
+    hiddenColumns: string[],
+    draggedColId: string,
+    targetColId: string
+): string[] | null {
+    const hidden = new Set(hiddenColumns);
+    const visibleOrder = columnOrder.filter(id => !hidden.has(id));
+    const fromIndex = visibleOrder.indexOf(draggedColId);
+    const toIndex = visibleOrder.indexOf(targetColId);
+    if (fromIndex === -1 || toIndex === -1) return null;
+
+    const reorderedVisible = [...visibleOrder];
+    reorderedVisible.splice(fromIndex, 1);
+    reorderedVisible.splice(toIndex, 0, draggedColId);
+
+    const queue = [...reorderedVisible];
+    return columnOrder.map(colId => {
+        if (hidden.has(colId)) return colId;
+        if (queue.length === 0) return colId;
+        return queue.shift()!;
+    }).concat(queue);
+}
+
+/** Inserta profileMatch en el orden sin dejar huecos (evita splice(1,0) sobre array vacío). */
+export function ensureProfileMatchInColumnOrder(order: string[]): string[] {
+    if (order.includes('profileMatch')) {
+        return order.filter((id): id is string => typeof id === 'string' && id.length > 0);
+    }
+    const clean = order.filter((id): id is string => typeof id === 'string' && id.length > 0);
+    const scoreIdx = clean.indexOf('scoreIa');
+    if (scoreIdx >= 0) {
+        const next = [...clean];
+        next.splice(scoreIdx + 1, 0, 'profileMatch');
+        return next;
+    }
+    const nameIdx = clean.indexOf('name');
+    const next = [...clean];
+    next.splice(nameIdx >= 0 ? nameIdx + 1 : 0, 0, 'profileMatch');
+    return next;
+}
+
+/** true si las columnas custom están solo al final (típico tras bugs de layout). */
+export function isBulkTableLayoutLikelyCorrupted(
+    columnOrder: string[],
+    customColumns: CustomColumn[] = []
+): boolean {
+    if (customColumns.length < 2 || columnOrder.length === 0) return false;
+    const customs = columnOrder.filter(id => id.startsWith('custom_'));
+    if (customs.length === 0) return true;
+    return scoreColumnLayoutInterleaving(columnOrder, customColumns) < 50;
+}
+
+export interface RecoveredLocalLayout {
+    columnOrder: string[];
+    hiddenColumns: string[];
+    pinnedColumns: string[];
+    source: 'backup' | 'template';
+    score: number;
+}
+
+/** Recupera diseño desde respaldo local del navegador o plantilla guardada (sin tocar candidatos). */
+export function recoverLayoutFromLocalSources(
+    processId: string,
+    bulkConfig: BulkProcessConfig | undefined,
+    customColumns: CustomColumn[] = []
+): RecoveredLocalLayout | null {
+    if (!processId) return null;
+
+    type Candidate = RecoveredLocalLayout;
+    const candidates: Candidate[] = [];
+
+    const backup = loadBulkTableLayoutBackup(processId);
+    if (backup?.columnOrder?.length) {
+        const order = remapLayoutOrderToCurrentColumns(
+            backup.columnOrder,
+            undefined,
+            customColumns,
+            bulkConfig
+        );
+        if (order.length > 0) {
+            candidates.push({
+                columnOrder: order,
+                hiddenColumns: backup.hiddenColumns || [],
+                pinnedColumns: backup.pinnedColumns?.length ? backup.pinnedColumns : ['name'],
+                source: 'backup',
+                score: scoreColumnLayoutInterleaving(order, customColumns),
+            });
+        }
+    }
+
+    const template = findBestTableTemplate(customColumns);
+    if (template?.columnOrder?.length) {
+        const order = remapLayoutOrderToCurrentColumns(
+            template.columnOrder,
+            template.columns,
+            customColumns,
+            bulkConfig
+        );
+        if (order.length > 0) {
+            candidates.push({
+                columnOrder: order,
+                hiddenColumns: template.hiddenColumns || [],
+                pinnedColumns: template.pinnedColumns?.length ? template.pinnedColumns : ['name'],
+                source: 'template',
+                score: scoreColumnLayoutInterleaving(order, customColumns) + 1,
+            });
+        }
+    }
+
+    if (candidates.length === 0) return null;
+    return candidates.sort((a, b) => b.score - a.score)[0];
+}
+
+function applyIdealProfileLayoutRules(
+    columnOrder: string[],
+    hiddenColumns: string[],
+    bulkConfig?: BulkProcessConfig
+): { columnOrder: string[]; hiddenColumns: string[] } {
+    let order = columnOrder;
+    let hidden = hiddenColumns;
+    if (bulkConfig?.idealProfile?.enabled) {
+        order = ensureProfileMatchInColumnOrder(order);
+        hidden = hidden.filter(id => id !== 'profileMatch');
+    }
+    if (order.length > 0 && order.every(id => hidden.includes(id))) {
+        hidden = [];
+    }
+    return { columnOrder: order, hiddenColumns: hidden };
+}
+
+/**
+ * Aplica layout de tabla desde bulk_config (Supabase): orden, ocultas y fijadas.
+ * Si el diseño en BD parece corrupto, intenta recuperar del respaldo local del navegador.
+ */
+export function resolveBulkTableLayout(
+    processId: string,
+    bulkConfig: BulkProcessConfig | undefined,
+    customColumns: CustomColumn[] = []
+): {
+    columnOrder: string[];
+    hiddenColumns: string[];
+    pinnedColumns: string[];
+    needsPersist: boolean;
+    recoveredFrom?: 'local';
+    localSource?: 'backup' | 'template';
+} {
+    let columnOrder = resolveColumnOrder(bulkConfig, customColumns);
+    let hiddenColumns = remapHiddenColumnIds(bulkConfig?.hiddenColumns, bulkConfig, customColumns);
+    let pinnedColumns = remapPinnedColumnIds(bulkConfig?.pinnedColumns, bulkConfig, customColumns);
+
+    ({ columnOrder, hiddenColumns } = applyIdealProfileLayoutRules(columnOrder, hiddenColumns, bulkConfig));
+
+    let needsPersist = storedLayoutUsesLegacyCustomIds(bulkConfig, customColumns);
+    let recoveredFrom: 'local' | undefined;
+    let localSource: 'backup' | 'template' | undefined;
+
+    const dbScore = scoreColumnLayoutInterleaving(columnOrder, customColumns);
+    if (processId && isBulkTableLayoutLikelyCorrupted(columnOrder, customColumns)) {
+        const local = recoverLayoutFromLocalSources(processId, bulkConfig, customColumns);
+        if (local && local.score > dbScore + 5) {
+            columnOrder = local.columnOrder;
+            hiddenColumns = remapHiddenColumnIds(local.hiddenColumns, bulkConfig, customColumns);
+            pinnedColumns = remapPinnedColumnIds(local.pinnedColumns, bulkConfig, customColumns);
+            ({ columnOrder, hiddenColumns } = applyIdealProfileLayoutRules(columnOrder, hiddenColumns, bulkConfig));
+            needsPersist = true;
+            recoveredFrom = 'local';
+            localSource = local.source;
+        }
+    }
+
+    return { columnOrder, hiddenColumns, pinnedColumns, needsPersist, recoveredFrom, localSource };
+}
+
+/** @deprecated Usar resolveBulkTableLayout */
+export function repairIdealProfileColumnLayout(
+    bulkConfig: BulkProcessConfig | undefined,
+    customColumns: CustomColumn[] = []
+): {
+    columnOrder: string[];
+    hiddenColumns: string[];
+    needsPersist: boolean;
+} {
+    const layout = resolveBulkTableLayout('', bulkConfig, customColumns);
+    return {
+        columnOrder: layout.columnOrder,
+        hiddenColumns: layout.hiddenColumns,
+        needsPersist: layout.needsPersist,
+    };
 }
 
 export function getColumnLabel(
