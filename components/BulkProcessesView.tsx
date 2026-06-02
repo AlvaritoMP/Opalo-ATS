@@ -101,6 +101,7 @@ import { BulkEmailModal } from './BulkEmailModal';
 import { QuickScheduleModal } from './QuickScheduleModal';
 import { BulkScheduleModal } from './BulkScheduleModal';
 import { AddColumnModal } from './AddColumnModal';
+import { ManageCustomColumnsModal } from './ManageCustomColumnsModal';
 import { TableTemplateModal, BulkTableTemplateLayout } from './TableTemplateModal';
 import { PsycholaboralReportModal } from './PsycholaboralReportModal';
 import { PsycholaboralBulkEvaluateModal } from './PsycholaboralBulkEvaluateModal';
@@ -556,6 +557,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
     const [editValue, setEditValue] = useState('');
     const [customColumns, setCustomColumns] = useState<CustomColumn[]>([]);
     const [showAddColumnModal, setShowAddColumnModal] = useState(false);
+    const [showManageColumnsModal, setShowManageColumnsModal] = useState(false);
     const [editingColumn, setEditingColumn] = useState<CustomColumn | null>(null);
     const [showTemplateModal, setShowTemplateModal] = useState(false);
     const [showColumnConfig, setShowColumnConfig] = useState(false);
@@ -2085,6 +2087,19 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
         setEditingProcess(null);
     };
 
+    const openAddColumnModal = useCallback(() => {
+        setEditingColumn(null);
+        setShowManageColumnsModal(false);
+        setShowAddColumnModal(true);
+    }, []);
+
+    const openEditColumnModal = useCallback((column: CustomColumn) => {
+        setEditingColumn(column);
+        setShowManageColumnsModal(false);
+        setShowColumnConfig(false);
+        setShowAddColumnModal(true);
+    }, []);
+
     const handleAddColumn = async (column: CustomColumn) => {
         const newColumns = [...customColumns, column];
         const newOrder = [...columnOrder, `custom_${column.id}`];
@@ -2095,7 +2110,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
     };
 
     const handleEditColumn = async (column: CustomColumn) => {
-        const newColumns = customColumns.map(c => c.id === column.id ? column : c);
+        const newColumns = customColumns.map(c => (c.id === column.id ? column : c));
         setCustomColumns(newColumns);
         await persistBulkConfig({ customColumns: newColumns });
         setEditingColumn(null);
@@ -3523,12 +3538,20 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
 
                                     <BulkToolbarGroup label="Tabla">
                                         <button
-                                            onClick={() => setShowAddColumnModal(true)}
+                                            onClick={openAddColumnModal}
                                             className="bg-blue-600 text-white hover:bg-blue-700 transition-colors"
                                             title="Agregar columna personalizada"
                                         >
                                             <Plus className="w-4 h-4" />
                                             Agregar Columna
+                                        </button>
+                                        <button
+                                            onClick={() => setShowManageColumnsModal(true)}
+                                            className="bg-indigo-600 text-white hover:bg-indigo-700 transition-colors"
+                                            title="Editar columnas existentes (nombre, tipo, opciones de listas)"
+                                        >
+                                            <Edit className="w-4 h-4" />
+                                            Gestionar columnas
                                         </button>
                                         <button
                                             onClick={() => setShowTemplateModal(true)}
@@ -3570,7 +3593,9 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                                             </button>
                                                         )}
                                                     </div>
-                                                    <p className="text-[10px] text-gray-400 px-2 mb-2">📌 = fijar al hacer scroll horizontal</p>
+                                                    <p className="text-[10px] text-gray-400 px-2 mb-2">
+                                                        📌 = fijar al scroll · ✎ = editar columna (tipo y opciones)
+                                                    </p>
                                                     {columnConfigIds.map(colId => {
                                                         const colName = getColumnLabel(colId, customColumns);
                                                         const isCustom = colId.startsWith('custom_');
@@ -3602,10 +3627,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                                                             type="button"
                                                                             onClick={() => {
                                                                                 const col = customColumns.find(c => c.id === customColId);
-                                                                                if (col) {
-                                                                                    setEditingColumn(col);
-                                                                                    setShowAddColumnModal(true);
-                                                                                }
+                                                                                if (col) openEditColumnModal(col);
                                                                             }}
                                                                             className="p-1 text-gray-500 hover:text-primary-600 hover:bg-primary-50 rounded"
                                                                             title="Editar columna"
@@ -4052,10 +4074,26 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                                 onResizeStart={handleColumnResizeStart}
                                             >
                                                 <div className="flex flex-col gap-1">
-                                                    <button onClick={() => handleSort(colId)} className="flex items-center gap-1 hover:text-primary-600 transition-colors">
-                                                        <span className="normal-case">{col.name}</span>
-                                                        {sortColumn === colId ? (sortDirection === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />) : <div className="w-3 h-3 opacity-30"><ArrowUp className="w-3 h-3" /></div>}
-                                                    </button>
+                                                    <div className="flex items-center gap-0.5 min-w-0">
+                                                        <button
+                                                            onClick={() => handleSort(colId)}
+                                                            className="flex items-center gap-1 hover:text-primary-600 transition-colors min-w-0 flex-1"
+                                                        >
+                                                            <span className="normal-case truncate">{col.name}</span>
+                                                            {sortColumn === colId ? (sortDirection === 'asc' ? <ArrowUp className="w-3 h-3 shrink-0" /> : <ArrowDown className="w-3 h-3 shrink-0" />) : <div className="w-3 h-3 opacity-30 shrink-0"><ArrowUp className="w-3 h-3" /></div>}
+                                                        </button>
+                                                        <button
+                                                            type="button"
+                                                            onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                openEditColumnModal(col);
+                                                            }}
+                                                            className="p-0.5 text-gray-400 hover:text-primary-600 hover:bg-primary-50 rounded shrink-0"
+                                                            title="Editar columna (opciones, nombre, tipo)"
+                                                        >
+                                                            <Edit className="w-3 h-3" />
+                                                        </button>
+                                                    </div>
                                                     {col.type === 'select' && col.options ? (
                                                         <select
                                                             value={columnFilters[filterKey] || ''}
@@ -4484,7 +4522,8 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                                                     <option value="true">Sí</option>
                                                                     <option value="false">No</option>
                                                                 </select>
-                                                            ) : col.type === 'select' && col.options ? (
+                                                            ) : col.type === 'select' ? (
+                                                                col.options?.length ? (
                                                                 <select
                                                                     value={editValue}
                                                                     onChange={(e) => setEditValue(e.target.value)}
@@ -4497,6 +4536,15 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                                                     <option value="">-</option>
                                                                     {col.options.map(opt => <option key={opt} value={opt}>{opt}</option>)}
                                                                 </select>
+                                                                ) : (
+                                                                    <span
+                                                                        className="text-xs text-amber-700 cursor-pointer underline"
+                                                                        title="Editar columna para agregar opciones"
+                                                                        onClick={(e) => { e.stopPropagation(); openEditColumnModal(col); }}
+                                                                    >
+                                                                        Sin opciones — editar columna
+                                                                    </span>
+                                                                )
                                                             ) : (
                                                                 <input
                                                                     type={col.type === 'number' ? 'number' : 'text'}
@@ -4759,6 +4807,17 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                     onClose={() => setShowBulkScheduleModal(false)}
                     candidateCount={selectedIds.size}
                     onSchedule={handleBulkSchedule}
+                />
+            )}
+
+            {showManageColumnsModal && (
+                <ManageCustomColumnsModal
+                    isOpen={showManageColumnsModal}
+                    onClose={() => setShowManageColumnsModal(false)}
+                    columns={customColumns}
+                    onEdit={openEditColumnModal}
+                    onDelete={handleDeleteColumn}
+                    onAdd={openAddColumnModal}
                 />
             )}
 

@@ -31,7 +31,16 @@ export const AddColumnModal: React.FC<AddColumnModalProps> = ({
         if (isOpen && editingColumn) {
             setName(editingColumn.name);
             setType(editingColumn.type);
-            setOptions(editingColumn.options?.length ? [...editingColumn.options] : ['']);
+            const opts = editingColumn.options?.filter(o => o != null && String(o).trim() !== '') ?? [];
+            setOptions(
+                editingColumn.type === 'select'
+                    ? opts.length > 0
+                        ? [...opts]
+                        : ['']
+                    : opts.length > 0
+                        ? [...opts]
+                        : ['']
+            );
             setRouteDestination(editingColumn.routeDestination || '');
             setReportNamePart(editingColumn.reportNamePart ?? '');
         } else if (isOpen) {
@@ -176,6 +185,11 @@ export const AddColumnModal: React.FC<AddColumnModalProps> = ({
                             <label className="block text-sm font-medium text-gray-700 mb-1">
                                 Opciones de Selección
                             </label>
+                            {isEditing && (
+                                <p className="text-xs text-gray-500 mb-2">
+                                    Agregue o modifique opciones aquí; los cambios se aplican a toda la tabla al guardar.
+                                </p>
+                            )}
                             <div className="space-y-2">
                                 {options.map((option, index) => (
                                     <div key={index} className="flex gap-2 items-center">
