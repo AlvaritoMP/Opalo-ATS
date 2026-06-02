@@ -1,6 +1,8 @@
 /**
  * Abre composición de correo sin congelar la SPA.
- * Evita window.location.href = mailto: (bloquea si no hay cliente de correo en el PC).
+ * Usa mailto: en pestaña nueva — el navegador/OS abre el gestor configurado
+ * (cliente de escritorio o webmail predeterminado: Gmail, Outlook, Yahoo, etc.).
+ * No forzamos Google ni Microsoft.
  */
 
 export interface OpenMailComposeOptions {
@@ -11,39 +13,21 @@ export interface OpenMailComposeOptions {
 
 export interface OpenMailComposeResult {
     recipientCount: number;
-    /** mailto en pestaña nueva, o Gmail si la URL era demasiado larga */
-    method: 'mailto' | 'gmail';
+    /** true si el cuerpo completo solo está en el portapapeles (URL mailto demasiado larga) */
+    bodyTruncatedInMailto: boolean;
     copiedToClipboard: boolean;
 }
 
-/** Límite práctico de longitud para mailto: en muchos navegadores ~2 KB */
+/** Límite práctico de longitud para mailto en navegadores */
 const MAILTO_MAX_HREF_LENGTH = 1800;
 
 export function buildMailtoHref(to: string[], subject: string, body: string): string {
     const emails = to.map(e => e?.trim()).filter(Boolean).join(';');
-    return `mailto:${emails}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
-}
-
-export function buildGmailComposeUrl(to: string[], subject: string, body: string): string {
-    const toParam = to.map(e => e?.trim()).filter(Boolean).join(',');
-    const params = new URLSearchParams({
-        view: 'cm',
-        fs: '1',
-        to: toParam,
-        su: subject,
-        body,
-    });
-    return `https://mail.google.com/mail/?${params.toString()}`;
-}
-
-export function buildOutlookWebComposeUrl(to: string[], subject: string, body: string): string {
-    const toParam = to.map(e => e?.trim()).filter(Boolean).join(';');
-    const params = new URLSearchParams({
-        to: toParam,
-        subject,
-        body,
-    });
-    return `https://outlook.live.com/mail/0/deeplink/compose?${params.toString()}`;
+    const params = new URLSearchParams();
+    if (subject) params.set('subject', subject);
+    if (body) params.set('body', body);
+    const qs = params.toString();
+    return qs ? `mailto:${emails}?${qs}` : `mailto:${emails}`;
 }
 
 function openInNewTab(url: string): boolean {
@@ -75,16 +59,7 @@ export async function copyMailComposeDraft(
     body: string
 ): Promise<boolean> {
     const validTo = to.map(e => e?.trim()).filter(Boolean);
-    const text = [
-        `Para: ${validTo.join(', ')}`,
-        `Asunto: ${subject}`,
-        '',
-        body,
-        '',
-        '---',
-        'Gmail (pegar en nuevo mensaje): https://mail.google.com',
-        'Outlook web: https://outlook.live.com',
-    ].join('\n');
+    const text = [`Para: ${validTo.join(', ')}`, `Asunto: ${subject}`, '', body].join('\n');
 
     try {
         await navigator.clipboard.writeText(text);
@@ -95,7 +70,7 @@ export async function copyMailComposeDraft(
 }
 
 /**
- * Abre el correo en una pestaña nueva (no navega la app) y copia borrador al portapapeles.
+ * Abre mailto en pestaña nueva (no navega la app) y copia borrador al portapapeles.
  */
 export async function openMailCompose(
     options: OpenMailComposeOptions
@@ -105,35 +80,35 @@ export async function openMailCompose(
 
     const copiedToClipboard = await copyMailComposeDraft(validTo, subject, body);
 
-    const mailtoHref = buildMailtoHref(validTo, subject, body);
-    let method: OpenMailComposeResult['method'] = 'mailto';
+    const fullHref = buildMailtoHref(validTo, subject, body);
+    let bodyTruncatedInMailto = false;
 
-    if (mailtoHref.length > MAILTO_MAX_HREF_LENGTH) {
-        openInNewTab(buildGmailComposeUrl(validTo, subject, body));
-        method = 'gmail';
+    if (fullHref.length > MAILTO_MAX_HREF_LENGTH) {
+        const shortHref = buildMailtoHref(validTo, subject, '');
+        openInNewTab(shortHref.length <= MAILTO_MAX_HREF_LENGTH ? shortHref : buildMailtoHref(validTo, '', ''));
+        bodyTruncatedInMailto = true;
     } else {
-        openInNewTab(mailtoHref);
+        openInNewTab(fullHref);
     }
 
     return {
         recipientCount: validTo.length,
-        method,
+        bodyTruncatedInMailto,
         copiedToClipboard,
     };
 }
 
-/** Mensaje de toast según resultado (para webmail sin cliente en PC). */
 export function getMailComposeToastMessage(result: OpenMailComposeResult): string {
     const n = result.recipientCount;
     const countLabel = n === 1 ? '1 destinatario' : `${n} destinatarios`;
 
-    if (result.method === 'gmail') {
+    if (result.bodyTruncatedInMailto) {
         return result.copiedToClipboard
-            ? `Gmail abierto en nueva pestaña (${countLabel}). Borrador copiado al portapapeles.`
-            : `Gmail abierto en nueva pestaña (${countLabel}).`;
+            ? `Correo abierto (${countLabel}). El mensaje completo está en el portapapeles — pégalo en tu cliente web.`
+            : `Correo abierto (${countLabel}). El mensaje es largo: copia el texto manualmente si hace falta.`;
     }
 
     return result.copiedToClipboard
-        ? `Correo abierto en nueva pestaña (${countLabel}). Si no se abre, pega el borrador en Gmail u Outlook web.`
-        : `Correo abierto en nueva pestaña (${countLabel}). Si no se abre, usa Gmail: mail.google.com`;
+        ? `Correo abierto (${countLabel}). Se usará tu cliente predeterminado. Borrador copiado por si usas correo web.`
+        : `Correo abierto (${countLabel}). Se usará el cliente de correo configurado en tu navegador.`;
 }

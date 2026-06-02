@@ -3,11 +3,22 @@ import { Candidate, CandidateHistory, PostIt, Comment, Attachment } from '../../
 import { processesApi } from './processes';
 import { convertirSalarioALetras } from '../numberToWords';
 import { APP_NAME } from '../appConfig';
+import { isMissingColumnError } from '../supabaseColumnErrors';
 
-const CANDIDATE_LIST_SELECT =
-    'id, name, email, phone, phone2, process_id, stage_id, description, avatar_url, source, salary_expectation, agreed_salary, agreed_salary_in_words, age, dni, linkedin_url, address, province, district, archived, archived_at, discarded, discard_reason, discarded_at, hire_date, google_drive_folder_id, google_drive_folder_name, visible_to_clients, offer_accepted_date, application_started_date, application_completed_date, critical_stage_reviewed_at, created_at, application_count, first_application_at';
+const CANDIDATE_LIST_SELECT_CORE =
+    'id, name, email, phone, phone2, process_id, stage_id, description, avatar_url, source, salary_expectation, agreed_salary, agreed_salary_in_words, age, dni, linkedin_url, address, province, district, archived, archived_at, discarded, discard_reason, discarded_at, hire_date, google_drive_folder_id, google_drive_folder_name, visible_to_clients, offer_accepted_date, application_started_date, application_completed_date, critical_stage_reviewed_at, created_at';
 
-const CANDIDATE_LIST_SELECT_WITH_BULK = `${CANDIDATE_LIST_SELECT}, bulk_column_values`;
+const CANDIDATE_LIST_SELECT = `${CANDIDATE_LIST_SELECT_CORE}, application_count, first_application_at`;
+
+/** Variantes de select (de más completa a mínima) si faltan migraciones en Supabase */
+function getCandidateListSelectVariants(): string[] {
+    return [
+        `${CANDIDATE_LIST_SELECT}, bulk_column_values`,
+        CANDIDATE_LIST_SELECT,
+        `${CANDIDATE_LIST_SELECT_CORE}, bulk_column_values`,
+        CANDIDATE_LIST_SELECT_CORE,
+    ];
+}
 
 function mapBulkColumnValues(dbCandidate: { bulk_column_values?: unknown }): Record<string, unknown> | undefined {
     const raw = dbCandidate.bulk_column_values;
@@ -15,14 +26,17 @@ function mapBulkColumnValues(dbCandidate: { bulk_column_values?: unknown }): Rec
     return raw as Record<string, unknown>;
 }
 
-function isMissingBulkColumnValuesError(error: { message?: string; code?: string } | null): boolean {
-    if (!error) return false;
-    const msg = (error.message || '').toLowerCase();
-    return (
-        error.code === '42703' ||
-        msg.includes('bulk_column_values') ||
-        (msg.includes('column') && msg.includes('candidates'))
-    );
+async function fetchCandidatesWithSelectFallback(
+    buildQuery: (selectFields: string) => ReturnType<typeof supabase.from>
+): Promise<{ data: any[] | null; error: { message?: string; code?: string } | null }> {
+    let lastError: { message?: string; code?: string } | null = null;
+    for (const selectFields of getCandidateListSelectVariants()) {
+        const { data, error } = await buildQuery(selectFields);
+        if (!error) return { data: data || [], error: null };
+        lastError = error;
+        if (!isMissingColumnError(error)) break;
+    }
+    return { data: null, error: lastError };
 }
 
 function mapListCandidate(dbCandidate: any, extras: Partial<Candidate> = {}): Candidate {
@@ -252,33 +266,18 @@ export const candidatesApi = {
     // OPTIMIZADO: Carga todas las relaciones en batch en lugar de N+1 queries
     // OPTIMIZADO EGRESS: Selecciona solo campos necesarios, attachments/comments se cargan lazy
     async getAll(includeArchived: boolean = false, includeRelations: boolean = true): Promise<Candidate[]> {
-        // Seleccionar solo campos básicos para reducir egress (solo de esta app)
-        let query = supabase
-            .from('candidates')
-            .select(CANDIDATE_LIST_SELECT_WITH_BULK)
-            .eq('app_name', APP_NAME) // Filtrar solo candidatos de esta app
-            .order('created_at', { ascending: false })
-            .limit(200); // Reducir límite para reducir egress
-        
-        if (!includeArchived) {
-            query = query.eq('archived', false);
-        }
-
-        let { data, error } = await query;
-        if (error && isMissingBulkColumnValuesError(error)) {
-            let fallbackQuery = supabase
+        const { data, error } = await fetchCandidatesWithSelectFallback((selectFields) => {
+            let query = supabase
                 .from('candidates')
-                .select(CANDIDATE_LIST_SELECT)
+                .select(selectFields)
                 .eq('app_name', APP_NAME)
                 .order('created_at', { ascending: false })
                 .limit(200);
             if (!includeArchived) {
-                fallbackQuery = fallbackQuery.eq('archived', false);
+                query = query.eq('archived', false);
             }
-            const fallback = await fallbackQuery;
-            data = fallback.data;
-            error = fallback.error;
-        }
+            return query;
+        });
         if (error) throw error;
         if (!data || data.length === 0) return [];
 
@@ -408,27 +407,16 @@ export const candidatesApi = {
 
     /** Candidatos descartados y archivados (dashboard) — sin relaciones */
     async getDiscardedArchived(): Promise<Candidate[]> {
-        let { data, error } = await supabase
-            .from('candidates')
-            .select(CANDIDATE_LIST_SELECT_WITH_BULK)
-            .eq('app_name', APP_NAME)
-            .eq('discarded', true)
-            .eq('archived', true)
-            .order('created_at', { ascending: false })
-            .limit(200);
-
-        if (error && isMissingBulkColumnValuesError(error)) {
-            const fallback = await supabase
+        const { data, error } = await fetchCandidatesWithSelectFallback((selectFields) =>
+            supabase
                 .from('candidates')
-                .select(CANDIDATE_LIST_SELECT)
+                .select(selectFields)
                 .eq('app_name', APP_NAME)
                 .eq('discarded', true)
                 .eq('archived', true)
                 .order('created_at', { ascending: false })
-                .limit(200);
-            data = fallback.data;
-            error = fallback.error;
-        }
+                .limit(200)
+        );
 
         if (error) throw error;
         if (!data?.length) return [];

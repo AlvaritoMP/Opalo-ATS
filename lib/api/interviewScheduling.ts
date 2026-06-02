@@ -1,5 +1,6 @@
 import { supabase } from '../supabase';
 import { APP_NAME } from '../appConfig';
+import { isMissingTableError } from '../supabaseColumnErrors';
 import type { InterviewEvent } from '../../types';
 
 export type InterviewSchedulingAction = 'scheduled' | 'rescheduled' | 'cancelled' | 'attended';
@@ -56,13 +57,12 @@ function timesChanged(prevStart?: string, nextStart?: string, prevInterviewer?: 
 
 let trackingTablesAvailable: boolean | null = null;
 
-function isMissingTrackingTableError(error: { message?: string; code?: string } | null): boolean {
+function isMissingTrackingTableError(error: { message?: string; code?: string; status?: number } | null): boolean {
     if (!error) return false;
     const msg = (error.message || '').toLowerCase();
     return (
-        error.code === '42P01' ||
-        msg.includes('interview_scheduling') ||
-        msg.includes('schema cache')
+        isMissingTableError(error) ||
+        msg.includes('interview_scheduling')
     );
 }
 
@@ -88,7 +88,13 @@ async function findOpenCycle(candidateId: string): Promise<InterviewSchedulingCy
         .limit(1)
         .maybeSingle();
 
-    if (error) throw error;
+    if (error) {
+        if (isMissingTrackingTableError(error)) {
+            trackingTablesAvailable = false;
+            return null;
+        }
+        throw error;
+    }
     if (!data) return null;
     return mapCycle(data);
 }
@@ -437,11 +443,17 @@ export const interviewSchedulingApi = {
             }
 
             const { data, error } = await query;
-            if (error) throw error;
+            if (error) {
+                if (isMissingTrackingTableError(error)) {
+                    trackingTablesAvailable = false;
+                    return [];
+                }
+                throw error;
+            }
             trackingTablesAvailable = true;
             return (data || []).map(row => mapLog(row as Record<string, unknown>));
         } catch (err: unknown) {
-            const e = err as { message?: string; code?: string };
+            const e = err as { message?: string; code?: string; status?: number };
             if (isMissingTrackingTableError(e)) {
                 trackingTablesAvailable = false;
                 return [];
@@ -468,11 +480,17 @@ export const interviewSchedulingApi = {
             }
 
             const { data, error } = await query;
-            if (error) throw error;
+            if (error) {
+                if (isMissingTrackingTableError(error)) {
+                    trackingTablesAvailable = false;
+                    return [];
+                }
+                throw error;
+            }
             trackingTablesAvailable = true;
             return (data || []).map(row => mapCycle(row as Record<string, unknown>));
         } catch (err: unknown) {
-            const e = err as { message?: string; code?: string };
+            const e = err as { message?: string; code?: string; status?: number };
             if (isMissingTrackingTableError(e)) {
                 trackingTablesAvailable = false;
                 return [];

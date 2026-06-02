@@ -14,6 +14,7 @@ import type { BulkProcessConfig } from '../../types';
 import { readChannelSummaryFromRow } from '../contactChannelConfig';
 import type { ChannelContactSummary } from '../contactChannelConfig';
 import { buildInterviewMapFromRows } from '../bulkInterviewUtils';
+import { isMissingColumnError } from '../supabaseColumnErrors';
 
 /** Select mínimo — siempre disponible */
 const BULK_SELECT_BASE =
@@ -30,18 +31,6 @@ const BULK_SELECT_FULL = `${BULK_SELECT_WITH_APPLICATION}, bulk_column_values`;
 
 /** Cache del select que funcionó en este entorno (evita reintentos en cada página) */
 let cachedBulkSelect: string | null = null;
-
-function isMissingColumnError(error: { message?: string; code?: string } | null): boolean {
-    if (!error) return false;
-    const msg = (error.message || '').toLowerCase();
-    return (
-        error.code === '42703' ||
-        msg.includes('bulk_column_values') ||
-        msg.includes('schema cache') ||
-        msg.includes('could not find') ||
-        (msg.includes('column') && msg.includes('candidates'))
-    );
-}
 
 /** PostgREST 406 cuando .single() no encuentra fila (p. ej. candidato borrado o id obsoleto en localStorage) */
 function isNotFoundError(error: { message?: string; code?: string } | null): boolean {
