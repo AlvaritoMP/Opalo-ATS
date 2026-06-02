@@ -15,6 +15,8 @@ import {
     type ContactHourlyDistribution,
 } from '../lib/contactDashboardStats';
 import { computeHiringStageConsultantStats } from '../lib/hiringStageTracking';
+import { interviewSchedulingApi } from '../lib/api/interviewScheduling';
+import { computeInterviewSchedulingStats } from '../lib/interviewSchedulingStats';
 import {
     buildUserLookupForStats,
     enrichContactAttemptsForStats,
@@ -290,6 +292,9 @@ export const Dashboard: React.FC = () => {
 
     const [contactAttempts, setContactAttempts] = useState<Awaited<ReturnType<typeof contactTrackingApi.getAttemptsForProcesses>>>([]);
     const [contactStatsLoading, setContactStatsLoading] = useState(false);
+    const [schedulingLogs, setSchedulingLogs] = useState<Awaited<ReturnType<typeof interviewSchedulingApi.getLogsForProcesses>>>([]);
+    const [schedulingCycles, setSchedulingCycles] = useState<Awaited<ReturnType<typeof interviewSchedulingApi.getCyclesForProcesses>>>([]);
+    const [schedulingStatsLoading, setSchedulingStatsLoading] = useState(false);
 
     useEffect(() => {
         const bulkProcessIds = [
@@ -351,6 +356,40 @@ export const Dashboard: React.FC = () => {
                 if (!cancelled) setContactAttempts([]);
             } finally {
                 if (!cancelled) setContactStatsLoading(false);
+            }
+        })();
+
+        return () => {
+            cancelled = true;
+        };
+    }, [targetProcessIds]);
+
+    useEffect(() => {
+        if (targetProcessIds.length === 0) {
+            setSchedulingLogs([]);
+            setSchedulingCycles([]);
+            return;
+        }
+
+        let cancelled = false;
+        setSchedulingStatsLoading(true);
+        (async () => {
+            try {
+                const [logs, cycles] = await Promise.all([
+                    interviewSchedulingApi.getLogsForProcesses(targetProcessIds),
+                    interviewSchedulingApi.getCyclesForProcesses(targetProcessIds),
+                ]);
+                if (!cancelled) {
+                    setSchedulingLogs(logs);
+                    setSchedulingCycles(cycles);
+                }
+            } catch {
+                if (!cancelled) {
+                    setSchedulingLogs([]);
+                    setSchedulingCycles([]);
+                }
+            } finally {
+                if (!cancelled) setSchedulingStatsLoading(false);
             }
         })();
 
@@ -633,6 +672,23 @@ export const Dashboard: React.FC = () => {
     const contactStats = useMemo(
         () => computeContactDashboardStats(enrichedContactAttempts, contactConsultantPeriod),
         [enrichedContactAttempts, contactConsultantPeriod]
+    );
+
+    const filteredCandidateIdSet = useMemo(
+        () => new Set(filteredCandidates.map(c => c.id)),
+        [filteredCandidates]
+    );
+
+    const schedulingStats = useMemo(
+        () =>
+            computeInterviewSchedulingStats(
+                schedulingLogs,
+                schedulingCycles,
+                contactConsultantPeriod,
+                statsUsers,
+                filteredCandidateIdSet
+            ),
+        [schedulingLogs, schedulingCycles, contactConsultantPeriod, statsUsers, filteredCandidateIdSet]
     );
 
     const contactTrendOpts = useMemo(() => {
@@ -977,6 +1033,121 @@ export const Dashboard: React.FC = () => {
                                 <Bar dataKey="effective" name="Interesado" fill="#10b981" radius={[4, 4, 0, 0]} />
                             </BarChart>
                         </ChartContainer>
+                    </>
+                )}
+            </div>
+
+            <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm mb-8">
+                <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4 mb-4">
+                    <div>
+                        <h2 className="text-xl font-semibold text-gray-800 mb-1">Agendamiento de citas</h2>
+                        <p className="text-sm text-gray-500">
+                            Cuenta cada agenda y reagenda por trabajador. Las reagendas suman al mismo ciclo del candidato
+                            hasta marcar asistencia en la tabla masiva (icono verde en citas pasadas).
+                        </p>
+                    </div>
+                    <p className="text-xs text-gray-400 shrink-0">{schedulingStats.periodLabel}</p>
+                </div>
+
+                {schedulingStatsLoading ? (
+                    <p className="text-sm text-gray-500 py-6 text-center">Cargando datos de agendamiento…</p>
+                ) : schedulingStats.totalSchedulingActions === 0 ? (
+                    <p className="text-sm text-gray-500 py-6 text-center">
+                        Sin agendas registradas en {schedulingStats.periodLabel.toLowerCase()}.
+                        Ejecute la migración SQL de seguimiento de citas si acaba de desplegar esta función.
+                    </p>
+                ) : (
+                    <>
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+                            <StatCard
+                                icon={Calendar}
+                                title="Total agendas + reagendas"
+                                value={String(schedulingStats.totalSchedulingActions)}
+                                subtitle={`${schedulingStats.totalReschedules} reagenda${schedulingStats.totalReschedules !== 1 ? 's' : ''}`}
+                                color="bg-sky-500"
+                            />
+                            <StatCard
+                                icon={UserCheck}
+                                title="Citas con asistencia"
+                                value={String(schedulingStats.totalAttended)}
+                                subtitle={`${schedulingStats.openCycles} ciclo${schedulingStats.openCycles !== 1 ? 's' : ''} abierto${schedulingStats.openCycles !== 1 ? 's' : ''}`}
+                                color="bg-emerald-500"
+                            />
+                            <StatCard
+                                icon={TrendingUp}
+                                title="Promedio hasta asistir"
+                                value={
+                                    schedulingStats.avgActionsUntilAttendance !== null
+                                        ? String(schedulingStats.avgActionsUntilAttendance)
+                                        : 'N/D'
+                                }
+                                subtitle="Acciones (agenda + reagendas) por candidato que asistió"
+                                color="bg-amber-500"
+                            />
+                            <StatCard
+                                icon={Headphones}
+                                title="Quién más agenda"
+                                value={schedulingStats.topScheduler?.userName ?? 'N/D'}
+                                subtitle={
+                                    schedulingStats.topScheduler
+                                        ? `${schedulingStats.topScheduler.count} acción${schedulingStats.topScheduler.count !== 1 ? 'es' : ''}`
+                                        : 'Sin datos'
+                                }
+                                color="bg-violet-500"
+                            />
+                        </div>
+
+                        {schedulingStats.schedulerRankings.length > 0 && (
+                            <div className="mb-6">
+                                <h3 className="text-sm font-semibold text-gray-700 mb-2">Por quien agenda / reagenda</h3>
+                                <div className="overflow-x-auto">
+                                    <table className="min-w-full text-sm">
+                                        <thead>
+                                            <tr className="text-left text-gray-500 border-b">
+                                                <th className="py-2 pr-4">Trabajador</th>
+                                                <th className="py-2 pr-4">Agendas + reagendas</th>
+                                                <th className="py-2">Reagendas</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {schedulingStats.schedulerRankings.slice(0, 10).map(row => (
+                                                <tr key={row.name} className="border-b border-gray-100">
+                                                    <td className="py-2 pr-4 font-medium text-gray-800">{row.name}</td>
+                                                    <td className="py-2 pr-4">{row.agendas}</td>
+                                                    <td className="py-2">{row.reagendas}</td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        )}
+
+                        {schedulingStats.interviewerRankings.length > 0 && (
+                            <div>
+                                <h3 className="text-sm font-semibold text-gray-700 mb-2">Por entrevistador asignado</h3>
+                                <div className="overflow-x-auto">
+                                    <table className="min-w-full text-sm">
+                                        <thead>
+                                            <tr className="text-left text-gray-500 border-b">
+                                                <th className="py-2 pr-4">Entrevistador</th>
+                                                <th className="py-2 pr-4">Agendas + reagendas</th>
+                                                <th className="py-2">Reagendas</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {schedulingStats.interviewerRankings.slice(0, 10).map(row => (
+                                                <tr key={row.name} className="border-b border-gray-100">
+                                                    <td className="py-2 pr-4 font-medium text-gray-800">{row.name}</td>
+                                                    <td className="py-2 pr-4">{row.agendas}</td>
+                                                    <td className="py-2">{row.reagendas}</td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        )}
                     </>
                 )}
             </div>

@@ -1429,9 +1429,16 @@ const App: React.FC = () => {
             }
         },
         addInterviewEvent: async (eventData) => {
+            const actor = {
+                userId: state.currentUser?.id,
+                userName: state.currentUser?.name || state.currentUser?.email || undefined,
+            };
+            const processId = state.candidates.find(c => c.id === eventData.candidateId)?.processId;
             try {
                 const newEvent = await interviewsApi.create(eventData, state.currentUser?.id);
                 setState(s => ({ ...s, interviewEvents: [...s.interviewEvents, newEvent] }));
+                const { interviewSchedulingApi } = await import('./lib/api/interviewScheduling');
+                void interviewSchedulingApi.recordScheduled(newEvent, actor, processId);
                 return newEvent;
             } catch (error) {
                 console.error('Error adding interview event:', error);
@@ -1441,18 +1448,38 @@ const App: React.FC = () => {
             }
         },
         updateInterviewEvent: async (eventData) => {
+            const previous = state.interviewEvents.find(e => e.id === eventData.id);
+            const actor = {
+                userId: state.currentUser?.id,
+                userName: state.currentUser?.name || state.currentUser?.email || undefined,
+            };
+            const processId = state.candidates.find(c => c.id === eventData.candidateId)?.processId;
             try {
                 const updated = await interviewsApi.update(eventData.id, eventData);
                 setState(s => ({ ...s, interviewEvents: s.interviewEvents.map(e => e.id === eventData.id ? updated : e) }));
+                const { interviewSchedulingApi } = await import('./lib/api/interviewScheduling');
+                void interviewSchedulingApi.recordRescheduled(updated, actor, previous, processId);
             } catch (error) {
                 console.error('Error updating interview event:', error);
                 setState(s => ({ ...s, interviewEvents: s.interviewEvents.map(e => e.id === eventData.id ? eventData : e) }));
             }
         },
         deleteInterviewEvent: async (eventId) => {
+            const previous = state.interviewEvents.find(e => e.id === eventId);
+            const actor = {
+                userId: state.currentUser?.id,
+                userName: state.currentUser?.name || state.currentUser?.email || undefined,
+            };
+            const processId = previous
+                ? state.candidates.find(c => c.id === previous.candidateId)?.processId
+                : undefined;
             try {
                 await interviewsApi.delete(eventId);
                 setState(s => ({ ...s, interviewEvents: s.interviewEvents.filter(e => e.id !== eventId) }));
+                if (previous) {
+                    const { interviewSchedulingApi } = await import('./lib/api/interviewScheduling');
+                    void interviewSchedulingApi.recordCancelled(previous, actor, processId);
+                }
             } catch (error) {
                 console.error('Error deleting interview event:', error);
                 setState(s => ({ ...s, interviewEvents: s.interviewEvents.filter(e => e.id !== eventId) }));

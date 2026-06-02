@@ -320,6 +320,10 @@ export interface Candidate {
     offerAcceptedDate?: string; // Fecha de aceptación de oferta (para Time to Hire)
     applicationStartedDate?: string; // Fecha de inicio de solicitud (para Application Completion Rate)
     applicationCompletedDate?: string; // Fecha de finalización de solicitud (para Application Completion Rate)
+    /** Veces que postuló por formulario en este proceso (Tally) */
+    applicationCount?: number;
+    /** Primera postulación; createdAt refleja la última */
+    firstApplicationAt?: string;
     criticalStageReviewedAt?: string; // Fecha en que un usuario revisó el candidato en etapa crítica (para ocultar alertas)
     metadataIa?: string; // Resumen/metadata generado por IA (OpenAI)
     scoreIa?: number; // Score/puntuación generado por IA

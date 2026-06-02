@@ -5,7 +5,7 @@ import { convertirSalarioALetras } from '../numberToWords';
 import { APP_NAME } from '../appConfig';
 
 const CANDIDATE_LIST_SELECT =
-    'id, name, email, phone, phone2, process_id, stage_id, description, avatar_url, source, salary_expectation, agreed_salary, agreed_salary_in_words, age, dni, linkedin_url, address, province, district, archived, archived_at, discarded, discard_reason, discarded_at, hire_date, google_drive_folder_id, google_drive_folder_name, visible_to_clients, offer_accepted_date, application_started_date, application_completed_date, critical_stage_reviewed_at, created_at';
+    'id, name, email, phone, phone2, process_id, stage_id, description, avatar_url, source, salary_expectation, agreed_salary, agreed_salary_in_words, age, dni, linkedin_url, address, province, district, archived, archived_at, discarded, discard_reason, discarded_at, hire_date, google_drive_folder_id, google_drive_folder_name, visible_to_clients, offer_accepted_date, application_started_date, application_completed_date, critical_stage_reviewed_at, created_at, application_count, first_application_at';
 
 const CANDIDATE_LIST_SELECT_WITH_BULK = `${CANDIDATE_LIST_SELECT}, bulk_column_values`;
 
@@ -63,6 +63,8 @@ function mapListCandidate(dbCandidate: any, extras: Partial<Candidate> = {}): Ca
         applicationStartedDate: dbCandidate.application_started_date,
         applicationCompletedDate: dbCandidate.application_completed_date,
         criticalStageReviewedAt: dbCandidate.critical_stage_reviewed_at,
+        applicationCount: dbCandidate.application_count != null ? Number(dbCandidate.application_count) : undefined,
+        firstApplicationAt: dbCandidate.first_application_at || undefined,
         bulkColumnValues: mapBulkColumnValues(dbCandidate),
         ...extras,
     };
@@ -188,6 +190,8 @@ async function dbToCandidate(dbCandidate: any): Promise<Candidate> {
         applicationStartedDate: dbCandidate.application_started_date,
         applicationCompletedDate: dbCandidate.application_completed_date,
         criticalStageReviewedAt: dbCandidate.critical_stage_reviewed_at,
+        applicationCount: dbCandidate.application_count != null ? Number(dbCandidate.application_count) : undefined,
+        firstApplicationAt: dbCandidate.first_application_at || undefined,
         bulkColumnValues: mapBulkColumnValues(dbCandidate),
     };
 }

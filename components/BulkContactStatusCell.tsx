@@ -20,6 +20,7 @@ import {
     CONTACT_OUTCOME_LABELS,
 } from '../lib/contactTracking';
 import { formatBulkDateTime } from '../lib/bulkTableColumns';
+import { openMailCompose } from '../lib/openMailto';
 
 function buildCellTooltip(
     lastAttemptAt?: string,
@@ -300,7 +301,7 @@ export const BulkContactStatusCell: React.FC<BulkContactStatusCellProps> = ({
             return;
         }
         if (channel === 'email') {
-            window.open(`mailto:${contactAddress}`, '_blank', 'noopener,noreferrer');
+            await openMailCompose({ to: [contactAddress], subject: '', body: '' });
             await handleMarkAttempt('no_response');
             return;
         }

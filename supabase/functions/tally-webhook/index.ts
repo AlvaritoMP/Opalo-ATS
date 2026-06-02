@@ -2,6 +2,7 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.49.1'
 import { applyImportTextCaseToCandidate } from '../_shared/importTextCase.ts'
 import { buildTallyCandidateFromSubmission } from '../_shared/tallyMapping.ts'
+import { processTallyCandidateUpsert } from '../_shared/tallyCandidateUpsert.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -107,47 +108,31 @@ Deno.serve(async (req) => {
       return json({ error: 'Candidate must have at least name or email' }, 400)
     }
 
-    const bulkValues = candidateData.bulk_column_values as Record<string, unknown> | undefined
-    const insertPayload = { ...candidateData }
-    delete insertPayload.bulk_column_values
+    const bulkConfig =
+      typeof process.bulk_config === 'string'
+        ? JSON.parse(process.bulk_config)
+        : process.bulk_config
+    const customColumns = bulkConfig?.customColumns || []
 
-    const { data: candidate, error: candidateError } = await supabase
-      .from('candidates')
-      .insert({
-        ...insertPayload,
-        created_at: new Date().toISOString(),
-      })
-      .select()
-      .single()
-
-    if (candidateError) {
-      console.error('❌ Error creando candidato:', candidateError)
-      return json({ error: 'Failed to create candidate', details: candidateError.message }, 500)
-    }
-
-    if (bulkValues && Object.keys(bulkValues).length > 0) {
-      const { error: bulkError } = await supabase
-        .from('candidates')
-        .update({ bulk_column_values: bulkValues })
-        .eq('id', candidate.id)
-
-      if (bulkError) {
-        console.warn('⚠️ bulk_column_values no guardado:', bulkError.message)
-      } else {
-        console.log('✅ bulk_column_values guardado')
-      }
-    }
-
-    await supabase.from('candidate_history').insert({
-      candidate_id: candidate.id,
-      stage_id: stages[0].id,
-      moved_at: new Date().toISOString(),
-      moved_by: null,
-      app_name: integration.app_name,
+    const upsertResult = await processTallyCandidateUpsert(supabase, {
+      processId: integration.process_id,
+      appName: integration.app_name,
+      stageId: stages[0].id,
+      candidateData,
+      customColumns,
     })
 
-    console.log('✅ Candidato creado:', candidate.id)
-    return json({ success: true, candidateId: candidate.id })
+    console.log(
+      upsertResult.isReapplication
+        ? `✅ Re-postulación #${upsertResult.applicationCount}: ${upsertResult.candidateId}`
+        : `✅ Candidato creado: ${upsertResult.candidateId}`
+    )
+    return json({
+      success: true,
+      candidateId: upsertResult.candidateId,
+      isReapplication: upsertResult.isReapplication,
+      applicationCount: upsertResult.applicationCount,
+    })
   } catch (error) {
     console.error('❌ Error procesando webhook:', error)
     return json(

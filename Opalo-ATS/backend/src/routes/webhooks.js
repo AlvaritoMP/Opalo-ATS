@@ -2,6 +2,7 @@ import express from 'express';
 import { createClient } from '@supabase/supabase-js';
 import { applyImportTextCaseToCandidate } from '../../../../lib/importTextCase.js';
 import { buildTallyCandidateFromSubmission } from '../../../../lib/tallyWebhookMapping.js';
+import { processTallyCandidateUpsert } from '../../../../lib/tallyCandidateUpsert.js';
 
 console.log('🔵 Cargando módulo webhooks.js...');
 
@@ -176,81 +177,52 @@ router.post('/tally/:webhookId', async (req, res) => {
             });
         }
 
-        const bulkColumnValues = candidateData.bulk_column_values;
-        const insertPayload = { ...candidateData };
-        delete insertPayload.bulk_column_values;
-
-        // 5. Crear el candidato en Supabase
-        console.log('📝 Intentando insertar candidato en Supabase...');
-        
-        const { data: candidate, error: candidateError } = await supabase
-            .from('candidates')
-            .insert({
-                ...insertPayload,
-                created_at: new Date().toISOString(),
-            })
-            .select()
-            .single();
-
-        if (candidateError) {
-            console.error('❌ Error creando candidato:', candidateError);
-            console.error('❌ Detalles del error:', JSON.stringify(candidateError, null, 2));
-            return res.status(500).json({ 
-                error: 'Failed to create candidate',
-                details: candidateError.message,
-                fullError: candidateError
-            });
-        }
-
-        if (!candidate) {
-            console.error('❌ Candidato no retornado después de insertar');
-            return res.status(500).json({ 
-                error: 'Candidate not returned after insert',
-                candidateData
-            });
-        }
-
-        console.log(`✅ Candidato creado: ${candidate.id} - ${candidate.name || candidate.email}`);
-
-        if (bulkColumnValues && Object.keys(bulkColumnValues).length > 0) {
-            const { error: bulkError } = await supabase
-                .from('candidates')
-                .update({ bulk_column_values: bulkColumnValues })
-                .eq('id', candidate.id);
-            if (bulkError) {
-                console.warn('⚠️ bulk_column_values no guardado:', bulkError.message);
-            } else {
-                console.log('✅ bulk_column_values guardado');
+        let bulkConfigParsed = process.bulk_config;
+        if (typeof bulkConfigParsed === 'string') {
+            try {
+                bulkConfigParsed = JSON.parse(bulkConfigParsed);
+            } catch {
+                bulkConfigParsed = {};
             }
         }
+        const customColumns = bulkConfigParsed?.customColumns || [];
+        const upsertResult = await processTallyCandidateUpsert(supabase, {
+            processId: integration.process_id,
+            appName: integration.app_name,
+            stageId: stages[0].id,
+            candidateData,
+            customColumns,
+        });
 
-        // 6. Crear entrada en historial
-        // Nota: moved_by es UUID (referencia a usuario), no texto
-        // Usamos null ya que es una integración automática
-        const { error: historyError } = await supabase
-            .from('candidate_history')
-            .insert({
-                candidate_id: candidate.id,
-                stage_id: stages[0].id,
-                moved_at: new Date().toISOString(),
-                moved_by: null, // Integración automática, no hay usuario específico
-                app_name: integration.app_name,
+        const { data: candidate, error: candidateError } = await supabase
+            .from('candidates')
+            .select('*')
+            .eq('id', upsertResult.candidateId)
+            .single();
+
+        if (candidateError || !candidate) {
+            console.error('❌ Error cargando candidato tras upsert:', candidateError);
+            return res.status(500).json({
+                error: 'Failed to load candidate after upsert',
+                details: candidateError?.message,
             });
-
-        if (historyError) {
-            console.warn('⚠️ Error creando historial (no crítico):', historyError);
-            // No fallar el webhook por esto
-        } else {
-            console.log(`✅ Historial creado para candidato ${candidate.id}`);
         }
+
+        console.log(
+            upsertResult.isReapplication
+                ? `✅ Re-postulación #${upsertResult.applicationCount}: ${candidate.id}`
+                : `✅ Candidato creado: ${candidate.id} - ${candidate.name || candidate.email}`
+        );
 
         console.log(`🎉 Webhook procesado exitosamente - Candidato: ${candidate.id}`);
 
-        const response = { 
-            success: true, 
+        const response = {
+            success: true,
             candidateId: candidate.id,
             candidateName: candidate.name || candidate.email,
-            candidate: candidate
+            isReapplication: upsertResult.isReapplication,
+            applicationCount: upsertResult.applicationCount,
+            candidate,
         };
         
         console.log('📤 Enviando respuesta:', JSON.stringify(response, null, 2));

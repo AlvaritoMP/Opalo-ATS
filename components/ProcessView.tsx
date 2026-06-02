@@ -9,6 +9,7 @@ import { CloseProcessModal } from './CloseProcessModal';
 import { ProcessCommunicationModal } from './ProcessCommunicationModal';
 import { Attachment, UserRole, ProcessStatus, Candidate } from '../types';
 import * as XLSX from 'xlsx';
+import { openMailCompose, getMailComposeToastMessage } from '../lib/openMailto';
 
 interface ProcessViewProps {
     processId: string;
@@ -615,15 +616,18 @@ export const ProcessView: React.FC<ProcessViewProps> = ({ processId }) => {
                             actions.showToast('No hay candidatos seleccionados con email', 'error', 3000);
                             return;
                         }
-                        const emailAddresses = selectedCandidatesForEmail.map(c => c.email).filter(Boolean);
-                        const toEmails = emailAddresses.join(';');
+                        const emailAddresses = selectedCandidatesForEmail.map(c => c.email!).filter(Boolean);
                         const personalizedBody = body
                             .replace(/\{\{nombre\}\}/g, selectedCandidatesForEmail[0].name || 'Candidato')
                             .replace(/\{\{email\}\}/g, selectedCandidatesForEmail[0].email || '')
                             .replace(/\{\{telefono\}\}/g, selectedCandidatesForEmail[0].phone || '');
-                        const mailtoLink = `mailto:${toEmails}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(personalizedBody)}`;
-                        window.location.href = mailtoLink;
-                        actions.showToast(`Abriendo cliente de correo para ${emailAddresses.length} candidato(s)`, 'success', 3000);
+                        void openMailCompose({
+                            to: emailAddresses,
+                            subject,
+                            body: personalizedBody,
+                        }).then((result) => {
+                            actions.showToast(getMailComposeToastMessage(result), 'success', 6000);
+                        });
                     }}
                     onSendWhatsApp={(candidateIds, message) => {
                         const selectedCandidatesForWhatsApp = candidates.filter(c => candidateIds.includes(c.id) && c.phone);

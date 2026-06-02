@@ -25,7 +25,8 @@ const BULK_SELECT_WITH_CONTACT = `${BULK_SELECT_BASE}, contact_status, contact_a
     contact_email_status, contact_email_attempt_count, contact_email_last_at, contact_email_last_user_name`;
 
 const BULK_SELECT_WITH_CREATED = `${BULK_SELECT_WITH_CONTACT}, created_at`;
-const BULK_SELECT_FULL = `${BULK_SELECT_WITH_CREATED}, bulk_column_values`;
+const BULK_SELECT_WITH_APPLICATION = `${BULK_SELECT_WITH_CREATED}, application_count, first_application_at`;
+const BULK_SELECT_FULL = `${BULK_SELECT_WITH_APPLICATION}, bulk_column_values`;
 
 /** Cache del select que funcionó en este entorno (evita reintentos en cada página) */
 let cachedBulkSelect: string | null = null;
@@ -50,7 +51,13 @@ function isNotFoundError(error: { message?: string; code?: string } | null): boo
 
 function getBulkSelectCandidates(): string[] {
     if (cachedBulkSelect) return [cachedBulkSelect];
-    return [BULK_SELECT_FULL, BULK_SELECT_WITH_CREATED, BULK_SELECT_WITH_CONTACT, BULK_SELECT_BASE];
+    return [
+        BULK_SELECT_FULL,
+        BULK_SELECT_WITH_APPLICATION,
+        BULK_SELECT_WITH_CREATED,
+        BULK_SELECT_WITH_CONTACT,
+        BULK_SELECT_BASE,
+    ];
 }
 
 function mapBulkCandidateRow(
@@ -76,6 +83,8 @@ function mapBulkCandidateRow(
         contactWhatsapp: readChannelSummaryFromRow(c, 'whatsapp'),
         contactEmail: readChannelSummaryFromRow(c, 'email'),
         createdAt: (c.created_at as string) || undefined,
+        applicationCount: c.application_count != null ? Number(c.application_count) : undefined,
+        firstApplicationAt: (c.first_application_at as string) || undefined,
         nextInterviewAt: nextInterview?.start || undefined,
         nextInterviewerId: nextInterview?.interviewerId || undefined,
         nextInterviewEventId: nextInterview?.eventId || undefined,
@@ -108,6 +117,9 @@ export interface BulkCandidate {
     contactWhatsapp?: ChannelContactSummary;
     contactEmail?: ChannelContactSummary;
     createdAt?: string;
+    /** Última postulación por formulario (created_at se actualiza en re-postulaciones) */
+    applicationCount?: number;
+    firstApplicationAt?: string;
     nextInterviewAt?: string; // Fecha/hora de la próxima entrevista
     nextInterviewerId?: string; // ID del entrevistador de la próxima entrevista
     nextInterviewEventId?: string;

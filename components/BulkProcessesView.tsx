@@ -27,7 +27,7 @@ import {
 } from '../lib/hiringStageTracking';
 import { processesApi } from '../lib/api/processes';
 import { useDebouncedValue } from '../lib/useDebouncedValue';
-import { Check, X, Loader2, Send, Archive, Search, ChevronDown, ChevronUp, Plus, Edit, Trash2, ArrowLeft, MessageCircle, Phone, Upload, Download, Filter, Mail, Calendar, Settings, ArrowUp, ArrowDown, Pin, FileText, BookOpen, Paperclip, ClipboardList, ListPlus, RefreshCw, HardDrive, CaseSensitive, Package, History, Target, BarChart3 } from 'lucide-react';
+import { Check, X, Loader2, Send, Archive, Search, ChevronDown, ChevronUp, Plus, Edit, Trash2, ArrowLeft, MessageCircle, Phone, Upload, Download, Filter, Mail, Calendar, Settings, ArrowUp, ArrowDown, Pin, FileText, BookOpen, Paperclip, ClipboardList, ListPlus, RefreshCw, HardDrive, CaseSensitive, Package, History, Target, BarChart3, UserCheck } from 'lucide-react';
 import { BulkCandidateTimeline } from './BulkCandidateTimeline';
 import { Process, CustomColumn, BulkProcessConfig, Candidate, IdealProfileConfig, BulkProcessStatChart } from '../types';
 import { candidatesApi } from '../lib/api/candidates';
@@ -108,6 +108,11 @@ import { PsycholaboralBulkEvaluateModal } from './PsycholaboralBulkEvaluateModal
 import { PsycholaboralInventoryModal } from './PsycholaboralInventoryModal';
 import { BulkIdealProfileModal } from './BulkIdealProfileModal';
 import { BulkProcessStatsModal } from './BulkProcessStatsModal';
+import {
+    getApplicationCountLabel,
+    getApplicationCountPriorityClass,
+} from '../lib/applicationCountDisplay';
+import { openMailCompose, getMailComposeToastMessage } from '../lib/openMailto';
 import {
     computeProfileMatch,
     computeProfileMatchSummary,
@@ -379,6 +384,19 @@ const CandidateDrawer: React.FC<{
 };
 
 // Tooltip para mostrar metadata_ia al hover con formato mejorado
+const ApplicationCountBadge: React.FC<{ count?: number }> = ({ count }) => {
+    const label = getApplicationCountLabel(count);
+    if (!label) return null;
+    return (
+        <span
+            className={`ml-1 inline-flex shrink-0 text-[10px] font-semibold px-1 py-0 rounded border ${getApplicationCountPriorityClass(count)}`}
+            title="Postulaciones por formulario — priorizar contacto"
+        >
+            {label}
+        </span>
+    );
+};
+
 const MetadataTooltip: React.FC<{
     metadata: string;
     scoreIa?: number;
@@ -551,7 +569,15 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
     const [showEmailModal, setShowEmailModal] = useState(false);
     const [isMobile, setIsMobile] = useState(false);
     const [showScheduleModal, setShowScheduleModal] = useState(false);
-    const [schedulingCandidate, setSchedulingCandidate] = useState<{ id: string; name: string } | null>(null);
+    const [schedulingCandidate, setSchedulingCandidate] = useState<{
+        id: string;
+        name: string;
+        existingEventId?: string;
+        initialDate?: string;
+        initialTime?: string;
+        initialInterviewerId?: string;
+        initialNotes?: string;
+    } | null>(null);
     const [showBulkScheduleModal, setShowBulkScheduleModal] = useState(false);
     const [editingCell, setEditingCell] = useState<{ candidateId: string; field: string } | null>(null);
     const [editValue, setEditValue] = useState('');
@@ -1807,21 +1833,46 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
             .replace(/\{\{telefono\}\}/g, firstCandidate.phone || '');
 
         // Obtener todas las direcciones de email y separarlas con punto y coma
-        const emailAddresses = selectedCandidates.map(c => c.email).filter(Boolean);
-        const toEmails = emailAddresses.join(';');
-        
-        // Construir el enlace mailto: con todas las direcciones en el campo "to"
-        // Las direcciones en el campo "to" no deben estar codificadas, solo los parámetros
-        const mailtoLink = `mailto:${toEmails}?subject=${encodeURIComponent(emailSubject)}&body=${encodeURIComponent(personalizedBody)}`;
-        
-        window.location.href = mailtoLink;
-        actions.showToast(`Abriendo cliente de correo para ${emailAddresses.length} candidato(s)`, 'success', 3000);
+        const emailAddresses = selectedCandidates.map(c => c.email!).filter(Boolean);
+
+        const result = await openMailCompose({
+            to: emailAddresses,
+            subject: emailSubject,
+            body: personalizedBody,
+        });
+        actions.showToast(getMailComposeToastMessage(result), 'success', 6000);
     }, [selectedIds, candidates, actions]);
 
     const openScheduleModal = useCallback((candidate: BulkCandidate) => {
-        setSchedulingCandidate({ id: candidate.id, name: candidate.name });
+        const eventId = candidate.nextInterviewEventId
+            || (() => {
+                const slots = state.interviewEvents
+                    .filter(e => e.candidateId === candidate.id)
+                    .map(e => ({
+                        start: e.start instanceof Date ? e.start.toISOString() : new Date(e.start).toISOString(),
+                        interviewerId: e.interviewerId,
+                        eventId: e.id,
+                    }));
+                return pickInterviewForCandidateDisplay(slots)?.eventId;
+            })();
+        const event = eventId ? state.interviewEvents.find(e => e.id === eventId) : undefined;
+        const start = event?.start
+            ? (event.start instanceof Date ? event.start : new Date(event.start))
+            : candidate.nextInterviewAt
+                ? new Date(candidate.nextInterviewAt)
+                : null;
+
+        setSchedulingCandidate({
+            id: candidate.id,
+            name: candidate.name,
+            existingEventId: eventId,
+            initialDate: start ? start.toISOString().split('T')[0] : '',
+            initialTime: start ? start.toTimeString().substring(0, 5) : '',
+            initialInterviewerId: event?.interviewerId || candidate.nextInterviewerId || '',
+            initialNotes: event?.notes || '',
+        });
         setShowScheduleModal(true);
-    }, []);
+    }, [state.interviewEvents]);
 
     const resolveNextInterviewEventId = useCallback((candidate: BulkCandidate): string | undefined => {
         if (candidate.nextInterviewEventId) return candidate.nextInterviewEventId;
@@ -1870,7 +1921,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
         const candidate = candidates.find(c => c.id === candidateId);
         const candidateName = candidate?.name || 'Candidato';
 
-        const eventData = {
+        const eventPayload = {
             title: `Entrevista con ${candidateName}`,
             start: startDateTime,
             end: endDateTime,
@@ -1879,19 +1930,31 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
             notes: notes || '',
         };
 
+        const existingEventId = schedulingCandidate.existingEventId;
+        const existingEvent = existingEventId
+            ? state.interviewEvents.find(e => e.id === existingEventId)
+            : undefined;
+
         try {
-            const newEvent = await actions.addInterviewEvent(eventData);
-            const interviewFields = interviewEventToCandidateFields(newEvent);
+            let savedEvent;
+            if (existingEvent) {
+                await actions.updateInterviewEvent({ ...existingEvent, ...eventPayload });
+                savedEvent = { ...existingEvent, ...eventPayload };
+                actions.showToast('Entrevista reagendada', 'success', 3000);
+            } else {
+                savedEvent = await actions.addInterviewEvent(eventPayload);
+                actions.showToast('Entrevista agendada exitosamente', 'success', 3000);
+            }
+
+            const interviewFields = interviewEventToCandidateFields(savedEvent);
             patchCandidateInterviewFields(candidateId, interviewFields);
 
-            if (newEvent.id.startsWith('evt-')) {
+            if (!existingEvent && savedEvent.id.startsWith('evt-')) {
                 actions.showToast(
                     'Entrevista guardada localmente; no se pudo confirmar en el servidor. Revisa permisos de entrevistas.',
                     'info',
                     5000
                 );
-            } else {
-                actions.showToast('Entrevista agendada exitosamente', 'success', 3000);
             }
 
             await actions.refreshInterviewEvents();
@@ -1902,7 +1965,30 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
             actions.showToast('Error al agendar la entrevista', 'error', 3000);
             throw error;
         }
-    }, [schedulingCandidate, candidates, actions, patchCandidateInterviewFields, loadCandidates, currentPage]);
+    }, [schedulingCandidate, candidates, state.interviewEvents, actions, patchCandidateInterviewFields, loadCandidates, currentPage]);
+
+    const handleMarkInterviewAttended = useCallback(async (candidate: BulkCandidate) => {
+        if (!process) return;
+        try {
+            const { interviewSchedulingApi } = await import('../lib/api/interviewScheduling');
+            const ok = await interviewSchedulingApi.markAttended(candidate.id, {
+                userId: state.currentUser?.id,
+                userName: state.currentUser?.name || state.currentUser?.email || undefined,
+            }, process.id);
+            if (ok) {
+                actions.showToast('Asistencia registrada', 'success', 2500);
+            } else {
+                actions.showToast(
+                    'No hay ciclo de agenda abierto o falta la migración de seguimiento de citas',
+                    'info',
+                    4000
+                );
+            }
+        } catch (error) {
+            console.error('Error marcando asistencia:', error);
+            actions.showToast('Error al registrar asistencia', 'error', 3000);
+        }
+    }, [process, state.currentUser?.id, state.currentUser?.name, state.currentUser?.email, actions]);
 
     const handleBulkSchedule = useCallback(async (date: string, time: string, interviewerId: string, notes?: string) => {
         const selectedCandidates = candidates.filter(c => selectedIds.has(c.id));
@@ -4179,7 +4265,10 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                                             <input type="text" value={editValue} onChange={(e) => setEditValue(e.target.value)} onBlur={() => handleSaveEdit(candidate.id, 'name')} onKeyDown={(e) => { if (e.key === 'Enter') handleSaveEdit(candidate.id, 'name'); if (e.key === 'Escape') handleCancelEdit(); }} autoFocus className="w-full px-1 py-0.5 text-xs border border-primary-500 rounded focus:ring-1 focus:ring-primary-500" />
                                                         ) : (
                                                             <MetadataTooltip metadata={displayCandidate.metadataIa || ''} scoreIa={scoreIaColumnVisible ? displayCandidate.scoreIa : undefined}>
-                                                                <span className="cursor-help hover:underline decoration-dotted" onDoubleClick={() => handleStartEdit(candidate.id, 'name', displayCandidate.name)} title="Doble clic para editar">{displayCandidate.name}</span>
+                                                                <span className="inline-flex items-center gap-0.5 min-w-0">
+                                                                    <span className="cursor-help hover:underline decoration-dotted truncate" onDoubleClick={() => handleStartEdit(candidate.id, 'name', displayCandidate.name)} title="Doble clic para editar">{displayCandidate.name}</span>
+                                                                    <ApplicationCountBadge count={displayCandidate.applicationCount} />
+                                                                </span>
                                                             </MetadataTooltip>
                                                         )}
                                                     </td>
@@ -4384,11 +4473,20 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                                 );
                                             }
                                             if (colId === 'createdAt') {
+                                                const createdTitle = displayCandidate.createdAt
+                                                    ? new Date(displayCandidate.createdAt).toLocaleString('es-PE')
+                                                    : undefined;
+                                                const firstTitle = displayCandidate.firstApplicationAt
+                                                    ? `Primera postulación: ${new Date(displayCandidate.firstApplicationAt).toLocaleString('es-PE')}`
+                                                    : undefined;
                                                 return (
                                                     <td key="createdAt" {...tdProps(candidate.id, 'createdAt')}>
-                                                        <span className="text-xs text-gray-700" title={displayCandidate.createdAt ? new Date(displayCandidate.createdAt).toLocaleString('es-PE') : undefined}>
-                                                            {formatBulkDateTime(displayCandidate.createdAt)}
-                                                        </span>
+                                                        <div className="flex flex-col gap-0.5">
+                                                            <span className="text-xs text-gray-700 inline-flex items-center" title={[createdTitle, firstTitle].filter(Boolean).join(' · ')}>
+                                                                {formatBulkDateTime(displayCandidate.createdAt)}
+                                                                <ApplicationCountBadge count={displayCandidate.applicationCount} />
+                                                            </span>
+                                                        </div>
                                                     </td>
                                                 );
                                             }
@@ -4412,6 +4510,19 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                                                     </span>
                                                                     <span className="text-[10px] text-gray-500">{new Date(displayCandidate.nextInterviewAt).toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' })}{interviewerName ? ` · ${interviewerName}` : ''}</span>
                                                                 </div>
+                                                                {interviewPast && (
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={(e) => {
+                                                                            e.stopPropagation();
+                                                                            void handleMarkInterviewAttended(displayCandidate);
+                                                                        }}
+                                                                        className="shrink-0 p-0.5 text-green-600 hover:bg-green-50 rounded opacity-70 group-hover:opacity-100 transition-colors"
+                                                                        title="Marcar asistencia a la cita"
+                                                                    >
+                                                                        <UserCheck className="w-3 h-3" />
+                                                                    </button>
+                                                                )}
                                                                 <button
                                                                     type="button"
                                                                     onClick={(e) => { e.stopPropagation(); void handleClearInterview(displayCandidate); }}
@@ -4798,6 +4909,11 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                     candidateId={schedulingCandidate.id}
                     candidateName={schedulingCandidate.name}
                     onSchedule={handleQuickSchedule}
+                    isReschedule={!!schedulingCandidate.existingEventId}
+                    initialDate={schedulingCandidate.initialDate}
+                    initialTime={schedulingCandidate.initialTime}
+                    initialInterviewerId={schedulingCandidate.initialInterviewerId}
+                    initialNotes={schedulingCandidate.initialNotes}
                 />
             )}
 
