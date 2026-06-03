@@ -39,6 +39,30 @@ async function fetchCandidatesWithSelectFallback(
     return { data: null, error: lastError };
 }
 
+/** IDs de procesos normales (no masivos). Los masivos cargan candidatos por bulkCandidatesApi. */
+async function fetchStandardProcessIds(): Promise<string[] | null> {
+    const { data, error } = await supabase
+        .from('processes')
+        .select('id')
+        .eq('app_name', APP_NAME)
+        .or('is_bulk_process.eq.false,is_bulk_process.is.null');
+
+    if (error) {
+        if (isMissingColumnError(error)) return null;
+        throw error;
+    }
+    return (data || []).map(row => row.id as string);
+}
+
+function applyStandardProcessFilter<T extends { in: (col: string, vals: string[]) => T }>(
+    query: T,
+    standardProcessIds: string[] | null
+): T | null {
+    if (standardProcessIds === null) return query;
+    if (standardProcessIds.length === 0) return null;
+    return query.in('process_id', standardProcessIds);
+}
+
 function mapListCandidate(dbCandidate: any, extras: Partial<Candidate> = {}): Candidate {
     return {
         id: dbCandidate.id,
@@ -266,17 +290,22 @@ export const candidatesApi = {
     // OPTIMIZADO: Carga todas las relaciones en batch en lugar de N+1 queries
     // OPTIMIZADO EGRESS: Selecciona solo campos necesarios, attachments/comments se cargan lazy
     async getAll(includeArchived: boolean = false, includeRelations: boolean = true): Promise<Candidate[]> {
+        const standardProcessIds = await fetchStandardProcessIds();
+        if (standardProcessIds !== null && standardProcessIds.length === 0) return [];
+
         const { data, error } = await fetchCandidatesWithSelectFallback((selectFields) => {
             let query = supabase
                 .from('candidates')
                 .select(selectFields)
                 .eq('app_name', APP_NAME)
-                .order('created_at', { ascending: false })
-                .limit(200);
+                .order('created_at', { ascending: false });
+
+            query = applyStandardProcessFilter(query, standardProcessIds) ?? query;
+
             if (!includeArchived) {
                 query = query.eq('archived', false);
             }
-            return query;
+            return query.limit(2000);
         });
         if (error) throw error;
         if (!data || data.length === 0) return [];
@@ -407,16 +436,21 @@ export const candidatesApi = {
 
     /** Candidatos descartados y archivados (dashboard) — sin relaciones */
     async getDiscardedArchived(): Promise<Candidate[]> {
-        const { data, error } = await fetchCandidatesWithSelectFallback((selectFields) =>
-            supabase
+        const standardProcessIds = await fetchStandardProcessIds();
+        if (standardProcessIds !== null && standardProcessIds.length === 0) return [];
+
+        const { data, error } = await fetchCandidatesWithSelectFallback((selectFields) => {
+            let query = supabase
                 .from('candidates')
                 .select(selectFields)
                 .eq('app_name', APP_NAME)
                 .eq('discarded', true)
                 .eq('archived', true)
-                .order('created_at', { ascending: false })
-                .limit(200)
-        );
+                .order('created_at', { ascending: false });
+
+            query = applyStandardProcessFilter(query, standardProcessIds) ?? query;
+            return query.limit(500);
+        });
 
         if (error) throw error;
         if (!data?.length) return [];
@@ -424,12 +458,94 @@ export const candidatesApi = {
         return data.map(dbCandidate => mapListCandidate(dbCandidate, { discarded: true }));
     },
 
-    // Obtener candidatos por proceso
-    // OPTIMIZADO EGRESS: Usa getAll con filtro en memoria o consulta optimizada
+    // Obtener candidatos por proceso (consulta directa, no depende del límite global de getAll)
     async getByProcess(processId: string, includeArchived: boolean = false, includeRelations: boolean = false): Promise<Candidate[]> {
-        // Usar getAll optimizado y filtrar en memoria (más eficiente para egress)
-        const allCandidates = await this.getAll(includeArchived, includeRelations);
-        return allCandidates.filter(c => c.processId === processId);
+        const { data, error } = await fetchCandidatesWithSelectFallback((selectFields) => {
+            let query = supabase
+                .from('candidates')
+                .select(selectFields)
+                .eq('app_name', APP_NAME)
+                .eq('process_id', processId)
+                .order('created_at', { ascending: false });
+            if (!includeArchived) {
+                query = query.eq('archived', false);
+            }
+            return query;
+        });
+        if (error) throw error;
+        if (!data?.length) return [];
+
+        if (!includeRelations) {
+            return data.map(dbCandidate => mapListCandidate(dbCandidate));
+        }
+
+        const candidateIds = data.map(c => c.id);
+        const [historyResult, postItsResult, commentsResult] = await Promise.all([
+            supabase
+                .from('candidate_history')
+                .select('id, candidate_id, stage_id, moved_at, moved_by')
+                .in('candidate_id', candidateIds)
+                .eq('app_name', APP_NAME)
+                .order('moved_at', { ascending: true }),
+            supabase
+                .from('post_its')
+                .select('id, candidate_id, text, color, created_by, created_at')
+                .in('candidate_id', candidateIds)
+                .eq('app_name', APP_NAME)
+                .order('created_at', { ascending: false }),
+            supabase
+                .from('comments')
+                .select('id, candidate_id, text, user_id, created_at')
+                .in('candidate_id', candidateIds)
+                .eq('app_name', APP_NAME)
+                .order('created_at', { ascending: false }),
+        ]);
+
+        const historyByCandidateId = new Map<string, any[]>();
+        const postItsByCandidateId = new Map<string, any[]>();
+        const commentsByCandidateId = new Map<string, any[]>();
+
+        (historyResult.data || []).forEach(history => {
+            if (!historyByCandidateId.has(history.candidate_id)) {
+                historyByCandidateId.set(history.candidate_id, []);
+            }
+            historyByCandidateId.get(history.candidate_id)!.push(history);
+        });
+        (postItsResult.data || []).forEach(postIt => {
+            if (!postItsByCandidateId.has(postIt.candidate_id)) {
+                postItsByCandidateId.set(postIt.candidate_id, []);
+            }
+            postItsByCandidateId.get(postIt.candidate_id)!.push(postIt);
+        });
+        (commentsResult.data || []).forEach(comment => {
+            if (!commentsByCandidateId.has(comment.candidate_id)) {
+                commentsByCandidateId.set(comment.candidate_id, []);
+            }
+            commentsByCandidateId.get(comment.candidate_id)!.push(comment);
+        });
+
+        return data.map(dbCandidate => mapListCandidate(dbCandidate, {
+            history: (historyByCandidateId.get(dbCandidate.id) || []).map(h => ({
+                id: h.id,
+                stageId: h.stage_id,
+                movedAt: h.moved_at,
+                movedBy: h.moved_by,
+            })),
+            postIts: (postItsByCandidateId.get(dbCandidate.id) || []).map(p => ({
+                id: p.id,
+                text: p.text,
+                color: p.color,
+                createdBy: p.created_by,
+                createdAt: p.created_at,
+            })),
+            comments: (commentsByCandidateId.get(dbCandidate.id) || []).map(c => ({
+                id: c.id,
+                text: c.text,
+                userId: c.user_id,
+                createdAt: c.created_at,
+                attachments: [],
+            })),
+        }));
     },
 
     // Obtener solo el conteo de attachments de un candidato (sin cargar los datos)
