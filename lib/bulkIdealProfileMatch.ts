@@ -18,6 +18,7 @@ import {
     buildLegacyFromColumnOrder,
 } from './bulkTableColumns';
 import { CONTACT_COLUMN_IDS } from './contactChannelConfig';
+import { extractRouteCostTotal } from './routeCostStorage';
 
 /** Columnas base comparables (excluye acciones, contacto, identidad pura) */
 export const IDEAL_PROFILE_BASE_FIELDS = [
@@ -58,6 +59,7 @@ export function getIdealProfileFieldType(
 ): IdealProfileFieldType {
     if (fieldId.startsWith('custom_')) {
         const col = customColumns.find(c => c.id === fieldId.replace('custom_', ''));
+        if (col?.type === 'route_cost') return 'route_cost';
         return col?.type || 'text';
     }
     return 'text';
@@ -135,6 +137,7 @@ function parseNumber(value: unknown): number | null {
 }
 
 function defaultMatchMode(type: IdealProfileFieldType): IdealProfileMatchMode {
+    if (type === 'route_cost') return 'maximum';
     if (type === 'number') return 'minimum';
     if (type === 'checkbox' || type === 'select' || type === 'date') return 'exact';
     return 'contains';
@@ -281,7 +284,7 @@ export function getCandidateFieldValue(
     legacyColumnIdToName: Record<string, string>,
     bulkConfig?: BulkProcessConfig
 ): unknown {
-    if (fieldId.startsWith('custom_')) {
+        if (colId.startsWith('custom_')) {
         let colId = fieldId.replace('custom_', '');
         if (!customColumns.some(c => c.id === colId)) {
             const mapped = remapIdealProfileFieldId(
@@ -292,13 +295,19 @@ export function getCandidateFieldValue(
             );
             colId = mapped.replace('custom_', '');
         }
-        return resolveBulkTableCellValue(
+        const col = customColumns.find(c => c.id === colId);
+        const resolved = resolveBulkTableCellValue(
             candidate,
             colId,
             customColumns,
             columnValues,
             legacyColumnIdToName
         );
+        if (col?.type === 'route_cost') {
+            const total = extractRouteCostTotal(resolved);
+            return total ?? '';
+        }
+        return resolved;
     }
 
     if (fieldId === 'source' || fieldId === 'province' || fieldId === 'district') {
@@ -391,7 +400,7 @@ function scorePositiveCriterion(
 ): number {
     const mode = criterion.matchMode || defaultMatchMode(fieldType);
 
-    if (fieldType === 'number') {
+    if (fieldType === 'number' || fieldType === 'route_cost') {
         return scoreNumberMatch(candidateVal, criterion, mode);
     }
     if (fieldType === 'checkbox') {
@@ -414,7 +423,7 @@ function scoreExcludeCriterion(
     if (!criterionHasExcludeValue(criterion)) return 100;
     const exclude = criterion.excludeValue;
 
-    if (fieldType === 'number') {
+    if (fieldType === 'number' || fieldType === 'route_cost') {
         const c = parseNumber(candidateVal);
         if (c === null) return 100;
         const excludedParts = String(exclude)

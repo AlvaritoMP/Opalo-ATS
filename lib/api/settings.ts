@@ -24,6 +24,11 @@ function dbToSettings(dbSettings: any): AppSettings {
         provinces: dbSettings.provinces || undefined,
         districts: dbSettings.districts || undefined,
         interviewLocations: dbSettings.interview_locations || undefined,
+        transportFares: dbSettings.transport_fares
+            ? typeof dbSettings.transport_fares === 'string'
+                ? JSON.parse(dbSettings.transport_fares)
+                : dbSettings.transport_fares
+            : undefined,
         psycholaboralInventory: dbSettings.psycholaboral_inventory
             ? typeof dbSettings.psycholaboral_inventory === 'string'
                 ? JSON.parse(dbSettings.psycholaboral_inventory)
@@ -67,6 +72,7 @@ function settingsToDb(settings: Partial<AppSettings>): any {
     if (settings.provinces !== undefined) dbSettings.provinces = settings.provinces;
     if (settings.districts !== undefined) dbSettings.districts = settings.districts;
     if (settings.interviewLocations !== undefined) dbSettings.interview_locations = settings.interviewLocations;
+    if (settings.transportFares !== undefined) dbSettings.transport_fares = settings.transportFares;
     if (settings.psycholaboralInventory !== undefined) {
         dbSettings.psycholaboral_inventory = settings.psycholaboralInventory;
     }

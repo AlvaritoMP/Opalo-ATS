@@ -4,6 +4,7 @@ import { migrateBulkColumnOrder, CONTACT_COLUMN_IDS, CONTACT_LAST_USER_COLUMN_ID
 import { ensureHiredStageUserColumnInOrder, HIRED_STAGE_USER_COLUMN_ID } from './hiringStageTracking';
 import { APP_NAME } from './appConfig';
 import { readBulkTableTemplatesCache } from './bulkTableTemplates';
+import { extractRouteCostTotal } from './routeCostStorage';
 
 const BULK_NAME_KEY_PREFIX = '__name__';
 
@@ -1904,7 +1905,7 @@ export function isPasteEditableColumn(colId: string, customColumns: CustomColumn
     if (colId.startsWith('custom_')) {
         const customColId = colId.replace('custom_', '');
         const col = customColumns.find(c => c.id === customColId);
-        if (col?.type === 'route') return false;
+        if (col?.type === 'route' || col?.type === 'route_cost') return false;
         return true;
     }
     return ['name', 'dni', 'email', 'phone', 'source', 'province', 'district'].includes(colId);
@@ -1969,6 +1970,11 @@ export function parseClipboardGrid(text: string): string[][] {
 
 export function formatCustomCellDisplay(value: any, col: CustomColumn): string {
     if (col.type === 'route') return '-';
+    if (col.type === 'route_cost') {
+        const total = extractRouteCostTotal(value);
+        if (total == null) return 'Pendiente';
+        return `S/ ${total.toFixed(2)}`;
+    }
     if (col.type === 'checkbox') {
         if (value === true) return 'Sí';
         if (value === false) return 'No';
@@ -1980,7 +1986,7 @@ export function formatCustomCellDisplay(value: any, col: CustomColumn): string {
 }
 
 export function parseCustomCellInput(rawValue: string, col: CustomColumn): any {
-    if (col.type === 'route') return '';
+    if (col.type === 'route' || col.type === 'route_cost') return '';
     const trimmed = rawValue.trim();
     if (!trimmed) return '';
     if (col.type === 'number') {

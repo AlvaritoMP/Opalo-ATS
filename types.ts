@@ -87,10 +87,17 @@ export type PsycholaboralReportNamePart =
 export interface CustomColumn {
     id: string;
     name: string;
-    type: 'text' | 'number' | 'checkbox' | 'date' | 'select' | 'route';
+    type: 'text' | 'number' | 'checkbox' | 'date' | 'select' | 'route' | 'route_cost';
     options?: string[];
     /** Dirección de destino para columnas tipo ruta (transporte público). */
     routeDestination?: string;
+    /** ID de columna tipo route de referencia para estimar costo aproximado del tramo. */
+    sourceRouteColumnId?: string;
+    /**
+     * Costo de ruta: solo se consulta Google Maps cuando el usuario lo pide.
+     * Siempre true para columnas route_cost; el valor calculado se persiste en BD.
+     */
+    routeCostOnDemand?: boolean;
     /** Marca explícita para el PDF psicolaboral (opcional). */
     reportNamePart?: PsycholaboralReportNamePart;
 }
@@ -498,6 +505,14 @@ export interface InterviewLocation {
     address: string;
 }
 
+/** Tarifa editable de transporte público (Lima Metropolitana). */
+export interface TransportFareSetting {
+    id: string;
+    label: string;
+    fare: number;
+    formal: boolean;
+}
+
 export interface AppSettings {
     database: {
         apiUrl: string;
@@ -531,6 +546,8 @@ export interface AppSettings {
     provinces?: string[]; // Opciones configurables para el campo "provincia" de candidatos
     districts?: { [province: string]: string[] }; // Opciones configurables para el campo "distrito" de candidatos, organizadas por provincia
     interviewLocations?: InterviewLocation[]; // Sedes para rutas en transporte público hacia entrevistas
+    /** Tarifas aproximadas de transporte público para estimación de costos de ruta. */
+    transportFares?: TransportFareSetting[];
     psycholaboralInventory?: PsycholaboralInventory;
 }
 

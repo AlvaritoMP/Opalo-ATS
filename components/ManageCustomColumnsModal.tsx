@@ -9,6 +9,7 @@ const TYPE_LABELS: Record<CustomColumn['type'], string> = {
     date: 'Fecha',
     select: 'Lista desplegable',
     route: 'Ruta',
+    route_cost: 'Costo de ruta',
 };
 
 interface ManageCustomColumnsModalProps {
@@ -77,6 +78,11 @@ export const ManageCustomColumnsModal: React.FC<ManageCustomColumnsModalProps> =
                                         {col.type === 'route' && col.routeDestination && (
                                             <span className="truncate block" title={col.routeDestination}>
                                                 → {col.routeDestination}
+                                            </span>
+                                        )}
+                                        {col.type === 'route_cost' && col.sourceRouteColumnId && (
+                                            <span className="truncate block">
+                                                A solicitud del usuario · guardado en BD
                                             </span>
                                         )}
                                     </div>

@@ -57,7 +57,7 @@ export function normalizeImportTextCase(
     const { field, columnType, selectOptions } = opts;
 
     if (isExcludedImportField(field)) return value;
-    if (columnType === 'number' || columnType === 'date' || columnType === 'checkbox') {
+    if (columnType === 'number' || columnType === 'date' || columnType === 'checkbox' || columnType === 'route_cost') {
         return value;
     }
 

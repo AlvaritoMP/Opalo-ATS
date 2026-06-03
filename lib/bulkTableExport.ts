@@ -18,6 +18,7 @@ import {
     shouldApplyScoreAutoFilter,
 } from './bulkTableColumns';
 import { buildRouteColumnLink } from './transitRouteLinks';
+import { extractRouteCostTotal } from './routeCostStorage';
 
 export type BulkExportScope = 'current_view' | 'full_process' | 'selected';
 
@@ -157,6 +158,11 @@ export function getBulkExportCellValue(
         if (!col) return '';
         if (col.type === 'route') {
             return buildRouteColumnLink(candidate, col, customColumns, columnValues) || '';
+        }
+        if (col.type === 'route_cost') {
+            const raw = getCustomStoredValue(candidate.id, cid, candidate, columnValues, customColumns);
+            const total = extractRouteCostTotal(raw);
+            return total != null ? total.toFixed(2) : '';
         }
         const raw = getCustomStoredValue(candidate.id, cid, candidate, columnValues, customColumns);
         return formatCustomCellDisplay(raw, col);

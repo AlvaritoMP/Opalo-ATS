@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { X, Plus, Trash2 } from 'lucide-react';
 import { CustomColumn, PsycholaboralReportNamePart } from '../types';
 
@@ -8,6 +8,8 @@ interface AddColumnModalProps {
     onAdd: (column: CustomColumn) => void;
     editingColumn?: CustomColumn | null;
     onEdit?: (column: CustomColumn) => void;
+    /** Columnas existentes del proceso (para vincular costo de ruta). */
+    existingColumns?: CustomColumn[];
 }
 
 type ColumnType = CustomColumn['type'];
@@ -18,12 +20,19 @@ export const AddColumnModal: React.FC<AddColumnModalProps> = ({
     onAdd,
     editingColumn,
     onEdit,
+    existingColumns = [],
 }) => {
     const [name, setName] = useState('');
     const [type, setType] = useState<ColumnType>('text');
     const [options, setOptions] = useState<string[]>(['']);
     const [routeDestination, setRouteDestination] = useState('');
+    const [sourceRouteColumnId, setSourceRouteColumnId] = useState('');
     const [reportNamePart, setReportNamePart] = useState<'' | PsycholaboralReportNamePart>('');
+
+    const routeColumns = useMemo(
+        () => existingColumns.filter(c => c.type === 'route'),
+        [existingColumns]
+    );
 
     const isEditing = !!editingColumn;
 
@@ -42,12 +51,14 @@ export const AddColumnModal: React.FC<AddColumnModalProps> = ({
                         : ['']
             );
             setRouteDestination(editingColumn.routeDestination || '');
+            setSourceRouteColumnId(editingColumn.sourceRouteColumnId || '');
             setReportNamePart(editingColumn.reportNamePart ?? '');
         } else if (isOpen) {
             setName('');
             setType('text');
             setOptions(['']);
             setRouteDestination('');
+            setSourceRouteColumnId('');
             setReportNamePart('');
         }
     }, [isOpen, editingColumn]);
@@ -83,13 +94,28 @@ export const AddColumnModal: React.FC<AddColumnModalProps> = ({
             return;
         }
 
+        if (type === 'route_cost') {
+            if (routeColumns.length === 0) {
+                alert('Primero cree al menos una columna de tipo Ruta (transporte público)');
+                return;
+            }
+            if (!sourceRouteColumnId) {
+                alert('Seleccione la columna de ruta de referencia');
+                return;
+            }
+        }
+
         const column: CustomColumn = {
             id: editingColumn?.id || `col_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
             name: name.trim(),
             type,
             ...(type === 'select' && { options: options.map(o => o.trim()).filter(Boolean) }),
             ...(type === 'route' && { routeDestination: routeDestination.trim() }),
-            ...(reportNamePart && type !== 'route' ? { reportNamePart } : {}),
+            ...(type === 'route_cost' && {
+                sourceRouteColumnId,
+                routeCostOnDemand: true,
+            }),
+            ...(reportNamePart && type !== 'route' && type !== 'route_cost' ? { reportNamePart } : {}),
         };
 
         if (isEditing && onEdit) {
@@ -102,6 +128,7 @@ export const AddColumnModal: React.FC<AddColumnModalProps> = ({
         setType('text');
         setOptions(['']);
         setRouteDestination('');
+        setSourceRouteColumnId('');
         setReportNamePart('');
         onClose();
     };
@@ -130,7 +157,13 @@ export const AddColumnModal: React.FC<AddColumnModalProps> = ({
                             type="text"
                             value={name}
                             onChange={(e) => setName(e.target.value)}
-                            placeholder={type === 'route' ? 'Ej: Ruta a sede Miraflores' : 'Ej: Disponibilidad, Salario esperado...'}
+                            placeholder={
+                                type === 'route'
+                                    ? 'Ej: Ruta a sede Miraflores'
+                                    : type === 'route_cost'
+                                        ? 'Ej: Costo ruta sede Miraflores'
+                                        : 'Ej: Disponibilidad, Salario esperado...'
+                            }
                             required
                             className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
                         />
@@ -148,6 +181,9 @@ export const AddColumnModal: React.FC<AddColumnModalProps> = ({
                                 if (newType === 'select' && options.length === 0) {
                                     setOptions(['']);
                                 }
+                                if (newType === 'route_cost' && routeColumns.length === 1) {
+                                    setSourceRouteColumnId(routeColumns[0].id);
+                                }
                             }}
                             required
                             className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
@@ -158,6 +194,7 @@ export const AddColumnModal: React.FC<AddColumnModalProps> = ({
                             <option value="date">Fecha</option>
                             <option value="select">Selección (Lista desplegable)</option>
                             <option value="route">Ruta (transporte público)</option>
+                            <option value="route_cost">Costo aprox. de ruta</option>
                         </select>
                     </div>
 
@@ -177,6 +214,40 @@ export const AddColumnModal: React.FC<AddColumnModalProps> = ({
                                 required
                                 className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
                             />
+                        </div>
+                    )}
+
+                    {type === 'route_cost' && (
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">
+                                Columna de ruta de referencia <span className="text-red-500">*</span>
+                            </label>
+                            <p className="text-xs text-gray-500 mb-2">
+                                Se estimará el costo aproximado del tramo según la ruta seleccionada.
+                                El valor <strong>no se calcula automáticamente</strong>: cada fila se consulta
+                                solo cuando el usuario pulse «Calcular» o use la acción masiva de pendientes.
+                                El resultado queda guardado en la base de datos.
+                            </p>
+                            {routeColumns.length === 0 ? (
+                                <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-3">
+                                    No hay columnas de ruta en este proceso. Cree primero una columna tipo «Ruta (transporte público)».
+                                </p>
+                            ) : (
+                                <select
+                                    value={sourceRouteColumnId}
+                                    onChange={(e) => setSourceRouteColumnId(e.target.value)}
+                                    required
+                                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                                >
+                                    <option value="">Seleccionar columna de ruta...</option>
+                                    {routeColumns.map(col => (
+                                        <option key={col.id} value={col.id}>
+                                            {col.name}
+                                            {col.routeDestination ? ` → ${col.routeDestination}` : ''}
+                                        </option>
+                                    ))}
+                                </select>
+                            )}
                         </div>
                     )}
 
@@ -227,7 +298,7 @@ export const AddColumnModal: React.FC<AddColumnModalProps> = ({
                         </div>
                     )}
 
-                    {type !== 'route' && (
+                    {type !== 'route' && type !== 'route_cost' && (
                         <div>
                             <label className="block text-sm font-medium text-gray-700 mb-1">
                                 Informe psicolaboral (nombre en PDF)

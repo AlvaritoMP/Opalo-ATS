@@ -29,6 +29,7 @@ import {
     shouldApplyScoreAutoFilter,
 } from './bulkTableColumns';
 import { computeProfileMatch } from './bulkIdealProfileMatch';
+import { extractRouteCostTotal } from './routeCostStorage';
 
 export type BulkStatValueKind = 'categorical' | 'numeric' | 'date';
 
@@ -89,7 +90,7 @@ function inferValueKind(columnId: string, customColumns: CustomColumn[]): BulkSt
     if (columnId === 'createdAt') return 'date';
     if (columnId.startsWith('custom_')) {
         const col = customColumns.find(c => c.id === columnId.replace('custom_', ''));
-        if (col?.type === 'number') return 'numeric';
+        if (col?.type === 'number' || col?.type === 'route_cost') return 'numeric';
         if (col?.type === 'date') return 'date';
     }
     return 'categorical';
@@ -282,6 +283,11 @@ export function resolveBulkStatCellLabel(
         if (display === '-' || !display.trim()) return EMPTY_LABEL;
         if (col.type === 'number' && typeof raw === 'number') {
             return bucketNumeric(raw, chooseNumericStep(raw, raw));
+        }
+        if (col.type === 'route_cost') {
+            const total = extractRouteCostTotal(raw);
+            if (total == null) return EMPTY_LABEL;
+            return bucketNumeric(total, chooseNumericStep(total, total));
         }
         if (col.type === 'date') {
             const formatted = formatBulkDate(raw);

@@ -45,6 +45,7 @@ const MATCH_MODE_LABELS: Record<IdealProfileMatchMode, string> = {
 function getMatchModesForType(type: IdealProfileFieldDef['type']): IdealProfileMatchMode[] {
     switch (type) {
         case 'number':
+        case 'route_cost':
             return ['exact', 'minimum', 'maximum', 'range'];
         case 'date':
             return ['exact', 'range'];
@@ -90,7 +91,11 @@ function createDefaultCriteria(
             enabled: false,
             idealValue: f.type === 'checkbox' ? false : '',
             excludeValue: '',
-            matchMode: f.type === 'number' ? 'minimum' : f.type === 'select' || f.type === 'checkbox' ? 'exact' : 'contains',
+            matchMode:
+                f.type === 'route_cost' ? 'maximum'
+                : f.type === 'number' ? 'minimum'
+                : f.type === 'select' || f.type === 'checkbox' ? 'exact'
+                : 'contains',
             weight: 1,
         };
     });
@@ -168,7 +173,7 @@ export const BulkIdealProfileModal: React.FC<Props> = ({
                 if (val === undefined) return c;
                 const field = availableFields.find(f => f.fieldId === c.fieldId);
                 let idealValue: string | number | boolean = val;
-                if (field?.type === 'number') idealValue = parseFloat(val) || 0;
+                if (field?.type === 'number' || field?.type === 'route_cost') idealValue = parseFloat(val) || 0;
                 if (field?.type === 'checkbox') idealValue = val === 'true' || val === '1' || val.toLowerCase() === 'sí';
                 return { ...c, enabled: true, idealValue };
             })
@@ -414,7 +419,7 @@ export const BulkIdealProfileModal: React.FC<Props> = ({
                                                             <option key={opt} value={opt}>{opt}</option>
                                                         ))}
                                                     </select>
-                                                ) : field.type === 'number' && c.matchMode === 'range' ? (
+                                                ) : (field.type === 'number' || field.type === 'route_cost') && c.matchMode === 'range' ? (
                                                     <div className="flex gap-1 items-center">
                                                         <input
                                                             type="number"
@@ -435,11 +440,11 @@ export const BulkIdealProfileModal: React.FC<Props> = ({
                                                 ) : (
                                                     <div className="space-y-1">
                                                         <input
-                                                            type={field.type === 'number' ? 'number' : field.type === 'date' ? 'date' : 'text'}
+                                                            type={field.type === 'number' || field.type === 'route_cost' ? 'number' : field.type === 'date' ? 'date' : 'text'}
                                                             value={String(c.idealValue ?? '')}
                                                             onChange={e =>
                                                                 updateCriterion(c.fieldId, {
-                                                                    idealValue: field.type === 'number'
+                                                                    idealValue: field.type === 'number' || field.type === 'route_cost'
                                                                         ? parseFloat(e.target.value) || 0
                                                                         : e.target.value,
                                                                 })
@@ -487,11 +492,11 @@ export const BulkIdealProfileModal: React.FC<Props> = ({
                                                 ) : (
                                                     <div className="space-y-1">
                                                         <input
-                                                            type={field.type === 'number' ? 'number' : field.type === 'date' ? 'date' : 'text'}
+                                                            type={field.type === 'number' || field.type === 'route_cost' ? 'number' : field.type === 'date' ? 'date' : 'text'}
                                                             value={String(c.excludeValue ?? '')}
                                                             onChange={e =>
                                                                 updateCriterion(c.fieldId, {
-                                                                    excludeValue: field.type === 'number'
+                                                                    excludeValue: field.type === 'number' || field.type === 'route_cost'
                                                                         ? (e.target.value === '' ? '' : parseFloat(e.target.value) || 0)
                                                                         : e.target.value,
                                                                 })

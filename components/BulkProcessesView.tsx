@@ -27,7 +27,7 @@ import {
 } from '../lib/hiringStageTracking';
 import { processesApi } from '../lib/api/processes';
 import { useDebouncedValue } from '../lib/useDebouncedValue';
-import { Check, X, Loader2, Send, Archive, Search, ChevronDown, ChevronUp, Plus, Edit, Trash2, ArrowLeft, MessageCircle, Phone, Upload, Download, Filter, Mail, Calendar, Settings, ArrowUp, ArrowDown, Pin, FileText, BookOpen, Paperclip, ClipboardList, ListPlus, RefreshCw, HardDrive, CaseSensitive, Package, History, Target, BarChart3, UserCheck } from 'lucide-react';
+import { Check, X, Loader2, Send, Archive, Search, ChevronDown, ChevronUp, Plus, Edit, Trash2, ArrowLeft, MessageCircle, Phone, Upload, Download, Filter, Mail, Calendar, Settings, ArrowUp, ArrowDown, Pin, FileText, BookOpen, Paperclip, ClipboardList, ListPlus, RefreshCw, HardDrive, CaseSensitive, Package, History, Target, BarChart3, UserCheck, Coins, Bus } from 'lucide-react';
 import { BulkCandidateTimeline } from './BulkCandidateTimeline';
 import { Process, CustomColumn, BulkProcessConfig, Candidate, IdealProfileConfig, BulkProcessStatChart } from '../types';
 import { candidatesApi } from '../lib/api/candidates';
@@ -107,6 +107,7 @@ import { PsycholaboralReportModal } from './PsycholaboralReportModal';
 import { PsycholaboralBulkEvaluateModal } from './PsycholaboralBulkEvaluateModal';
 import { PsycholaboralInventoryModal } from './PsycholaboralInventoryModal';
 import { BulkIdealProfileModal } from './BulkIdealProfileModal';
+import { TransportFaresModal } from './TransportFaresModal';
 import { BulkProcessStatsModal } from './BulkProcessStatsModal';
 import {
     getApplicationCountLabel,
@@ -133,7 +134,11 @@ import { BulkContactStatusCell } from './BulkContactStatusCell';
 import { SendToOpsFlowModal } from './SendToOpsFlowModal';
 import { BulkCandidateOpsFlowPanel } from './BulkCandidateOpsFlowPanel';
 import { BulkRouteCell } from './BulkRouteCell';
+import { BulkRouteCostCell } from './BulkRouteCostCell';
 import { buildRouteColumnLink } from '../lib/transitRouteLinks';
+import { buildRouteCostRequest, estimateRouteCostForCandidate, hasStoredRouteCost, countRouteCostCells, encodeStoredRouteCost, parseRouteCostCellValue, extractRouteCostTotal } from '../lib/transitRouteCost';
+import { resolveTransportFaresList } from '../lib/limaTransportFares';
+import { formatRouteCostDisplay } from '../lib/limaTransportFares';
 import {
     enrichCandidatesWithNextInterviews,
     interviewEventToCandidateFields,
@@ -620,10 +625,14 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
     const [showExportModal, setShowExportModal] = useState(false);
     const [showIdealProfileModal, setShowIdealProfileModal] = useState(false);
     const [showStatsModal, setShowStatsModal] = useState(false);
+    const [showTransportFaresModal, setShowTransportFaresModal] = useState(false);
     const [allCandidatesForStats, setAllCandidatesForStats] = useState<BulkCandidate[]>([]);
     const [loadingAllCandidatesForStats, setLoadingAllCandidatesForStats] = useState(false);
     const [loadingProfileStats, setLoadingProfileStats] = useState(false);
     const [isNormalizingTextCase, setIsNormalizingTextCase] = useState(false);
+    const [isCalculatingRouteCosts, setIsCalculatingRouteCosts] = useState(false);
+    const [routeCostLoadingCells, setRouteCostLoadingCells] = useState<Set<string>>(new Set());
+    const [routeCostErrors, setRouteCostErrors] = useState<Record<string, string>>({});
     const [activityLogRefreshToken, setActivityLogRefreshToken] = useState(0);
     const [showOpsFlowModal, setShowOpsFlowModal] = useState(false);
     const [opsFlowCandidates, setOpsFlowCandidates] = useState<Candidate[]>([]);
@@ -1313,6 +1322,11 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
             setIsNormalizingTextCase(false);
         }
     }, [selectedProcess, process, syncColumnValuesFromDatabase, loadCandidates, actions]);
+
+    const routeCostColumns = useMemo(
+        () => customColumns.filter(c => c.type === 'route_cost'),
+        [customColumns]
+    );
 
     // Al cambiar de proceso: sincronizar columnas completas una sola vez
     useEffect(() => {
@@ -2204,6 +2218,16 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
     };
 
     const handleDeleteColumn = async (columnId: string) => {
+        const dependentCostCols = customColumns.filter(
+            c => c.type === 'route_cost' && c.sourceRouteColumnId === columnId
+        );
+        if (dependentCostCols.length > 0) {
+            alert(
+                `Esta columna de ruta está vinculada a: ${dependentCostCols.map(c => c.name).join(', ')}. ` +
+                'Elimine o edite esas columnas de costo antes de continuar.'
+            );
+            return;
+        }
         if (!confirm('¿Eliminar esta columna personalizada?')) return;
         const colKey = `custom_${columnId}`;
         const newColumns = customColumns.filter(c => c.id !== columnId);
@@ -2307,6 +2331,11 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
     };
 
     const handleStartEdit = (candidateId: string, field: string, currentValue: any) => {
+        if (field.startsWith('custom_')) {
+            const colId = field.replace('custom_', '');
+            const col = customColumns.find(c => c.id === colId);
+            if (col?.type === 'route' || col?.type === 'route_cost') return;
+        }
         const colId = field.startsWith('custom_') ? field : field;
         setActiveCell({ candidateId, colId });
         setSelectionAnchor({ candidateId, colId });
@@ -2695,6 +2724,242 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
         );
     };
 
+    const routeCostCellKey = (candidateId: string, columnId: string) => `${candidateId}:${columnId}`;
+
+    const transportFaresForCalc = useMemo(
+        () => resolveTransportFaresList(state.settings),
+        [state.settings]
+    );
+
+    const persistRouteCostResult = useCallback((
+        candidateId: string,
+        costColumnId: string,
+        result: { total: number; breakdown: { type: string; label: string; fare: number }[]; currency: 'PEN' }
+    ) => {
+        if (!process) return;
+        const stored = encodeStoredRouteCost(result);
+        setColumnValues(prev => {
+            const candidatePatch = enrichBulkColumnValuesForStorage(
+                { ...(prev[candidateId] || {}), [costColumnId]: stored },
+                customColumns
+            );
+            const newValues = { ...prev, [candidateId]: candidatePatch };
+            persistLocalColumnValues(process.id, newValues);
+            persistCustomColumnValues(candidateId, candidatePatch);
+            return newValues;
+        });
+    }, [process, customColumns, persistCustomColumnValues]);
+
+    const handleCalculateRouteCost = useCallback(async (
+        candidateId: string,
+        costColumn: CustomColumn,
+        displayCandidate: BulkCandidate,
+        options: { forceRecalculate?: boolean } = {}
+    ) => {
+        if (!process) return;
+
+        const storedValue = getColumnValue(candidateId, costColumn.id, displayCandidate);
+        if (!options.forceRecalculate && hasStoredRouteCost(storedValue)) {
+            actions.showToast('Este costo ya está guardado. Use «Recalcular» si desea volver a consultar Maps.', 'info', 3500);
+            return;
+        }
+
+        if (options.forceRecalculate) {
+            const ok = window.confirm(
+                '¿Recalcular el costo de esta fila?\n\nSe hará una nueva consulta a Google Maps y se actualizará el valor en la base de datos.'
+            );
+            if (!ok) return;
+        }
+
+        const cellKey = routeCostCellKey(candidateId, costColumn.id);
+        setRouteCostLoadingCells(prev => new Set(prev).add(cellKey));
+        setRouteCostErrors(prev => {
+            const next = { ...prev };
+            delete next[cellKey];
+            return next;
+        });
+
+        try {
+            const result = await estimateRouteCostForCandidate(
+                displayCandidate,
+                costColumn,
+                customColumns,
+                columnValues,
+                transportFaresForCalc
+            );
+            persistRouteCostResult(candidateId, costColumn.id, result);
+            actions.showToast(
+                options.forceRecalculate
+                    ? `Costo actualizado: ${formatRouteCostDisplay(result.total)}`
+                    : `Costo guardado: ${formatRouteCostDisplay(result.total)}`,
+                'success',
+                2500
+            );
+        } catch (error) {
+            const message = error instanceof Error ? error.message : 'Error al calcular costo';
+            setRouteCostErrors(prev => ({ ...prev, [cellKey]: message }));
+            actions.showToast(message, 'error', 4000);
+        } finally {
+            setRouteCostLoadingCells(prev => {
+                const next = new Set(prev);
+                next.delete(cellKey);
+                return next;
+            });
+        }
+    }, [process, customColumns, columnValues, persistRouteCostResult, actions, transportFaresForCalc]);
+
+    const runBulkRouteCostCalculation = useCallback(async (forceRecalculate: boolean) => {
+        if (!process || routeCostColumns.length === 0) return;
+
+        const targetCandidates = selectedIds.size > 0
+            ? candidates.filter(c => selectedIds.has(c.id))
+            : candidates;
+
+        if (targetCandidates.length === 0) {
+            actions.showToast('No hay candidatos para calcular', 'info', 3000);
+            return;
+        }
+
+        const counts = countRouteCostCells(
+            targetCandidates,
+            routeCostColumns,
+            customColumns,
+            columnValues,
+            (candidateId, columnId, candidate) => getColumnValue(candidateId, columnId, candidate as BulkCandidate)
+        );
+
+        let effectiveForce = forceRecalculate;
+
+        if (!effectiveForce && counts.pending === 0) {
+            if (counts.calculated > 0) {
+                const ok = window.confirm(
+                    `Todos los registros visibles ya tienen costo guardado (${counts.calculated} celda(s)).\n\n` +
+                    '¿Desea recalcularlos? Cada fila hará una nueva consulta a Google Maps.'
+                );
+                if (!ok) return;
+                effectiveForce = true;
+            } else {
+                actions.showToast('No hay celdas pendientes de calcular', 'info', 3000);
+                return;
+            }
+        } else if (effectiveForce) {
+            if (counts.calculated === 0 && counts.pending === 0) {
+                actions.showToast('No hay celdas calculables (faltan ubicaciones)', 'info', 3000);
+                return;
+            }
+            const ok = window.confirm(
+                `¿Recalcular costos de ruta?\n\n` +
+                `${counts.calculated} celda(s) con valor guardado se volverán a consultar.\n` +
+                `${counts.pending} celda(s) pendientes también se calcularán.\n\n` +
+                'Cada consulta consume la API de Google Maps.'
+            );
+            if (!ok) return;
+        } else {
+            const ok = window.confirm(
+                `¿Calcular costos pendientes?\n\n` +
+                `${counts.pending} celda(s) sin valor se consultarán en Google Maps.\n` +
+                `${counts.calculated} celda(s) ya guardadas se omitirán.\n\n` +
+                'Los resultados quedan persistidos en la base de datos.'
+            );
+            if (!ok) return;
+        }
+
+        setIsCalculatingRouteCosts(true);
+        let successCount = 0;
+        let skippedCount = 0;
+        let errorCount = 0;
+
+        try {
+            for (const candidate of targetCandidates) {
+                const optimistic = optimisticUpdates.get(candidate.id);
+                const displayCandidate = optimistic ? { ...candidate, ...optimistic } : candidate;
+
+                for (const costColumn of routeCostColumns) {
+                    const storedValue = getColumnValue(candidate.id, costColumn.id, displayCandidate);
+                    if (!effectiveForce && hasStoredRouteCost(storedValue)) {
+                        skippedCount++;
+                        continue;
+                    }
+
+                    const request = buildRouteCostRequest(
+                        displayCandidate,
+                        costColumn,
+                        customColumns,
+                        columnValues
+                    );
+                    if (!request) {
+                        errorCount++;
+                        continue;
+                    }
+
+                    const cellKey = routeCostCellKey(candidate.id, costColumn.id);
+                    setRouteCostLoadingCells(prev => new Set(prev).add(cellKey));
+
+                    try {
+                        const result = await estimateRouteCostForCandidate(
+                            displayCandidate,
+                            costColumn,
+                            customColumns,
+                            columnValues,
+                            transportFaresForCalc
+                        );
+                        persistRouteCostResult(candidate.id, costColumn.id, result);
+                        setRouteCostErrors(prev => {
+                            const next = { ...prev };
+                            delete next[cellKey];
+                            return next;
+                        });
+                        successCount++;
+                    } catch {
+                        errorCount++;
+                    } finally {
+                        setRouteCostLoadingCells(prev => {
+                            const next = new Set(prev);
+                            next.delete(cellKey);
+                            return next;
+                        });
+                    }
+
+                    await new Promise(resolve => setTimeout(resolve, 200));
+                }
+            }
+
+            if (successCount === 0 && errorCount > 0 && skippedCount === 0) {
+                actions.showToast('No se pudo calcular ningún costo de ruta', 'error', 4000);
+            } else if (successCount === 0 && skippedCount > 0) {
+                actions.showToast(`${skippedCount} celda(s) omitidas (ya guardadas en BD)`, 'info', 3500);
+            } else {
+                const skippedMsg = skippedCount > 0 ? `, ${skippedCount} omitido(s) (ya guardados)` : '';
+                actions.showToast(
+                    `Costos guardados: ${successCount} celda(s)${skippedMsg}${errorCount > 0 ? `, ${errorCount} error(es)` : ''}`,
+                    errorCount > 0 ? 'info' : 'success',
+                    4500
+                );
+            }
+        } finally {
+            setIsCalculatingRouteCosts(false);
+        }
+    }, [
+        process,
+        routeCostColumns,
+        selectedIds,
+        candidates,
+        optimisticUpdates,
+        customColumns,
+        columnValues,
+        persistRouteCostResult,
+        actions,
+        transportFaresForCalc,
+    ]);
+
+    const handleBulkCalculateRouteCosts = useCallback(() => {
+        void runBulkRouteCostCalculation(false);
+    }, [runBulkRouteCostCalculation]);
+
+    const handleBulkRecalculateRouteCosts = useCallback(() => {
+        void runBulkRouteCostCalculation(true);
+    }, [runBulkRouteCostCalculation]);
+
     const readCandidateFieldValue = useCallback((candidateId: string, field: string): string => {
         const candidate = candidates.find(c => c.id === candidateId);
         if (!candidate) return '';
@@ -2720,6 +2985,10 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
             const cellValue = getColumnValue(candidateId, col.id, candidates.find(c => c.id === candidateId));
 
             if (col.type === 'route') continue;
+            if (col.type === 'route_cost') {
+                if (!String(cellValue ?? '').includes(filterValue)) return false;
+                continue;
+            }
             if (col.type === 'checkbox') {
                 const isChecked = cellValue === true;
                 if (filterValue === 'true' && !isChecked) return false;
@@ -2845,9 +3114,9 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                         const col = customColumns.find(c => c.id === customColId);
                         const rawA = getColumnValue(candidateA.id, customColId, candidateA);
                         const rawB = getColumnValue(candidateB.id, customColId, candidateB);
-                        if (col?.type === 'number') {
-                            valueA = Number(rawA) || 0;
-                            valueB = Number(rawB) || 0;
+                        if (col?.type === 'number' || col?.type === 'route_cost') {
+                            valueA = Number(extractRouteCostTotal(rawA) ?? rawA) || 0;
+                            valueB = Number(extractRouteCostTotal(rawB) ?? rawB) || 0;
                         } else if (col?.type === 'date') {
                             const fmtA = formatBulkDate(rawA);
                             const fmtB = formatBulkDate(rawB);
@@ -3080,6 +3349,8 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
 
         if (colId.startsWith('custom_')) {
             const customColId = colId.replace('custom_', '');
+            const col = customColumns.find(c => c.id === customColId);
+            if (col?.type === 'route' || col?.type === 'route_cost') return;
             handleStartEdit(candidateId, colId, getColumnValue(candidateId, customColId, displayCandidate));
             return;
         }
@@ -3789,6 +4060,38 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                             )}
                                             Normalizar
                                         </button>
+                                        {routeCostColumns.length > 0 && (
+                                            <>
+                                                <button
+                                                    type="button"
+                                                    onClick={handleBulkCalculateRouteCosts}
+                                                    disabled={isCalculatingRouteCosts || isLoading}
+                                                    className="bg-emerald-600 text-white hover:bg-emerald-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                                    title="Calcular solo filas pendientes (sin valor guardado). Omite registros ya calculados."
+                                                >
+                                                    {isCalculatingRouteCosts ? (
+                                                        <Loader2 className="w-4 h-4 animate-spin" />
+                                                    ) : (
+                                                        <Coins className="w-4 h-4" />
+                                                    )}
+                                                    Costos pendientes
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={handleBulkRecalculateRouteCosts}
+                                                    disabled={isCalculatingRouteCosts || isLoading}
+                                                    className="bg-amber-600 text-white hover:bg-amber-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                                    title="Volver a consultar Google Maps incluso en filas que ya tienen costo guardado"
+                                                >
+                                                    {isCalculatingRouteCosts ? (
+                                                        <Loader2 className="w-4 h-4 animate-spin" />
+                                                    ) : (
+                                                        <RefreshCw className="w-4 h-4" />
+                                                    )}
+                                                    Recalcular costos
+                                                </button>
+                                            </>
+                                        )}
                                         <button
                                             type="button"
                                             onClick={() => refreshFromDatabase()}
@@ -3801,6 +4104,15 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                     </BulkToolbarGroup>
 
                                     <BulkToolbarGroup label="Herramientas">
+                                        <button
+                                            type="button"
+                                            onClick={() => setShowTransportFaresModal(true)}
+                                            className="bg-white border border-sky-300 text-sky-900 hover:bg-sky-50 transition-colors whitespace-nowrap"
+                                            title="Editar tarifas de transporte público para estimación de costos de ruta"
+                                        >
+                                            <Bus className="w-4 h-4 shrink-0" />
+                                            Tarifas transporte
+                                        </button>
                                         <button
                                             type="button"
                                             onClick={() => setShowStatsModal(true)}
@@ -4205,6 +4517,15 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                                         </select>
                                                     ) : col.type === 'route' ? (
                                                         <span className="text-[10px] text-gray-400 font-normal normal-case">Enlace automático</span>
+                                                    ) : col.type === 'route_cost' ? (
+                                                        <input
+                                                            type="text"
+                                                            placeholder="Filtrar costo..."
+                                                            value={columnFilters[filterKey] || ''}
+                                                            onChange={(e) => setColumnFilters({ ...columnFilters, [filterKey]: e.target.value })}
+                                                            className="text-xs px-2 py-1 border border-gray-300 rounded focus:ring-1 focus:ring-primary-500 focus:border-primary-500 font-normal normal-case"
+                                                            onClick={(e) => e.stopPropagation()}
+                                                        />
                                                     ) : (
                                                         <input
                                                             type="text"
@@ -4612,6 +4933,50 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                                     );
                                                 }
 
+                                                if (col.type === 'route_cost') {
+                                                    const cellKey = routeCostCellKey(candidate.id, col.id);
+                                                    const routeRequest = buildRouteCostRequest(
+                                                        displayCandidate,
+                                                        col,
+                                                        customColumns,
+                                                        columnValues
+                                                    );
+                                                    const parsed = parseRouteCostCellValue(value);
+                                                    const hasValue = parsed.total != null;
+
+                                                    return (
+                                                        <td
+                                                            key={col.id}
+                                                            {...tdProps(candidate.id, colId)}
+                                                        >
+                                                            {renderCellCommentIndicator(candidate.id, colId)}
+                                                            <BulkRouteCostCell
+                                                                value={parsed.total}
+                                                                loading={routeCostLoadingCells.has(cellKey)}
+                                                                error={routeCostErrors[cellKey]}
+                                                                missingSourceRoute={!col.sourceRouteColumnId}
+                                                                missingOrigin={!routeRequest}
+                                                                breakdownTitle={parsed.tooltip || undefined}
+                                                                onCalculate={
+                                                                    routeRequest && !hasValue
+                                                                        ? () => void handleCalculateRouteCost(candidate.id, col, displayCandidate)
+                                                                        : undefined
+                                                                }
+                                                                onRecalculate={
+                                                                    routeRequest && hasValue
+                                                                        ? () => void handleCalculateRouteCost(
+                                                                            candidate.id,
+                                                                            col,
+                                                                            displayCandidate,
+                                                                            { forceRecalculate: true }
+                                                                        )
+                                                                        : undefined
+                                                                }
+                                                            />
+                                                        </td>
+                                                    );
+                                                }
+
                                                 return (
                                                     <td
                                                         key={col.id}
@@ -4947,6 +5312,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                     onAdd={handleAddColumn}
                     editingColumn={editingColumn}
                     onEdit={handleEditColumn}
+                    existingColumns={customColumns}
                 />
             )}
 
@@ -5067,6 +5433,11 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                     onSave={handleSaveCustomStats}
                 />
             )}
+
+            <TransportFaresModal
+                isOpen={showTransportFaresModal}
+                onClose={() => setShowTransportFaresModal(false)}
+            />
         </div>
     );
 };
