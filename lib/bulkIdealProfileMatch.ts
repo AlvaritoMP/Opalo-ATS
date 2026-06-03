@@ -284,7 +284,7 @@ export function getCandidateFieldValue(
     legacyColumnIdToName: Record<string, string>,
     bulkConfig?: BulkProcessConfig
 ): unknown {
-        if (colId.startsWith('custom_')) {
+    if (fieldId.startsWith('custom_')) {
         let colId = fieldId.replace('custom_', '');
         if (!customColumns.some(c => c.id === colId)) {
             const mapped = remapIdealProfileFieldId(
