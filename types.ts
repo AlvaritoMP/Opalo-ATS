@@ -211,6 +211,18 @@ export interface BulkProcessConfig {
     idealProfile?: IdealProfileConfig;
     /** Gráficos personalizados del proceso masivo (columna + tipo) */
     customStats?: BulkProcessStatChart[];
+    /** Referencias rápidas tipo post-it (título + contenido) visibles en la tabla */
+    infoPins?: BulkInfoPin[];
+}
+
+export type BulkInfoPinColor = 'yellow' | 'pink' | 'blue' | 'green' | 'purple';
+
+/** Nota de referencia rápida en procesos masivos */
+export interface BulkInfoPin {
+    id: string;
+    title: string;
+    content: string;
+    color?: BulkInfoPinColor;
 }
 
 /** Tipo de gráfico para estadísticas del proceso masivo */

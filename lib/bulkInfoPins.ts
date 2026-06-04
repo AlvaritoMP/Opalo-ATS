@@ -1,0 +1,53 @@
+import type { BulkInfoPin, BulkInfoPinColor } from '../types';
+
+export const BULK_INFO_PIN_COLOR_OPTIONS: BulkInfoPinColor[] = [
+    'yellow',
+    'pink',
+    'blue',
+    'green',
+    'purple',
+];
+
+export const BULK_INFO_PIN_STYLES: Record<
+    BulkInfoPinColor,
+    { button: string; dot: string; label: string }
+> = {
+    yellow: {
+        button: 'bg-amber-100 border-amber-300 text-amber-950 hover:bg-amber-200',
+        dot: 'bg-amber-400',
+        label: 'Amarillo',
+    },
+    pink: {
+        button: 'bg-pink-100 border-pink-300 text-pink-950 hover:bg-pink-200',
+        dot: 'bg-pink-400',
+        label: 'Rosa',
+    },
+    blue: {
+        button: 'bg-sky-100 border-sky-300 text-sky-950 hover:bg-sky-200',
+        dot: 'bg-sky-400',
+        label: 'Azul',
+    },
+    green: {
+        button: 'bg-emerald-100 border-emerald-300 text-emerald-950 hover:bg-emerald-200',
+        dot: 'bg-emerald-400',
+        label: 'Verde',
+    },
+    purple: {
+        button: 'bg-violet-100 border-violet-300 text-violet-950 hover:bg-violet-200',
+        dot: 'bg-violet-400',
+        label: 'Morado',
+    },
+};
+
+export function createBulkInfoPin(partial?: Partial<BulkInfoPin>): BulkInfoPin {
+    return {
+        id: partial?.id || `pin-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        title: partial?.title ?? 'Nueva referencia',
+        content: partial?.content ?? '',
+        color: partial?.color ?? 'yellow',
+    };
+}
+
+export function getBulkInfoPinStyle(color?: BulkInfoPinColor) {
+    return BULK_INFO_PIN_STYLES[color || 'yellow'];
+}

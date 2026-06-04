@@ -29,7 +29,7 @@ import { processesApi } from '../lib/api/processes';
 import { useDebouncedValue } from '../lib/useDebouncedValue';
 import { Check, X, Loader2, Send, Archive, Search, ChevronDown, ChevronUp, Plus, Edit, Trash2, ArrowLeft, MessageCircle, Phone, Upload, Download, Filter, Mail, Calendar, Settings, ArrowUp, ArrowDown, Pin, FileText, BookOpen, Paperclip, ClipboardList, ListPlus, RefreshCw, HardDrive, CaseSensitive, Package, History, Target, BarChart3, UserCheck, Coins, Bus } from 'lucide-react';
 import { BulkCandidateTimeline } from './BulkCandidateTimeline';
-import { Process, CustomColumn, BulkProcessConfig, Candidate, IdealProfileConfig, BulkProcessStatChart } from '../types';
+import { Process, CustomColumn, BulkProcessConfig, Candidate, IdealProfileConfig, BulkProcessStatChart, BulkInfoPin } from '../types';
 import { candidatesApi } from '../lib/api/candidates';
 import {
     BASE_COLUMNS,
@@ -108,6 +108,9 @@ import { PsycholaboralBulkEvaluateModal } from './PsycholaboralBulkEvaluateModal
 import { PsycholaboralInventoryModal } from './PsycholaboralInventoryModal';
 import { BulkIdealProfileModal } from './BulkIdealProfileModal';
 import { TransportFaresModal } from './TransportFaresModal';
+import { BulkInfoPinsBar } from './BulkInfoPinsBar';
+import { BulkInfoPinModal } from './BulkInfoPinModal';
+import { createBulkInfoPin } from '../lib/bulkInfoPins';
 import { BulkProcessStatsModal } from './BulkProcessStatsModal';
 import {
     getApplicationCountLabel,
@@ -626,6 +629,8 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
     const [showIdealProfileModal, setShowIdealProfileModal] = useState(false);
     const [showStatsModal, setShowStatsModal] = useState(false);
     const [showTransportFaresModal, setShowTransportFaresModal] = useState(false);
+    const [infoPinModal, setInfoPinModal] = useState<{ pin: BulkInfoPin; isNew: boolean } | null>(null);
+    const [isSavingInfoPin, setIsSavingInfoPin] = useState(false);
     const [allCandidatesForStats, setAllCandidatesForStats] = useState<BulkCandidate[]>([]);
     const [loadingAllCandidatesForStats, setLoadingAllCandidatesForStats] = useState(false);
     const [loadingProfileStats, setLoadingProfileStats] = useState(false);
@@ -659,6 +664,12 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
     );
 
     const canSendToOpsFlow = state.currentUser?.role === 'admin' || state.currentUser?.role === 'recruiter';
+    const canEditBulkInfoPins = canSendToOpsFlow;
+
+    const infoPins = useMemo(
+        () => process?.bulkConfig?.infoPins ?? [],
+        [process?.bulkConfig?.infoPins]
+    );
 
     const userNameById = useMemo(() => {
         const map = new Map<string, string>();
@@ -839,6 +850,37 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
             actions.showToast('Error al guardar configuración de columnas', 'error', 3000);
         }
     }, [process, actions, logActivity, customColumns, persistBulkTableLayoutBackup]);
+
+    const handleSaveInfoPin = useCallback(async (pin: BulkInfoPin) => {
+        setIsSavingInfoPin(true);
+        try {
+            const exists = infoPins.some(p => p.id === pin.id);
+            const next = exists
+                ? infoPins.map(p => (p.id === pin.id ? pin : p))
+                : [...infoPins, pin];
+            await persistBulkConfig({ infoPins: next });
+            actions.showToast(exists ? 'Referencia actualizada' : 'Referencia creada', 'success', 2500);
+            setInfoPinModal(null);
+        } catch {
+            actions.showToast('Error al guardar referencia', 'error', 3000);
+        } finally {
+            setIsSavingInfoPin(false);
+        }
+    }, [infoPins, persistBulkConfig, actions]);
+
+    const handleDeleteInfoPin = useCallback(async (pinId: string) => {
+        if (!window.confirm('¿Eliminar esta referencia?')) return;
+        setIsSavingInfoPin(true);
+        try {
+            await persistBulkConfig({ infoPins: infoPins.filter(p => p.id !== pinId) });
+            actions.showToast('Referencia eliminada', 'success', 2500);
+            setInfoPinModal(null);
+        } catch {
+            actions.showToast('Error al eliminar referencia', 'error', 3000);
+        } finally {
+            setIsSavingInfoPin(false);
+        }
+    }, [infoPins, persistBulkConfig, actions]);
 
     useEffect(() => {
         if (!process) {
@@ -3863,6 +3905,14 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                     {total} candidatos
                                 </span>
                             </div>
+                            {process && (infoPins.length > 0 || canEditBulkInfoPins) && (
+                                <BulkInfoPinsBar
+                                    pins={infoPins}
+                                    canEdit={canEditBulkInfoPins}
+                                    onSelectPin={pin => setInfoPinModal({ pin, isNew: false })}
+                                    onAddPin={() => setInfoPinModal({ pin: createBulkInfoPin(), isNew: true })}
+                                />
+                            )}
                             {process && (
                                 <div className="flex flex-wrap items-end gap-2 w-full min-w-0">
                                     <BulkToolbarGroup label="Proceso">
@@ -5437,6 +5487,17 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
             <TransportFaresModal
                 isOpen={showTransportFaresModal}
                 onClose={() => setShowTransportFaresModal(false)}
+            />
+
+            <BulkInfoPinModal
+                isOpen={!!infoPinModal}
+                pin={infoPinModal?.pin ?? null}
+                isNew={infoPinModal?.isNew ?? false}
+                canEdit={canEditBulkInfoPins}
+                isSaving={isSavingInfoPin}
+                onClose={() => setInfoPinModal(null)}
+                onSave={handleSaveInfoPin}
+                onDelete={canEditBulkInfoPins ? handleDeleteInfoPin : undefined}
             />
         </div>
     );
