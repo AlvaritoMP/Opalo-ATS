@@ -1,11 +1,12 @@
 import React from 'react';
-import { Plus, StickyNote } from 'lucide-react';
+import { Plus, StickyNote, ImageIcon } from 'lucide-react';
 import type { BulkInfoPin } from '../types';
-import { getBulkInfoPinStyle } from '../lib/bulkInfoPins';
+import { bulkInfoPinHasImage, getBulkInfoPinStyle } from '../lib/bulkInfoPins';
 
 interface BulkInfoPinsBarProps {
     pins: BulkInfoPin[];
     canEdit: boolean;
+    activePinId?: string | null;
     onSelectPin: (pin: BulkInfoPin) => void;
     onAddPin: () => void;
 }
@@ -13,6 +14,7 @@ interface BulkInfoPinsBarProps {
 export const BulkInfoPinsBar: React.FC<BulkInfoPinsBarProps> = ({
     pins,
     canEdit,
+    activePinId,
     onSelectPin,
     onAddPin,
 }) => {
@@ -29,15 +31,23 @@ export const BulkInfoPinsBar: React.FC<BulkInfoPinsBarProps> = ({
             <div className="flex flex-wrap items-center gap-1.5 min-w-0">
                 {pins.map(pin => {
                     const style = getBulkInfoPinStyle(pin.color);
+                    const isActive = activePinId === pin.id;
+                    const hasImage = bulkInfoPinHasImage(pin);
                     return (
                         <button
                             key={pin.id}
                             type="button"
                             onClick={() => onSelectPin(pin)}
-                            className={`inline-flex items-center max-w-[200px] px-2.5 py-1 text-xs font-semibold border rounded-md shadow-sm transition-colors truncate ${style.button}`}
+                            className={`inline-flex items-center max-w-[200px] px-2.5 py-1 text-xs font-semibold border rounded-md shadow-sm transition-colors truncate ${style.button} ${
+                                isActive ? 'ring-2 ring-primary-500 ring-offset-1' : ''
+                            }`}
                             title={pin.title}
+                            aria-pressed={isActive}
                         >
                             <span className={`w-1.5 h-1.5 rounded-full shrink-0 mr-1.5 ${style.dot}`} />
+                            {hasImage && (
+                                <ImageIcon className="w-3 h-3 shrink-0 mr-1 opacity-70" aria-hidden />
+                            )}
                             <span className="truncate">{pin.title}</span>
                         </button>
                     );

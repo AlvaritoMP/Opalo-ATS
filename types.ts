@@ -223,6 +223,9 @@ export interface BulkInfoPin {
     title: string;
     content: string;
     color?: BulkInfoPinColor;
+    /** PNG en data URL (base64); permite consulta con desplazamiento en el panel flotante */
+    imageDataUrl?: string;
+    imageFileName?: string;
 }
 
 /** Tipo de gráfico para estadísticas del proceso masivo */

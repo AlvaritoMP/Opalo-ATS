@@ -110,6 +110,7 @@ import { BulkIdealProfileModal } from './BulkIdealProfileModal';
 import { TransportFaresModal } from './TransportFaresModal';
 import { BulkInfoPinsBar } from './BulkInfoPinsBar';
 import { BulkInfoPinModal } from './BulkInfoPinModal';
+import { BulkInfoPinPanel } from './BulkInfoPinPanel';
 import { createBulkInfoPin } from '../lib/bulkInfoPins';
 import { BulkProcessStatsModal } from './BulkProcessStatsModal';
 import {
@@ -630,6 +631,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
     const [showStatsModal, setShowStatsModal] = useState(false);
     const [showTransportFaresModal, setShowTransportFaresModal] = useState(false);
     const [infoPinModal, setInfoPinModal] = useState<{ pin: BulkInfoPin; isNew: boolean } | null>(null);
+    const [activeInfoPinId, setActiveInfoPinId] = useState<string | null>(null);
     const [isSavingInfoPin, setIsSavingInfoPin] = useState(false);
     const [allCandidatesForStats, setAllCandidatesForStats] = useState<BulkCandidate[]>([]);
     const [loadingAllCandidatesForStats, setLoadingAllCandidatesForStats] = useState(false);
@@ -669,6 +671,11 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
     const infoPins = useMemo(
         () => process?.bulkConfig?.infoPins ?? [],
         [process?.bulkConfig?.infoPins]
+    );
+
+    const activeInfoPin = useMemo(
+        () => infoPins.find(p => p.id === activeInfoPinId) ?? null,
+        [infoPins, activeInfoPinId]
     );
 
     const userNameById = useMemo(() => {
@@ -861,6 +868,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
             await persistBulkConfig({ infoPins: next });
             actions.showToast(exists ? 'Referencia actualizada' : 'Referencia creada', 'success', 2500);
             setInfoPinModal(null);
+            if (!exists) setActiveInfoPinId(pin.id);
         } catch {
             actions.showToast('Error al guardar referencia', 'error', 3000);
         } finally {
@@ -875,12 +883,17 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
             await persistBulkConfig({ infoPins: infoPins.filter(p => p.id !== pinId) });
             actions.showToast('Referencia eliminada', 'success', 2500);
             setInfoPinModal(null);
+            if (activeInfoPinId === pinId) setActiveInfoPinId(null);
         } catch {
             actions.showToast('Error al eliminar referencia', 'error', 3000);
         } finally {
             setIsSavingInfoPin(false);
         }
-    }, [infoPins, persistBulkConfig, actions]);
+    }, [infoPins, persistBulkConfig, actions, activeInfoPinId]);
+
+    useEffect(() => {
+        setActiveInfoPinId(null);
+    }, [process?.id]);
 
     useEffect(() => {
         if (!process) {
@@ -3909,7 +3922,10 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                 <BulkInfoPinsBar
                                     pins={infoPins}
                                     canEdit={canEditBulkInfoPins}
-                                    onSelectPin={pin => setInfoPinModal({ pin, isNew: false })}
+                                    activePinId={activeInfoPinId}
+                                    onSelectPin={pin =>
+                                        setActiveInfoPinId(prev => (prev === pin.id ? null : pin.id))
+                                    }
                                     onAddPin={() => setInfoPinModal({ pin: createBulkInfoPin(), isNew: true })}
                                 />
                             )}
@@ -5489,16 +5505,26 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                 onClose={() => setShowTransportFaresModal(false)}
             />
 
-            <BulkInfoPinModal
-                isOpen={!!infoPinModal}
-                pin={infoPinModal?.pin ?? null}
-                isNew={infoPinModal?.isNew ?? false}
-                canEdit={canEditBulkInfoPins}
-                isSaving={isSavingInfoPin}
-                onClose={() => setInfoPinModal(null)}
-                onSave={handleSaveInfoPin}
-                onDelete={canEditBulkInfoPins ? handleDeleteInfoPin : undefined}
-            />
+            {activeInfoPin && (
+                <BulkInfoPinPanel
+                    pin={activeInfoPin}
+                    canEdit={canEditBulkInfoPins}
+                    onClose={() => setActiveInfoPinId(null)}
+                    onEdit={() => setInfoPinModal({ pin: activeInfoPin, isNew: false })}
+                />
+            )}
+
+            {canEditBulkInfoPins && (
+                <BulkInfoPinModal
+                    isOpen={!!infoPinModal}
+                    pin={infoPinModal?.pin ?? null}
+                    isNew={infoPinModal?.isNew ?? false}
+                    isSaving={isSavingInfoPin}
+                    onClose={() => setInfoPinModal(null)}
+                    onSave={handleSaveInfoPin}
+                    onDelete={handleDeleteInfoPin}
+                />
+            )}
         </div>
     );
 };

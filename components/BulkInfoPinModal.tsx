@@ -1,16 +1,17 @@
-import React, { useEffect, useState } from 'react';
-import { X, Save, Loader2, Trash2, StickyNote } from 'lucide-react';
+import React, { useEffect, useRef, useState } from 'react';
+import { X, Save, Loader2, Trash2, StickyNote, ImageIcon, Upload } from 'lucide-react';
 import type { BulkInfoPin } from '../types';
+import { fileToBase64 } from '../lib/fileUtils';
 import {
     BULK_INFO_PIN_COLOR_OPTIONS,
     BULK_INFO_PIN_STYLES,
     getBulkInfoPinStyle,
+    validateBulkInfoPinImageFile,
 } from '../lib/bulkInfoPins';
 
 interface BulkInfoPinModalProps {
     isOpen: boolean;
     pin: BulkInfoPin | null;
-    canEdit: boolean;
     isNew?: boolean;
     isSaving?: boolean;
     onClose: () => void;
@@ -21,7 +22,6 @@ interface BulkInfoPinModalProps {
 export const BulkInfoPinModal: React.FC<BulkInfoPinModalProps> = ({
     isOpen,
     pin,
-    canEdit,
     isNew = false,
     isSaving = false,
     onClose,
@@ -29,9 +29,14 @@ export const BulkInfoPinModal: React.FC<BulkInfoPinModalProps> = ({
     onDelete,
 }) => {
     const [draft, setDraft] = useState<BulkInfoPin | null>(pin);
+    const [imageError, setImageError] = useState<string | null>(null);
+    const fileInputRef = useRef<HTMLInputElement>(null);
 
     useEffect(() => {
-        if (isOpen && pin) setDraft({ ...pin });
+        if (isOpen && pin) {
+            setDraft({ ...pin });
+            setImageError(null);
+        }
     }, [isOpen, pin]);
 
     if (!isOpen || !draft) return null;
@@ -43,6 +48,36 @@ export const BulkInfoPinModal: React.FC<BulkInfoPinModalProps> = ({
         onSave({ ...draft, title, content: draft.content });
     };
 
+    const handleImageFile = async (file: File | undefined) => {
+        if (!file) return;
+        const validationError = validateBulkInfoPinImageFile(file);
+        if (validationError) {
+            setImageError(validationError);
+            return;
+        }
+        setImageError(null);
+        try {
+            const dataUrl = await fileToBase64(file);
+            setDraft({
+                ...draft,
+                imageDataUrl: dataUrl,
+                imageFileName: file.name,
+            });
+        } catch {
+            setImageError('No se pudo leer la imagen.');
+        }
+    };
+
+    const clearImage = () => {
+        setDraft({
+            ...draft,
+            imageDataUrl: undefined,
+            imageFileName: undefined,
+        });
+        setImageError(null);
+        if (fileInputRef.current) fileInputRef.current.value = '';
+    };
+
     return (
         <div className="fixed inset-0 bg-black/50 z-[60] flex items-center justify-center p-4">
             <div
@@ -51,11 +86,9 @@ export const BulkInfoPinModal: React.FC<BulkInfoPinModalProps> = ({
                 <div className="flex items-start justify-between gap-3 p-4 border-b border-black/10 shrink-0">
                     <div className="flex items-center gap-2 min-w-0">
                         <StickyNote className="w-5 h-5 shrink-0 opacity-70" />
-                        <div className="min-w-0">
-                            <h2 className="text-sm font-semibold opacity-80">
-                                {isNew ? 'Nueva referencia' : canEdit ? 'Editar referencia' : 'Referencia'}
-                            </h2>
-                        </div>
+                        <h2 className="text-sm font-semibold opacity-80">
+                            {isNew ? 'Nueva referencia' : 'Editar referencia'}
+                        </h2>
                     </div>
                     <button
                         type="button"
@@ -67,79 +100,120 @@ export const BulkInfoPinModal: React.FC<BulkInfoPinModalProps> = ({
                 </div>
 
                 <div className="flex-1 overflow-y-auto p-4 space-y-4">
-                    {canEdit ? (
-                        <>
-                            <div>
-                                <label className="block text-xs font-semibold uppercase tracking-wide opacity-70 mb-1">
-                                    Título del botón
-                                </label>
-                                <input
-                                    type="text"
-                                    value={draft.title}
-                                    onChange={e => setDraft({ ...draft, title: e.target.value })}
-                                    placeholder="Ej. Horarios, Contacto cliente, Tarifas..."
-                                    className="w-full px-3 py-2 text-sm border border-black/15 rounded-lg bg-white/80 focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none"
-                                    autoFocus
-                                />
-                            </div>
+                    <div>
+                        <label className="block text-xs font-semibold uppercase tracking-wide opacity-70 mb-1">
+                            Título del botón
+                        </label>
+                        <input
+                            type="text"
+                            value={draft.title}
+                            onChange={e => setDraft({ ...draft, title: e.target.value })}
+                            placeholder="Ej. Horarios, Tarifas, Mapa sede..."
+                            className="w-full px-3 py-2 text-sm border border-black/15 rounded-lg bg-white/80 focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none"
+                            autoFocus
+                        />
+                    </div>
 
-                            {canEdit && (
-                                <div>
-                                    <label className="block text-xs font-semibold uppercase tracking-wide opacity-70 mb-1">
-                                        Color
-                                    </label>
-                                    <div className="flex flex-wrap gap-2">
-                                        {BULK_INFO_PIN_COLOR_OPTIONS.map(color => {
-                                            const colorStyle = BULK_INFO_PIN_STYLES[color];
-                                            const selected = draft.color === color;
-                                            return (
-                                                <button
-                                                    key={color}
-                                                    type="button"
-                                                    onClick={() => setDraft({ ...draft, color })}
-                                                    className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border transition-colors ${
-                                                        selected
-                                                            ? `${colorStyle.button} ring-2 ring-offset-1 ring-primary-500`
-                                                            : 'bg-white/70 border-black/10 text-gray-700 hover:bg-white'
-                                                    }`}
-                                                >
-                                                    <span className={`w-2.5 h-2.5 rounded-full ${colorStyle.dot}`} />
-                                                    {colorStyle.label}
-                                                </button>
-                                            );
-                                        })}
-                                    </div>
-                                </div>
+                    <div>
+                        <label className="block text-xs font-semibold uppercase tracking-wide opacity-70 mb-1">
+                            Color
+                        </label>
+                        <div className="flex flex-wrap gap-2">
+                            {BULK_INFO_PIN_COLOR_OPTIONS.map(color => {
+                                const colorStyle = BULK_INFO_PIN_STYLES[color];
+                                const selected = draft.color === color;
+                                return (
+                                    <button
+                                        key={color}
+                                        type="button"
+                                        onClick={() => setDraft({ ...draft, color })}
+                                        className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border transition-colors ${
+                                            selected
+                                                ? `${colorStyle.button} ring-2 ring-offset-1 ring-primary-500`
+                                                : 'bg-white/70 border-black/10 text-gray-700 hover:bg-white'
+                                        }`}
+                                    >
+                                        <span className={`w-2.5 h-2.5 rounded-full ${colorStyle.dot}`} />
+                                        {colorStyle.label}
+                                    </button>
+                                );
+                            })}
+                        </div>
+                    </div>
+
+                    <div>
+                        <label className="block text-xs font-semibold uppercase tracking-wide opacity-70 mb-1">
+                            Imagen PNG (opcional)
+                        </label>
+                        <p className="text-[11px] text-gray-600 mb-2">
+                            Sube un PNG para consultarlo en el panel flotante mientras trabajas en la tabla. Puedes
+                            reemplazarlo cuando se actualice.
+                        </p>
+                        <input
+                            ref={fileInputRef}
+                            type="file"
+                            accept="image/png"
+                            className="hidden"
+                            onChange={e => void handleImageFile(e.target.files?.[0])}
+                        />
+                        <div className="flex flex-wrap gap-2">
+                            <button
+                                type="button"
+                                onClick={() => fileInputRef.current?.click()}
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-white border border-black/15 rounded-lg hover:bg-gray-50"
+                            >
+                                <Upload className="w-3.5 h-3.5" />
+                                {draft.imageDataUrl ? 'Cambiar imagen' : 'Subir PNG'}
+                            </button>
+                            {draft.imageDataUrl && (
+                                <button
+                                    type="button"
+                                    onClick={clearImage}
+                                    className="px-3 py-1.5 text-xs font-medium text-red-700 hover:bg-red-50 rounded-lg"
+                                >
+                                    Quitar imagen
+                                </button>
                             )}
+                        </div>
+                        {imageError && (
+                            <p className="mt-2 text-xs text-red-600">{imageError}</p>
+                        )}
+                        {draft.imageDataUrl && (
+                            <div className="mt-3 rounded-lg border border-black/10 bg-gray-50 overflow-hidden">
+                                <div className="flex items-center gap-1.5 px-2 py-1 border-b border-gray-200 bg-white">
+                                    <ImageIcon className="w-3.5 h-3.5 text-gray-500" />
+                                    <span className="text-[10px] text-gray-500 truncate">
+                                        {draft.imageFileName || 'imagen.png'}
+                                    </span>
+                                </div>
+                                <div className="overflow-auto max-h-40">
+                                    <img
+                                        src={draft.imageDataUrl}
+                                        alt="Vista previa"
+                                        className="block max-w-none h-auto w-max min-w-full"
+                                    />
+                                </div>
+                            </div>
+                        )}
+                    </div>
 
-                            <div>
-                                <label className="block text-xs font-semibold uppercase tracking-wide opacity-70 mb-1">
-                                    Contenido
-                                </label>
-                                <textarea
-                                    value={draft.content}
-                                    onChange={e => setDraft({ ...draft, content: e.target.value })}
-                                    placeholder="Información que el equipo necesita tener a la mano..."
-                                    rows={10}
-                                    className="w-full px-3 py-2 text-sm border border-black/15 rounded-lg bg-white/80 focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none resize-y min-h-[160px] font-mono leading-relaxed"
-                                />
-                            </div>
-                        </>
-                    ) : (
-                        <>
-                            <h3 className="text-lg font-bold">{draft.title}</h3>
-                            <div className="text-sm whitespace-pre-wrap leading-relaxed opacity-90">
-                                {draft.content || (
-                                    <span className="italic opacity-60">Sin contenido</span>
-                                )}
-                            </div>
-                        </>
-                    )}
+                    <div>
+                        <label className="block text-xs font-semibold uppercase tracking-wide opacity-70 mb-1">
+                            Contenido de texto (opcional)
+                        </label>
+                        <textarea
+                            value={draft.content}
+                            onChange={e => setDraft({ ...draft, content: e.target.value })}
+                            placeholder="Información complementaria..."
+                            rows={8}
+                            className="w-full px-3 py-2 text-sm border border-black/15 rounded-lg bg-white/80 focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none resize-y min-h-[120px] font-mono leading-relaxed"
+                        />
+                    </div>
                 </div>
 
                 <div className="flex items-center justify-between gap-2 p-4 border-t border-black/10 shrink-0">
                     <div>
-                        {canEdit && !isNew && onDelete && (
+                        {!isNew && onDelete && (
                             <button
                                 type="button"
                                 onClick={() => onDelete(draft.id)}
@@ -157,23 +231,21 @@ export const BulkInfoPinModal: React.FC<BulkInfoPinModalProps> = ({
                             onClick={onClose}
                             className="px-3 py-1.5 text-xs font-medium text-gray-700 bg-white/80 border border-black/10 rounded-lg hover:bg-white transition-colors"
                         >
-                            {canEdit ? 'Cancelar' : 'Cerrar'}
+                            Cancelar
                         </button>
-                        {canEdit && (
-                            <button
-                                type="button"
-                                onClick={handleSave}
-                                disabled={isSaving}
-                                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-primary-600 rounded-lg hover:bg-primary-700 transition-colors disabled:opacity-50"
-                            >
-                                {isSaving ? (
-                                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                                ) : (
-                                    <Save className="w-3.5 h-3.5" />
-                                )}
-                                Guardar
-                            </button>
-                        )}
+                        <button
+                            type="button"
+                            onClick={handleSave}
+                            disabled={isSaving}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-primary-600 rounded-lg hover:bg-primary-700 transition-colors disabled:opacity-50"
+                        >
+                            {isSaving ? (
+                                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            ) : (
+                                <Save className="w-3.5 h-3.5" />
+                            )}
+                            Guardar
+                        </button>
                     </div>
                 </div>
             </div>
