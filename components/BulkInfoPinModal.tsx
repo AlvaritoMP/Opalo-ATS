@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { X, Save, Loader2, Trash2, StickyNote, ImageIcon, Upload } from 'lucide-react';
 import type { BulkInfoPin } from '../types';
 import { fileToBase64 } from '../lib/fileUtils';
@@ -6,6 +6,7 @@ import {
     BULK_INFO_PIN_COLOR_OPTIONS,
     BULK_INFO_PIN_STYLES,
     getBulkInfoPinStyle,
+    getImageFileFromClipboardEvent,
     validateBulkInfoPinImageFile,
 } from '../lib/bulkInfoPins';
 
@@ -39,6 +40,50 @@ export const BulkInfoPinModal: React.FC<BulkInfoPinModalProps> = ({
         }
     }, [isOpen, pin]);
 
+    const applyImageFile = useCallback(async (file: File | undefined, fromClipboard = false) => {
+        if (!file) return;
+        const validationError = validateBulkInfoPinImageFile(file, { fromClipboard });
+        if (validationError) {
+            setImageError(validationError);
+            return;
+        }
+        setImageError(null);
+        try {
+            const dataUrl = await fileToBase64(file);
+            const imageFileName =
+                file.name ||
+                (fromClipboard
+                    ? `portapapeles.${file.type === 'image/jpeg' ? 'jpg' : 'png'}`
+                    : 'imagen.png');
+            setDraft(prev =>
+                prev
+                    ? {
+                          ...prev,
+                          imageDataUrl: dataUrl,
+                          imageFileName,
+                      }
+                    : null
+            );
+        } catch {
+            setImageError('No se pudo leer la imagen.');
+        }
+    }, []);
+
+    useEffect(() => {
+        if (!isOpen) return;
+
+        const onPaste = (event: ClipboardEvent) => {
+            const file = getImageFileFromClipboardEvent(event);
+            if (!file) return;
+
+            event.preventDefault();
+            void applyImageFile(file, true);
+        };
+
+        window.addEventListener('paste', onPaste);
+        return () => window.removeEventListener('paste', onPaste);
+    }, [isOpen, applyImageFile]);
+
     if (!isOpen || !draft) return null;
 
     const style = getBulkInfoPinStyle(draft.color);
@@ -48,32 +93,16 @@ export const BulkInfoPinModal: React.FC<BulkInfoPinModalProps> = ({
         onSave({ ...draft, title, content: draft.content });
     };
 
-    const handleImageFile = async (file: File | undefined) => {
-        if (!file) return;
-        const validationError = validateBulkInfoPinImageFile(file);
-        if (validationError) {
-            setImageError(validationError);
-            return;
-        }
-        setImageError(null);
-        try {
-            const dataUrl = await fileToBase64(file);
-            setDraft({
-                ...draft,
-                imageDataUrl: dataUrl,
-                imageFileName: file.name,
-            });
-        } catch {
-            setImageError('No se pudo leer la imagen.');
-        }
-    };
-
     const clearImage = () => {
-        setDraft({
-            ...draft,
-            imageDataUrl: undefined,
-            imageFileName: undefined,
-        });
+        setDraft(prev =>
+            prev
+                ? {
+                      ...prev,
+                      imageDataUrl: undefined,
+                      imageFileName: undefined,
+                  }
+                : null
+        );
         setImageError(null);
         if (fileInputRef.current) fileInputRef.current.value = '';
     };
@@ -146,34 +175,39 @@ export const BulkInfoPinModal: React.FC<BulkInfoPinModalProps> = ({
                             Imagen PNG (opcional)
                         </label>
                         <p className="text-[11px] text-gray-600 mb-2">
-                            Sube un PNG para consultarlo en el panel flotante mientras trabajas en la tabla. Puedes
-                            reemplazarlo cuando se actualice.
+                            Sube un PNG, pega con <kbd className="px-1 py-0.5 rounded bg-white/80 border border-black/10 text-[10px] font-mono">Ctrl+V</kbd>{' '}
+                            si la imagen está en el portapapeles, o reemplázala cuando se actualice.
                         </p>
                         <input
                             ref={fileInputRef}
                             type="file"
                             accept="image/png"
                             className="hidden"
-                            onChange={e => void handleImageFile(e.target.files?.[0])}
+                            onChange={e => void applyImageFile(e.target.files?.[0])}
                         />
-                        <div className="flex flex-wrap gap-2">
-                            <button
-                                type="button"
-                                onClick={() => fileInputRef.current?.click()}
-                                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-white border border-black/15 rounded-lg hover:bg-gray-50"
-                            >
-                                <Upload className="w-3.5 h-3.5" />
-                                {draft.imageDataUrl ? 'Cambiar imagen' : 'Subir PNG'}
-                            </button>
-                            {draft.imageDataUrl && (
+                        <div className="rounded-lg border border-dashed border-black/20 bg-white/50 px-3 py-3">
+                            <div className="flex flex-wrap gap-2">
                                 <button
                                     type="button"
-                                    onClick={clearImage}
-                                    className="px-3 py-1.5 text-xs font-medium text-red-700 hover:bg-red-50 rounded-lg"
+                                    onClick={() => fileInputRef.current?.click()}
+                                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-white border border-black/15 rounded-lg hover:bg-gray-50"
                                 >
-                                    Quitar imagen
+                                    <Upload className="w-3.5 h-3.5" />
+                                    {draft.imageDataUrl ? 'Cambiar imagen' : 'Subir PNG'}
                                 </button>
-                            )}
+                                {draft.imageDataUrl && (
+                                    <button
+                                        type="button"
+                                        onClick={clearImage}
+                                        className="px-3 py-1.5 text-xs font-medium text-red-700 hover:bg-red-50 rounded-lg"
+                                    >
+                                        Quitar imagen
+                                    </button>
+                                )}
+                            </div>
+                            <p className="mt-2 text-[10px] text-gray-500">
+                                Con el modal abierto, usa Ctrl+V en cualquier parte para pegar una captura o imagen copiada.
+                            </p>
                         </div>
                         {imageError && (
                             <p className="mt-2 text-xs text-red-600">{imageError}</p>

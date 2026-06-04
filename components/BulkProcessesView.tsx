@@ -27,7 +27,7 @@ import {
 } from '../lib/hiringStageTracking';
 import { processesApi } from '../lib/api/processes';
 import { useDebouncedValue } from '../lib/useDebouncedValue';
-import { Check, X, Loader2, Send, Archive, Search, ChevronDown, ChevronUp, Plus, Edit, Trash2, ArrowLeft, MessageCircle, Phone, Upload, Download, Filter, Mail, Calendar, Settings, ArrowUp, ArrowDown, Pin, FileText, BookOpen, Paperclip, ClipboardList, ListPlus, RefreshCw, HardDrive, CaseSensitive, Package, History, Target, BarChart3, UserCheck, Coins, Bus } from 'lucide-react';
+import { Check, X, Loader2, Send, Archive, Search, ChevronDown, ChevronUp, Plus, Edit, Trash2, ArrowLeft, MessageCircle, Phone, Upload, Download, Filter, Mail, Calendar, Settings, ArrowUp, ArrowDown, Pin, FileText, BookOpen, Paperclip, ClipboardList, ListPlus, RefreshCw, HardDrive, CaseSensitive, Package, History, Target, BarChart3, UserCheck, Coins, Bus, Undo2 } from 'lucide-react';
 import { BulkCandidateTimeline } from './BulkCandidateTimeline';
 import { Process, CustomColumn, BulkProcessConfig, Candidate, IdealProfileConfig, BulkProcessStatChart, BulkInfoPin } from '../types';
 import { candidatesApi } from '../lib/api/candidates';
@@ -112,6 +112,15 @@ import { BulkInfoPinsBar } from './BulkInfoPinsBar';
 import { BulkInfoPinModal } from './BulkInfoPinModal';
 import { BulkInfoPinPanel } from './BulkInfoPinPanel';
 import { createBulkInfoPin } from '../lib/bulkInfoPins';
+import {
+    BULK_UNDO_MAX_STACK,
+    BulkUndoCellMetaSnapshot,
+    BulkUndoCellSnapshot,
+    BulkUndoEntry,
+    BulkUndoStatusSnapshot,
+    cloneCellMeta,
+    createUndoEntryId,
+} from '../lib/bulkUndo';
 import { BulkProcessStatsModal } from './BulkProcessStatsModal';
 import {
     getApplicationCountLabel,
@@ -632,6 +641,9 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
     const [showTransportFaresModal, setShowTransportFaresModal] = useState(false);
     const [infoPinModal, setInfoPinModal] = useState<{ pin: BulkInfoPin; isNew: boolean } | null>(null);
     const [activeInfoPinId, setActiveInfoPinId] = useState<string | null>(null);
+    const undoStackRef = useRef<BulkUndoEntry[]>([]);
+    const [undoStackSize, setUndoStackSize] = useState(0);
+    const isUndoingRef = useRef(false);
     const [isSavingInfoPin, setIsSavingInfoPin] = useState(false);
     const [allCandidatesForStats, setAllCandidatesForStats] = useState<BulkCandidate[]>([]);
     const [loadingAllCandidatesForStats, setLoadingAllCandidatesForStats] = useState(false);
@@ -893,6 +905,11 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
 
     useEffect(() => {
         setActiveInfoPinId(null);
+    }, [process?.id]);
+
+    useEffect(() => {
+        undoStackRef.current = [];
+        setUndoStackSize(0);
     }, [process?.id]);
 
     useEffect(() => {
@@ -1213,6 +1230,54 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
     const legacyColumnIdToName = useMemo(
         () => buildLegacyColumnIdToName(process?.bulkConfig, customColumns),
         [process?.bulkConfig, customColumns]
+    );
+
+    const pushUndo = useCallback((entry: Omit<BulkUndoEntry, 'id'>) => {
+        if (isUndoingRef.current) return;
+        const stack = undoStackRef.current;
+        stack.push({ ...entry, id: createUndoEntryId() });
+        if (stack.length > BULK_UNDO_MAX_STACK) stack.shift();
+        setUndoStackSize(stack.length);
+    }, []);
+
+    const captureCellSnapshot = useCallback(
+        (candidateId: string, colId: string): BulkUndoCellSnapshot => {
+            const candidate = candidates.find(c => c.id === candidateId);
+            if (!candidate) {
+                return {
+                    candidateId,
+                    colId,
+                    kind: colId.startsWith('custom_') ? 'custom' : 'standard',
+                    previousValue: null,
+                };
+            }
+            const optimistic = optimisticUpdates.get(candidateId);
+            const displayCandidate = optimistic ? { ...candidate, ...optimistic } : candidate;
+            if (colId.startsWith('custom_')) {
+                const rawColId = colId.replace('custom_', '');
+                const prev = resolveBulkTableCellValue(
+                    displayCandidate,
+                    rawColId,
+                    customColumns,
+                    columnValues,
+                    legacyColumnIdToName
+                );
+                return {
+                    candidateId,
+                    colId,
+                    kind: 'custom',
+                    previousValue: prev === '' ? null : prev,
+                };
+            }
+            const prev = (displayCandidate as Record<string, unknown>)[colId];
+            return {
+                candidateId,
+                colId,
+                kind: 'standard',
+                previousValue: prev ?? null,
+            };
+        },
+        [candidates, optimisticUpdates, customColumns, columnValues, legacyColumnIdToName]
     );
 
     const openPsychReport = useCallback((list: BulkCandidate[]) => {
@@ -1597,7 +1662,43 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
         });
     }, []);
 
-    const updateCandidateStatus = useCallback(async (candidateId: string, updates: { stageId?: string; discarded?: boolean; archived?: boolean }, previousStageId?: string) => {
+    const captureCandidateStatus = useCallback(
+        (candidateId: string): BulkUndoStatusSnapshot | null => {
+            const candidate = candidates.find(c => c.id === candidateId);
+            if (!candidate) return null;
+            const optimistic = optimisticUpdates.get(candidateId);
+            const display = optimistic ? { ...candidate, ...optimistic } : candidate;
+            return {
+                candidateId,
+                stageId: display.stageId,
+                discarded: display.discarded,
+                archived: display.archived,
+            };
+        },
+        [candidates, optimisticUpdates]
+    );
+
+    const updateCandidateStatus = useCallback(async (
+        candidateId: string,
+        updates: { stageId?: string; discarded?: boolean; archived?: boolean },
+        previousStageId?: string,
+        options?: { skipUndo?: boolean }
+    ) => {
+        if (!options?.skipUndo && !isUndoingRef.current) {
+            const previous = captureCandidateStatus(candidateId);
+            if (previous) {
+                const label = updates.discarded
+                    ? 'Descarte de candidato'
+                    : updates.archived
+                      ? 'Archivo de candidato'
+                      : 'Cambio de etapa';
+                pushUndo({
+                    type: 'candidate_status',
+                    changes: [previous],
+                    label,
+                });
+            }
+        }
         applyOptimisticUpdate(candidateId, updates);
         try {
             await bulkCandidatesApi.updateCandidate(candidateId, updates, {
@@ -1637,12 +1738,24 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
             loadCandidates(currentPage, true);
             actions.showToast('Error al actualizar candidato', 'error', 3000);
         }
-    }, [applyOptimisticUpdate, loadCandidates, currentPage, actions, state.currentUser?.id, state.currentUser?.name, state.currentUser?.email, process?.stages, processLastStageId, candidates, logActivity]);
+    }, [applyOptimisticUpdate, loadCandidates, currentPage, actions, state.currentUser?.id, state.currentUser?.name, state.currentUser?.email, process?.stages, processLastStageId, candidates, logActivity, captureCandidateStatus, pushUndo]);
 
     const handleBulkApprove = useCallback(async () => {
         if (selectedIds.size === 0) return;
         const ids = Array.from(selectedIds);
         const lastStageId = process?.stages[process.stages.length - 1]?.id;
+        if (!isUndoingRef.current) {
+            const changes = ids
+                .map(id => captureCandidateStatus(id))
+                .filter((c): c is BulkUndoStatusSnapshot => c != null);
+            if (changes.length > 0) {
+                pushUndo({
+                    type: 'candidate_status',
+                    changes,
+                    label: 'Aprobación masiva',
+                });
+            }
+        }
         ids.forEach(id => {
             applyOptimisticUpdate(id, { stageId: lastStageId });
         });
@@ -1680,11 +1793,19 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
             loadCandidates(currentPage, true);
             actions.showToast('Error al aprobar candidatos', 'error', 3000);
         }
-    }, [selectedIds, process, candidates, applyOptimisticUpdate, loadCandidates, currentPage, actions, logActivity, state.currentUser?.id, state.currentUser?.name, state.currentUser?.email]);
+    }, [selectedIds, process, candidates, applyOptimisticUpdate, loadCandidates, currentPage, actions, logActivity, state.currentUser?.id, state.currentUser?.name, state.currentUser?.email, captureCandidateStatus, pushUndo]);
 
     const handleBulkReject = useCallback(async () => {
         if (selectedIds.size === 0) return;
         const ids = Array.from(selectedIds);
+        if (!isUndoingRef.current) {
+            const changes = ids
+                .map(id => captureCandidateStatus(id))
+                .filter((c): c is BulkUndoStatusSnapshot => c != null);
+            if (changes.length > 0) {
+                pushUndo({ type: 'candidate_status', changes, label: 'Descarte masivo' });
+            }
+        }
         ids.forEach(id => { applyOptimisticUpdate(id, { discarded: true }); });
         try {
             await bulkCandidatesApi.updateCandidatesBatch(ids, { discarded: true, discardReason: 'Rechazado en proceso masivo' });
@@ -1699,11 +1820,19 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
             loadCandidates(currentPage, true);
             actions.showToast('Error al rechazar candidatos', 'error', 3000);
         }
-    }, [selectedIds, applyOptimisticUpdate, loadCandidates, currentPage, actions, logActivity]);
+    }, [selectedIds, applyOptimisticUpdate, loadCandidates, currentPage, actions, logActivity, captureCandidateStatus, pushUndo]);
 
     const handleBulkArchive = useCallback(async () => {
         if (selectedIds.size === 0) return;
         const ids = Array.from(selectedIds);
+        if (!isUndoingRef.current) {
+            const changes = ids
+                .map(id => captureCandidateStatus(id))
+                .filter((c): c is BulkUndoStatusSnapshot => c != null);
+            if (changes.length > 0) {
+                pushUndo({ type: 'candidate_status', changes, label: 'Archivo masivo' });
+            }
+        }
         ids.forEach(id => { applyOptimisticUpdate(id, { archived: true }); });
         try {
             await bulkCandidatesApi.updateCandidatesBatch(ids, { archived: true });
@@ -1718,7 +1847,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
             loadCandidates(currentPage, true);
             actions.showToast('Error al archivar candidatos', 'error', 3000);
         }
-    }, [selectedIds, applyOptimisticUpdate, loadCandidates, currentPage, actions, logActivity]);
+    }, [selectedIds, applyOptimisticUpdate, loadCandidates, currentPage, actions, logActivity, captureCandidateStatus, pushUndo]);
 
     const handleBulkDelete = useCallback(async () => {
         if (selectedIds.size === 0) return;
@@ -2365,8 +2494,20 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
             });
     }, [customColumns, actions]);
 
-    const handleColumnValueChange = (candidateId: string, columnId: string, value: any) => {
+    const handleColumnValueChange = (
+        candidateId: string,
+        columnId: string,
+        value: any,
+        options?: { skipUndo?: boolean }
+    ) => {
         if (!process) return;
+        if (!options?.skipUndo && !isUndoingRef.current) {
+            pushUndo({
+                type: 'cells',
+                cells: [captureCellSnapshot(candidateId, `custom_${columnId}`)],
+                label: 'Edición de celda',
+            });
+        }
         setColumnValues(prev => {
             const candidatePatch = enrichBulkColumnValuesForStorage(
                 {
@@ -2442,7 +2583,14 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
             const col = customColumns.find(c => c.id === colId);
             if (col) {
                 const newVal = parseCustomCellInput(editValue, col);
-                handleColumnValueChange(candidateId, colId, newVal);
+                if (!isUndoingRef.current) {
+                    pushUndo({
+                        type: 'cells',
+                        cells: [captureCellSnapshot(candidateId, field)],
+                        label: 'Edición de celda',
+                    });
+                }
+                handleColumnValueChange(candidateId, colId, newVal, { skipUndo: true });
                 logActivity('cell_edit', {
                     candidateId,
                     candidateName: candidate?.name,
@@ -2467,6 +2615,14 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
             [field]: trimmed || undefined,
         };
 
+        if (!isUndoingRef.current) {
+            pushUndo({
+                type: 'cells',
+                cells: [captureCellSnapshot(candidateId, field)],
+                label: 'Edición de celda',
+            });
+        }
+
         applyOptimisticUpdate(candidateId, updates as Partial<BulkCandidate>);
         setEditingCell(null);
         setEditValue('');
@@ -2489,26 +2645,160 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
         });
     };
 
-    const setCellValue = useCallback(async (candidateId: string, colId: string, rawValue: string) => {
-        if (!isPasteEditableColumn(colId, customColumns)) return;
+    const setCellValue = useCallback(
+        async (candidateId: string, colId: string, rawValue: string, options?: { skipUndo?: boolean }) => {
+            if (!isPasteEditableColumn(colId, customColumns)) return;
 
-        if (colId.startsWith('custom_')) {
-            const customColId = colId.replace('custom_', '');
-            const col = customColumns.find(c => c.id === customColId);
-            if (!col) return;
-            handleColumnValueChange(candidateId, customColId, parseCustomCellInput(rawValue, col));
+            if (colId.startsWith('custom_')) {
+                const customColId = colId.replace('custom_', '');
+                const col = customColumns.find(c => c.id === customColId);
+                if (!col) return;
+                handleColumnValueChange(
+                    candidateId,
+                    customColId,
+                    parseCustomCellInput(rawValue, col),
+                    options
+                );
+                return;
+            }
+
+            const value = rawValue.trim() || undefined;
+            applyOptimisticUpdate(candidateId, { [colId]: value } as Partial<BulkCandidate>);
+            if (colId === 'source' || colId === 'province' || colId === 'district') {
+                syncCustomFieldFromStandard(candidateId, colId, rawValue.trim());
+            }
+            bulkCandidatesApi.patchFields(candidateId, { [colId]: value }).catch(error => {
+                console.error('Error pegando valor:', error);
+            });
+        },
+        [customColumns, applyOptimisticUpdate, syncCustomFieldFromStandard, handleColumnValueChange]
+    );
+
+    const restoreCellSnapshot = useCallback(
+        async (snap: BulkUndoCellSnapshot) => {
+            if (snap.kind === 'custom') {
+                const rawColId = snap.colId.replace('custom_', '');
+                handleColumnValueChange(
+                    snap.candidateId,
+                    rawColId,
+                    snap.previousValue,
+                    { skipUndo: true }
+                );
+                return;
+            }
+            const prev = snap.previousValue;
+            const value =
+                prev === null || prev === undefined
+                    ? undefined
+                    : String(prev).trim() || undefined;
+            applyOptimisticUpdate(snap.candidateId, { [snap.colId]: value } as Partial<BulkCandidate>);
+            if (snap.colId === 'source' || snap.colId === 'province' || snap.colId === 'district') {
+                syncCustomFieldFromStandard(snap.candidateId, snap.colId, value ?? '');
+            }
+            try {
+                await bulkCandidatesApi.patchFields(snap.candidateId, { [snap.colId]: value });
+            } catch (error) {
+                console.error('Error al deshacer celda:', error);
+            }
+        },
+        [handleColumnValueChange, applyOptimisticUpdate, syncCustomFieldFromStandard]
+    );
+
+    const restoreCellMetaSnapshots = useCallback(
+        (snapshots: BulkUndoCellMetaSnapshot[]) => {
+            if (!process?.id) return;
+            setCellMeta(prev => {
+                const next: BulkCellMetaStore = { ...prev };
+                for (const { candidateId, colId, previous } of snapshots) {
+                    if (!next[candidateId]) next[candidateId] = {};
+                    if (!previous || Object.keys(previous).length === 0) {
+                        delete next[candidateId][colId];
+                        if (Object.keys(next[candidateId]).length === 0) delete next[candidateId];
+                    } else {
+                        next[candidateId] = { ...next[candidateId], [colId]: { ...previous } };
+                    }
+                }
+                localStorage.setItem(getCellMetaStorageKey(process.id), JSON.stringify(next));
+                return next;
+            });
+        },
+        [process?.id]
+    );
+
+    const restoreStatusSnapshots = useCallback(
+        async (changes: BulkUndoStatusSnapshot[]) => {
+            for (const change of changes) {
+                const updates: { stageId?: string; discarded?: boolean; archived?: boolean } = {};
+                if (change.stageId !== undefined) updates.stageId = change.stageId;
+                if (change.discarded !== undefined) updates.discarded = change.discarded;
+                if (change.archived !== undefined) updates.archived = change.archived;
+                applyOptimisticUpdate(change.candidateId, updates);
+                try {
+                    await bulkCandidatesApi.updateCandidate(change.candidateId, updates, {
+                        previousStageId: change.stageId,
+                        movedBy: state.currentUser?.id,
+                        lastStageId: processLastStageId,
+                    });
+                } catch (error) {
+                    console.error('Error al deshacer estado:', error);
+                }
+            }
+        },
+        [applyOptimisticUpdate, state.currentUser?.id, processLastStageId]
+    );
+
+    const performUndo = useCallback(async () => {
+        const entry = undoStackRef.current.pop();
+        if (!entry) {
+            actions.showToast('No hay acciones para deshacer', 'info', 2000);
             return;
         }
-
-        const value = rawValue.trim() || undefined;
-        applyOptimisticUpdate(candidateId, { [colId]: value } as Partial<BulkCandidate>);
-        if (colId === 'source' || colId === 'province' || colId === 'district') {
-            syncCustomFieldFromStandard(candidateId, colId, rawValue.trim());
+        setUndoStackSize(undoStackRef.current.length);
+        isUndoingRef.current = true;
+        try {
+            switch (entry.type) {
+                case 'cells':
+                    for (const snap of entry.cells) {
+                        await restoreCellSnapshot(snap);
+                    }
+                    break;
+                case 'cell_meta':
+                    restoreCellMetaSnapshots(entry.cells);
+                    break;
+                case 'candidate_status':
+                    await restoreStatusSnapshots(entry.changes);
+                    break;
+            }
+            logActivity('cell_edit', {
+                details: { undo: true, label: entry.label, undoId: entry.id },
+            });
+            actions.showToast(`Deshecho: ${entry.label}`, 'success', 2500);
+        } catch (error) {
+            console.error('Error al deshacer:', error);
+            actions.showToast('No se pudo deshacer la última acción', 'error', 3000);
+        } finally {
+            isUndoingRef.current = false;
         }
-        bulkCandidatesApi.patchFields(candidateId, { [colId]: value }).catch(error => {
-            console.error('Error pegando valor:', error);
-        });
-    }, [customColumns, applyOptimisticUpdate, syncCustomFieldFromStandard]);
+    }, [restoreCellSnapshot, restoreCellMetaSnapshots, restoreStatusSnapshots, logActivity, actions]);
+
+    const applyPastedCells = useCallback(
+        async (assignments: { candidateId: string; colId: string; value: string }[]) => {
+            const filtered = assignments.filter(a => isPasteEditableColumn(a.colId, customColumns));
+            if (filtered.length === 0) return 0;
+            if (!isUndoingRef.current) {
+                pushUndo({
+                    type: 'cells',
+                    cells: filtered.map(a => captureCellSnapshot(a.candidateId, a.colId)),
+                    label: 'Pegado en tabla',
+                });
+            }
+            for (const a of filtered) {
+                await setCellValue(a.candidateId, a.colId, a.value, { skipUndo: true });
+            }
+            return filtered.length;
+        },
+        [customColumns, pushUndo, captureCellSnapshot, setCellValue]
+    );
 
     const clearSelectedCells = useCallback(async (e?: KeyboardEvent | React.KeyboardEvent) => {
         if (editingCell) return;
@@ -2526,11 +2816,21 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
 
         e?.preventDefault();
 
+        const undoCells: BulkUndoCellSnapshot[] = [];
+        for (const key of cellKeys) {
+            const { candidateId, colId } = parseCellKey(key);
+            if (!isPasteEditableColumn(colId, customColumns)) continue;
+            undoCells.push(captureCellSnapshot(candidateId, colId));
+        }
+        if (undoCells.length > 0 && !isUndoingRef.current) {
+            pushUndo({ type: 'cells', cells: undoCells, label: 'Borrado de celdas' });
+        }
+
         let cleared = 0;
         for (const key of cellKeys) {
             const { candidateId, colId } = parseCellKey(key);
             if (!isPasteEditableColumn(colId, customColumns)) continue;
-            await setCellValue(candidateId, colId, '');
+            await setCellValue(candidateId, colId, '', { skipUndo: true });
             cleared++;
         }
 
@@ -2540,7 +2840,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                 details: { count: cleared, summary: `Borrado en ${cleared} celda(s)` },
             });
         }
-    }, [editingCell, selectedCells, activeCell, customColumns, setCellValue, actions, logActivity]);
+    }, [editingCell, selectedCells, activeCell, customColumns, setCellValue, actions, logActivity, captureCellSnapshot, pushUndo]);
 
     const handleRestoreTableLayout = async () => {
         if (!process) return;
@@ -2622,8 +2922,32 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
         await persistBulkConfig({ pinnedColumns: newPinned });
     };
 
-    const applyCellMeta = useCallback((candidateIds: string[], colIds: string[], patch: Partial<BulkCellMeta>) => {
+    const applyCellMeta = useCallback((
+        candidateIds: string[],
+        colIds: string[],
+        patch: Partial<BulkCellMeta>,
+        options?: { skipUndo?: boolean }
+    ) => {
         if (!process?.id) return;
+        if (!options?.skipUndo && !isUndoingRef.current) {
+            const snapshots: BulkUndoCellMetaSnapshot[] = [];
+            candidateIds.forEach(cId => {
+                colIds.forEach(colId => {
+                    snapshots.push({
+                        candidateId: cId,
+                        colId,
+                        previous: cloneCellMeta(cellMeta[cId]?.[colId]),
+                    });
+                });
+            });
+            if (snapshots.length > 0) {
+                pushUndo({
+                    type: 'cell_meta',
+                    cells: snapshots,
+                    label: 'Color o comentario de celda',
+                });
+            }
+        }
         setCellMeta(prev => {
             const next = { ...prev };
             candidateIds.forEach(cId => {
@@ -2661,7 +2985,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
             newValue: summaryParts.join('; '),
             details: { cellCount: candidateIds.length * colIds.length },
         });
-    }, [process?.id, candidates, getFieldLabel, logActivity]);
+    }, [process?.id, candidates, getFieldLabel, logActivity, cellMeta, pushUndo]);
 
     const getCellMetaFor = useCallback((candidateId: string, colId: string): BulkCellMeta | undefined => {
         return cellMeta[candidateId]?.[colId];
@@ -3486,6 +3810,12 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
         const target = e.target as HTMLElement;
         if (['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName)) return;
 
+        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && !e.shiftKey) {
+            e.preventDefault();
+            void performUndo();
+            return;
+        }
+
         if (e.key === 'Delete' || e.key === 'Backspace') {
             void clearSelectedCells(e);
             return;
@@ -3546,7 +3876,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
             default:
                 break;
         }
-    }, [selectSingleCell, moveActiveCell, beginEditCell, clearSelectedCells]);
+    }, [selectSingleCell, moveActiveCell, beginEditCell, clearSelectedCells, performUndo]);
 
     tableKeyboardRef.current = {
         editingCell,
@@ -3694,7 +4024,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
         if (grid.length === 0) return;
 
         const flatValues = grid.flat();
-        let pastedCells = 0;
+        const assignments: { candidateId: string; colId: string; value: string }[] = [];
 
         if (selectedCells.size > 0) {
             const sortedKeys = sortSelectedCellKeys(Array.from(selectedCells));
@@ -3713,27 +4043,27 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                     for (let c = 0; c < grid[r].length; c++) {
                         const candidateId = displayCandidates[minR + r]?.id;
                         const colId = visibleColumns[minC + c];
-                        if (!candidateId || !colId || !isPasteEditableColumn(colId, customColumns)) continue;
-                        await setCellValue(candidateId, colId, grid[r][c]);
-                        pastedCells++;
+                        if (!candidateId || !colId) continue;
+                        assignments.push({ candidateId, colId, value: grid[r][c] });
                     }
                 }
             } else if (flatValues.length === 1) {
                 for (const key of sortedKeys) {
                     const { candidateId, colId } = parseCellKey(key);
-                    if (!isPasteEditableColumn(colId, customColumns)) continue;
-                    await setCellValue(candidateId, colId, flatValues[0]);
-                    pastedCells++;
+                    assignments.push({ candidateId, colId, value: flatValues[0] });
                 }
             } else {
                 for (let i = 0; i < sortedKeys.length; i++) {
                     const { candidateId, colId } = parseCellKey(sortedKeys[i]);
-                    if (!isPasteEditableColumn(colId, customColumns)) continue;
-                    await setCellValue(candidateId, colId, flatValues[Math.min(i, flatValues.length - 1)]);
-                    pastedCells++;
+                    assignments.push({
+                        candidateId,
+                        colId,
+                        value: flatValues[Math.min(i, flatValues.length - 1)],
+                    });
                 }
             }
 
+            const pastedCells = await applyPastedCells(assignments);
             if (pastedCells > 0) {
                 actions.showToast(`Pegado en ${pastedCells} celda(s)`, 'success', 2000);
             }
@@ -3762,19 +4092,22 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                 const colIdx = startColIdx + c;
                 if (colIdx >= visibleColumns.length) break;
                 const colId = visibleColumns[colIdx];
-                if (!isPasteEditableColumn(colId, customColumns)) continue;
-                await setCellValue(targetCandidateIds[r], colId, rowValues[c]);
-                pastedCells++;
+                assignments.push({
+                    candidateId: targetCandidateIds[r],
+                    colId,
+                    value: rowValues[c],
+                });
             }
         }
 
+        const pastedCells = await applyPastedCells(assignments);
         if (pastedCells > 0) {
             actions.showToast(`Pegado en ${pastedCells} celda(s)`, 'success', 2000);
             logActivity('paste', {
                 details: { count: pastedCells, summary: `Pegado en ${pastedCells} celda(s)` },
             });
         }
-    }, [activeCell, editingCell, visibleColumns, selectedIds, selectedCells, displayCandidates, setCellValue, actions, sortSelectedCellKeys, logActivity]);
+    }, [activeCell, editingCell, visibleColumns, selectedIds, selectedCells, displayCandidates, applyPastedCells, actions, sortSelectedCellKeys, logActivity]);
 
     const handleBulkCopy = useCallback((e: ClipboardEvent) => {
         if (editingCell) return;
@@ -3960,6 +4293,19 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                     </BulkToolbarGroup>
 
                                     <BulkToolbarGroup label="Tabla">
+                                        <button
+                                            type="button"
+                                            onClick={() => void performUndo()}
+                                            disabled={undoStackSize === 0}
+                                            className="bg-white border border-gray-300 text-gray-800 hover:bg-gray-50 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                                            title="Deshacer última acción (Ctrl+Z)"
+                                        >
+                                            <Undo2 className="w-4 h-4" />
+                                            Deshacer
+                                            {undoStackSize > 0 && (
+                                                <span className="ml-1 text-[10px] opacity-70">({undoStackSize})</span>
+                                            )}
+                                        </button>
                                         <button
                                             onClick={openAddColumnModal}
                                             className="bg-blue-600 text-white hover:bg-blue-700 transition-colors"
@@ -4287,8 +4633,8 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
 
             {selectedProcess && (
                 <div className="flex-1 overflow-hidden relative flex flex-col">
-                    <p className="bulk-table-hint text-[10px] text-gray-500 px-2 pt-1 pb-0.5 shrink-0 line-clamp-1" title="Flechas · Shift+arrastrar selección · Ctrl+clic múltiple · Clic derecho: color/comentario · Enter/doble clic editar · Ctrl+C copiar · Ctrl+V pegar · Doble clic en fila abre detalle · Arrastre el borde del encabezado para ajustar ancho · Desplaza horizontalmente para ver más columnas">
-                        Flechas · Shift+arrastrar · Ctrl+clic · Clic derecho color/comentario · Enter editar · Ctrl+C/V · Doble clic detalle · Arrastre borde encabezado = ancho · Scroll horizontal → más columnas
+                    <p className="bulk-table-hint text-[10px] text-gray-500 px-2 pt-1 pb-0.5 shrink-0 line-clamp-1" title="Flechas · Shift+arrastrar selección · Ctrl+clic múltiple · Clic derecho: color/comentario · Enter/doble clic editar · Ctrl+C copiar · Ctrl+V pegar · Ctrl+Z deshacer · Doble clic en fila abre detalle · Arrastre el borde del encabezado para ajustar ancho · Desplaza horizontalmente para ver más columnas">
+                        Flechas · Shift+arrastrar · Ctrl+clic · Clic derecho color/comentario · Enter editar · Ctrl+C/V · Ctrl+Z deshacer · Doble clic detalle · Arrastre borde encabezado = ancho · Scroll horizontal → más columnas
                     </p>
                     <div
                         ref={tableContainerRef}

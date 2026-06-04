@@ -59,12 +59,33 @@ export function bulkInfoPinHasImage(pin: BulkInfoPin): boolean {
     return Boolean(pin.imageDataUrl?.startsWith('data:image/'));
 }
 
-export function validateBulkInfoPinImageFile(file: File): string | null {
-    if (file.type !== 'image/png') {
+export function validateBulkInfoPinImageFile(
+    file: File,
+    options?: { fromClipboard?: boolean }
+): string | null {
+    const type = file.type || '';
+    if (options?.fromClipboard) {
+        if (type && !type.startsWith('image/')) {
+            return 'El portapapeles no contiene una imagen válida.';
+        }
+    } else if (type !== 'image/png') {
         return 'Solo se permiten archivos PNG.';
     }
     if (file.size > BULK_INFO_PIN_IMAGE_MAX_BYTES) {
         return `La imagen no puede superar ${Math.round(BULK_INFO_PIN_IMAGE_MAX_BYTES / (1024 * 1024))} MB.`;
+    }
+    return null;
+}
+
+/** Extrae la primera imagen del portapapeles (Ctrl+V). */
+export function getImageFileFromClipboardEvent(event: ClipboardEvent): File | null {
+    const items = event.clipboardData?.items;
+    if (!items) return null;
+    for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+        if (item.kind === 'file' && item.type.startsWith('image/')) {
+            return item.getAsFile();
+        }
     }
     return null;
 }
