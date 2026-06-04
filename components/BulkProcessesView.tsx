@@ -117,6 +117,7 @@ import {
     BulkUndoCellMetaSnapshot,
     BulkUndoCellSnapshot,
     BulkUndoEntry,
+    BulkUndoEntryPayload,
     BulkUndoStatusSnapshot,
     cloneCellMeta,
     createUndoEntryId,
@@ -1232,10 +1233,10 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
         [process?.bulkConfig, customColumns]
     );
 
-    const pushUndo = useCallback((entry: Omit<BulkUndoEntry, 'id'>) => {
+    const pushUndo = useCallback((entry: BulkUndoEntryPayload) => {
         if (isUndoingRef.current) return;
         const stack = undoStackRef.current;
-        stack.push({ ...entry, id: createUndoEntryId() });
+        stack.push({ ...entry, id: createUndoEntryId() } as BulkUndoEntry);
         if (stack.length > BULK_UNDO_MAX_STACK) stack.shift();
         setUndoStackSize(stack.length);
     }, []);
@@ -1269,7 +1270,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                     previousValue: prev === '' ? null : prev,
                 };
             }
-            const prev = (displayCandidate as Record<string, unknown>)[colId];
+            const prev = (displayCandidate as unknown as Record<string, unknown>)[colId];
             return {
                 candidateId,
                 colId,
@@ -3350,7 +3351,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
             const raw = getColumnValue(candidateId, colId, displayCandidate);
             return formatCustomCellDisplay(raw, col);
         }
-        const direct = (displayCandidate as Record<string, unknown>)[field];
+        const direct = (displayCandidate as unknown as Record<string, unknown>)[field];
         return direct == null ? '' : String(direct);
     }, [candidates, optimisticUpdates, customColumns, columnValues]);
 

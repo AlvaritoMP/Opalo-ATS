@@ -102,6 +102,8 @@ export interface BulkCandidate {
     metadataIa?: string;
     stageId: string;
     processId: string;
+    discarded?: boolean;
+    archived?: boolean;
     contactPhone?: ChannelContactSummary;
     contactWhatsapp?: ChannelContactSummary;
     contactEmail?: ChannelContactSummary;

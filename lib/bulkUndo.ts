@@ -22,10 +22,12 @@ export interface BulkUndoStatusSnapshot {
     archived?: boolean;
 }
 
-export type BulkUndoEntry =
-    | { id: string; label: string; type: 'cells'; cells: BulkUndoCellSnapshot[] }
-    | { id: string; label: string; type: 'cell_meta'; cells: BulkUndoCellMetaSnapshot[] }
-    | { id: string; label: string; type: 'candidate_status'; changes: BulkUndoStatusSnapshot[] };
+export type BulkUndoEntryPayload =
+    | { label: string; type: 'cells'; cells: BulkUndoCellSnapshot[] }
+    | { label: string; type: 'cell_meta'; cells: BulkUndoCellMetaSnapshot[] }
+    | { label: string; type: 'candidate_status'; changes: BulkUndoStatusSnapshot[] };
+
+export type BulkUndoEntry = BulkUndoEntryPayload & { id: string };
 
 export function createUndoEntryId(): string {
     return `undo-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
