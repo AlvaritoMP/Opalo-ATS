@@ -4,12 +4,14 @@ import { bulkCandidatesApi, BulkCandidate } from '../lib/api/bulkCandidates';
 import { bulkTableTemplatesApi } from '../lib/api/bulkTableTemplates';
 import { bulkProcessActivityApi, BulkActivityActionType } from '../lib/api/bulkProcessActivity';
 import { contactTrackingApi, type ResetContactTrackingResult } from '../lib/api/contactTracking';
-import { isContactCooldownActive } from '../lib/contactTracking';
+import { isContactCooldownActive, type ContactStatus } from '../lib/contactTracking';
 import { supabase } from '../lib/supabase';
 import {
     columnIdToAttemptChannel,
     CONTACT_COLUMN_IDS,
     CONTACT_LAST_USER_COLUMN_ID,
+    CONTACT_STATUS_META,
+    contactSummaryMatchesFilter,
     type ContactAttemptChannel,
     type ChannelContactSummary,
     readChannelSummaryFromRow,
@@ -3557,6 +3559,20 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
             if (columnFilters.phone && !(displayCandidate.phone || '').includes(columnFilters.phone)) {
                 return false;
             }
+            for (const contactColId of CONTACT_COLUMN_IDS) {
+                const statusFilter = columnFilters[contactColId];
+                const userFilter = columnFilters[`${contactColId}_user`];
+                if (!statusFilter && !userFilter) continue;
+                const channel = columnIdToAttemptChannel(contactColId);
+                if (!channel) continue;
+                const summaryKey = CHANNEL_CANDIDATE_KEY[channel];
+                const summary = displayCandidate[summaryKey];
+                if (statusFilter && !contactSummaryMatchesFilter(summary, statusFilter)) return false;
+                if (userFilter) {
+                    const userName = (summary?.lastUserName || '').toLowerCase();
+                    if (!userName.includes(userFilter.toLowerCase())) return false;
+                }
+            }
             if (columnFilters.contactLastUser) {
                 const actor = getLatestContactActorFromCandidate(displayCandidate);
                 const name = (actor?.userName || '').toLowerCase();
@@ -4765,7 +4781,62 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                     if (CONTACT_COLUMN_IDS.includes(colId)) {
                                         return (
                                             <BulkTh colId={colId} headerProps={commonProps} style={thStyle()} onResizeStart={handleColumnResizeStart}>
-                                                <span title="Semáforo y última interacción">{getColumnLabel(colId, customColumns)}</span>
+                                                <div className="flex flex-col gap-1">
+                                                    <button
+                                                        onClick={() => handleSort(colId)}
+                                                        className="flex items-center gap-1 hover:text-primary-600 transition-colors"
+                                                        title="Semáforo y última interacción"
+                                                    >
+                                                        <span>{getColumnLabel(colId, customColumns)}</span>
+                                                        {sortColumn === colId ? (
+                                                            sortDirection === 'asc' ? (
+                                                                <ArrowUp className="w-3 h-3" />
+                                                            ) : (
+                                                                <ArrowDown className="w-3 h-3" />
+                                                            )
+                                                        ) : (
+                                                            <div className="w-3 h-3 opacity-30">
+                                                                <ArrowUp className="w-3 h-3" />
+                                                            </div>
+                                                        )}
+                                                    </button>
+                                                    <select
+                                                        value={columnFilters[colId] || ''}
+                                                        onChange={e =>
+                                                            setColumnFilters({
+                                                                ...columnFilters,
+                                                                [colId]: e.target.value,
+                                                            })
+                                                        }
+                                                        className="text-xs px-2 py-1 border border-gray-300 rounded focus:ring-1 focus:ring-primary-500 focus:border-primary-500 font-normal normal-case max-w-full"
+                                                        onClick={e => e.stopPropagation()}
+                                                        title="Filtrar por estado del semáforo"
+                                                    >
+                                                        <option value="">Todos</option>
+                                                        {(Object.keys(CONTACT_STATUS_META) as ContactStatus[]).map(
+                                                            status => (
+                                                                <option key={status} value={status}>
+                                                                    {CONTACT_STATUS_META[status].label}
+                                                                </option>
+                                                            )
+                                                        )}
+                                                    </select>
+                                                    <input
+                                                        type="text"
+                                                        placeholder="Filtrar usuario..."
+                                                        value={
+                                                            columnFilters[`${colId}_user`] || ''
+                                                        }
+                                                        onChange={e =>
+                                                            setColumnFilters({
+                                                                ...columnFilters,
+                                                                [`${colId}_user`]: e.target.value,
+                                                            })
+                                                        }
+                                                        className="text-xs px-2 py-1 border border-gray-300 rounded focus:ring-1 focus:ring-primary-500 focus:border-primary-500 font-normal normal-case"
+                                                        onClick={e => e.stopPropagation()}
+                                                    />
+                                                </div>
                                             </BulkTh>
                                         );
                                     }

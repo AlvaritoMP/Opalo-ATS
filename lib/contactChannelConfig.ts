@@ -1,5 +1,5 @@
 import type { ContactChannel, ContactStatus } from './contactTracking';
-import { normalizeContactStatus } from './contactTracking';
+import { CONTACT_STATUS_META, normalizeContactStatus } from './contactTracking';
 
 /** Canal persistido en candidate_contact_attempts */
 export type ContactAttemptChannel = 'call' | 'whatsapp' | 'email';
@@ -134,6 +134,37 @@ export function hasChannelContactTracking(summary?: ChannelContactSummary | null
     if (!summary) return false;
     return summary.status !== 'por_contactar' || summary.attemptCount > 0 || !!summary.lastAttemptAt;
 }
+
+const CONTACT_STATUS_FILTER_IDS = Object.keys(CONTACT_STATUS_META) as ContactStatus[];
+
+/** Texto buscable para filtro libre en columnas de contacto (estado, usuario, intentos). */
+export function getContactSummarySearchText(summary?: ChannelContactSummary | null): string {
+    const s = summary ?? { status: 'por_contactar' as ContactStatus, attemptCount: 0 };
+    const meta = CONTACT_STATUS_META[s.status];
+    return [meta.label, meta.shortLabel, s.lastUserName || '', String(s.attemptCount)]
+        .join(' ')
+        .toLowerCase();
+}
+
+/** Filtra por id de estado (select) o por texto parcial (usuario, etiqueta, etc.). */
+export function contactSummaryMatchesFilter(
+    summary: ChannelContactSummary | undefined,
+    filterValue: string
+): boolean {
+    const trimmed = filterValue.trim();
+    if (!trimmed) return true;
+
+    const normalized = trimmed.toLowerCase();
+    const s = summary ?? { status: 'por_contactar' as ContactStatus, attemptCount: 0 };
+
+    if (CONTACT_STATUS_FILTER_IDS.includes(trimmed as ContactStatus)) {
+        return s.status === trimmed;
+    }
+
+    return getContactSummarySearchText(summary).includes(normalized);
+}
+
+export { CONTACT_STATUS_META };
 
 export function readChannelSummaryFromRow(
     row: Record<string, unknown>,
