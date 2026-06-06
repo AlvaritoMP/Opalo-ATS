@@ -19,10 +19,20 @@ export interface HiringStageConsultantStats {
 
 type HistoryUserLookup = Pick<User, 'id' | 'name'> & Partial<Pick<User, 'email'>>;
 
+const HIRED_STAGE_NAME_PATTERN = /contratad|hire|ingres|oferta.?acept/i;
+
 export function getProcessLastStageId(process?: Pick<Process, 'stages'> | null): string | null {
     const stages = process?.stages;
     if (!stages?.length) return null;
     return stages[stages.length - 1].id;
+}
+
+/** Etapa que cuenta como contratación: por nombre (Contratado, etc.) o la última del pipeline. */
+export function resolveHiringStageId(process?: Pick<Process, 'stages'> | null): string | null {
+    const stages = process?.stages;
+    if (!stages?.length) return null;
+    const byName = stages.find(s => HIRED_STAGE_NAME_PATTERN.test(s.name.trim()));
+    return byName?.id ?? stages[stages.length - 1].id;
 }
 
 export function resolveHistoryUserName(
@@ -68,9 +78,9 @@ export function getHiredStageActorFromHistory(
     process: Pick<Process, 'stages'> | undefined,
     users: HistoryUserLookup[] = []
 ): HiredStageActor | null {
-    const lastStageId = getProcessLastStageId(process);
-    if (!lastStageId) return null;
-    const move = findMostRecentMoveToStage(history, lastStageId);
+    const hiringStageId = resolveHiringStageId(process);
+    if (!hiringStageId) return null;
+    const move = findMostRecentMoveToStage(history, hiringStageId);
     if (!move) return null;
     return {
         userName: resolveHistoryUserName(move.movedBy, users),
@@ -109,16 +119,28 @@ export function computeHiringStageConsultantStats(
     candidates: Array<{
         id: string;
         processId: string;
+        stageId?: string;
+        discarded?: boolean;
         history?: CandidateHistory[];
     }>,
     processMap: Map<string, Process>,
-    users: HistoryUserLookup[] = []
+    users: HistoryUserLookup[] = [],
+    bulkHiringActorsByProcess: Record<string, Record<string, HiredStageActor>> = {}
 ): HiringStageConsultantStats {
     const counts = new Map<string, number>();
 
     for (const candidate of candidates) {
         const process = processMap.get(candidate.processId);
-        const actor = getHiredStageActorFromHistory(candidate.history, process, users);
+        const hiringStageId = resolveHiringStageId(process);
+        if (!hiringStageId) continue;
+
+        let actor = getHiredStageActorFromHistory(candidate.history, process, users);
+        if (!actor) {
+            actor = bulkHiringActorsByProcess[candidate.processId]?.[candidate.id] ?? null;
+        }
+        if (!actor && candidate.stageId === hiringStageId && !candidate.discarded) {
+            actor = { userName: 'Sin consultor', movedAt: '' };
+        }
         if (!actor) continue;
         counts.set(actor.userName, (counts.get(actor.userName) || 0) + 1);
     }

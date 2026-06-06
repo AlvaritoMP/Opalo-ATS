@@ -1,7 +1,7 @@
 import type { ContactAttempt } from './contactTracking';
 import type { ContactAttemptChannel, ChannelContactSummary } from './contactChannelConfig';
 import { CONTACT_CHANNELS } from './contactChannelConfig';
-import { formatDateKeyLima, isChannelVolumeAttempt } from './contactDashboardStats';
+import { addDaysToDateKey, formatDateKeyLima, isChannelVolumeAttempt } from './contactDashboardStats';
 
 export interface ContactSummaryCandidate {
     id: string;
@@ -56,6 +56,64 @@ function isGenericActorName(name?: string): boolean {
     return !t || t === 'Usuario' || t === 'Sin consultor' || t === 'usuario';
 }
 
+function dateKeyToLimaNoonIso(key: string): string {
+    const [y, m, d] = key.split('-').map(Number);
+    return `${String(y).padStart(4, '0')}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}T12:00:00-05:00`;
+}
+
+/** Reparte intentos sintéticos en días distintos hacia atrás desde la última fecha conocida. */
+function spreadSyntheticAttemptDates(
+    lastAttemptAt: string,
+    count: number,
+    existingVolume: ContactAttempt[]
+): string[] {
+    const existingKeys = [
+        ...new Set(
+            existingVolume
+                .map(a => formatDateKeyLima(a.createdAt))
+                .filter(Boolean)
+        ),
+    ].sort();
+
+    const dates: string[] = existingKeys.map(dateKeyToLimaNoonIso);
+    const anchorKey = formatDateKeyLima(lastAttemptAt) || existingKeys[existingKeys.length - 1];
+    if (!anchorKey) return dates.slice(0, count);
+
+    let cursor = anchorKey;
+    while (dates.length < count) {
+        const prevKey = addDaysToDateKey(cursor, -1);
+        if (!dates.some(d => formatDateKeyLima(d) === prevKey)) {
+            dates.unshift(dateKeyToLimaNoonIso(prevKey));
+        }
+        if (prevKey === cursor) break;
+        cursor = prevKey;
+    }
+
+    while (dates.length < count) {
+        dates.push(dateKeyToLimaNoonIso(anchorKey));
+    }
+
+    return dates.slice(-count);
+}
+
+export function mergeContactAttemptsDedupe(attempts: ContactAttempt[]): ContactAttempt[] {
+    const byId = new Map<string, ContactAttempt>();
+    for (const attempt of attempts) {
+        byId.set(attempt.id, attempt);
+    }
+    return [...byId.values()];
+}
+
+export function backfillContactAttemptProcessIds(
+    attempts: ContactAttempt[],
+    processByCandidate: Map<string, string>
+): ContactAttempt[] {
+    return attempts.map(attempt => ({
+        ...attempt,
+        processId: attempt.processId || processByCandidate.get(attempt.candidateId) || attempt.processId,
+    }));
+}
+
 /**
  * Si el historial no guardó user_name pero la tabla sí tiene lastUserName,
  * atribuye el intento al consultor visible en la columna de contacto.
@@ -89,7 +147,7 @@ export function attributeContactAttemptsFromSummaries(
 
 /**
  * Completa el historial cuando faltan intentos respecto a attempt_count en la tabla.
- * Reparte intentos sintéticos por día usando lastAttemptAt del resumen del canal.
+ * Reparte intentos sintéticos en días distintos (p. ej. 03/06 y 04/06).
  */
 export function reconcileContactAttemptsWithSummaries(
     attempts: ContactAttempt[],
@@ -111,7 +169,11 @@ export function reconcileContactAttemptsWithSummaries(
             if (deficit <= 0) continue;
 
             const tableUser = summary.lastUserName?.trim();
-            const dayKey = formatDateKeyLima(summary.lastAttemptAt);
+            const spreadDates = spreadSyntheticAttemptDates(
+                summary.lastAttemptAt,
+                attemptCount,
+                volumeRows
+            ).slice(-deficit);
 
             for (let i = 0; i < deficit; i++) {
                 result.push(
@@ -120,13 +182,11 @@ export function reconcileContactAttemptsWithSummaries(
                         channel,
                         summary,
                         volumeRows.length + i + 1,
-                        summary.lastAttemptAt,
+                        spreadDates[i] ?? summary.lastAttemptAt,
                         tableUser
                     )
                 );
             }
-
-            void dayKey;
         }
     }
 
@@ -147,11 +207,18 @@ export function synthesizeVolumeAttemptsFromSummaries(
     for (const candidate of candidates) {
         for (const channel of channels) {
             const summary = summaryForChannel(candidate, channel);
-            if (!summary?.lastAttemptAt || !summary.lastUserName?.trim()) continue;
+            if (!summary?.lastAttemptAt) continue;
             if ((summary.attemptCount ?? 0) <= 0) continue;
 
             const existing = volumeAttemptsForCandidate(result, candidate.id, channel);
             if (existing.length > 0) continue;
+
+            const tableUser = summary.lastUserName?.trim();
+            const spreadDates = spreadSyntheticAttemptDates(
+                summary.lastAttemptAt,
+                summary.attemptCount,
+                existing
+            );
 
             for (let n = 1; n <= summary.attemptCount; n++) {
                 result.push(
@@ -160,8 +227,8 @@ export function synthesizeVolumeAttemptsFromSummaries(
                         channel,
                         summary,
                         n,
-                        summary.lastAttemptAt,
-                        summary.lastUserName.trim()
+                        spreadDates[n - 1] ?? summary.lastAttemptAt,
+                        tableUser
                     )
                 );
             }

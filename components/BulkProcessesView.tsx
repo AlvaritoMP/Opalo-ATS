@@ -21,7 +21,7 @@ import {
 } from '../lib/contactChannelConfig';
 import {
     HIRED_STAGE_USER_COLUMN_ID,
-    getProcessLastStageId,
+    resolveHiringStageId,
     mapRawHiringMoves,
     formatHiredStageActorDisplay,
     formatHiredStageActorTooltip,
@@ -707,7 +707,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
         return map;
     }, [state.users]);
 
-    const processLastStageId = useMemo(() => getProcessLastStageId(process), [process]);
+    const processLastStageId = useMemo(() => resolveHiringStageId(process), [process]);
 
     useEffect(() => {
         void bulkTableTemplatesApi.refreshCache({
@@ -1752,7 +1752,8 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
     const handleBulkApprove = useCallback(async () => {
         if (selectedIds.size === 0) return;
         const ids = Array.from(selectedIds);
-        const lastStageId = process?.stages[process.stages.length - 1]?.id;
+        const approveStageId = processLastStageId;
+        if (!approveStageId) return;
         if (!isUndoingRef.current) {
             const changes = ids
                 .map(id => captureCandidateStatus(id))
@@ -1766,7 +1767,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
             }
         }
         ids.forEach(id => {
-            applyOptimisticUpdate(id, { stageId: lastStageId });
+            applyOptimisticUpdate(id, { stageId: approveStageId });
         });
         try {
             const previousStageByCandidate = Object.fromEntries(
@@ -1774,14 +1775,14 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
             );
             await bulkCandidatesApi.updateCandidatesBatch(
                 ids,
-                { stageId: lastStageId },
+                { stageId: approveStageId },
                 {
                     movedBy: state.currentUser?.id,
                     previousStageByCandidate,
-                    lastStageId,
+                    lastStageId: approveStageId,
                 }
             );
-            if (lastStageId && state.currentUser) {
+            if (approveStageId && state.currentUser) {
                 const actorName = state.currentUser.name || state.currentUser.email || 'Usuario';
                 const movedAt = new Date().toISOString();
                 setHiringStageActors(prev => {
@@ -1802,7 +1803,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
             loadCandidates(currentPage, true);
             actions.showToast('Error al aprobar candidatos', 'error', 3000);
         }
-    }, [selectedIds, process, candidates, applyOptimisticUpdate, loadCandidates, currentPage, actions, logActivity, state.currentUser?.id, state.currentUser?.name, state.currentUser?.email, captureCandidateStatus, pushUndo]);
+    }, [selectedIds, processLastStageId, candidates, applyOptimisticUpdate, loadCandidates, currentPage, actions, logActivity, state.currentUser?.id, state.currentUser?.name, state.currentUser?.email, captureCandidateStatus, pushUndo]);
 
     const handleBulkReject = useCallback(async () => {
         if (selectedIds.size === 0) return;

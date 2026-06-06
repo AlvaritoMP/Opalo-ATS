@@ -171,6 +171,55 @@ export const contactTrackingApi = {
         return all;
     },
 
+    async getAttemptsForCandidateIds(candidateIds: string[]): Promise<ContactAttempt[]> {
+        if (candidateIds.length === 0) return [];
+
+        const selectFields =
+            'id, candidate_id, process_id, user_id, user_name, channel, outcome, attempt_number, status_after, notes, created_at';
+
+        const pageSize = 1000;
+        const idChunkSize = 150;
+        const all: ContactAttempt[] = [];
+        const seen = new Set<string>();
+
+        for (let chunkStart = 0; chunkStart < candidateIds.length; chunkStart += idChunkSize) {
+            const idChunk = candidateIds.slice(chunkStart, chunkStart + idChunkSize);
+
+            for (let page = 0; page < 500; page++) {
+                const from = page * pageSize;
+                const to = from + pageSize - 1;
+
+                const { data, error } = await supabase
+                    .from('candidate_contact_attempts')
+                    .select(selectFields)
+                    .in('candidate_id', idChunk)
+                    .eq('app_name', APP_NAME)
+                    .order('created_at', { ascending: false })
+                    .range(from, to);
+
+                if (error) {
+                    if (isMissingContactColumnError(error)) {
+                        contactColumnsSupported = false;
+                        return all;
+                    }
+                    throw error;
+                }
+
+                contactColumnsSupported = true;
+                for (const row of data || []) {
+                    const mapped = mapAttemptRow(row as Record<string, unknown>);
+                    if (seen.has(mapped.id)) continue;
+                    seen.add(mapped.id);
+                    all.push(mapped);
+                }
+
+                if (!data || data.length < pageSize) break;
+            }
+        }
+
+        return all;
+    },
+
     async getHistory(
         candidateId: string,
         channel: ContactAttemptChannel,

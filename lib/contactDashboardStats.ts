@@ -167,7 +167,7 @@ function parseDateKey(key: string): { y: number; m: number; d: number } {
     return { y, m, d };
 }
 
-function addDaysToDateKey(key: string, days: number): string {
+export function addDaysToDateKey(key: string, days: number): string {
     const { y, m, d } = parseDateKey(key);
     const base = new Date(`${String(y).padStart(4, '0')}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}T12:00:00-05:00`);
     base.setUTCDate(base.getUTCDate() + days);

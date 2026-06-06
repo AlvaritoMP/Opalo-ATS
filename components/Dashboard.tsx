@@ -18,9 +18,11 @@ import {
     reconcileContactAttemptsWithSummaries,
     attributeContactAttemptsFromSummaries,
     synthesizeVolumeAttemptsFromSummaries,
+    mergeContactAttemptsDedupe,
+    backfillContactAttemptProcessIds,
 } from '../lib/contactAttemptReconcile';
 import type { ContactAttemptChannel } from '../lib/contactChannelConfig';
-import { computeHiringStageConsultantStats } from '../lib/hiringStageTracking';
+import { computeHiringStageConsultantStats, resolveHiringStageId, mapRawHiringMoves, type HiredStageActor } from '../lib/hiringStageTracking';
 import { interviewSchedulingApi } from '../lib/api/interviewScheduling';
 import { computeInterviewSchedulingStats } from '../lib/interviewSchedulingStats';
 import { reconcileInterviewSchedulingFromBulkCandidates } from '../lib/interviewSchedulingReconcile';
@@ -168,9 +170,9 @@ const normalizeDistrictName = (raw?: string): string | null => {
 };
 
 const isHiredInProcess = (candidate: Candidate, process?: Process): boolean => {
-    if (!process?.stages?.length) return false;
-    const lastStageId = process.stages[process.stages.length - 1].id;
-    return candidate.stageId === lastStageId && !candidate.discarded;
+    const hiringStageId = resolveHiringStageId(process);
+    if (!hiringStageId) return false;
+    return candidate.stageId === hiringStageId && !candidate.discarded;
 };
 
 const getStageName = (candidate: Candidate, processes: Process[]): string => {
@@ -429,6 +431,9 @@ export const Dashboard: React.FC = () => {
     const [bulkPoolCandidates, setBulkPoolCandidates] = useState<Candidate[]>([]);
     const [bulkContactSummaries, setBulkContactSummaries] = useState<Record<string, ContactSummaryCandidate>>({});
     const [bulkSchedulingRows, setBulkSchedulingRows] = useState<BulkSchedulingCandidateRow[]>([]);
+    const [bulkHiringActorsByProcess, setBulkHiringActorsByProcess] = useState<
+        Record<string, Record<string, HiredStageActor>>
+    >({});
 
     const [contactAttempts, setContactAttempts] = useState<Awaited<ReturnType<typeof contactTrackingApi.getAttemptsForProcesses>>>([]);
     const [contactStatsLoading, setContactStatsLoading] = useState(false);
@@ -506,6 +511,39 @@ export const Dashboard: React.FC = () => {
         };
     }, [bulkProcessIdsInScope, processMap]);
 
+    useEffect(() => {
+        if (bulkProcessIdsInScope.length === 0) {
+            setBulkHiringActorsByProcess({});
+            return;
+        }
+
+        let cancelled = false;
+        (async () => {
+            const byProcess: Record<string, Record<string, HiredStageActor>> = {};
+            await Promise.all(
+                bulkProcessIdsInScope.map(async processId => {
+                    const process = processMap.get(processId);
+                    const hiringStageId = resolveHiringStageId(process);
+                    if (!hiringStageId) return;
+                    try {
+                        const rows = await bulkCandidatesApi.getHiringStageActorsForProcess(
+                            processId,
+                            hiringStageId
+                        );
+                        byProcess[processId] = mapRawHiringMoves(rows, statsUsers);
+                    } catch {
+                        byProcess[processId] = {};
+                    }
+                })
+            );
+            if (!cancelled) setBulkHiringActorsByProcess(byProcess);
+        })();
+
+        return () => {
+            cancelled = true;
+        };
+    }, [bulkProcessIdsInScope, processMap, statsUsers]);
+
     const analyticsCandidates = useMemo(() => {
         const standardProcessIds = new Set(
             scopedProcesses.filter(p => !p.isBulkProcess).map(p => p.id)
@@ -519,6 +557,24 @@ export const Dashboard: React.FC = () => {
         return scopedProcesses.map(p => p.id);
     }, [processFilter, scopedProcesses]);
 
+    const bulkCandidateIdsInScope = useMemo(() => {
+        const processIdSet = new Set(targetProcessIds);
+        const ids: string[] = [];
+        for (const c of analyticsCandidates) {
+            if (!processIdSet.has(c.processId)) continue;
+            if (processMap.get(c.processId)?.isBulkProcess) ids.push(c.id);
+        }
+        return ids;
+    }, [analyticsCandidates, targetProcessIds, processMap]);
+
+    const candidateProcessIdMap = useMemo(() => {
+        const map = new Map<string, string>();
+        for (const c of analyticsCandidates) {
+            map.set(c.id, c.processId);
+        }
+        return map;
+    }, [analyticsCandidates]);
+
     useEffect(() => {
         if (targetProcessIds.length === 0) {
             setContactAttempts([]);
@@ -529,8 +585,17 @@ export const Dashboard: React.FC = () => {
         setContactStatsLoading(true);
         (async () => {
             try {
-                const attempts = await contactTrackingApi.getAttemptsForProcesses(targetProcessIds);
-                if (!cancelled) setContactAttempts(attempts);
+                const [byProcess, byCandidates] = await Promise.all([
+                    contactTrackingApi.getAttemptsForProcesses(targetProcessIds),
+                    bulkCandidateIdsInScope.length > 0
+                        ? contactTrackingApi.getAttemptsForCandidateIds(bulkCandidateIdsInScope)
+                        : Promise.resolve([]),
+                ]);
+                const merged = backfillContactAttemptProcessIds(
+                    mergeContactAttemptsDedupe([...byProcess, ...byCandidates]),
+                    candidateProcessIdMap
+                );
+                if (!cancelled) setContactAttempts(merged);
             } catch {
                 if (!cancelled) setContactAttempts([]);
             } finally {
@@ -541,7 +606,7 @@ export const Dashboard: React.FC = () => {
         return () => {
             cancelled = true;
         };
-    }, [targetProcessIds]);
+    }, [targetProcessIds, bulkCandidateIdsInScope, candidateProcessIdMap]);
 
     useEffect(() => {
         if (targetProcessIds.length === 0) {
@@ -947,12 +1012,15 @@ export const Dashboard: React.FC = () => {
                 filteredCandidates.map(c => ({
                     id: c.id,
                     processId: c.processId,
+                    stageId: c.stageId,
+                    discarded: c.discarded,
                     history: c.history,
                 })),
                 processMap,
-                statsUsers
+                statsUsers,
+                bulkHiringActorsByProcess
             ),
-        [filteredCandidates, processMap, statsUsers]
+        [filteredCandidates, processMap, statsUsers, bulkHiringActorsByProcess]
     );
 
     const stageChartHeight = Math.max(280, candidatesByStage.length * 36);
@@ -1379,7 +1447,7 @@ export const Dashboard: React.FC = () => {
             <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm mb-8">
                 <h2 className="text-xl font-semibold text-gray-800 mb-1">Ingresos a contratación</h2>
                 <p className="text-sm text-gray-500 mb-4">
-                    Usuarios del equipo (consultores y administrador) que movieron candidatos a la última etapa del proceso, según el historial de etapas.
+                    Usuarios del equipo que movieron candidatos a la etapa de contratación (etapa «Contratado» o la última del pipeline), según historial de etapas o etapa actual en procesos masivos.
                 </p>
 
                 {hiringConsultantStats.totalHires === 0 ? (
