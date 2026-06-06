@@ -431,27 +431,40 @@ export const interviewSchedulingApi = {
     ): Promise<InterviewSchedulingLogRow[]> {
         if (!processIds.length || trackingTablesAvailable === false) return [];
         try {
-            let query = supabase
-                .from('interview_scheduling_log')
-                .select('*')
-                .eq('app_name', APP_NAME)
-                .in('process_id', processIds)
-                .order('created_at', { ascending: false });
+            const pageSize = 1000;
+            const all: InterviewSchedulingLogRow[] = [];
 
-            if (sinceIso) {
-                query = query.gte('created_at', sinceIso);
-            }
+            for (let page = 0; page < 500; page++) {
+                const from = page * pageSize;
+                const to = from + pageSize - 1;
 
-            const { data, error } = await query;
-            if (error) {
-                if (isMissingTrackingTableError(error)) {
-                    trackingTablesAvailable = false;
-                    return [];
+                let query = supabase
+                    .from('interview_scheduling_log')
+                    .select('*')
+                    .eq('app_name', APP_NAME)
+                    .in('process_id', processIds)
+                    .order('created_at', { ascending: false })
+                    .range(from, to);
+
+                if (sinceIso) {
+                    query = query.gte('created_at', sinceIso);
                 }
-                throw error;
+
+                const { data, error } = await query;
+                if (error) {
+                    if (isMissingTrackingTableError(error)) {
+                        trackingTablesAvailable = false;
+                        return all;
+                    }
+                    throw error;
+                }
+
+                all.push(...(data || []).map(row => mapLog(row as Record<string, unknown>)));
+                if (!data || data.length < pageSize) break;
             }
+
             trackingTablesAvailable = true;
-            return (data || []).map(row => mapLog(row as Record<string, unknown>));
+            return all;
         } catch (err: unknown) {
             const e = err as { message?: string; code?: string; status?: number };
             if (isMissingTrackingTableError(e)) {
@@ -468,27 +481,40 @@ export const interviewSchedulingApi = {
     ): Promise<InterviewSchedulingCycleRow[]> {
         if (!processIds.length || trackingTablesAvailable === false) return [];
         try {
-            let query = supabase
-                .from('interview_scheduling_cycles')
-                .select('*')
-                .eq('app_name', APP_NAME)
-                .in('process_id', processIds)
-                .order('opened_at', { ascending: false });
+            const pageSize = 1000;
+            const all: InterviewSchedulingCycleRow[] = [];
 
-            if (sinceIso) {
-                query = query.gte('opened_at', sinceIso);
-            }
+            for (let page = 0; page < 500; page++) {
+                const from = page * pageSize;
+                const to = from + pageSize - 1;
 
-            const { data, error } = await query;
-            if (error) {
-                if (isMissingTrackingTableError(error)) {
-                    trackingTablesAvailable = false;
-                    return [];
+                let query = supabase
+                    .from('interview_scheduling_cycles')
+                    .select('*')
+                    .eq('app_name', APP_NAME)
+                    .in('process_id', processIds)
+                    .order('opened_at', { ascending: false })
+                    .range(from, to);
+
+                if (sinceIso) {
+                    query = query.gte('opened_at', sinceIso);
                 }
-                throw error;
+
+                const { data, error } = await query;
+                if (error) {
+                    if (isMissingTrackingTableError(error)) {
+                        trackingTablesAvailable = false;
+                        return all;
+                    }
+                    throw error;
+                }
+
+                all.push(...(data || []).map(row => mapCycle(row as Record<string, unknown>)));
+                if (!data || data.length < pageSize) break;
             }
+
             trackingTablesAvailable = true;
-            return (data || []).map(row => mapCycle(row as Record<string, unknown>));
+            return all;
         } catch (err: unknown) {
             const e = err as { message?: string; code?: string; status?: number };
             if (isMissingTrackingTableError(e)) {

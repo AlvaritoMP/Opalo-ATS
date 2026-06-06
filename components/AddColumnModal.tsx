@@ -311,8 +311,8 @@ export const AddColumnModal: React.FC<AddColumnModalProps> = ({
                                 Clasificación para el Panel
                             </label>
                             <p className="text-xs text-gray-500 mb-2">
-                                Indique qué gráfico del Panel debe alimentar esta columna cuando su nombre no es estándar
-                                (p. ej. «¿Cómo se enteró?» → Fuente de candidato).
+                                Indique qué indicador del Panel alimenta esta columna cuando su nombre no es estándar
+                                (p. ej. «Asistió» → Asistencia a cita; «¿Cómo se enteró?» → Fuente de candidato).
                             </p>
                             <select
                                 value={dashboardSemanticField}

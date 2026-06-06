@@ -1,6 +1,11 @@
 import type { InterviewSchedulingLogRow, InterviewSchedulingCycleRow } from './api/interviewScheduling';
+import {
+    formatDateKeyLima,
+    getContactPeriodRange,
+    type ContactConsultantPeriod,
+} from './contactDashboardStats';
 
-export type InterviewSchedulingPeriod = 'week' | 'month' | 'year';
+export type InterviewSchedulingPeriod = ContactConsultantPeriod;
 
 export interface InterviewSchedulingDashboardStats {
     periodLabel: string;
@@ -13,32 +18,6 @@ export interface InterviewSchedulingDashboardStats {
     topInterviewer: { userName: string; count: number } | null;
     schedulerRankings: { name: string; agendas: number; reagendas: number }[];
     interviewerRankings: { name: string; agendas: number; reagendas: number }[];
-}
-
-const PERIOD_LABELS: Record<InterviewSchedulingPeriod, string> = {
-    week: 'Esta semana',
-    month: 'Este mes',
-    year: 'Este año',
-};
-
-function periodStart(period: InterviewSchedulingPeriod): Date {
-    const now = new Date();
-    const d = new Date(now);
-    if (period === 'week') {
-        const day = d.getDay();
-        const diff = day === 0 ? 6 : day - 1;
-        d.setDate(d.getDate() - diff);
-        d.setHours(0, 0, 0, 0);
-        return d;
-    }
-    if (period === 'month') {
-        d.setDate(1);
-        d.setHours(0, 0, 0, 0);
-        return d;
-    }
-    d.setMonth(0, 1);
-    d.setHours(0, 0, 0, 0);
-    return d;
 }
 
 function resolveUserName(
@@ -61,17 +40,19 @@ export function computeInterviewSchedulingStats(
     users: Array<{ id: string; name?: string; email?: string }> = [],
     candidateIdsInScope?: Set<string>
 ): InterviewSchedulingDashboardStats {
-    const since = periodStart(period);
-    const sinceMs = since.getTime();
+    const { startKey, endKey, label: periodLabel } = getContactPeriodRange(period);
 
     const scopedLogs = logs.filter(l => {
-        if (new Date(l.createdAt).getTime() < sinceMs) return false;
+        const key = formatDateKeyLima(l.createdAt);
+        if (!key || key < startKey || key > endKey) return false;
         if (candidateIdsInScope && !candidateIdsInScope.has(l.candidateId)) return false;
         return l.action === 'scheduled' || l.action === 'rescheduled';
     });
 
     const scopedCycles = cycles.filter(c => {
-        if (new Date(c.openedAt).getTime() < sinceMs) return false;
+        const ref = c.attendedAt || c.openedAt;
+        const key = formatDateKeyLima(ref);
+        if (!key || key < startKey || key > endKey) return false;
         if (candidateIdsInScope && !candidateIdsInScope.has(c.candidateId)) return false;
         return true;
     });
@@ -134,7 +115,7 @@ export function computeInterviewSchedulingStats(
             : null;
 
     return {
-        periodLabel: PERIOD_LABELS[period],
+        periodLabel,
         totalSchedulingActions,
         totalReschedules,
         totalAttended: attendedCycles.length,

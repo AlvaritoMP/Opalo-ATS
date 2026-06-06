@@ -18,6 +18,8 @@ import { reconcileContactAttemptsWithSummaries } from '../lib/contactAttemptReco
 import { computeHiringStageConsultantStats } from '../lib/hiringStageTracking';
 import { interviewSchedulingApi } from '../lib/api/interviewScheduling';
 import { computeInterviewSchedulingStats } from '../lib/interviewSchedulingStats';
+import { reconcileInterviewSchedulingFromBulkCandidates } from '../lib/interviewSchedulingReconcile';
+import type { BulkSchedulingCandidateRow } from '../lib/interviewSchedulingReconcile';
 import {
     buildUserLookupForStats,
     enrichContactAttemptsForStats,
@@ -401,6 +403,7 @@ export const Dashboard: React.FC = () => {
     const [bulkCandidateFields, setBulkCandidateFields] = useState<Record<string, BulkCandidateFieldExtras>>({});
     const [bulkPoolCandidates, setBulkPoolCandidates] = useState<Candidate[]>([]);
     const [bulkContactSummaries, setBulkContactSummaries] = useState<Record<string, ContactSummaryCandidate>>({});
+    const [bulkSchedulingRows, setBulkSchedulingRows] = useState<BulkSchedulingCandidateRow[]>([]);
 
     const [contactAttempts, setContactAttempts] = useState<Awaited<ReturnType<typeof contactTrackingApi.getAttemptsForProcesses>>>([]);
     const [contactStatsLoading, setContactStatsLoading] = useState(false);
@@ -421,6 +424,7 @@ export const Dashboard: React.FC = () => {
             setBulkPoolCandidates([]);
             setBulkCandidateFields({});
             setBulkContactSummaries({});
+            setBulkSchedulingRows([]);
             return;
         }
 
@@ -429,6 +433,7 @@ export const Dashboard: React.FC = () => {
             const pool: Candidate[] = [];
             const fields: Record<string, BulkCandidateFieldExtras> = {};
             const summaries: Record<string, ContactSummaryCandidate> = {};
+            const schedulingRows: BulkSchedulingCandidateRow[] = [];
             for (const processId of bulkProcessIdsInScope) {
                 try {
                     const process = processMap.get(processId);
@@ -448,6 +453,16 @@ export const Dashboard: React.FC = () => {
                             contactWhatsapp: c.contactWhatsapp,
                             contactEmail: c.contactEmail,
                         };
+                        schedulingRows.push({
+                            id: c.id,
+                            processId: c.processId,
+                            bulkColumnValues: {
+                                ...(c.bulkColumnValues || {}),
+                                ...columnRow,
+                            },
+                            nextInterviewAt: c.nextInterviewAt,
+                            nextInterviewerId: c.nextInterviewerId,
+                        });
                     }
                 } catch {
                     /* continuar con otros procesos */
@@ -457,6 +472,7 @@ export const Dashboard: React.FC = () => {
                 setBulkPoolCandidates(pool);
                 setBulkCandidateFields(fields);
                 setBulkContactSummaries(summaries);
+                setBulkSchedulingRows(schedulingRows);
             }
         })();
 
@@ -828,17 +844,33 @@ export const Dashboard: React.FC = () => {
         [filteredCandidates]
     );
 
-    const schedulingStats = useMemo(
-        () =>
-            computeInterviewSchedulingStats(
-                schedulingLogs,
-                schedulingCycles,
-                contactConsultantPeriod,
-                statsUsers,
-                filteredCandidateIdSet
-            ),
-        [schedulingLogs, schedulingCycles, contactConsultantPeriod, statsUsers, filteredCandidateIdSet]
-    );
+    const schedulingStats = useMemo(() => {
+        const scopedSchedulingRows = bulkSchedulingRows.filter(r =>
+            filteredCandidateIdSet.has(r.id)
+        );
+        const { logs, cycles } = reconcileInterviewSchedulingFromBulkCandidates(
+            schedulingLogs,
+            schedulingCycles,
+            scopedSchedulingRows,
+            processMap,
+            contactConsultantPeriod
+        );
+        return computeInterviewSchedulingStats(
+            logs,
+            cycles,
+            contactConsultantPeriod,
+            statsUsers,
+            filteredCandidateIdSet
+        );
+    }, [
+        schedulingLogs,
+        schedulingCycles,
+        bulkSchedulingRows,
+        processMap,
+        contactConsultantPeriod,
+        statsUsers,
+        filteredCandidateIdSet,
+    ]);
 
     const contactTrendOpts = useMemo(() => {
         const names = new Set<string>();
@@ -1202,8 +1234,8 @@ export const Dashboard: React.FC = () => {
                     <div>
                         <h2 className="text-xl font-semibold text-gray-800 mb-1">Agendamiento de citas</h2>
                         <p className="text-sm text-gray-500">
-                            Cuenta cada agenda y reagenda por trabajador. Las reagendas suman al mismo ciclo del candidato
-                            hasta marcar asistencia en la tabla masiva (icono verde en citas pasadas).
+                            Cuenta agendas, reagendas y asistencias. Incluye la columna Próxima entrevista, el icono verde
+                            de asistencia y columnas personalizadas clasificadas como «Asistencia a cita» o «Fecha de cita».
                         </p>
                     </div>
                     <p className="text-xs text-gray-400 shrink-0">{schedulingStats.periodLabel}</p>

@@ -108,7 +108,13 @@ export interface CustomColumn {
 }
 
 /** Clasificación de columna para gráficos del Panel y agregaciones. */
-export type DashboardSemanticField = 'source' | 'province' | 'district' | 'age';
+export type DashboardSemanticField =
+    | 'source'
+    | 'province'
+    | 'district'
+    | 'age'
+    | 'interview_attendance'
+    | 'interview_date';
 
 export const DASHBOARD_SEMANTIC_FIELD_OPTIONS: {
     value: DashboardSemanticField;
@@ -119,6 +125,8 @@ export const DASHBOARD_SEMANTIC_FIELD_OPTIONS: {
     { value: 'district', label: 'Distrito', chartHint: 'Candidatos por distrito' },
     { value: 'province', label: 'Provincia', chartHint: 'Panel / filtros' },
     { value: 'age', label: 'Edad', chartHint: 'Distribución por edad' },
+    { value: 'interview_attendance', label: 'Asistencia a cita', chartHint: 'Agendamiento · citas con asistencia' },
+    { value: 'interview_date', label: 'Fecha de cita', chartHint: 'Agendamiento · agendas registradas' },
 ];
 
 // --- Informes psicolaborales ---
