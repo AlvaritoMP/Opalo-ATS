@@ -137,24 +137,38 @@ export const contactTrackingApi = {
         if (processIds.length === 0) return [];
 
         const selectFields =
-            'id, candidate_id, process_id, user_id, user_name, channel, outcome, attempt_number, status_after, created_at';
+            'id, candidate_id, process_id, user_id, user_name, channel, outcome, attempt_number, status_after, notes, created_at';
 
-        const { data, error } = await supabase
-            .from('candidate_contact_attempts')
-            .select(selectFields)
-            .in('process_id', processIds)
-            .eq('app_name', APP_NAME)
-            .order('created_at', { ascending: false });
+        const pageSize = 1000;
+        const all: ContactAttempt[] = [];
 
-        if (error) {
-            if (isMissingContactColumnError(error)) {
-                contactColumnsSupported = false;
-                return [];
+        for (let page = 0; page < 500; page++) {
+            const from = page * pageSize;
+            const to = from + pageSize - 1;
+
+            const { data, error } = await supabase
+                .from('candidate_contact_attempts')
+                .select(selectFields)
+                .in('process_id', processIds)
+                .eq('app_name', APP_NAME)
+                .order('created_at', { ascending: false })
+                .range(from, to);
+
+            if (error) {
+                if (isMissingContactColumnError(error)) {
+                    contactColumnsSupported = false;
+                    return all;
+                }
+                throw error;
             }
-            throw error;
+
+            contactColumnsSupported = true;
+            all.push(...(data || []).map(mapAttemptRow));
+
+            if (!data || data.length < pageSize) break;
         }
-        contactColumnsSupported = true;
-        return (data || []).map(mapAttemptRow);
+
+        return all;
     },
 
     async getHistory(
@@ -322,7 +336,22 @@ export const contactTrackingApi = {
         });
 
         if (insErr && !isMissingContactColumnError(insErr)) {
-            console.warn('Historial de contacto no guardado:', insErr.message);
+            console.error('Historial de contacto no guardado; reintentando:', insErr.message);
+            const { error: retryErr } = await supabase.from('candidate_contact_attempts').insert({
+                candidate_id: input.candidateId,
+                process_id: input.processId,
+                user_id: input.userId || null,
+                user_name: input.userName || null,
+                channel: input.channel,
+                outcome: input.outcome,
+                attempt_number: increment ? newCount : prevCount,
+                status_after: newStatus,
+                notes: undoNotes,
+                app_name: APP_NAME,
+            });
+            if (retryErr && !isMissingContactColumnError(retryErr)) {
+                console.error('Historial de contacto falló tras reintento:', retryErr.message);
+            }
         }
 
         contactColumnsSupported = true;

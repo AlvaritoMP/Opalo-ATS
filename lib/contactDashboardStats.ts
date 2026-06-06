@@ -93,11 +93,94 @@ export function isEffectiveContactAttempt(
     return attempt.statusAfter === 'interesado' || attempt.outcome === 'interested';
 }
 
-/** Llamada registrada con botón de contacto (no cambio manual de estado). */
+const LIMA_TZ = 'America/Lima';
+const LIMA_WEEKDAY: Record<string, number> = {
+    Mon: 0,
+    Tue: 1,
+    Wed: 2,
+    Thu: 3,
+    Fri: 4,
+    Sat: 5,
+    Sun: 6,
+};
+
+/** Fecha calendario YYYY-MM-DD en hora Perú (America/Lima). */
+export function formatDateKeyLima(iso: string | Date): string {
+    const d = typeof iso === 'string' ? new Date(iso) : iso;
+    if (Number.isNaN(d.getTime())) return '';
+    return new Intl.DateTimeFormat('en-CA', { timeZone: LIMA_TZ }).format(d);
+}
+
+function formatMonthKeyLima(iso: string | Date): string {
+    const key = formatDateKeyLima(iso);
+    return key ? key.slice(0, 7) : '';
+}
+
+function parseDateKey(key: string): { y: number; m: number; d: number } {
+    const [y, m, d] = key.split('-').map(Number);
+    return { y, m, d };
+}
+
+function addDaysToDateKey(key: string, days: number): string {
+    const { y, m, d } = parseDateKey(key);
+    const base = new Date(`${String(y).padStart(4, '0')}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}T12:00:00-05:00`);
+    base.setUTCDate(base.getUTCDate() + days);
+    return formatDateKeyLima(base);
+}
+
+function weekdayIndexLima(refDate: Date): number {
+    const wd = new Intl.DateTimeFormat('en-US', { timeZone: LIMA_TZ, weekday: 'short' }).format(refDate);
+    return LIMA_WEEKDAY[wd] ?? 0;
+}
+
+function startOfWeekMondayLimaKey(refDate = new Date()): string {
+    const todayKey = formatDateKeyLima(refDate);
+    return addDaysToDateKey(todayKey, -weekdayIndexLima(refDate));
+}
+
+export interface ContactPeriodRange {
+    startKey: string;
+    endKey: string;
+    label: string;
+}
+
+export function getContactPeriodRange(
+    period: ContactConsultantPeriod,
+    refDate = new Date()
+): ContactPeriodRange {
+    const endKey = formatDateKeyLima(refDate);
+    const { y, m } = parseDateKey(endKey);
+
+    if (period === 'week') {
+        return { startKey: startOfWeekMondayLimaKey(refDate), endKey, label: PERIOD_LABELS.week };
+    }
+    if (period === 'month') {
+        return { startKey: `${y}-${String(m).padStart(2, '0')}-01`, endKey, label: PERIOD_LABELS.month };
+    }
+    return { startKey: `${y}-01-01`, endKey, label: PERIOD_LABELS.year };
+}
+
+export function filterAttemptsInDateRange(
+    attempts: ContactAttempt[],
+    startKey: string,
+    endKey: string
+): ContactAttempt[] {
+    return attempts.filter(a => {
+        const key = formatDateKeyLima(a.createdAt);
+        return key && key >= startKey && key <= endKey;
+    });
+}
+
+/** Deshacer última acción — no cuenta como contacto nuevo. */
+export function isContactUndoAttempt(attempt: Pick<ContactAttempt, 'outcome' | 'notes'>): boolean {
+    return attempt.outcome === 'status_change' && Boolean(attempt.notes?.includes('Deshacer'));
+}
+
+/** Llamada registrada con botón de contacto o cambio de estado en columna Llamadas. */
 export function isRecordedCallAttempt(
-    attempt: Pick<ContactAttempt, 'channel' | 'outcome'>
+    attempt: Pick<ContactAttempt, 'channel' | 'outcome' | 'notes'>
 ): boolean {
-    return attempt.channel === 'call' && isCountableContactAction(attempt) && attempt.outcome !== 'status_change';
+    return attempt.channel === 'call' && isRecordedChannelAttempt(attempt, 'call');
 }
 
 /** Interés registrado en columna Llamadas (botón o menú rápido «Interesado»). */
@@ -133,14 +216,13 @@ function accumulateCallConsultantStats(
 
 /** Contacto registrado en un canal (llamada, WhatsApp o correo). */
 export function isRecordedChannelAttempt(
-    attempt: Pick<ContactAttempt, 'channel' | 'outcome'>,
+    attempt: Pick<ContactAttempt, 'channel' | 'outcome' | 'notes'>,
     channel: ContactAttemptChannel
 ): boolean {
-    return (
-        attempt.channel === channel &&
-        isCountableContactAction(attempt) &&
-        attempt.outcome !== 'status_change'
-    );
+    if (attempt.channel !== channel) return false;
+    if (!isCountableContactAction(attempt)) return false;
+    if (isContactUndoAttempt(attempt)) return false;
+    return true;
 }
 
 function channelLabel(channel: ContactChannel): string {
@@ -152,58 +234,24 @@ function normalizeUserName(name?: string): string {
     return trimmed || 'Sin consultor';
 }
 
-function formatDateKey(d: Date): string {
-    const y = d.getFullYear();
-    const m = String(d.getMonth() + 1).padStart(2, '0');
-    const day = String(d.getDate()).padStart(2, '0');
-    return `${y}-${m}-${day}`;
+function formatMonthKeyFromParts(y: number, m: number): string {
+    return `${y}-${String(m).padStart(2, '0')}`;
 }
 
-function formatMonthKey(d: Date): string {
-    const y = d.getFullYear();
-    const m = String(d.getMonth() + 1).padStart(2, '0');
-    return `${y}-${m}`;
-}
-
-function startOfWeekMonday(d: Date): Date {
-    const x = new Date(d);
-    x.setHours(0, 0, 0, 0);
-    const day = x.getDay();
-    const diff = day === 0 ? 6 : day - 1;
-    x.setDate(x.getDate() - diff);
-    return x;
-}
-
-export function getContactPeriodRange(
-    period: ContactConsultantPeriod,
-    refDate = new Date()
-): { start: Date; end: Date; label: string } {
-    const end = new Date(refDate);
-    end.setHours(23, 59, 59, 999);
-
-    if (period === 'week') {
-        const start = startOfWeekMonday(refDate);
-        return { start, end, label: PERIOD_LABELS.week };
+function iterDateKeys(fromKey: string, toKey: string): string[] {
+    const keys: string[] = [];
+    let cursor = fromKey;
+    while (cursor && cursor <= toKey) {
+        keys.push(cursor);
+        cursor = addDaysToDateKey(cursor, 1);
     }
-    if (period === 'month') {
-        const start = new Date(refDate.getFullYear(), refDate.getMonth(), 1, 0, 0, 0, 0);
-        return { start, end, label: PERIOD_LABELS.month };
-    }
-    const start = new Date(refDate.getFullYear(), 0, 1, 0, 0, 0, 0);
-    return { start, end, label: PERIOD_LABELS.year };
+    return keys;
 }
 
-export function filterAttemptsInDateRange(
-    attempts: ContactAttempt[],
-    start: Date,
-    end: Date
-): ContactAttempt[] {
-    const startMs = start.getTime();
-    const endMs = end.getTime();
-    return attempts.filter(a => {
-        const ts = new Date(a.createdAt).getTime();
-        return !Number.isNaN(ts) && ts >= startMs && ts <= endMs;
-    });
+function formatDayLabelFromKey(key: string): string {
+    const { y, m, d } = parseDateKey(key);
+    const date = new Date(`${String(y).padStart(4, '0')}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}T12:00:00-05:00`);
+    return date.toLocaleDateString('es-PE', { weekday: 'short', day: '2-digit', month: 'short', timeZone: LIMA_TZ });
 }
 
 function countTopConsultantByChannel(
@@ -227,8 +275,8 @@ export function computeContactDashboardStats(
     attempts: ContactAttempt[],
     period: ContactConsultantPeriod = 'month'
 ): ContactChannelDashboardStats {
-    const { start, end, label: periodLabel } = getContactPeriodRange(period);
-    const scoped = filterAttemptsInDateRange(attempts, start, end);
+    const { startKey, endKey, label: periodLabel } = getContactPeriodRange(period);
+    const scoped = filterAttemptsInDateRange(attempts, startKey, endKey);
 
     const countable = scoped.filter(isCountableContactAction);
     const channels = Object.keys(CONTACT_CHANNELS) as ContactAttemptChannel[];
@@ -368,11 +416,11 @@ export function buildChannelDailyTrendByUser(
     alwaysIncludeNames: string[] = []
 ): ContactDailyTrendSeries {
     const meta = CHANNEL_TREND_META[channel];
-    const { start, end, label: periodLabel } = getContactPeriodRange(period);
+    const { startKey, endKey, label: periodLabel } = getContactPeriodRange(period);
     const channelAttempts = filterAttemptsInDateRange(
         attempts.filter(a => isRecordedChannelAttempt(a, channel)),
-        start,
-        end
+        startKey,
+        endKey
     );
 
     const userTotals = new Map<string, number>();
@@ -399,11 +447,15 @@ export function buildChannelDailyTrendByUser(
     }
 
     if (period === 'year') {
+        const { y } = parseDateKey(endKey);
+        const endMonth = parseDateKey(endKey).m;
         const buckets = new Map<string, ContactCallTrendPoint>();
-        for (let m = 0; m <= end.getMonth(); m++) {
-            const d = new Date(end.getFullYear(), m, 1);
-            const key = formatMonthKey(d);
-            const label = d.toLocaleDateString('es-PE', { month: 'short' });
+        for (let m = 1; m <= endMonth; m++) {
+            const key = formatMonthKeyFromParts(y, m);
+            const label = new Date(`${key}-01T12:00:00-05:00`).toLocaleDateString('es-PE', {
+                month: 'short',
+                timeZone: LIMA_TZ,
+            });
             const row: ContactCallTrendPoint = { key, label };
             for (const u of users) row[u] = 0;
             buckets.set(key, row);
@@ -411,7 +463,7 @@ export function buildChannelDailyTrendByUser(
         for (const a of channelAttempts) {
             const name = normalizeUserName(a.userName);
             if (!users.includes(name)) continue;
-            const key = formatMonthKey(new Date(a.createdAt));
+            const key = formatMonthKeyLima(a.createdAt);
             const row = buckets.get(key);
             if (row) row[name] = (Number(row[name]) || 0) + 1;
         }
@@ -427,24 +479,17 @@ export function buildChannelDailyTrendByUser(
     }
 
     const buckets = new Map<string, ContactCallTrendPoint>();
-    const cursor = new Date(start);
-    cursor.setHours(0, 0, 0, 0);
-    const last = new Date(end);
-    last.setHours(0, 0, 0, 0);
-
-    while (cursor <= last) {
-        const key = formatDateKey(cursor);
-        const label = cursor.toLocaleDateString('es-PE', { weekday: 'short', day: '2-digit', month: 'short' });
+    for (const key of iterDateKeys(startKey, endKey)) {
+        const label = formatDayLabelFromKey(key);
         const row: ContactCallTrendPoint = { key, label };
         for (const u of users) row[u] = 0;
         buckets.set(key, row);
-        cursor.setDate(cursor.getDate() + 1);
     }
 
     for (const a of channelAttempts) {
         const name = normalizeUserName(a.userName);
         if (!users.includes(name)) continue;
-        const key = formatDateKey(new Date(a.createdAt));
+        const key = formatDateKeyLima(a.createdAt);
         const row = buckets.get(key);
         if (row) row[name] = (Number(row[name]) || 0) + 1;
     }
@@ -488,11 +533,11 @@ export function buildChannelHourlyDistribution(
     channel: ContactAttemptChannel
 ): ContactHourlyDistribution {
     const meta = CHANNEL_TREND_META[channel];
-    const { start, end, label: periodLabel } = getContactPeriodRange(period);
+    const { startKey, endKey, label: periodLabel } = getContactPeriodRange(period);
     const channelAttempts = filterAttemptsInDateRange(
         attempts.filter(a => isRecordedChannelAttempt(a, channel)),
-        start,
-        end
+        startKey,
+        endKey
     );
 
     const counts = new Array<number>(24).fill(0);

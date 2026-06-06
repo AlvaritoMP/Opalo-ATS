@@ -14,6 +14,7 @@ import {
     type ContactDailyTrendSeries,
     type ContactHourlyDistribution,
 } from '../lib/contactDashboardStats';
+import { reconcileContactAttemptsWithSummaries } from '../lib/contactAttemptReconcile';
 import { computeHiringStageConsultantStats } from '../lib/hiringStageTracking';
 import { interviewSchedulingApi } from '../lib/api/interviewScheduling';
 import { computeInterviewSchedulingStats } from '../lib/interviewSchedulingStats';
@@ -33,6 +34,7 @@ import {
     bulkDashboardFieldExtrasFromCandidate,
     resolveDashboardApplicationDate,
 } from '../lib/dashboardCandidatePool';
+import type { ContactSummaryCandidate } from '../lib/contactAttemptReconcile';
 
 const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#AF19FF', '#6366f1', '#14b8a6', '#f97316'];
 
@@ -398,6 +400,7 @@ export const Dashboard: React.FC = () => {
     /** Datos masivos por candidato (columnas + edad desde API de procesos masivos) */
     const [bulkCandidateFields, setBulkCandidateFields] = useState<Record<string, BulkCandidateFieldExtras>>({});
     const [bulkPoolCandidates, setBulkPoolCandidates] = useState<Candidate[]>([]);
+    const [bulkContactSummaries, setBulkContactSummaries] = useState<Record<string, ContactSummaryCandidate>>({});
 
     const [contactAttempts, setContactAttempts] = useState<Awaited<ReturnType<typeof contactTrackingApi.getAttemptsForProcesses>>>([]);
     const [contactStatsLoading, setContactStatsLoading] = useState(false);
@@ -417,6 +420,7 @@ export const Dashboard: React.FC = () => {
         if (bulkProcessIdsInScope.length === 0) {
             setBulkPoolCandidates([]);
             setBulkCandidateFields({});
+            setBulkContactSummaries({});
             return;
         }
 
@@ -424,6 +428,7 @@ export const Dashboard: React.FC = () => {
         (async () => {
             const pool: Candidate[] = [];
             const fields: Record<string, BulkCandidateFieldExtras> = {};
+            const summaries: Record<string, ContactSummaryCandidate> = {};
             for (const processId of bulkProcessIdsInScope) {
                 try {
                     const process = processMap.get(processId);
@@ -436,6 +441,13 @@ export const Dashboard: React.FC = () => {
                         const mapped = enrichBulkCandidateForDashboard(c, process, columnRow);
                         pool.push(mapped);
                         fields[c.id] = bulkDashboardFieldExtrasFromCandidate(mapped);
+                        summaries[c.id] = {
+                            id: c.id,
+                            processId: c.processId,
+                            contactPhone: c.contactPhone,
+                            contactWhatsapp: c.contactWhatsapp,
+                            contactEmail: c.contactEmail,
+                        };
                     }
                 } catch {
                     /* continuar con otros procesos */
@@ -444,6 +456,7 @@ export const Dashboard: React.FC = () => {
             if (!cancelled) {
                 setBulkPoolCandidates(pool);
                 setBulkCandidateFields(fields);
+                setBulkContactSummaries(summaries);
             }
         })();
 
@@ -793,9 +806,16 @@ export const Dashboard: React.FC = () => {
         [contactAttempts, scopedProcessIds]
     );
 
+    const reconciledContactAttempts = useMemo(() => {
+        const summaries = Object.values(bulkContactSummaries).filter(c =>
+            scopedProcessIds.has(c.processId)
+        );
+        return reconcileContactAttemptsWithSummaries(scopedContactAttempts, summaries);
+    }, [scopedContactAttempts, bulkContactSummaries, scopedProcessIds]);
+
     const enrichedContactAttempts = useMemo(
-        () => enrichContactAttemptsForStats(scopedContactAttempts, statsUsers),
-        [scopedContactAttempts, statsUsers]
+        () => enrichContactAttemptsForStats(reconciledContactAttempts, statsUsers),
+        [reconciledContactAttempts, statsUsers]
     );
 
     const contactStats = useMemo(
@@ -821,23 +841,26 @@ export const Dashboard: React.FC = () => {
     );
 
     const contactTrendOpts = useMemo(() => {
-        const names: string[] = [];
-        if (currentUser?.name?.trim()) names.push(currentUser.name.trim());
-        return names;
-    }, [currentUser?.name]);
+        const names = new Set<string>();
+        if (currentUser?.name?.trim()) names.add(currentUser.name.trim());
+        for (const u of statsUsers) {
+            if (u.name?.trim()) names.add(u.name.trim());
+        }
+        return [...names];
+    }, [currentUser?.name, statsUsers]);
 
     const callTrendSeries = useMemo(
-        () => buildChannelDailyTrendByUser(enrichedContactAttempts, contactConsultantPeriod, 'call', 6, contactTrendOpts),
+        () => buildChannelDailyTrendByUser(enrichedContactAttempts, contactConsultantPeriod, 'call', 10, contactTrendOpts),
         [enrichedContactAttempts, contactConsultantPeriod, contactTrendOpts]
     );
 
     const whatsappTrendSeries = useMemo(
-        () => buildChannelDailyTrendByUser(enrichedContactAttempts, contactConsultantPeriod, 'whatsapp', 6, contactTrendOpts),
+        () => buildChannelDailyTrendByUser(enrichedContactAttempts, contactConsultantPeriod, 'whatsapp', 10, contactTrendOpts),
         [enrichedContactAttempts, contactConsultantPeriod, contactTrendOpts]
     );
 
     const emailTrendSeries = useMemo(
-        () => buildChannelDailyTrendByUser(enrichedContactAttempts, contactConsultantPeriod, 'email', 6, contactTrendOpts),
+        () => buildChannelDailyTrendByUser(enrichedContactAttempts, contactConsultantPeriod, 'email', 10, contactTrendOpts),
         [enrichedContactAttempts, contactConsultantPeriod, contactTrendOpts]
     );
 
