@@ -20,15 +20,46 @@ export function buildUserLookupForStats(
 
 const GENERIC_ACTOR_LABELS = new Set(['', 'Usuario', 'Sin consultor', 'usuario']);
 
+function normalizePersonKey(name: string): string {
+    return name
+        .trim()
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/\s+/g, ' ');
+}
+
+function personNameTokens(name: string): string[] {
+    return normalizePersonKey(name).split(' ').filter(Boolean);
+}
+
+function personNamesLooselyMatch(a: string, b: string): boolean {
+    const na = normalizePersonKey(a);
+    const nb = normalizePersonKey(b);
+    if (na === nb) return true;
+    if (na.includes(nb) || nb.includes(na)) return true;
+    const ta = personNameTokens(a);
+    const tb = personNameTokens(b);
+    if (ta.length === 0 || tb.length === 0) return false;
+    const firstA = ta[0];
+    const firstB = tb[0];
+    const lastA = ta[ta.length - 1];
+    const lastB = tb[tb.length - 1];
+    return firstA === firstB && lastA === lastB;
+}
+
 function findUserByLooseName(users: DashboardActorUser[], raw: string): DashboardActorUser | undefined {
-    const norm = raw.trim().toLowerCase();
+    const norm = normalizePersonKey(raw);
     if (!norm) return undefined;
-    return users.find(u => {
-        const name = u.name?.trim().toLowerCase();
+    const exact = users.find(u => {
+        const name = u.name?.trim();
+        if (name && normalizePersonKey(name) === norm) return true;
         const email = u.email?.trim().toLowerCase();
         const local = email?.split('@')[0];
-        return name === norm || email === norm || local === norm;
+        return email === norm || local === norm;
     });
+    if (exact) return exact;
+    return users.find(u => u.name?.trim() && personNamesLooselyMatch(u.name, raw));
 }
 
 export function resolveActorDisplayName(

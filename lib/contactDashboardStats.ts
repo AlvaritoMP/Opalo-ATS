@@ -495,11 +495,9 @@ export function buildChannelDailyTrendByUser(
         userTotals.set(name, (userTotals.get(name) || 0) + 1);
     }
     const ranked = [...userTotals.entries()].sort((a, b) => b[1] - a[1]);
-    const userLimit = Math.min(Math.max(ranked.length, 1), Math.max(maxUsers, 20));
     const users: string[] = [];
     const seen = new Set<string>();
     for (const [name] of ranked) {
-        if (users.length >= userLimit) break;
         if (seen.has(name)) continue;
         users.push(name);
         seen.add(name);

@@ -14,7 +14,11 @@ import {
     type ContactHourlyDistribution,
     type ContactVolumeMetric,
 } from '../lib/contactDashboardStats';
-import { reconcileContactAttemptsWithSummaries } from '../lib/contactAttemptReconcile';
+import {
+    reconcileContactAttemptsWithSummaries,
+    attributeContactAttemptsFromSummaries,
+    synthesizeVolumeAttemptsFromSummaries,
+} from '../lib/contactAttemptReconcile';
 import type { ContactAttemptChannel } from '../lib/contactChannelConfig';
 import { computeHiringStageConsultantStats } from '../lib/hiringStageTracking';
 import { interviewSchedulingApi } from '../lib/api/interviewScheduling';
@@ -848,19 +852,32 @@ export const Dashboard: React.FC = () => {
         [contactAttempts, scopedProcessIds]
     );
 
+    /** Candidatos en procesos del filtro (sin restricción de fecha de postulación) para contactología */
+    const contactStatsCandidateIds = useMemo(() => {
+        const ids = new Set<string>();
+        for (const c of analyticsCandidates) {
+            if (scopedProcessIds.has(c.processId)) ids.add(c.id);
+        }
+        return ids;
+    }, [analyticsCandidates, scopedProcessIds]);
+
     const reconciledContactAttempts = useMemo(() => {
         const summaries = Object.values(bulkContactSummaries).filter(c =>
             scopedProcessIds.has(c.processId)
         );
-        return reconcileContactAttemptsWithSummaries(scopedContactAttempts, summaries);
+        let rows = scopedContactAttempts;
+        rows = synthesizeVolumeAttemptsFromSummaries(rows, summaries);
+        rows = reconcileContactAttemptsWithSummaries(rows, summaries);
+        rows = attributeContactAttemptsFromSummaries(rows, summaries);
+        return rows;
     }, [scopedContactAttempts, bulkContactSummaries, scopedProcessIds]);
 
     const enrichedContactAttempts = useMemo(
         () =>
             enrichContactAttemptsForStats(reconciledContactAttempts, statsUsers).filter(a =>
-                filteredCandidateIdSet.has(a.candidateId)
+                contactStatsCandidateIds.has(a.candidateId)
             ),
-        [reconciledContactAttempts, statsUsers, filteredCandidateIdSet]
+        [reconciledContactAttempts, statsUsers, contactStatsCandidateIds]
     );
 
     const contactStats = useMemo(
@@ -1105,7 +1122,9 @@ export const Dashboard: React.FC = () => {
                         <h2 className="text-xl font-semibold text-gray-800 mb-1">Canales de atención</h2>
                         <p className="text-sm text-gray-500">
                             Uso y efectividad de llamadas, WhatsApp y correo. Cada canal incluye gráficos de
-                            intentos totales, intentos fallidos e intentos efectivos (interesado).
+                            intentos totales, fallidos y efectivos. Los conteos coinciden con la columna de contacto
+                            de la tabla; el rango semanal/mensual/anual aplica a la fecha del intento, no a la
+                            fecha de postulación del candidato.
                         </p>
                     </div>
                     <div className="flex flex-col gap-1 shrink-0">
