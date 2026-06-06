@@ -1,9 +1,9 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { useAppState } from '../App';
 import { Briefcase, Users, FileText, CheckCircle, Calendar, Grid3x3, Phone, TrendingUp, UserCheck, Headphones, UserPlus, MessageCircle, Mail } from 'lucide-react';
-import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend, BarChart, CartesianGrid, XAxis, YAxis, Bar, LineChart, Line } from 'recharts';
+import { PieChart, Pie, Cell, Tooltip, Legend, BarChart, CartesianGrid, XAxis, YAxis, Bar, LineChart, Line } from 'recharts';
 import { Candidate, Process } from '../types';
-import { resolveCandidateAgeForProcess } from '../lib/bulkTableColumns';
+import { resolveCandidateAgeForProcess, resolveCandidateHomonymField, buildLegacyColumnIdToName } from '../lib/bulkTableColumns';
 import { bulkCandidatesApi } from '../lib/api/bulkCandidates';
 import { contactTrackingApi } from '../lib/api/contactTracking';
 import {
@@ -52,6 +52,42 @@ const StatCard: React.FC<{
     </div>
 );
 
+const COMPACT_CHART_HEIGHT = 200;
+
+/** Mide el ancho del contenedor y pasa dimensiones explícitas a los gráficos (evita cuadros vacíos con Recharts 3 + React 19). */
+const MeasuredChartArea: React.FC<{
+    height: number;
+    className?: string;
+    children: (size: { width: number; height: number }) => React.ReactNode;
+}> = ({ height, className = '', children }) => {
+    const containerRef = useRef<HTMLDivElement>(null);
+    const [size, setSize] = useState<{ width: number; height: number } | null>(null);
+
+    const updateSize = useCallback(() => {
+        const el = containerRef.current;
+        if (!el) return;
+        const { width } = el.getBoundingClientRect();
+        if (width > 0) {
+            setSize(prev => (prev?.width === width && prev?.height === height ? prev : { width, height }));
+        }
+    }, [height]);
+
+    useEffect(() => {
+        updateSize();
+        const el = containerRef.current;
+        if (!el || typeof ResizeObserver === 'undefined') return;
+        const observer = new ResizeObserver(updateSize);
+        observer.observe(el);
+        return () => observer.disconnect();
+    }, [updateSize]);
+
+    return (
+        <div ref={containerRef} className={`min-w-0 w-full ${className}`} style={{ height }}>
+            {size ? children(size) : null}
+        </div>
+    );
+};
+
 const ChartContainer: React.FC<{
     title: string;
     description?: string;
@@ -60,14 +96,23 @@ const ChartContainer: React.FC<{
     className?: string;
     height?: number;
 }> = ({ title, description, children, hasData, className = '', height = 280 }) => (
-    <div className={`bg-white p-4 md:p-6 rounded-xl border border-gray-200 shadow-sm ${className}`}>
+    <div className={`bg-white p-4 md:p-6 rounded-xl border border-gray-200 shadow-sm min-w-0 ${className}`}>
         <h2 className="text-lg md:text-xl font-semibold text-gray-800">{title}</h2>
         {description && <p className="text-xs md:text-sm text-gray-500 mt-1 mb-3">{description}</p>}
         {!description && <div className="mb-3 md:mb-4" />}
         {hasData ? (
-            <ResponsiveContainer width="100%" height={height}>
-                {children}
-            </ResponsiveContainer>
+            <MeasuredChartArea height={height}>
+                {({ width, height: chartHeight }) =>
+                    React.Children.map(children, child =>
+                        React.isValidElement(child)
+                            ? React.cloneElement(child as React.ReactElement<{ width?: number; height?: number }>, {
+                                width,
+                                height: chartHeight,
+                            })
+                            : child
+                    )
+                }
+            </MeasuredChartArea>
         ) : (
             <div className="flex items-center justify-center text-gray-500 text-sm md:text-base" style={{ height }}>
                 Sin datos para los filtros seleccionados.
@@ -126,7 +171,46 @@ const topNWithOthers = (
     ];
 };
 
-const COMPACT_CHART_HEIGHT = 200;
+type BulkCandidateFieldExtras = {
+    bulkColumnValues?: Record<string, unknown>;
+    age?: number;
+    source?: string;
+    province?: string;
+    district?: string;
+};
+
+const resolveDashboardCandidateField = (
+    candidate: Candidate,
+    field: 'source' | 'province' | 'district',
+    process: Process | undefined,
+    bulkExtra?: BulkCandidateFieldExtras
+): string | undefined => {
+    const customColumns = process?.bulkConfig?.customColumns ?? [];
+    const legacyColumnIdToName = buildLegacyColumnIdToName(process?.bulkConfig, customColumns);
+    const enrichedRow = {
+        ...(candidate.bulkColumnValues || {}),
+        ...(bulkExtra?.bulkColumnValues || {}),
+    };
+    const columnValues = Object.keys(enrichedRow).length > 0
+        ? { [candidate.id]: enrichedRow }
+        : {};
+    const homonymCandidate = {
+        id: candidate.id,
+        source: bulkExtra?.source ?? candidate.source,
+        province: bulkExtra?.province ?? candidate.province,
+        district: bulkExtra?.district ?? candidate.district,
+        bulkColumnValues: Object.keys(enrichedRow).length > 0 ? enrichedRow : undefined,
+    };
+    const resolved = resolveCandidateHomonymField(
+        homonymCandidate,
+        field,
+        customColumns,
+        columnValues,
+        legacyColumnIdToName
+    );
+    if (resolved == null || resolved === '') return undefined;
+    return String(resolved);
+};
 
 const CompactChartContainer: React.FC<{
     title: string;
@@ -139,9 +223,18 @@ const CompactChartContainer: React.FC<{
         {description && <p className="text-[11px] text-gray-500 mt-0.5 mb-2 leading-snug">{description}</p>}
         {!description && <div className="mb-2" />}
         {hasData ? (
-            <ResponsiveContainer width="100%" height={COMPACT_CHART_HEIGHT}>
-                {children}
-            </ResponsiveContainer>
+            <MeasuredChartArea height={COMPACT_CHART_HEIGHT}>
+                {({ width, height: chartHeight }) =>
+                    React.Children.map(children, child =>
+                        React.isValidElement(child)
+                            ? React.cloneElement(child as React.ReactElement<{ width?: number; height?: number }>, {
+                                width,
+                                height: chartHeight,
+                            })
+                            : child
+                    )
+                }
+            </MeasuredChartArea>
         ) : (
             <div
                 className="flex items-center justify-center text-gray-400 text-xs"
@@ -286,9 +379,7 @@ export const Dashboard: React.FC = () => {
     const processMap = useMemo(() => new Map(processes.map(p => [p.id, p])), [processes]);
 
     /** Datos masivos por candidato (columnas + edad desde API de procesos masivos) */
-    const [bulkCandidateFields, setBulkCandidateFields] = useState<
-        Record<string, { bulkColumnValues?: Record<string, unknown>; age?: number }>
-    >({});
+    const [bulkCandidateFields, setBulkCandidateFields] = useState<Record<string, BulkCandidateFieldExtras>>({});
 
     const [contactAttempts, setContactAttempts] = useState<Awaited<ReturnType<typeof contactTrackingApi.getAttemptsForProcesses>>>([]);
     const [contactStatsLoading, setContactStatsLoading] = useState(false);
@@ -309,7 +400,7 @@ export const Dashboard: React.FC = () => {
 
         let cancelled = false;
         (async () => {
-            const merged: Record<string, { bulkColumnValues?: Record<string, unknown>; age?: number }> = {};
+            const merged: Record<string, BulkCandidateFieldExtras> = {};
             for (const processId of bulkProcessIds) {
                 try {
                     const all = await bulkCandidatesApi.getAllCandidates(processId);
@@ -317,6 +408,9 @@ export const Dashboard: React.FC = () => {
                         const prev = merged[c.id] || {};
                         merged[c.id] = {
                             age: c.age ?? prev.age,
+                            source: c.source ?? prev.source,
+                            province: c.province ?? prev.province,
+                            district: c.district ?? prev.district,
                             bulkColumnValues: {
                                 ...(prev.bulkColumnValues || {}),
                                 ...(c.bulkColumnValues || {}),
@@ -447,21 +541,27 @@ export const Dashboard: React.FC = () => {
     const candidateSources = useMemo(() => {
         const sourceMap = new Map<string, number>();
         filteredCandidates.forEach(c => {
-            const source = translateSource(c.source || 'Otro');
+            const process = processMap.get(c.processId);
+            const bulkExtra = bulkCandidateFields[c.id];
+            const rawSource = resolveDashboardCandidateField(c, 'source', process, bulkExtra);
+            const source = translateSource(rawSource || 'Otro');
             sourceMap.set(source, (sourceMap.get(source) || 0) + 1);
         });
         return Array.from(sourceMap, ([name, value]) => ({ name, value }));
-    }, [filteredCandidates]);
+    }, [filteredCandidates, processMap, bulkCandidateFields]);
 
     const candidateDistricts = useMemo(() => {
         const districtMap = new Map<string, number>();
         filteredCandidates.forEach(c => {
-            const district = normalizeDistrictName(c.district);
+            const process = processMap.get(c.processId);
+            const bulkExtra = bulkCandidateFields[c.id];
+            const rawDistrict = resolveDashboardCandidateField(c, 'district', process, bulkExtra);
+            const district = normalizeDistrictName(rawDistrict);
             const key = district || 'Sin distrito';
             districtMap.set(key, (districtMap.get(key) || 0) + 1);
         });
         return topNWithOthers(Array.from(districtMap.entries()), 10);
-    }, [filteredCandidates]);
+    }, [filteredCandidates, processMap, bulkCandidateFields]);
 
     const candidatesByStage = useMemo(() => {
         const stageMap = new Map<string, number>();
@@ -873,23 +973,31 @@ export const Dashboard: React.FC = () => {
                 </div>
 
                 {stageDuration.length > 0 && (
-                    <div className="mt-6">
+                    <div className="mt-6 min-w-0">
                         <h3 className="text-lg font-semibold text-gray-800 mb-1">Duración promedio por etapa</h3>
                         <p className="text-sm text-gray-500 mb-3">Días que los candidatos permanecen en cada etapa antes de avanzar.</p>
-                        <ResponsiveContainer width="100%" height={Math.max(200, stageDuration.length * 40)}>
-                            <BarChart data={stageDuration} layout="vertical" margin={{ top: 5, right: 30, left: 10, bottom: 5 }}>
-                                <CartesianGrid strokeDasharray="3 3" />
-                                <XAxis type="number" unit=" d" />
-                                <YAxis type="category" dataKey="name" width={120} tick={{ fontSize: 12 }} />
-                                <Tooltip
-                                    formatter={(value: number, _name, item) => [
-                                        `${value} días (${item.payload.muestras} movimientos)`,
-                                        'Promedio',
-                                    ]}
-                                />
-                                <Bar dataKey="dias" fill="#f97316" radius={[0, 4, 4, 0]} />
-                            </BarChart>
-                        </ResponsiveContainer>
+                        <MeasuredChartArea height={Math.max(200, stageDuration.length * 40)}>
+                            {({ width, height: chartHeight }) => (
+                                <BarChart
+                                    width={width}
+                                    height={chartHeight}
+                                    data={stageDuration}
+                                    layout="vertical"
+                                    margin={{ top: 5, right: 30, left: 10, bottom: 5 }}
+                                >
+                                    <CartesianGrid strokeDasharray="3 3" />
+                                    <XAxis type="number" unit=" d" />
+                                    <YAxis type="category" dataKey="name" width={120} tick={{ fontSize: 12 }} />
+                                    <Tooltip
+                                        formatter={(value: number, _name, item) => [
+                                            `${value} días (${item.payload.muestras} movimientos)`,
+                                            'Promedio',
+                                        ]}
+                                    />
+                                    <Bar dataKey="dias" fill="#f97316" radius={[0, 4, 4, 0]} />
+                                </BarChart>
+                            )}
+                        </MeasuredChartArea>
                     </div>
                 )}
             </div>
@@ -1240,7 +1348,7 @@ export const Dashboard: React.FC = () => {
                 )}
             </div>
 
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8 min-w-0">
                 <ChartContainer
                     title="Candidatos por etapa"
                     description={
@@ -1287,7 +1395,7 @@ export const Dashboard: React.FC = () => {
                 </ChartContainer>
             </div>
 
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8 min-w-0">
                 <ChartContainer
                     title="Candidatos por puesto"
                     description="Cantidad de candidatos según el proceso o puesto al que postularon (incluye procesos masivos)."
@@ -1324,7 +1432,7 @@ export const Dashboard: React.FC = () => {
                 </ChartContainer>
             </div>
 
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8 min-w-0">
                 <ChartContainer
                     title="Candidatos por distrito"
                     description="Solo se considera el campo distrito del candidato (no direcciones). Muestra los 10 distritos con más postulantes."

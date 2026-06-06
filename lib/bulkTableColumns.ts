@@ -1262,6 +1262,22 @@ export function normalizePhoneKey(phone?: string | null): string {
     return (phone || '').replace(/\D/g, '');
 }
 
+/** Clave de teléfono para emparejar candidatos (Perú: últimos 9 dígitos, ignora +51). */
+export function normalizePhoneKeyForMatch(phone?: string | null): string {
+    const digits = normalizePhoneKey(phone);
+    if (!digits) return '';
+    return digits.length > 9 ? digits.slice(-9) : digits;
+}
+
+export function collectPhoneMatchKeys(...phones: (string | null | undefined)[]): string[] {
+    const keys = new Set<string>();
+    for (const phone of phones) {
+        const key = normalizePhoneKeyForMatch(phone);
+        if (key) keys.add(key);
+    }
+    return [...keys];
+}
+
 /** Alias de encabezados Excel / Tally → nombre normalizado de columna custom */
 export const CUSTOM_COLUMN_HEADER_ALIASES: Record<string, string[]> = {
     'ap paterno': ['apellido paterno', 'paterno', 'ap. paterno', 'appaterno', 'ap_paterno'],

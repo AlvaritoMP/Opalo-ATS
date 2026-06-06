@@ -39,14 +39,17 @@ function isNotFoundError(error: { message?: string; code?: string } | null): boo
 }
 
 function getBulkSelectCandidates(): string[] {
-    if (cachedBulkSelect) return [cachedBulkSelect];
-    return [
+    const allVariants = [
         BULK_SELECT_FULL,
         BULK_SELECT_WITH_APPLICATION,
         BULK_SELECT_WITH_CREATED,
         BULK_SELECT_WITH_CONTACT,
         BULK_SELECT_BASE,
     ];
+    if (!cachedBulkSelect) return allVariants;
+    // Si el caché omitió application_count, reintentar variantes más completas
+    if (!cachedBulkSelect.includes('application_count')) return allVariants;
+    return [cachedBulkSelect, ...allVariants.filter(v => v !== cachedBulkSelect)];
 }
 
 function mapBulkCandidateRow(
@@ -178,7 +181,11 @@ export const bulkCandidatesApi = {
             if (!error) {
                 data = (rows || []) as Record<string, unknown>[];
                 count = total;
-                cachedBulkSelect = selectFields;
+                if (selectFields.includes('application_count') || selectFields === BULK_SELECT_FULL || selectFields === BULK_SELECT_WITH_APPLICATION) {
+                    cachedBulkSelect = selectFields;
+                } else if (!cachedBulkSelect?.includes('application_count')) {
+                    cachedBulkSelect = selectFields;
+                }
                 bulkColumnValuesWriteSupported = selectFields.includes('bulk_column_values');
                 break;
             }
