@@ -7,7 +7,7 @@ import {
     type ChannelContactSummary,
     type ContactAttemptChannel,
 } from './contactChannelConfig';
-import { addDaysToDateKey, formatDateKeyLima, isChannelVolumeAttempt } from './contactDashboardStats';
+import { addDaysToDateKey, formatDateKeyLima, isChannelVolumeAttempt, isEffectiveContactAttemptForChannel } from './contactDashboardStats';
 import type { ContactSummaryCandidate } from './contactAttemptReconcile';
 
 const FIELD_TO_CHANNEL: Record<string, ContactAttemptChannel> = {
@@ -153,8 +153,7 @@ export async function syncContactHistoryForCandidates(
     for (const candidate of candidates) {
         for (const channel of channels) {
             const summary = summaryForChannel(candidate, channel);
-            const targetCount = summary?.attemptCount ?? 0;
-            if (targetCount <= 0 || !summary?.lastAttemptAt) continue;
+            if (!summary?.lastAttemptAt) continue;
 
             const key = `${candidate.id}:${channel}`;
             const allRows = (attemptsByKey.get(key) || []).sort(
@@ -181,25 +180,59 @@ export async function syncContactHistoryForCandidates(
                 if (!error) patched += 1;
             }
 
+            const targetCount = summary.attemptCount ?? 0;
             const deficit = targetCount - volumeRows.length;
-            if (deficit <= 0) continue;
+            if (deficit > 0) {
+                const activity = activityByCandidate.get(candidate.id);
+                const fullDates = resolveInsertDates(
+                    summary,
+                    channel,
+                    volumeRows,
+                    activity,
+                    targetCount
+                );
+                const insertDates = fullDates.slice(volumeRows.length);
 
-            const activity = activityByCandidate.get(candidate.id);
-            const fullDates = resolveInsertDates(
-                summary,
-                channel,
-                volumeRows,
-                activity,
-                targetCount
-            );
-            const insertDates = fullDates.slice(volumeRows.length);
+                for (let i = 0; i < deficit; i++) {
+                    const attemptNumber = volumeRows.length + i + 1;
+                    const createdAt =
+                        insertDates[i] ||
+                        summary.lastAttemptAt ||
+                        new Date().toISOString();
 
-            for (let i = 0; i < deficit; i++) {
-                const attemptNumber = volumeRows.length + i + 1;
-                const createdAt =
-                    insertDates[i] ||
-                    summary.lastAttemptAt ||
-                    new Date().toISOString();
+                    const { error } = await supabase.from('candidate_contact_attempts').insert({
+                        candidate_id: candidate.id,
+                        process_id: candidate.processId,
+                        user_id: null,
+                        user_name: summary.lastUserName?.trim() || null,
+                        channel,
+                        outcome: defaultOutcome(channel),
+                        attempt_number: attemptNumber,
+                        status_after: summary.status,
+                        notes: JSON.stringify({ sync: 'summary_backfill', source: 'contactHistorySync' }),
+                        created_at: createdAt,
+                        app_name: APP_NAME,
+                    });
+
+                    if (!error) inserted += 1;
+                }
+            }
+
+            if (
+                summary.status === 'interesado' &&
+                !allRows.some(a => isEffectiveContactAttemptForChannel(a, channel))
+            ) {
+                const activity = activityByCandidate.get(candidate.id);
+                const label = CONTACT_CHANNELS[channel].shortLabel;
+                const statusActivity = activity
+                    ?.filter(
+                        e =>
+                            e.actionType === 'contact_status' &&
+                            (e.fieldName === label || FIELD_TO_CHANNEL[e.fieldName || ''] === channel) &&
+                            e.newValue?.toLowerCase().includes('interes')
+                    )
+                    .map(e => e.createdAt)
+                    .sort((a, b) => new Date(b).getTime() - new Date(a).getTime())[0];
 
                 const { error } = await supabase.from('candidate_contact_attempts').insert({
                     candidate_id: candidate.id,
@@ -207,11 +240,11 @@ export async function syncContactHistoryForCandidates(
                     user_id: null,
                     user_name: summary.lastUserName?.trim() || null,
                     channel,
-                    outcome: defaultOutcome(channel),
-                    attempt_number: attemptNumber,
-                    status_after: summary.status,
-                    notes: JSON.stringify({ sync: 'summary_backfill', source: 'contactHistorySync' }),
-                    created_at: createdAt,
+                    outcome: 'status_change',
+                    attempt_number: Math.max(targetCount, volumeRows.length, 1),
+                    status_after: 'interesado',
+                    notes: JSON.stringify({ sync: 'interesado_backfill', source: 'contactHistorySync' }),
+                    created_at: statusActivity || summary.lastAttemptAt,
                     app_name: APP_NAME,
                 });
 

@@ -348,11 +348,16 @@ export function computeContactDashboardStats(
 
     for (const a of scoped) {
         const ch = a.channel as ContactAttemptChannel;
-        if (!isChannelVolumeAttempt(a, ch)) continue;
+        if (!CONTACT_CHANNELS[ch]) continue;
         const bucket = channelTotals.get(ch);
         if (!bucket) continue;
-        bucket.total += 1;
-        if (isEffectiveContactAttempt(a)) bucket.effective += 1;
+
+        if (isChannelVolumeAttempt(a, ch)) {
+            bucket.total += 1;
+        }
+        if (isEffectiveContactAttemptForChannel(a, ch)) {
+            bucket.effective += 1;
+        }
     }
 
     const totalActions = scoped.filter(a =>
@@ -377,8 +382,8 @@ export function computeContactDashboardStats(
     let bestRate = -1;
     let bestEffectiveTotal = 0;
     for (const [channel, { total, effective }] of channelTotals) {
-        if (total === 0) continue;
-        const rate = effective / total;
+        if (total === 0 && effective === 0) continue;
+        const rate = total > 0 ? effective / total : effective > 0 ? 1 : 0;
         if (rate > bestRate || (rate === bestRate && effective > bestEffectiveTotal)) {
             bestRate = rate;
             bestEffectiveTotal = effective;
@@ -429,10 +434,10 @@ export function computeContactDashboardStats(
                 name: channelLabel(ch),
                 total,
                 effective,
-                rate: total > 0 ? Math.round((effective / total) * 1000) / 10 : 0,
+                rate: total > 0 ? Math.round((effective / total) * 1000) / 10 : effective > 0 ? 100 : 0,
             };
         })
-        .filter(d => d.total > 0);
+        .filter(d => d.total > 0 || d.effective > 0);
 
     const callerRankings = Array.from(callerTotals.entries())
         .map(([name, { total, effective }]) => ({
