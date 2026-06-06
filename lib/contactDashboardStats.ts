@@ -55,6 +55,8 @@ export interface ContactDailyTrendSeries {
     channel: ContactAttemptChannel;
     channelLabel: string;
     unitLabel: string;
+    metric: ContactVolumeMetric;
+    metricLabel: string;
 }
 
 export interface ContactHourlyPoint {
@@ -70,7 +72,18 @@ export interface ContactHourlyDistribution {
     unitLabel: string;
     periodLabel: string;
     peakHour: { label: string; count: number } | null;
+    metric: ContactVolumeMetric;
+    metricLabel: string;
 }
+
+/** Variante de conteo para gráficos de contactología. */
+export type ContactVolumeMetric = 'total' | 'failed' | 'effective';
+
+export const CONTACT_VOLUME_METRIC_LABELS: Record<ContactVolumeMetric, string> = {
+    total: 'Intentos',
+    failed: 'Intentos fallidos',
+    effective: 'Intentos efectivos',
+};
 
 /** @deprecated alias */
 export type ContactCallTrendSeries = ContactDailyTrendSeries;
@@ -91,6 +104,39 @@ export function isEffectiveContactAttempt(
     attempt: Pick<ContactAttempt, 'outcome' | 'statusAfter'>
 ): boolean {
     return attempt.statusAfter === 'interesado' || attempt.outcome === 'interested';
+}
+
+/** Intento efectivo en un canal (incluye marcar interesado desde menú de estado). */
+export function isEffectiveContactAttemptForChannel(
+    attempt: Pick<ContactAttempt, 'channel' | 'outcome' | 'statusAfter' | 'notes'>,
+    channel: ContactAttemptChannel
+): boolean {
+    if (attempt.channel !== channel) return false;
+    if (!isCountableContactAction(attempt)) return false;
+    if (isContactUndoAttempt(attempt)) return false;
+    if (isEffectiveContactAttempt(attempt)) {
+        if (attempt.outcome === 'status_change') return true;
+        return isChannelVolumeAttempt(attempt, channel);
+    }
+    return false;
+}
+
+/** Intento registrado sin interés (no contestó, sin respuesta, no interesado, etc.). */
+export function isFailedContactVolumeAttempt(
+    attempt: Pick<ContactAttempt, 'channel' | 'outcome' | 'statusAfter' | 'notes'>,
+    channel: ContactAttemptChannel
+): boolean {
+    return isChannelVolumeAttempt(attempt, channel) && !isEffectiveContactAttempt(attempt);
+}
+
+export function matchesContactVolumeMetric(
+    attempt: ContactAttempt,
+    channel: ContactAttemptChannel,
+    metric: ContactVolumeMetric
+): boolean {
+    if (metric === 'total') return isChannelVolumeAttempt(attempt, channel);
+    if (metric === 'effective') return isEffectiveContactAttemptForChannel(attempt, channel);
+    return isFailedContactVolumeAttempt(attempt, channel);
 }
 
 const LIMA_TZ = 'America/Lima';
@@ -176,11 +222,26 @@ export function isContactUndoAttempt(attempt: Pick<ContactAttempt, 'outcome' | '
     return attempt.outcome === 'status_change' && Boolean(attempt.notes?.includes('Deshacer'));
 }
 
-/** Llamada registrada con botón de contacto o cambio de estado en columna Llamadas. */
+/**
+ * Intento real registrado con botón de contacto (correo, WhatsApp, llamada).
+ * Coincide con contact_*_attempt_count en la tabla masiva — excluye cambios de estado manual.
+ */
+export function isChannelVolumeAttempt(
+    attempt: Pick<ContactAttempt, 'channel' | 'outcome' | 'notes'>,
+    channel: ContactAttemptChannel
+): boolean {
+    if (attempt.channel !== channel) return false;
+    if (!isCountableContactAction(attempt)) return false;
+    if (isContactUndoAttempt(attempt)) return false;
+    if (attempt.outcome === 'status_change') return false;
+    return true;
+}
+
+/** Llamada registrada con botón de contacto (misma regla que la columna Llamadas). */
 export function isRecordedCallAttempt(
     attempt: Pick<ContactAttempt, 'channel' | 'outcome' | 'notes'>
 ): boolean {
-    return attempt.channel === 'call' && isRecordedChannelAttempt(attempt, 'call');
+    return isChannelVolumeAttempt(attempt, 'call');
 }
 
 /** Interés registrado en columna Llamadas (botón o menú rápido «Interesado»). */
@@ -214,7 +275,7 @@ function accumulateCallConsultantStats(
     return callerTotals;
 }
 
-/** Contacto registrado en un canal (llamada, WhatsApp o correo). */
+/** Cualquier acción en canal (incl. cambio de estado) — solo para reconciliación amplia. */
 export function isRecordedChannelAttempt(
     attempt: Pick<ContactAttempt, 'channel' | 'outcome' | 'notes'>,
     channel: ContactAttemptChannel
@@ -260,7 +321,7 @@ function countTopConsultantByChannel(
 ): { userName: string; count: number } | null {
     const totals = new Map<string, number>();
     for (const a of attempts) {
-        if (!isRecordedChannelAttempt(a, channel)) continue;
+        if (!isChannelVolumeAttempt(a, channel)) continue;
         const name = normalizeUserName(a.userName);
         totals.set(name, (totals.get(name) || 0) + 1);
     }
@@ -278,7 +339,6 @@ export function computeContactDashboardStats(
     const { startKey, endKey, label: periodLabel } = getContactPeriodRange(period);
     const scoped = filterAttemptsInDateRange(attempts, startKey, endKey);
 
-    const countable = scoped.filter(isCountableContactAction);
     const channels = Object.keys(CONTACT_CHANNELS) as ContactAttemptChannel[];
 
     const channelTotals = new Map<ContactAttemptChannel, { total: number; effective: number }>();
@@ -286,14 +346,18 @@ export function computeContactDashboardStats(
         channelTotals.set(ch, { total: 0, effective: 0 });
     }
 
-    for (const a of countable) {
-        const bucket = channelTotals.get(a.channel as ContactAttemptChannel);
+    for (const a of scoped) {
+        const ch = a.channel as ContactAttemptChannel;
+        if (!isChannelVolumeAttempt(a, ch)) continue;
+        const bucket = channelTotals.get(ch);
         if (!bucket) continue;
         bucket.total += 1;
         if (isEffectiveContactAttempt(a)) bucket.effective += 1;
     }
 
-    const totalActions = countable.length;
+    const totalActions = scoped.filter(a =>
+        isChannelVolumeAttempt(a, a.channel as ContactAttemptChannel)
+    ).length;
 
     let mostUsedChannel: ContactChannelDashboardStats['mostUsedChannel'] = null;
     let maxVolume = 0;
@@ -413,12 +477,14 @@ export function buildChannelDailyTrendByUser(
     period: ContactConsultantPeriod,
     channel: ContactAttemptChannel,
     maxUsers = 6,
-    alwaysIncludeNames: string[] = []
+    alwaysIncludeNames: string[] = [],
+    metric: ContactVolumeMetric = 'total'
 ): ContactDailyTrendSeries {
     const meta = CHANNEL_TREND_META[channel];
+    const metricLabel = CONTACT_VOLUME_METRIC_LABELS[metric];
     const { startKey, endKey, label: periodLabel } = getContactPeriodRange(period);
     const channelAttempts = filterAttemptsInDateRange(
-        attempts.filter(a => isRecordedChannelAttempt(a, channel)),
+        attempts.filter(a => matchesContactVolumeMetric(a, channel, metric)),
         startKey,
         endKey
     );
@@ -429,10 +495,11 @@ export function buildChannelDailyTrendByUser(
         userTotals.set(name, (userTotals.get(name) || 0) + 1);
     }
     const ranked = [...userTotals.entries()].sort((a, b) => b[1] - a[1]);
+    const userLimit = Math.min(Math.max(ranked.length, 1), Math.max(maxUsers, 20));
     const users: string[] = [];
     const seen = new Set<string>();
     for (const [name] of ranked) {
-        if (users.length >= maxUsers) break;
+        if (users.length >= userLimit) break;
         if (seen.has(name)) continue;
         users.push(name);
         seen.add(name);
@@ -475,6 +542,8 @@ export function buildChannelDailyTrendByUser(
             channel,
             channelLabel: meta.label,
             unitLabel: meta.unitPlural,
+            metric,
+            metricLabel,
         };
     }
 
@@ -502,7 +571,40 @@ export function buildChannelDailyTrendByUser(
         channel,
         channelLabel: meta.label,
         unitLabel: meta.unitPlural,
+        metric,
+        metricLabel,
     };
+}
+
+export function buildChannelTrendBundle(
+    attempts: ContactAttempt[],
+    period: ContactConsultantPeriod,
+    channel: ContactAttemptChannel,
+    maxUsers = 10,
+    alwaysIncludeNames: string[] = []
+): Record<
+    ContactVolumeMetric,
+    { daily: ContactDailyTrendSeries; hourly: ContactHourlyDistribution }
+> {
+    const metrics: ContactVolumeMetric[] = ['total', 'failed', 'effective'];
+    const out = {} as Record<
+        ContactVolumeMetric,
+        { daily: ContactDailyTrendSeries; hourly: ContactHourlyDistribution }
+    >;
+    for (const metric of metrics) {
+        out[metric] = {
+            daily: buildChannelDailyTrendByUser(
+                attempts,
+                period,
+                channel,
+                maxUsers,
+                alwaysIncludeNames,
+                metric
+            ),
+            hourly: buildChannelHourlyDistribution(attempts, period, channel, metric),
+        };
+    }
+    return out;
 }
 
 /** @deprecated use buildChannelDailyTrendByUser */
@@ -530,12 +632,14 @@ function getHourInLima(iso: string): number {
 export function buildChannelHourlyDistribution(
     attempts: ContactAttempt[],
     period: ContactConsultantPeriod,
-    channel: ContactAttemptChannel
+    channel: ContactAttemptChannel,
+    metric: ContactVolumeMetric = 'total'
 ): ContactHourlyDistribution {
     const meta = CHANNEL_TREND_META[channel];
+    const metricLabel = CONTACT_VOLUME_METRIC_LABELS[metric];
     const { startKey, endKey, label: periodLabel } = getContactPeriodRange(period);
     const channelAttempts = filterAttemptsInDateRange(
-        attempts.filter(a => isRecordedChannelAttempt(a, channel)),
+        attempts.filter(a => matchesContactVolumeMetric(a, channel, metric)),
         startKey,
         endKey
     );
@@ -567,5 +671,7 @@ export function buildChannelHourlyDistribution(
         unitLabel: meta.unitPlural,
         periodLabel,
         peakHour,
+        metric,
+        metricLabel,
     };
 }

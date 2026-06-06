@@ -8,13 +8,14 @@ import { bulkCandidatesApi } from '../lib/api/bulkCandidates';
 import { contactTrackingApi } from '../lib/api/contactTracking';
 import {
     computeContactDashboardStats,
-    buildChannelDailyTrendByUser,
-    buildChannelHourlyDistribution,
+    buildChannelTrendBundle,
     type ContactConsultantPeriod,
     type ContactDailyTrendSeries,
     type ContactHourlyDistribution,
+    type ContactVolumeMetric,
 } from '../lib/contactDashboardStats';
 import { reconcileContactAttemptsWithSummaries } from '../lib/contactAttemptReconcile';
+import type { ContactAttemptChannel } from '../lib/contactChannelConfig';
 import { computeHiringStageConsultantStats } from '../lib/hiringStageTracking';
 import { interviewSchedulingApi } from '../lib/api/interviewScheduling';
 import { computeInterviewSchedulingStats } from '../lib/interviewSchedulingStats';
@@ -274,8 +275,8 @@ const ContactDailyTrendChart: React.FC<{ series: ContactDailyTrendSeries }> = ({
 
     return (
         <CompactChartContainer
-            title={isDaily ? 'Por día y usuario' : 'Por mes y usuario'}
-            description={`${series.channelLabel} · ${series.periodLabel.toLowerCase()} · cantidad diaria (no acumulativa)`}
+            title={isDaily ? `Por día y usuario · ${series.metricLabel}` : `Por mes y usuario · ${series.metricLabel}`}
+            description={`${series.channelLabel} · ${series.periodLabel.toLowerCase()} · ${series.metricLabel.toLowerCase()}`}
             hasData={hasData}
         >
             <LineChart data={series.data} margin={{ top: 4, right: 8, left: -10, bottom: 0 }}>
@@ -316,18 +317,25 @@ const CHANNEL_CHART_COLORS: Record<string, string> = {
     email: '#0ea5e9',
 };
 
+const METRIC_HOURLY_COLORS: Record<ContactVolumeMetric, string> = {
+    total: '#6366f1',
+    failed: '#f97316',
+    effective: '#22c55e',
+};
+
 const ContactHourlyChart: React.FC<{ series: ContactHourlyDistribution }> = ({ series }) => {
     const hasData = series.data.some(d => d.count > 0);
     const unitSingular = series.unitLabel.replace(/s$/, '') || series.unitLabel;
     const peakNote = series.peakHour
         ? ` · pico ${series.peakHour.label} (${series.peakHour.count})`
         : '';
-    const fill = CHANNEL_CHART_COLORS[series.channel] || '#6366f1';
+    const channelTint = CHANNEL_CHART_COLORS[series.channel];
+    const fill = channelTint && series.metric === 'total' ? channelTint : METRIC_HOURLY_COLORS[series.metric];
 
     return (
         <CompactChartContainer
-            title="Distribución horaria"
-            description={`${series.channelLabel} · hora Lima${peakNote}`}
+            title={`Por hora · ${series.metricLabel}`}
+            description={`${series.channelLabel} · hora Lima · ${series.metricLabel.toLowerCase()}${peakNote}`}
             hasData={hasData}
         >
             <BarChart data={series.data} margin={{ top: 4, right: 8, left: -10, bottom: 0 }}>
@@ -347,18 +355,31 @@ const ContactHourlyChart: React.FC<{ series: ContactHourlyDistribution }> = ({ s
     );
 };
 
+const CONTACT_METRICS: ContactVolumeMetric[] = ['total', 'failed', 'effective'];
+
 const ContactChannelChartsRow: React.FC<{
-    userSeries: ContactDailyTrendSeries;
-    hourlySeries: ContactHourlyDistribution;
-}> = ({ userSeries, hourlySeries }) => (
-    <div className="mb-4">
-        <h3 className="text-sm font-semibold text-gray-700 mb-2">{userSeries.channelLabel}</h3>
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-            <ContactDailyTrendChart series={userSeries} />
-            <ContactHourlyChart series={hourlySeries} />
+    bundle: Record<ContactVolumeMetric, { daily: ContactDailyTrendSeries; hourly: ContactHourlyDistribution }>;
+}> = ({ bundle }) => {
+    const channelLabel = bundle.total.daily.channelLabel;
+    return (
+        <div className="mb-6 pb-6 border-b border-gray-100 last:border-0 last:pb-0 last:mb-0">
+            <h3 className="text-sm font-semibold text-gray-800 mb-3">{channelLabel}</h3>
+            <div className="space-y-4">
+                {CONTACT_METRICS.map(metric => (
+                    <div key={metric}>
+                        <p className="text-xs font-medium text-gray-500 mb-2">
+                            {bundle[metric].daily.metricLabel}
+                        </p>
+                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+                            <ContactDailyTrendChart series={bundle[metric].daily} />
+                            <ContactHourlyChart series={bundle[metric].hourly} />
+                        </div>
+                    </div>
+                ))}
+            </div>
         </div>
-    </div>
-);
+    );
+};
 
 export const Dashboard: React.FC = () => {
     const { state, getLabel, actions } = useAppState();
@@ -817,6 +838,11 @@ export const Dashboard: React.FC = () => {
         [targetProcessIds]
     );
 
+    const filteredCandidateIdSet = useMemo(
+        () => new Set(filteredCandidates.map(c => c.id)),
+        [filteredCandidates]
+    );
+
     const scopedContactAttempts = useMemo(
         () => contactAttempts.filter(a => scopedProcessIds.has(a.processId)),
         [contactAttempts, scopedProcessIds]
@@ -830,18 +856,16 @@ export const Dashboard: React.FC = () => {
     }, [scopedContactAttempts, bulkContactSummaries, scopedProcessIds]);
 
     const enrichedContactAttempts = useMemo(
-        () => enrichContactAttemptsForStats(reconciledContactAttempts, statsUsers),
-        [reconciledContactAttempts, statsUsers]
+        () =>
+            enrichContactAttemptsForStats(reconciledContactAttempts, statsUsers).filter(a =>
+                filteredCandidateIdSet.has(a.candidateId)
+            ),
+        [reconciledContactAttempts, statsUsers, filteredCandidateIdSet]
     );
 
     const contactStats = useMemo(
         () => computeContactDashboardStats(enrichedContactAttempts, contactConsultantPeriod),
         [enrichedContactAttempts, contactConsultantPeriod]
-    );
-
-    const filteredCandidateIdSet = useMemo(
-        () => new Set(filteredCandidates.map(c => c.id)),
-        [filteredCandidates]
     );
 
     const schedulingStats = useMemo(() => {
@@ -881,35 +905,24 @@ export const Dashboard: React.FC = () => {
         return [...names];
     }, [currentUser?.name, statsUsers]);
 
-    const callTrendSeries = useMemo(
-        () => buildChannelDailyTrendByUser(enrichedContactAttempts, contactConsultantPeriod, 'call', 10, contactTrendOpts),
-        [enrichedContactAttempts, contactConsultantPeriod, contactTrendOpts]
-    );
-
-    const whatsappTrendSeries = useMemo(
-        () => buildChannelDailyTrendByUser(enrichedContactAttempts, contactConsultantPeriod, 'whatsapp', 10, contactTrendOpts),
-        [enrichedContactAttempts, contactConsultantPeriod, contactTrendOpts]
-    );
-
-    const emailTrendSeries = useMemo(
-        () => buildChannelDailyTrendByUser(enrichedContactAttempts, contactConsultantPeriod, 'email', 10, contactTrendOpts),
-        [enrichedContactAttempts, contactConsultantPeriod, contactTrendOpts]
-    );
-
-    const callHourlySeries = useMemo(
-        () => buildChannelHourlyDistribution(enrichedContactAttempts, contactConsultantPeriod, 'call'),
-        [enrichedContactAttempts, contactConsultantPeriod]
-    );
-
-    const whatsappHourlySeries = useMemo(
-        () => buildChannelHourlyDistribution(enrichedContactAttempts, contactConsultantPeriod, 'whatsapp'),
-        [enrichedContactAttempts, contactConsultantPeriod]
-    );
-
-    const emailHourlySeries = useMemo(
-        () => buildChannelHourlyDistribution(enrichedContactAttempts, contactConsultantPeriod, 'email'),
-        [enrichedContactAttempts, contactConsultantPeriod]
-    );
+    const contactChannelTrends = useMemo(() => {
+        const channels: ContactAttemptChannel[] = ['call', 'whatsapp', 'email'];
+        return Object.fromEntries(
+            channels.map(ch => [
+                ch,
+                buildChannelTrendBundle(
+                    enrichedContactAttempts,
+                    contactConsultantPeriod,
+                    ch,
+                    10,
+                    contactTrendOpts
+                ),
+            ])
+        ) as Record<
+            ContactAttemptChannel,
+            Record<ContactVolumeMetric, { daily: ContactDailyTrendSeries; hourly: ContactHourlyDistribution }>
+        >;
+    }, [enrichedContactAttempts, contactConsultantPeriod, contactTrendOpts]);
 
     const hiringConsultantStats = useMemo(
         () =>
@@ -1091,8 +1104,8 @@ export const Dashboard: React.FC = () => {
                     <div>
                         <h2 className="text-xl font-semibold text-gray-800 mb-1">Canales de atención</h2>
                         <p className="text-sm text-gray-500">
-                            Uso y efectividad de llamadas, WhatsApp y correo sobre los candidatos del filtro actual.
-                            La efectividad se mide cuando se marca &quot;Interesado&quot; al contactar.
+                            Uso y efectividad de llamadas, WhatsApp y correo. Cada canal incluye gráficos de
+                            intentos totales, intentos fallidos e intentos efectivos (interesado).
                         </p>
                     </div>
                     <div className="flex flex-col gap-1 shrink-0">
@@ -1199,9 +1212,9 @@ export const Dashboard: React.FC = () => {
                             />
                         </div>
 
-                        <ContactChannelChartsRow userSeries={callTrendSeries} hourlySeries={callHourlySeries} />
-                        <ContactChannelChartsRow userSeries={whatsappTrendSeries} hourlySeries={whatsappHourlySeries} />
-                        <ContactChannelChartsRow userSeries={emailTrendSeries} hourlySeries={emailHourlySeries} />
+                        <ContactChannelChartsRow bundle={contactChannelTrends.call} />
+                        <ContactChannelChartsRow bundle={contactChannelTrends.whatsapp} />
+                        <ContactChannelChartsRow bundle={contactChannelTrends.email} />
 
                         <ChartContainer
                             title="Acciones por canal"

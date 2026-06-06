@@ -1,7 +1,7 @@
 import type { ContactAttempt } from './contactTracking';
 import type { ContactAttemptChannel, ChannelContactSummary } from './contactChannelConfig';
 import { CONTACT_CHANNELS } from './contactChannelConfig';
-import { formatDateKeyLima, isRecordedChannelAttempt } from './contactDashboardStats';
+import { isChannelVolumeAttempt } from './contactDashboardStats';
 
 export interface ContactSummaryCandidate {
     id: string;
@@ -24,7 +24,8 @@ function syntheticAttempt(
     candidate: ContactSummaryCandidate,
     channel: ContactAttemptChannel,
     summary: ChannelContactSummary,
-    attemptNumber: number
+    attemptNumber: number,
+    createdAt: string
 ): ContactAttempt {
     return {
         id: `reconcile-${candidate.id}-${channel}-${attemptNumber}`,
@@ -32,16 +33,27 @@ function syntheticAttempt(
         processId: candidate.processId,
         userName: summary.lastUserName,
         channel,
-        outcome: 'no_answer',
+        outcome: channel === 'email' ? 'no_response' : channel === 'whatsapp' ? 'no_response' : 'no_answer',
         attemptNumber,
         statusAfter: summary.status,
-        createdAt: summary.lastAttemptAt!,
+        createdAt,
     };
 }
 
+function volumeAttemptsForCandidate(
+    attempts: ContactAttempt[],
+    candidateId: string,
+    channel: ContactAttemptChannel
+): ContactAttempt[] {
+    return attempts.filter(
+        a => a.candidateId === candidateId && isChannelVolumeAttempt(a, channel)
+    );
+}
+
 /**
- * Alinea el Panel con la tabla masiva cuando el historial en BD está incompleto
- * (p. ej. insert fallido en candidate_contact_attempts pero sí se actualizó candidates).
+ * Completa el historial solo cuando faltan intentos reales respecto a attempt_count
+ * (p. ej. insert fallido en candidate_contact_attempts). No inventa intentos por cambios
+ * de estado manual ni duplica filas ya registradas.
  */
 export function reconcileContactAttemptsWithSummaries(
     attempts: ContactAttempt[],
@@ -55,25 +67,11 @@ export function reconcileContactAttemptsWithSummaries(
     for (const candidate of candidates) {
         for (const channel of channels) {
             const summary = summaryForChannel(candidate, channel);
-            if (!summary?.lastAttemptAt || !summary.lastUserName?.trim()) continue;
+            const attemptCount = summary?.attemptCount ?? 0;
+            if (attemptCount <= 0 || !summary?.lastAttemptAt) continue;
 
-            const channelAttempts = result.filter(
-                a => a.candidateId === candidate.id && isRecordedChannelAttempt(a, channel)
-            );
-            const attemptCount = summary.attemptCount ?? 0;
-
-            if (attemptCount === 0) {
-                const dayKey = formatDateKeyLima(summary.lastAttemptAt);
-                const hasTouchOnDay = channelAttempts.some(
-                    a => formatDateKeyLima(a.createdAt) === dayKey
-                );
-                if (!hasTouchOnDay) {
-                    result.push(syntheticAttempt(candidate, channel, summary, 1));
-                }
-                continue;
-            }
-
-            const deficit = attemptCount - channelAttempts.length;
+            const volumeRows = volumeAttemptsForCandidate(result, candidate.id, channel);
+            const deficit = attemptCount - volumeRows.length;
             if (deficit <= 0) continue;
 
             for (let i = 0; i < deficit; i++) {
@@ -82,7 +80,8 @@ export function reconcileContactAttemptsWithSummaries(
                         candidate,
                         channel,
                         summary,
-                        channelAttempts.length + i + 1
+                        volumeRows.length + i + 1,
+                        summary.lastAttemptAt
                     )
                 );
             }
