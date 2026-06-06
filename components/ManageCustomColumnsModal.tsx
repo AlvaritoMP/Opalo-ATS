@@ -1,6 +1,6 @@
 import React from 'react';
 import { X, Plus, Edit, Trash2, List } from 'lucide-react';
-import { CustomColumn } from '../types';
+import { CustomColumn, DASHBOARD_SEMANTIC_FIELD_OPTIONS } from '../types';
 
 const TYPE_LABELS: Record<CustomColumn['type'], string> = {
     text: 'Texto',
@@ -67,6 +67,13 @@ export const ManageCustomColumnsModal: React.FC<ManageCustomColumnsModalProps> =
                                     <div className="font-medium text-gray-900 truncate">{col.name}</div>
                                     <div className="text-xs text-gray-500 mt-0.5">
                                         {TYPE_LABELS[col.type]}
+                                        {col.dashboardSemanticField && (
+                                            <span className="text-indigo-600">
+                                                {' · Panel: '}
+                                                {DASHBOARD_SEMANTIC_FIELD_OPTIONS.find(o => o.value === col.dashboardSemanticField)?.label
+                                                    || col.dashboardSemanticField}
+                                            </span>
+                                        )}
                                         {col.type === 'select' && (
                                             <span>
                                                 {' · '}

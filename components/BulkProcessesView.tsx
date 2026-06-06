@@ -126,8 +126,9 @@ import {
 } from '../lib/bulkUndo';
 import { BulkProcessStatsModal } from './BulkProcessStatsModal';
 import {
-    getApplicationCountLabel,
+    getApplicationCountLabelFromCandidate,
     getApplicationCountPriorityClass,
+    resolveApplicationCount,
 } from '../lib/applicationCountDisplay';
 import { openMailCompose, getMailComposeToastMessage } from '../lib/openMailto';
 import {
@@ -405,8 +406,13 @@ const CandidateDrawer: React.FC<{
 };
 
 // Tooltip para mostrar metadata_ia al hover con formato mejorado
-const ApplicationCountBadge: React.FC<{ count?: number }> = ({ count }) => {
-    const label = getApplicationCountLabel(count);
+const ApplicationCountBadge: React.FC<{
+    applicationCount?: number;
+    firstApplicationAt?: string;
+    createdAt?: string;
+}> = ({ applicationCount, firstApplicationAt, createdAt }) => {
+    const count = resolveApplicationCount({ applicationCount, firstApplicationAt, createdAt });
+    const label = getApplicationCountLabelFromCandidate({ applicationCount: count, firstApplicationAt, createdAt });
     if (!label) return null;
     return (
         <span
@@ -5072,7 +5078,11 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                                             <MetadataTooltip metadata={displayCandidate.metadataIa || ''} scoreIa={scoreIaColumnVisible ? displayCandidate.scoreIa : undefined}>
                                                                 <span className="inline-flex items-center gap-0.5 min-w-0">
                                                                     <span className="cursor-help hover:underline decoration-dotted truncate" onDoubleClick={() => handleStartEdit(candidate.id, 'name', displayCandidate.name)} title="Doble clic para editar">{displayCandidate.name}</span>
-                                                                    <ApplicationCountBadge count={displayCandidate.applicationCount} />
+                                                                    <ApplicationCountBadge
+                                                                        applicationCount={displayCandidate.applicationCount}
+                                                                        firstApplicationAt={displayCandidate.firstApplicationAt}
+                                                                        createdAt={displayCandidate.createdAt}
+                                                                    />
                                                                 </span>
                                                             </MetadataTooltip>
                                                         )}
@@ -5289,7 +5299,11 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                                         <div className="flex flex-col gap-0.5">
                                                             <span className="text-xs text-gray-700 inline-flex items-center" title={[createdTitle, firstTitle].filter(Boolean).join(' · ')}>
                                                                 {formatBulkDateTime(displayCandidate.createdAt)}
-                                                                <ApplicationCountBadge count={displayCandidate.applicationCount} />
+                                                                <ApplicationCountBadge
+                                                                    applicationCount={displayCandidate.applicationCount}
+                                                                    firstApplicationAt={displayCandidate.firstApplicationAt}
+                                                                    createdAt={displayCandidate.createdAt}
+                                                                />
                                                             </span>
                                                         </div>
                                                     </td>

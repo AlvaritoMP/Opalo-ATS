@@ -100,7 +100,26 @@ export interface CustomColumn {
     routeCostOnDemand?: boolean;
     /** Marca explícita para el PDF psicolaboral (opcional). */
     reportNamePart?: PsycholaboralReportNamePart;
+    /**
+     * Campo semántico para Panel e informes cuando el encabezado no coincide
+     * con nombres estándar (p. ej. "¿Cómo se enteró?" → fuente).
+     */
+    dashboardSemanticField?: DashboardSemanticField;
 }
+
+/** Clasificación de columna para gráficos del Panel y agregaciones. */
+export type DashboardSemanticField = 'source' | 'province' | 'district' | 'age';
+
+export const DASHBOARD_SEMANTIC_FIELD_OPTIONS: {
+    value: DashboardSemanticField;
+    label: string;
+    chartHint: string;
+}[] = [
+    { value: 'source', label: 'Fuente de candidato', chartHint: 'Fuentes de candidatos' },
+    { value: 'district', label: 'Distrito', chartHint: 'Candidatos por distrito' },
+    { value: 'province', label: 'Provincia', chartHint: 'Panel / filtros' },
+    { value: 'age', label: 'Edad', chartHint: 'Distribución por edad' },
+];
 
 // --- Informes psicolaborales ---
 

@@ -1395,6 +1395,7 @@ type HomonymCandidateFields = {
 };
 
 export function isAgeLikeColumn(col: CustomColumn): boolean {
+    if (col.dashboardSemanticField === 'age') return true;
     const norm = normalizeColumnNameKey(col.name);
     if (norm === 'edad' || norm === 'age') return true;
     if (mapImportHeader(col.name.toLowerCase()) === 'age') return true;
@@ -1406,6 +1407,7 @@ function columnMatchesHomonymField(
     col: CustomColumn,
     field: 'age' | 'source' | 'province' | 'district'
 ): boolean {
+    if (col.dashboardSemanticField === field) return true;
     if (field === 'age') return isAgeLikeColumn(col);
     return mapImportHeader(col.name.toLowerCase()) === field;
 }

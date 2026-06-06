@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { X, Plus, Trash2 } from 'lucide-react';
-import { CustomColumn, PsycholaboralReportNamePart } from '../types';
+import { CustomColumn, PsycholaboralReportNamePart, DashboardSemanticField, DASHBOARD_SEMANTIC_FIELD_OPTIONS } from '../types';
 
 interface AddColumnModalProps {
     isOpen: boolean;
@@ -28,6 +28,7 @@ export const AddColumnModal: React.FC<AddColumnModalProps> = ({
     const [routeDestination, setRouteDestination] = useState('');
     const [sourceRouteColumnId, setSourceRouteColumnId] = useState('');
     const [reportNamePart, setReportNamePart] = useState<'' | PsycholaboralReportNamePart>('');
+    const [dashboardSemanticField, setDashboardSemanticField] = useState<'' | DashboardSemanticField>('');
 
     const routeColumns = useMemo(
         () => existingColumns.filter(c => c.type === 'route'),
@@ -53,6 +54,7 @@ export const AddColumnModal: React.FC<AddColumnModalProps> = ({
             setRouteDestination(editingColumn.routeDestination || '');
             setSourceRouteColumnId(editingColumn.sourceRouteColumnId || '');
             setReportNamePart(editingColumn.reportNamePart ?? '');
+            setDashboardSemanticField(editingColumn.dashboardSemanticField ?? '');
         } else if (isOpen) {
             setName('');
             setType('text');
@@ -60,6 +62,7 @@ export const AddColumnModal: React.FC<AddColumnModalProps> = ({
             setRouteDestination('');
             setSourceRouteColumnId('');
             setReportNamePart('');
+            setDashboardSemanticField('');
         }
     }, [isOpen, editingColumn]);
 
@@ -116,6 +119,9 @@ export const AddColumnModal: React.FC<AddColumnModalProps> = ({
                 routeCostOnDemand: true,
             }),
             ...(reportNamePart && type !== 'route' && type !== 'route_cost' ? { reportNamePart } : {}),
+            ...(dashboardSemanticField && type !== 'route' && type !== 'route_cost'
+                ? { dashboardSemanticField }
+                : {}),
         };
 
         if (isEditing && onEdit) {
@@ -130,6 +136,7 @@ export const AddColumnModal: React.FC<AddColumnModalProps> = ({
         setRouteDestination('');
         setSourceRouteColumnId('');
         setReportNamePart('');
+        setDashboardSemanticField('');
         onClose();
     };
 
@@ -295,6 +302,32 @@ export const AddColumnModal: React.FC<AddColumnModalProps> = ({
                                     Agregar Opción
                                 </button>
                             </div>
+                        </div>
+                    )}
+
+                    {type !== 'route' && type !== 'route_cost' && (
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">
+                                Clasificación para el Panel
+                            </label>
+                            <p className="text-xs text-gray-500 mb-2">
+                                Indique qué gráfico del Panel debe alimentar esta columna cuando su nombre no es estándar
+                                (p. ej. «¿Cómo se enteró?» → Fuente de candidato).
+                            </p>
+                            <select
+                                value={dashboardSemanticField}
+                                onChange={(e) =>
+                                    setDashboardSemanticField((e.target.value || '') as '' | DashboardSemanticField)
+                                }
+                                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                            >
+                                <option value="">Automático (detectar por nombre)</option>
+                                {DASHBOARD_SEMANTIC_FIELD_OPTIONS.map(opt => (
+                                    <option key={opt.value} value={opt.value}>
+                                        {opt.label} — {opt.chartHint}
+                                    </option>
+                                ))}
+                            </select>
                         </div>
                     )}
 

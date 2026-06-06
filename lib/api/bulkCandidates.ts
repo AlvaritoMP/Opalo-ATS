@@ -196,6 +196,32 @@ export const bulkCandidatesApi = {
 
         if (lastError && !data) throw lastError;
 
+        if (data && data.length > 0 && data[0].application_count === undefined) {
+            const ids = data.map(row => row.id as string);
+            const countById = new Map<string, Record<string, unknown>>();
+            for (let offset = 0; offset < ids.length; offset += 200) {
+                const chunk = ids.slice(offset, offset + 200);
+                const { data: countRows, error: countError } = await supabase
+                    .from('candidates')
+                    .select('id, application_count, first_application_at, created_at')
+                    .in('id', chunk)
+                    .eq('app_name', APP_NAME);
+                if (countError) {
+                    if (!isMissingColumnError(countError)) break;
+                    continue;
+                }
+                for (const row of countRows || []) {
+                    countById.set(row.id as string, row as Record<string, unknown>);
+                }
+            }
+            if (countById.size > 0) {
+                data = data.map(row => {
+                    const extra = countById.get(row.id as string);
+                    return extra ? { ...row, ...extra } : row;
+                });
+            }
+        }
+
         // Obtener próximas entrevistas para los candidatos
         const candidateIds = (data || []).map(c => c.id as string);
         let nextInterviews: Map<string, { start: string; interviewerId: string; eventId: string }> = new Map();

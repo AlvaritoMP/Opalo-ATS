@@ -28,6 +28,11 @@ import {
     resolveApplicationCompletedDate,
     getLastStageId,
 } from '../lib/dashboardEfficiencyMetrics';
+import {
+    enrichBulkCandidateForDashboard,
+    bulkDashboardFieldExtrasFromCandidate,
+    resolveDashboardApplicationDate,
+} from '../lib/dashboardCandidatePool';
 
 const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#AF19FF', '#6366f1', '#14b8a6', '#f97316'];
 
@@ -66,7 +71,8 @@ const MeasuredChartArea: React.FC<{
     const updateSize = useCallback(() => {
         const el = containerRef.current;
         if (!el) return;
-        const { width } = el.getBoundingClientRect();
+        const rect = el.getBoundingClientRect();
+        const width = rect.width > 0 ? rect.width : el.clientWidth || el.offsetWidth || 320;
         if (width > 0) {
             setSize(prev => (prev?.width === width && prev?.height === height ? prev : { width, height }));
         }
@@ -74,11 +80,22 @@ const MeasuredChartArea: React.FC<{
 
     useEffect(() => {
         updateSize();
+        const raf = requestAnimationFrame(updateSize);
+        const timer = window.setTimeout(updateSize, 150);
         const el = containerRef.current;
-        if (!el || typeof ResizeObserver === 'undefined') return;
+        if (!el || typeof ResizeObserver === 'undefined') {
+            return () => {
+                cancelAnimationFrame(raf);
+                window.clearTimeout(timer);
+            };
+        }
         const observer = new ResizeObserver(updateSize);
         observer.observe(el);
-        return () => observer.disconnect();
+        return () => {
+            cancelAnimationFrame(raf);
+            window.clearTimeout(timer);
+            observer.disconnect();
+        };
     }, [updateSize]);
 
     return (
@@ -380,6 +397,7 @@ export const Dashboard: React.FC = () => {
 
     /** Datos masivos por candidato (columnas + edad desde API de procesos masivos) */
     const [bulkCandidateFields, setBulkCandidateFields] = useState<Record<string, BulkCandidateFieldExtras>>({});
+    const [bulkPoolCandidates, setBulkPoolCandidates] = useState<Candidate[]>([]);
 
     const [contactAttempts, setContactAttempts] = useState<Awaited<ReturnType<typeof contactTrackingApi.getAttemptsForProcesses>>>([]);
     const [contactStatsLoading, setContactStatsLoading] = useState(false);
@@ -387,47 +405,60 @@ export const Dashboard: React.FC = () => {
     const [schedulingCycles, setSchedulingCycles] = useState<Awaited<ReturnType<typeof interviewSchedulingApi.getCyclesForProcesses>>>([]);
     const [schedulingStatsLoading, setSchedulingStatsLoading] = useState(false);
 
+    const bulkProcessIdsInScope = useMemo(() => {
+        if (processFilter !== 'all') {
+            const p = processMap.get(processFilter);
+            return p?.isBulkProcess ? [processFilter] : [];
+        }
+        return scopedProcesses.filter(p => p.isBulkProcess).map(p => p.id);
+    }, [processFilter, scopedProcesses, processMap]);
+
     useEffect(() => {
-        const bulkProcessIds = [
-            ...new Set(
-                scopedProcesses.filter(p => p.isBulkProcess).map(p => p.id)
-            ),
-        ];
-        if (bulkProcessIds.length === 0) {
+        if (bulkProcessIdsInScope.length === 0) {
+            setBulkPoolCandidates([]);
             setBulkCandidateFields({});
             return;
         }
 
         let cancelled = false;
         (async () => {
-            const merged: Record<string, BulkCandidateFieldExtras> = {};
-            for (const processId of bulkProcessIds) {
+            const pool: Candidate[] = [];
+            const fields: Record<string, BulkCandidateFieldExtras> = {};
+            for (const processId of bulkProcessIdsInScope) {
                 try {
-                    const all = await bulkCandidatesApi.getAllCandidates(processId);
+                    const process = processMap.get(processId);
+                    const [all, columnValuesMap] = await Promise.all([
+                        bulkCandidatesApi.getAllCandidates(processId),
+                        bulkCandidatesApi.loadAllBulkColumnValues(processId),
+                    ]);
                     for (const c of all) {
-                        const prev = merged[c.id] || {};
-                        merged[c.id] = {
-                            age: c.age ?? prev.age,
-                            source: c.source ?? prev.source,
-                            province: c.province ?? prev.province,
-                            district: c.district ?? prev.district,
-                            bulkColumnValues: {
-                                ...(prev.bulkColumnValues || {}),
-                                ...(c.bulkColumnValues || {}),
-                            },
-                        };
+                        const columnRow = columnValuesMap[c.id] || {};
+                        const mapped = enrichBulkCandidateForDashboard(c, process, columnRow);
+                        pool.push(mapped);
+                        fields[c.id] = bulkDashboardFieldExtrasFromCandidate(mapped);
                     }
                 } catch {
-                    /* continuar con localStorage vía resolveCandidateAgeForProcess */
+                    /* continuar con otros procesos */
                 }
             }
-            if (!cancelled) setBulkCandidateFields(merged);
+            if (!cancelled) {
+                setBulkPoolCandidates(pool);
+                setBulkCandidateFields(fields);
+            }
         })();
 
         return () => {
             cancelled = true;
         };
-    }, [scopedProcesses, processMap]);
+    }, [bulkProcessIdsInScope, processMap]);
+
+    const analyticsCandidates = useMemo(() => {
+        const standardProcessIds = new Set(
+            scopedProcesses.filter(p => !p.isBulkProcess).map(p => p.id)
+        );
+        const standard = allCandidates.filter(c => standardProcessIds.has(c.processId));
+        return [...standard, ...bulkPoolCandidates];
+    }, [allCandidates, bulkPoolCandidates, scopedProcesses]);
 
     const targetProcessIds = useMemo(() => {
         if (processFilter !== 'all') return [processFilter];
@@ -497,16 +528,16 @@ export const Dashboard: React.FC = () => {
         const isClientOrViewer = userRole === 'client' || userRole === 'viewer';
         const scopedProcessIds = new Set(scopedProcesses.map(p => p.id));
 
-        return allCandidates.filter(candidate => {
+        return analyticsCandidates.filter(candidate => {
             if (isClientOrViewer && !candidate.visibleToClients) return false;
             if (!scopedProcessIds.has(candidate.processId)) return false;
 
             const processMatch = processFilter === 'all' || candidate.processId === processFilter;
 
-            const firstMove = candidate.history[0]?.movedAt;
-            if (!firstMove) return processMatch;
+            const applicationDateRaw = resolveDashboardApplicationDate(candidate);
+            if (!applicationDateRaw) return processMatch;
 
-            const applicationDate = new Date(firstMove);
+            const applicationDate = new Date(applicationDateRaw);
             const startDate = dateFilter.start ? new Date(dateFilter.start) : null;
             const endDate = dateFilter.end ? new Date(dateFilter.end) : null;
             if (startDate) startDate.setHours(0, 0, 0, 0);
@@ -518,7 +549,7 @@ export const Dashboard: React.FC = () => {
 
             return processMatch && dateMatch;
         });
-    }, [allCandidates, processFilter, dateFilter, scopedProcesses, state.currentUser?.role]);
+    }, [analyticsCandidates, processFilter, dateFilter, scopedProcesses, state.currentUser?.role]);
 
     const activeProcesses = scopedProcesses.filter(p => p.status === 'en_proceso');
     const bulkActiveCount = activeProcesses.filter(p => p.isBulkProcess).length;
@@ -618,9 +649,7 @@ export const Dashboard: React.FC = () => {
                     bulkColumnValues: Object.keys(enrichedRow).length > 0 ? enrichedRow : undefined,
                 },
                 process,
-                bulkExtra?.bulkColumnValues
-                    ? { [c.id]: bulkExtra.bulkColumnValues }
-                    : {}
+                Object.keys(enrichedRow).length > 0 ? { [c.id]: enrichedRow } : {}
             );
             if (age == null) {
                 ageBrackets['Sin dato']++;
@@ -1370,7 +1399,7 @@ export const Dashboard: React.FC = () => {
 
                 <ChartContainer
                     title={getLabel('dashboard_candidate_source', 'Fuentes de candidatos')}
-                    description="Origen de postulación de los candidatos en el filtro actual."
+                    description="Origen de postulación. En procesos masivos, asigne «Fuente de candidato» en la clasificación de la columna si el encabezado no es estándar."
                     hasData={candidateSources.length > 0}
                 >
                     <PieChart>
@@ -1419,7 +1448,7 @@ export const Dashboard: React.FC = () => {
 
                 <ChartContainer
                     title={getLabel('dashboard_age_distribution', 'Distribución por edad')}
-                    description="Rangos etarios de los candidatos filtrados."
+                    description="Rangos etarios. En procesos masivos, marque la columna de edad con «Edad» en Clasificación para el Panel."
                     hasData={ageDistribution.some(d => d.Candidatos > 0)}
                 >
                     <BarChart data={ageDistribution} margin={{ top: 10, right: 20, left: 10, bottom: 5 }}>
@@ -1435,7 +1464,7 @@ export const Dashboard: React.FC = () => {
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8 min-w-0">
                 <ChartContainer
                     title="Candidatos por distrito"
-                    description="Solo se considera el campo distrito del candidato (no direcciones). Muestra los 10 distritos con más postulantes."
+                    description="Distrito de residencia. En procesos masivos, asigne «Distrito» en la clasificación de la columna correspondiente."
                     hasData={candidateDistricts.some(d => d.Candidatos > 0 && d.name !== 'Sin distrito') || candidateDistricts.some(d => d.name === 'Sin distrito' && d.Candidatos > 0)}
                     height={Math.max(280, candidateDistricts.length * 36)}
                 >
@@ -1457,7 +1486,7 @@ export const Dashboard: React.FC = () => {
                     <div className="space-y-3">
                         {upcomingInterviews.length > 0 ? (
                             upcomingInterviews.map(event => {
-                                const candidate = allCandidates.find(c => c.id === event.candidateId);
+                                const candidate = analyticsCandidates.find(c => c.id === event.candidateId);
                                 const process = candidate ? processMap.get(candidate.processId) : undefined;
                                 const interviewer = users.find(u => u.id === event.interviewerId);
                                 return (
@@ -1493,7 +1522,7 @@ export const Dashboard: React.FC = () => {
                         <p className="text-sm font-medium text-indigo-900">Procesos masivos incluidos en el análisis</p>
                         <p className="text-xs text-indigo-700 mt-1">
                             {bulkCandidates} candidato{bulkCandidates !== 1 ? 's' : ''} de procesos masivos en el filtro actual.
-                            Usa el filtro &quot;Solo procesos masivos&quot; para analizar únicamente reclutamiento de alto volumen.
+                            Fuente, distrito y edad usan columnas personalizadas: edite cada columna y elija «Clasificación para el Panel» si los gráficos salen vacíos o agrupados en «Otro».
                         </p>
                     </div>
                 </div>
