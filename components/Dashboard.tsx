@@ -585,6 +585,16 @@ export const Dashboard: React.FC = () => {
         setContactStatsLoading(true);
         (async () => {
             try {
+                const summaries = Object.values(bulkContactSummaries).filter(c =>
+                    targetProcessIds.includes(c.processId)
+                );
+                if (summaries.length > 0) {
+                    await contactTrackingApi.syncSummariesToHistory(
+                        summaries,
+                        bulkProcessIdsInScope.length > 0 ? bulkProcessIdsInScope : targetProcessIds
+                    );
+                }
+
                 const [byProcess, byCandidates] = await Promise.all([
                     contactTrackingApi.getAttemptsForProcesses(targetProcessIds),
                     bulkCandidateIdsInScope.length > 0
@@ -606,7 +616,13 @@ export const Dashboard: React.FC = () => {
         return () => {
             cancelled = true;
         };
-    }, [targetProcessIds, bulkCandidateIdsInScope, candidateProcessIdMap]);
+    }, [
+        targetProcessIds,
+        bulkCandidateIdsInScope,
+        candidateProcessIdMap,
+        bulkContactSummaries,
+        bulkProcessIdsInScope,
+    ]);
 
     useEffect(() => {
         if (targetProcessIds.length === 0) {
@@ -913,8 +929,12 @@ export const Dashboard: React.FC = () => {
     );
 
     const scopedContactAttempts = useMemo(
-        () => contactAttempts.filter(a => scopedProcessIds.has(a.processId)),
-        [contactAttempts, scopedProcessIds]
+        () =>
+            contactAttempts.filter(a => {
+                const processId = a.processId || candidateProcessIdMap.get(a.candidateId);
+                return processId != null && scopedProcessIds.has(processId);
+            }),
+        [contactAttempts, scopedProcessIds, candidateProcessIdMap]
     );
 
     /** Candidatos en procesos del filtro (sin restricción de fecha de postulación) para contactología */

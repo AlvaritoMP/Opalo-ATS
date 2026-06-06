@@ -13,6 +13,12 @@ import {
     readChannelSummaryFromRow,
     buildSingleChannelResetUpdate,
 } from '../contactChannelConfig';
+import {
+    syncContactHistoryForCandidates,
+    type SyncContactHistoryResult,
+} from '../contactHistorySync';
+import type { ContactSummaryCandidate } from '../contactAttemptReconcile';
+import { bulkProcessActivityApi } from './bulkProcessActivity';
 
 export type { ChannelContactSummary as ContactSummary };
 export type { ContactAttemptChannel as ContactChannel };
@@ -401,6 +407,8 @@ export const contactTrackingApi = {
             if (retryErr && !isMissingContactColumnError(retryErr)) {
                 console.error('Historial de contacto falló tras reintento:', retryErr.message);
             }
+        } else if (insErr && isMissingContactColumnError(insErr)) {
+            contactColumnsSupported = false;
         }
 
         contactColumnsSupported = true;
@@ -516,5 +524,40 @@ export const contactTrackingApi = {
             clearedAttempts,
             channel: input.channel,
         };
+    },
+
+    /**
+     * Persiste en candidate_contact_attempts los intentos visibles en candidates.contact_*_*.
+     * Usa bulk_process_activity_log para fechas cuando el historial no se guardó al registrar.
+     */
+    async syncSummariesToHistory(
+        candidates: ContactSummaryCandidate[],
+        processIds: string[] = []
+    ): Promise<SyncContactHistoryResult> {
+        if (candidates.length === 0) return { inserted: 0, patched: 0 };
+
+        const candidateIds = candidates.map(c => c.id);
+        const scopedProcessIds = [
+            ...new Set(
+                processIds.length > 0 ? processIds : candidates.map(c => c.processId)
+            ),
+        ];
+
+        const [existingAttempts, activityRows] = await Promise.all([
+            this.getAttemptsForCandidateIds(candidateIds),
+            scopedProcessIds.length > 0
+                ? bulkProcessActivityApi.getContactActivityForProcesses(scopedProcessIds)
+                : Promise.resolve([]),
+        ]);
+
+        const activityByCandidate = new Map<string, typeof activityRows>();
+        for (const row of activityRows) {
+            if (!row.candidateId) continue;
+            const bucket = activityByCandidate.get(row.candidateId) || [];
+            bucket.push(row);
+            activityByCandidate.set(row.candidateId, bucket);
+        }
+
+        return syncContactHistoryForCandidates(candidates, existingAttempts, activityByCandidate);
     },
 };

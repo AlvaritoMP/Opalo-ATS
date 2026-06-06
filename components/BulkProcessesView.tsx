@@ -1469,6 +1469,36 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
         return () => { cancelled = true; };
     }, [selectedProcess]);
 
+    // Alinear candidate_contact_attempts con lo visible en la tabla (contact_*_* en candidates)
+    useEffect(() => {
+        if (!selectedProcess) return;
+
+        let cancelled = false;
+        (async () => {
+            try {
+                const all = await bulkCandidatesApi.getAllCandidates(selectedProcess);
+                if (cancelled || all.length === 0) return;
+
+                await contactTrackingApi.syncSummariesToHistory(
+                    all.map(c => ({
+                        id: c.id,
+                        processId: c.processId,
+                        contactPhone: c.contactPhone,
+                        contactWhatsapp: c.contactWhatsapp,
+                        contactEmail: c.contactEmail,
+                    })),
+                    [selectedProcess]
+                );
+            } catch (error) {
+                console.warn('No se pudo sincronizar historial de contacto:', error);
+            }
+        })();
+
+        return () => {
+            cancelled = true;
+        };
+    }, [selectedProcess]);
+
     // Sincronizar semáforo de contacto entre reclutadores en la misma lista
     useEffect(() => {
         if (!selectedProcess) return;

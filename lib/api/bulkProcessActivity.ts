@@ -134,4 +134,25 @@ export const bulkProcessActivityApi = {
         if (error) throw error;
         return (data || []).map(mapRow);
     },
+
+    /** Intentos de contacto registrados en el log masivo (fechas reales por candidato). */
+    async getContactActivityForProcesses(processIds: string[]): Promise<BulkProcessActivityEntry[]> {
+        if (processIds.length === 0) return [];
+
+        const all: BulkProcessActivityEntry[] = [];
+        for (const processId of processIds) {
+            const { data, error } = await supabase
+                .from('bulk_process_activity_log')
+                .select('*')
+                .eq('process_id', processId)
+                .eq('app_name', APP_NAME)
+                .in('action_type', ['contact_attempt', 'contact_status'])
+                .order('created_at', { ascending: true })
+                .limit(5000);
+
+            if (error) throw error;
+            all.push(...(data || []).map(mapRow));
+        }
+        return all;
+    },
 };
