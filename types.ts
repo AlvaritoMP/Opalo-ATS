@@ -280,6 +280,9 @@ export interface BulkStatSeries {
 /** Orden de categorías en el eje X */
 export type BulkStatSortBy = 'auto' | 'category' | 'valueDesc' | 'valueAsc';
 
+/** Agrupación temporal para columnas de fecha en el eje X */
+export type BulkStatDateGranularity = 'day' | 'week' | 'month' | 'year';
+
 /** Configuración de un gráfico personalizado en el proceso masivo */
 export interface BulkProcessStatChart {
     id: string;
@@ -296,6 +299,8 @@ export interface BulkProcessStatChart {
     /** Apilar barras cuando hay varias series */
     stacked?: boolean;
     sortBy?: BulkStatSortBy;
+    /** Agrupación del eje X cuando la columna es de tipo fecha */
+    dateGranularity?: BulkStatDateGranularity;
 }
 
 /** Modo de comparación por criterio del perfil ideal */

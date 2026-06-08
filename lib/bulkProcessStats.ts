@@ -20,6 +20,7 @@ import {
     BulkStatAxisConfig,
     BulkStatSeries,
     BulkStatSortBy,
+    BulkStatDateGranularity,
     IdealProfileConfig,
     Process,
 } from '../types';
@@ -46,10 +47,15 @@ export interface BulkStatColumnOption {
 export interface BulkStatDatum {
     name: string;
     value: number;
+    /** Timestamp para orden cronológico en agrupaciones de fecha */
+    sortKey?: number;
 }
 
 /** Fila para gráficos con varias series (Recharts) */
-export type BulkStatMergedRow = Record<string, string | number> & { name: string };
+export type BulkStatMergedRow = Record<string, string | number> & {
+    name: string;
+    _sortKey?: number;
+};
 
 export interface BulkStatResolvedSeries {
     id: string;
@@ -205,6 +211,146 @@ function formatMonthLabel(isoDate: string): string {
     }
 }
 
+function startOfWeek(d: Date): Date {
+    const copy = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+    const day = copy.getDay();
+    const diff = day === 0 ? -6 : 1 - day;
+    copy.setDate(copy.getDate() + diff);
+    return copy;
+}
+
+export function formatDateBucketLabel(
+    d: Date,
+    granularity: BulkStatDateGranularity
+): { label: string; sortKey: number } {
+    switch (granularity) {
+        case 'day': {
+            const start = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+            return {
+                label: start.toLocaleDateString('es-PE', {
+                    day: '2-digit',
+                    month: '2-digit',
+                    year: 'numeric',
+                }),
+                sortKey: start.getTime(),
+            };
+        }
+        case 'week': {
+            const start = startOfWeek(d);
+            const end = new Date(start);
+            end.setDate(end.getDate() + 6);
+            return {
+                label: `${start.toLocaleDateString('es-PE', { day: 'numeric', month: 'short' })} – ${end.toLocaleDateString('es-PE', { day: 'numeric', month: 'short', year: 'numeric' })}`,
+                sortKey: start.getTime(),
+            };
+        }
+        case 'year': {
+            const start = new Date(d.getFullYear(), 0, 1);
+            return { label: String(d.getFullYear()), sortKey: start.getTime() };
+        }
+        case 'month':
+        default: {
+            const start = new Date(d.getFullYear(), d.getMonth(), 1);
+            return {
+                label: start.toLocaleDateString('es-PE', { month: 'short', year: 'numeric' }),
+                sortKey: start.getTime(),
+            };
+        }
+    }
+}
+
+function resolveBulkStatDateRaw(
+    candidate: BulkCandidate,
+    columnId: string,
+    ctx: BulkStatContext
+): unknown {
+    if (columnId === 'createdAt') return candidate.createdAt;
+    if (columnId.startsWith('custom_')) {
+        const customId = columnId.replace('custom_', '');
+        return resolveBulkTableCellValue(
+            candidate,
+            customId,
+            ctx.customColumns,
+            ctx.columnValues,
+            ctx.legacyColumnIdToName
+        );
+    }
+    return null;
+}
+
+export function parseBulkStatDateValue(raw: unknown): Date | null {
+    if (raw === undefined || raw === null || raw === '') return null;
+    if (raw instanceof Date && !Number.isNaN(raw.getTime())) return raw;
+
+    if (typeof raw === 'number') {
+        if (raw > 1e12) {
+            const d = new Date(raw);
+            return Number.isNaN(d.getTime()) ? null : d;
+        }
+        const formatted = formatBulkDate(raw);
+        if (formatted) return parseBulkStatDateValue(formatted);
+        return null;
+    }
+
+    const trimmed = String(raw).trim();
+    if (!trimmed) return null;
+
+    if (/^\d{4}-\d{2}-\d{2}/.test(trimmed)) {
+        const d = new Date(trimmed);
+        if (!Number.isNaN(d.getTime())) return d;
+    }
+
+    const dmy = trimmed.match(/^(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})$/);
+    if (dmy) {
+        const d = new Date(Number(dmy[3]), Number(dmy[2]) - 1, Number(dmy[1]));
+        if (!Number.isNaN(d.getTime())) return d;
+    }
+
+    const formatted = formatBulkDate(trimmed);
+    if (formatted) {
+        const fromFormatted = formatted.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+        if (fromFormatted) {
+            const d = new Date(
+                Number(fromFormatted[3]),
+                Number(fromFormatted[2]) - 1,
+                Number(fromFormatted[1])
+            );
+            if (!Number.isNaN(d.getTime())) return d;
+        }
+    }
+
+    const parsed = Date.parse(trimmed);
+    if (!Number.isNaN(parsed)) return new Date(parsed);
+    return null;
+}
+
+export function getDefaultDateGranularity(columnId: string): BulkStatDateGranularity {
+    return columnId === 'createdAt' ? 'month' : 'day';
+}
+
+export function chartHasDateColumn(
+    chart: BulkProcessStatChart,
+    columnOptions: BulkStatColumnOption[]
+): boolean {
+    return getChartSeries(chart).some(s => {
+        const col = columnOptions.find(c => c.id === s.columnId);
+        return col?.valueKind === 'date';
+    });
+}
+
+export function resolveChartDateGranularity(
+    chart: BulkProcessStatChart,
+    columnOptions: BulkStatColumnOption[]
+): BulkStatDateGranularity | undefined {
+    if (!chartHasDateColumn(chart, columnOptions)) return undefined;
+    if (chart.dateGranularity) return chart.dateGranularity;
+    const dateSeries = getChartSeries(chart).find(s => {
+        const col = columnOptions.find(c => c.id === s.columnId);
+        return col?.valueKind === 'date';
+    });
+    return getDefaultDateGranularity(dateSeries?.columnId ?? chart.columnId);
+}
+
 /** Etiqueta agrupable para gráficos (sin fechas/horas extensas en contacto). */
 export function resolveBulkStatCellLabel(
     candidate: BulkCandidate,
@@ -342,11 +488,38 @@ function aggregateNumericLabels(values: number[]): Map<string, number> {
 export function aggregateBulkStatData(
     candidates: BulkCandidate[],
     columnId: string,
-    ctx: BulkStatContext
+    ctx: BulkStatContext,
+    options?: { dateGranularity?: BulkStatDateGranularity }
 ): BulkStatDatum[] {
     if (candidates.length === 0) return [];
 
     const kind = inferValueKind(columnId, ctx.customColumns);
+
+    if (kind === 'date') {
+        const granularity = options?.dateGranularity ?? getDefaultDateGranularity(columnId);
+        const counts = new Map<string, number>();
+        const sortKeys = new Map<string, number>();
+        let empty = 0;
+
+        for (const candidate of candidates) {
+            const raw = resolveBulkStatDateRaw(candidate, columnId, ctx);
+            const parsed = parseBulkStatDateValue(raw);
+            if (!parsed) {
+                empty += 1;
+                continue;
+            }
+            const { label, sortKey } = formatDateBucketLabel(parsed, granularity);
+            counts.set(label, (counts.get(label) ?? 0) + 1);
+            if (!sortKeys.has(label)) sortKeys.set(label, sortKey);
+        }
+
+        if (empty > 0) {
+            counts.set(EMPTY_LABEL, (counts.get(EMPTY_LABEL) ?? 0) + empty);
+            sortKeys.set(EMPTY_LABEL, -1);
+        }
+
+        return mapCountsToChronologicalData(counts, sortKeys);
+    }
 
     if (kind === 'numeric' && columnId.startsWith('custom_')) {
         const customId = columnId.replace('custom_', '');
@@ -384,6 +557,24 @@ export function aggregateBulkStatData(
     }
 
     return collapseTopCategories(counts, MAX_CATEGORIES);
+}
+
+function mapCountsToChronologicalData(
+    counts: Map<string, number>,
+    sortKeys: Map<string, number>
+): BulkStatDatum[] {
+    return [...counts.entries()]
+        .map(([name, value]) => ({
+            name,
+            value,
+            sortKey: sortKeys.get(name),
+        }))
+        .sort((a, b) => {
+            const ka = a.sortKey ?? 0;
+            const kb = b.sortKey ?? 0;
+            if (ka !== kb) return ka - kb;
+            return a.name.localeCompare(b.name, 'es');
+        });
 }
 
 function mapCountsToSortedData(counts: Map<string, number>): BulkStatDatum[] {
@@ -458,6 +649,19 @@ function sortCategoryNames(
     const mode = sortBy ?? 'auto';
     const unique = [...new Set(names)];
 
+    const hasSortKeys = unique.some(n => {
+        const sk = rowByName.get(n)?._sortKey;
+        return sk !== undefined && sk >= 0;
+    });
+    if (hasSortKeys && (mode === 'auto' || mode === 'category')) {
+        return unique.sort((a, b) => {
+            const ka = rowByName.get(a)?._sortKey ?? -1;
+            const kb = rowByName.get(b)?._sortKey ?? -1;
+            if (ka !== kb) return ka - kb;
+            return a.localeCompare(b, 'es');
+        });
+    }
+
     if (mode === 'category') {
         return unique.sort((a, b) => a.localeCompare(b, 'es'));
     }
@@ -504,19 +708,32 @@ export function mergeBulkStatSeriesData(
     candidates: BulkCandidate[],
     chart: BulkProcessStatChart,
     resolvedSeries: BulkStatResolvedSeries[],
-    ctx: BulkStatContext
+    ctx: BulkStatContext,
+    columnOptions: BulkStatColumnOption[]
 ): BulkStatMergedRow[] {
     if (resolvedSeries.length === 0) return [];
 
+    const dateGranularity = resolveChartDateGranularity(chart, columnOptions);
     const rowByName = new Map<string, BulkStatMergedRow>();
     const allNames = new Set<string>();
 
     for (const series of resolvedSeries) {
-        const aggregated = aggregateBulkStatData(candidates, series.columnId, ctx);
-        for (const { name, value } of aggregated) {
+        const col = columnOptions.find(c => c.id === series.columnId);
+        const granularity =
+            col?.valueKind === 'date'
+                ? (dateGranularity ?? getDefaultDateGranularity(series.columnId))
+                : undefined;
+
+        const aggregated = aggregateBulkStatData(candidates, series.columnId, ctx, {
+            dateGranularity: granularity,
+        });
+        for (const { name, value, sortKey } of aggregated) {
             allNames.add(name);
             const existing = rowByName.get(name) ?? { name };
             existing[series.dataKey] = value;
+            if (sortKey !== undefined && existing._sortKey === undefined) {
+                existing._sortKey = sortKey;
+            }
             rowByName.set(name, existing);
         }
     }

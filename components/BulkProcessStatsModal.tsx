@@ -36,6 +36,7 @@ import {
     BulkStatAxisConfig,
     BulkStatSortBy,
     BulkStatSeries,
+    BulkStatDateGranularity,
 } from '../types';
 import {
     aggregateBulkStatData,
@@ -47,6 +48,9 @@ import {
     mergeBulkStatSeriesData,
     resolveChartSeries,
     computeNumericAxisDomain,
+    chartHasDateColumn,
+    resolveChartDateGranularity,
+    getDefaultDateGranularity,
     type BulkStatColumnOption,
     type BulkStatContext,
     type BulkStatMergedRow,
@@ -74,6 +78,13 @@ const SORT_OPTIONS: { id: BulkStatSortBy; label: string }[] = [
     { id: 'valueDesc', label: 'Por valor (mayor a menor)' },
     { id: 'valueAsc', label: 'Por valor (menor a mayor)' },
     { id: 'category', label: 'Alfabético' },
+];
+
+const DATE_GRANULARITY_OPTIONS: { id: BulkStatDateGranularity; label: string }[] = [
+    { id: 'day', label: 'Por día' },
+    { id: 'week', label: 'Por semana' },
+    { id: 'month', label: 'Por mes' },
+    { id: 'year', label: 'Por año' },
 ];
 
 type DataScope = 'all' | 'stage';
@@ -519,8 +530,17 @@ export const BulkProcessStatsModal: React.FC<Props> = ({
         for (const chart of charts) {
             const resolved = resolveChartSeries(chart, columnOptions, CHART_COLORS);
             const primaryColumn = getChartSeries(chart)[0]?.columnId ?? chart.columnId;
-            const pie = aggregateBulkStatData(candidatePool, primaryColumn, statContext);
-            const merged = mergeBulkStatSeriesData(candidatePool, chart, resolved, statContext);
+            const dateGranularity = resolveChartDateGranularity(chart, columnOptions);
+            const pie = aggregateBulkStatData(candidatePool, primaryColumn, statContext, {
+                dateGranularity,
+            });
+            const merged = mergeBulkStatSeriesData(
+                candidatePool,
+                chart,
+                resolved,
+                statContext,
+                columnOptions
+            );
             map.set(chart.id, { merged, resolved, pie });
         }
         return map;
@@ -530,7 +550,15 @@ export const BulkProcessStatsModal: React.FC<Props> = ({
         const used = new Set(charts.flatMap(c => getChartSeries(c).map(s => s.columnId)));
         const nextCol = columnOptions.find(c => !used.has(c.id)) ?? columnOptions[0];
         if (!nextCol) return;
-        setCharts(prev => [...prev, createDefaultStatChart(nextCol.id, nextCol.suggestedChart)]);
+        setCharts(prev => [
+            ...prev,
+            {
+                ...createDefaultStatChart(nextCol.id, nextCol.suggestedChart),
+                ...(nextCol.valueKind === 'date'
+                    ? { dateGranularity: getDefaultDateGranularity(nextCol.id) }
+                    : {}),
+            },
+        ]);
     }, [charts, columnOptions]);
 
     const updateChart = useCallback((id: string, patch: Partial<BulkProcessStatChart>) => {
@@ -578,10 +606,17 @@ export const BulkProcessStatsModal: React.FC<Props> = ({
                 if (c.id !== chartId) return c;
                 const series = getChartSeries(c).map(s => (s.id === seriesId ? { ...s, ...patch } : s));
                 const primary = series[0]?.columnId ?? c.columnId;
-                return { ...c, series, columnId: primary };
+                const next: BulkProcessStatChart = { ...c, series, columnId: primary };
+                if (patch.columnId) {
+                    const col = columnOptions.find(opt => opt.id === patch.columnId);
+                    if (col?.valueKind === 'date' && !next.dateGranularity) {
+                        next.dateGranularity = getDefaultDateGranularity(patch.columnId);
+                    }
+                }
+                return next;
             })
         );
-    }, []);
+    }, [columnOptions]);
 
     const removeSeries = useCallback((chartId: string, seriesId: string) => {
         setCharts(prev =>
@@ -683,6 +718,7 @@ export const BulkProcessStatsModal: React.FC<Props> = ({
                             const title = getStatChartTitle(chart, columnOptions);
                             const seriesList = getChartSeries(chart);
                             const isPie = chart.chartType === 'pie';
+                            const hasDateColumn = chartHasDateColumn(chart, columnOptions);
 
                             return (
                                 <div
@@ -816,6 +852,41 @@ export const BulkProcessStatsModal: React.FC<Props> = ({
                                             </p>
                                         )}
                                     </div>
+
+                                    {hasDateColumn && (
+                                        <div className="flex flex-wrap items-end gap-3 p-3 rounded-lg border border-indigo-100 bg-indigo-50/40">
+                                            <div className="min-w-[200px]">
+                                                <label className="block text-xs font-medium text-indigo-900 mb-1">
+                                                    Agrupación de fechas (eje X)
+                                                </label>
+                                                <select
+                                                    value={
+                                                        chart.dateGranularity ??
+                                                        getDefaultDateGranularity(
+                                                            seriesList[0]?.columnId ?? chart.columnId
+                                                        )
+                                                    }
+                                                    onChange={e =>
+                                                        updateChart(chart.id, {
+                                                            dateGranularity: e.target
+                                                                .value as BulkStatDateGranularity,
+                                                        })
+                                                    }
+                                                    className="w-full text-sm border border-indigo-200 rounded-md px-2 py-1.5 bg-white"
+                                                >
+                                                    {DATE_GRANULARITY_OPTIONS.map(opt => (
+                                                        <option key={opt.id} value={opt.id}>
+                                                            {opt.label}
+                                                        </option>
+                                                    ))}
+                                                </select>
+                                            </div>
+                                            <p className="text-xs text-indigo-800/80 pb-2">
+                                                Cambia la escala temporal: días, semanas, meses o años.
+                                                Para ver cada día en el eje X, elige <strong>Por día</strong>.
+                                            </p>
+                                        </div>
+                                    )}
 
                                     <ChartAdvancedOptions
                                         chart={chart}
