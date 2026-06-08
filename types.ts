@@ -256,14 +256,46 @@ export interface BulkInfoPin {
 }
 
 /** Tipo de gráfico para estadísticas del proceso masivo */
-export type BulkStatChartType = 'bar' | 'horizontalBar' | 'pie';
+export type BulkStatChartType = 'bar' | 'horizontalBar' | 'pie' | 'line';
+
+/** Escala del eje numérico */
+export type BulkStatAxisScale = 'auto' | 'linear' | 'log';
+
+/** Configuración de un eje del gráfico */
+export interface BulkStatAxisConfig {
+    label?: string;
+    min?: number;
+    max?: number;
+    scale?: BulkStatAxisScale;
+}
+
+/** Serie de datos dentro de un gráfico (permite varias columnas en el mismo gráfico) */
+export interface BulkStatSeries {
+    id: string;
+    columnId: string;
+    label?: string;
+    color?: string;
+}
+
+/** Orden de categorías en el eje X */
+export type BulkStatSortBy = 'auto' | 'category' | 'valueDesc' | 'valueAsc';
 
 /** Configuración de un gráfico personalizado en el proceso masivo */
 export interface BulkProcessStatChart {
     id: string;
+    /** Columna principal (compatibilidad con gráficos guardados antes de series) */
     columnId: string;
     chartType: BulkStatChartType;
     title?: string;
+    /** Varias columnas en el mismo gráfico */
+    series?: BulkStatSeries[];
+    axisX?: BulkStatAxisConfig;
+    axisY?: BulkStatAxisConfig;
+    showGrid?: boolean;
+    showLegend?: boolean;
+    /** Apilar barras cuando hay varias series */
+    stacked?: boolean;
+    sortBy?: BulkStatSortBy;
 }
 
 /** Modo de comparación por criterio del perfil ideal */

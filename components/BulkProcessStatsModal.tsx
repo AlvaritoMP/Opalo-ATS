@@ -7,6 +7,10 @@ import {
     Loader2,
     Save,
     PieChart as PieChartIcon,
+    LineChart as LineChartIcon,
+    ChevronDown,
+    ChevronUp,
+    Settings2,
 } from 'lucide-react';
 import {
     BarChart,
@@ -20,16 +24,33 @@ import {
     Pie,
     Cell,
     Legend,
+    LineChart,
+    Line,
 } from 'recharts';
 import { BulkCandidate } from '../lib/api/bulkCandidates';
-import { Process, CustomColumn, BulkProcessStatChart, BulkStatChartType } from '../types';
+import {
+    Process,
+    CustomColumn,
+    BulkProcessStatChart,
+    BulkStatChartType,
+    BulkStatAxisConfig,
+    BulkStatSortBy,
+    BulkStatSeries,
+} from '../types';
 import {
     aggregateBulkStatData,
     createDefaultStatChart,
+    createDefaultStatSeries,
     getBulkStatChartableColumns,
     getStatChartTitle,
+    getChartSeries,
+    mergeBulkStatSeriesData,
+    resolveChartSeries,
+    computeNumericAxisDomain,
     type BulkStatColumnOption,
     type BulkStatContext,
+    type BulkStatMergedRow,
+    type BulkStatResolvedSeries,
 } from '../lib/bulkProcessStats';
 import { HiredStageActor } from '../lib/hiringStageTracking';
 
@@ -38,7 +59,21 @@ const CHART_COLORS = ['#6366f1', '#14b8a6', '#f97316', '#ec4899', '#8b5cf6', '#0
 const CHART_TYPE_OPTIONS: { id: BulkStatChartType; label: string }[] = [
     { id: 'bar', label: 'Barras verticales' },
     { id: 'horizontalBar', label: 'Barras horizontales' },
+    { id: 'line', label: 'Líneas' },
     { id: 'pie', label: 'Circular' },
+];
+
+const SCALE_OPTIONS: { id: BulkStatAxisConfig['scale']; label: string }[] = [
+    { id: 'auto', label: 'Automática' },
+    { id: 'linear', label: 'Lineal' },
+    { id: 'log', label: 'Logarítmica' },
+];
+
+const SORT_OPTIONS: { id: BulkStatSortBy; label: string }[] = [
+    { id: 'auto', label: 'Automático' },
+    { id: 'valueDesc', label: 'Por valor (mayor a menor)' },
+    { id: 'valueAsc', label: 'Por valor (menor a mayor)' },
+    { id: 'category', label: 'Alfabético' },
 ];
 
 type DataScope = 'all' | 'stage';
@@ -61,25 +96,33 @@ interface Props {
 
 const StatChartPreview: React.FC<{
     chart: BulkProcessStatChart;
-    title: string;
-    data: { name: string; value: number }[];
-}> = ({ chart, title, data }) => {
-    const hasData = data.some(d => d.value > 0);
+    mergedData: BulkStatMergedRow[];
+    resolvedSeries: BulkStatResolvedSeries[];
+    pieData: { name: string; value: number }[];
+}> = ({ chart, mergedData, resolvedSeries, pieData }) => {
+    const dataKeys = resolvedSeries.map(s => s.dataKey);
+    const hasData = mergedData.some(row => dataKeys.some(k => (row[k] as number) > 0));
 
     if (!hasData) {
         return (
             <div className="flex items-center justify-center h-56 text-sm text-gray-500 border border-dashed border-gray-200 rounded-lg">
-                Sin datos para esta columna.
+                Sin datos para las columnas seleccionadas.
             </div>
         );
     }
+
+    const yDomain = computeNumericAxisDomain(mergedData, dataKeys, chart.axisY);
+    const yScale = chart.axisY?.scale === 'log' ? 'log' : 'linear';
+    const showGrid = chart.showGrid !== false;
+    const showLegend = chart.showLegend !== false;
+    const stacked = !!chart.stacked && chart.chartType !== 'line';
 
     if (chart.chartType === 'pie') {
         return (
             <ResponsiveContainer width="100%" height={260}>
                 <PieChart>
                     <Pie
-                        data={data}
+                        data={pieData}
                         dataKey="value"
                         nameKey="name"
                         cx="50%"
@@ -89,13 +132,68 @@ const StatChartPreview: React.FC<{
                             `${name.length > 14 ? `${name.slice(0, 12)}…` : name} (${(percent * 100).toFixed(0)}%)`
                         }
                     >
-                        {data.map((_, i) => (
+                        {pieData.map((_, i) => (
                             <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
                         ))}
                     </Pie>
                     <Tooltip formatter={(v: number) => [v, 'Candidatos']} />
-                    <Legend />
+                    {showLegend && <Legend />}
                 </PieChart>
+            </ResponsiveContainer>
+        );
+    }
+
+    if (chart.chartType === 'line') {
+        return (
+            <ResponsiveContainer width="100%" height={Math.max(260, mergedData.length * 20)}>
+                <LineChart
+                    data={mergedData}
+                    margin={{ top: 8, right: 16, left: chart.axisY?.label ? 12 : 8, bottom: chart.axisX?.label ? 24 : 8 }}
+                >
+                    {showGrid && <CartesianGrid strokeDasharray="3 3" />}
+                    <XAxis
+                        dataKey="name"
+                        tick={{ fontSize: 11 }}
+                        interval={0}
+                        angle={mergedData.length > 6 ? -25 : 0}
+                        textAnchor={mergedData.length > 6 ? 'end' : 'middle'}
+                        height={mergedData.length > 6 ? 70 : 30}
+                        label={
+                            chart.axisX?.label
+                                ? { value: chart.axisX.label, position: 'insideBottom', offset: -4, fontSize: 11 }
+                                : undefined
+                        }
+                    />
+                    <YAxis
+                        scale={yScale}
+                        domain={yDomain}
+                        allowDecimals={false}
+                        label={
+                            chart.axisY?.label
+                                ? { value: chart.axisY.label, angle: -90, position: 'insideLeft', fontSize: 11 }
+                                : undefined
+                        }
+                    />
+                    <Tooltip
+                        formatter={(v: number, name: string) => {
+                            const series = resolvedSeries.find(s => s.dataKey === name);
+                            return [v, series?.label ?? name];
+                        }}
+                    />
+                    {showLegend && <Legend />}
+                    {resolvedSeries.map(s => (
+                        <Line
+                            key={s.id}
+                            type="monotone"
+                            dataKey={s.dataKey}
+                            name={s.label}
+                            stroke={s.color}
+                            strokeWidth={2}
+                            dot={{ r: 3 }}
+                            activeDot={{ r: 5 }}
+                        />
+                    ))}
+                </LineChart>
             </ResponsiveContainer>
         );
     }
@@ -103,17 +201,42 @@ const StatChartPreview: React.FC<{
     const layout = chart.chartType === 'horizontalBar' ? 'vertical' : 'horizontal';
 
     return (
-        <ResponsiveContainer width="100%" height={Math.max(260, data.length * 28)}>
+        <ResponsiveContainer width="100%" height={Math.max(260, mergedData.length * 28)}>
             <BarChart
-                data={data}
+                data={mergedData}
                 layout={layout}
-                margin={{ top: 8, right: 16, left: layout === 'vertical' ? 8 : 80, bottom: 8 }}
+                margin={{
+                    top: 8,
+                    right: 16,
+                    left: layout === 'vertical' ? (chart.axisY?.label ? 12 : 8) : 80,
+                    bottom: chart.axisX?.label ? 24 : 8,
+                }}
             >
-                <CartesianGrid strokeDasharray="3 3" />
+                {showGrid && <CartesianGrid strokeDasharray="3 3" />}
                 {layout === 'vertical' ? (
                     <>
-                        <XAxis type="number" allowDecimals={false} />
-                        <YAxis type="category" dataKey="name" width={76} tick={{ fontSize: 11 }} />
+                        <XAxis
+                            type="number"
+                            scale={yScale}
+                            domain={yDomain}
+                            allowDecimals={false}
+                            label={
+                                chart.axisY?.label
+                                    ? { value: chart.axisY.label, position: 'insideBottom', offset: -4, fontSize: 11 }
+                                    : undefined
+                            }
+                        />
+                        <YAxis
+                            type="category"
+                            dataKey="name"
+                            width={76}
+                            tick={{ fontSize: 11 }}
+                            label={
+                                chart.axisX?.label
+                                    ? { value: chart.axisX.label, angle: -90, position: 'insideLeft', fontSize: 11 }
+                                    : undefined
+                            }
+                        />
                     </>
                 ) : (
                     <>
@@ -121,20 +244,197 @@ const StatChartPreview: React.FC<{
                             dataKey="name"
                             tick={{ fontSize: 11 }}
                             interval={0}
-                            angle={data.length > 6 ? -25 : 0}
-                            textAnchor={data.length > 6 ? 'end' : 'middle'}
-                            height={data.length > 6 ? 70 : 30}
+                            angle={mergedData.length > 6 ? -25 : 0}
+                            textAnchor={mergedData.length > 6 ? 'end' : 'middle'}
+                            height={mergedData.length > 6 ? 70 : 30}
+                            label={
+                                chart.axisX?.label
+                                    ? { value: chart.axisX.label, position: 'insideBottom', offset: -4, fontSize: 11 }
+                                    : undefined
+                            }
                         />
-                        <YAxis allowDecimals={false} />
+                        <YAxis
+                            scale={yScale}
+                            domain={yDomain}
+                            allowDecimals={false}
+                            label={
+                                chart.axisY?.label
+                                    ? { value: chart.axisY.label, angle: -90, position: 'insideLeft', fontSize: 11 }
+                                    : undefined
+                            }
+                        />
                     </>
                 )}
                 <Tooltip
-                    formatter={(v: number) => [v, 'Candidatos']}
-                    labelFormatter={label => String(label)}
+                    formatter={(v: number, name: string) => {
+                        const series = resolvedSeries.find(s => s.dataKey === name);
+                        return [v, series?.label ?? name];
+                    }}
                 />
-                <Bar dataKey="value" fill="#6366f1" radius={[4, 4, 0, 0]} />
+                {showLegend && resolvedSeries.length > 1 && <Legend />}
+                {resolvedSeries.map(s => (
+                    <Bar
+                        key={s.id}
+                        dataKey={s.dataKey}
+                        name={s.label}
+                        fill={s.color}
+                        stackId={stacked ? 'stack' : undefined}
+                        radius={stacked ? undefined : [4, 4, 0, 0]}
+                    />
+                ))}
             </BarChart>
         </ResponsiveContainer>
+    );
+};
+
+const AxisNumberInput: React.FC<{
+    label: string;
+    value: number | undefined;
+    onChange: (v: number | undefined) => void;
+    placeholder?: string;
+}> = ({ label, value, onChange, placeholder }) => (
+    <div>
+        <label className="block text-xs font-medium text-gray-600 mb-1">{label}</label>
+        <input
+            type="number"
+            value={value ?? ''}
+            onChange={e => {
+                const raw = e.target.value.trim();
+                onChange(raw === '' ? undefined : Number(raw));
+            }}
+            placeholder={placeholder}
+            className="w-full text-sm border border-gray-300 rounded-md px-2 py-1.5"
+        />
+    </div>
+);
+
+const ChartAdvancedOptions: React.FC<{
+    chart: BulkProcessStatChart;
+    onUpdate: (patch: Partial<BulkProcessStatChart>) => void;
+    multiSeries: boolean;
+}> = ({ chart, onUpdate, multiSeries }) => {
+    const [open, setOpen] = useState(false);
+
+    const patchAxisY = (patch: Partial<BulkStatAxisConfig>) => {
+        onUpdate({ axisY: { ...chart.axisY, ...patch } });
+    };
+    const patchAxisX = (patch: Partial<BulkStatAxisConfig>) => {
+        onUpdate({ axisX: { ...chart.axisX, ...patch } });
+    };
+
+    return (
+        <div className="w-full border border-gray-100 rounded-lg bg-gray-50/80">
+            <button
+                type="button"
+                onClick={() => setOpen(v => !v)}
+                className="w-full flex items-center justify-between gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-lg"
+            >
+                <span className="inline-flex items-center gap-1.5 font-medium">
+                    <Settings2 className="w-4 h-4 text-gray-500" />
+                    Ejes y visualización
+                </span>
+                {open ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+            </button>
+            {open && (
+                <div className="px-3 pb-3 pt-1 grid grid-cols-2 md:grid-cols-4 gap-3">
+                    <div>
+                        <label className="block text-xs font-medium text-gray-600 mb-1">Orden eje X</label>
+                        <select
+                            value={chart.sortBy ?? 'auto'}
+                            onChange={e => onUpdate({ sortBy: e.target.value as BulkStatSortBy })}
+                            className="w-full text-sm border border-gray-300 rounded-md px-2 py-1.5"
+                        >
+                            {SORT_OPTIONS.map(opt => (
+                                <option key={opt.id} value={opt.id}>
+                                    {opt.label}
+                                </option>
+                            ))}
+                        </select>
+                    </div>
+                    <div>
+                        <label className="block text-xs font-medium text-gray-600 mb-1">Escala eje Y</label>
+                        <select
+                            value={chart.axisY?.scale ?? 'auto'}
+                            onChange={e =>
+                                patchAxisY({ scale: e.target.value as BulkStatAxisConfig['scale'] })
+                            }
+                            className="w-full text-sm border border-gray-300 rounded-md px-2 py-1.5"
+                        >
+                            {SCALE_OPTIONS.map(opt => (
+                                <option key={opt.id} value={opt.id ?? 'auto'}>
+                                    {opt.label}
+                                </option>
+                            ))}
+                        </select>
+                    </div>
+                    <AxisNumberInput
+                        label="Mínimo eje Y"
+                        value={chart.axisY?.min}
+                        onChange={v => patchAxisY({ min: v })}
+                        placeholder="Auto"
+                    />
+                    <AxisNumberInput
+                        label="Máximo eje Y"
+                        value={chart.axisY?.max}
+                        onChange={v => patchAxisY({ max: v })}
+                        placeholder="Auto"
+                    />
+                    <div>
+                        <label className="block text-xs font-medium text-gray-600 mb-1">Etiqueta eje X</label>
+                        <input
+                            type="text"
+                            value={chart.axisX?.label ?? ''}
+                            onChange={e => patchAxisX({ label: e.target.value })}
+                            placeholder="Opcional"
+                            className="w-full text-sm border border-gray-300 rounded-md px-2 py-1.5"
+                        />
+                    </div>
+                    <div>
+                        <label className="block text-xs font-medium text-gray-600 mb-1">Etiqueta eje Y</label>
+                        <input
+                            type="text"
+                            value={chart.axisY?.label ?? ''}
+                            onChange={e => patchAxisY({ label: e.target.value })}
+                            placeholder="Candidatos"
+                            className="w-full text-sm border border-gray-300 rounded-md px-2 py-1.5"
+                        />
+                    </div>
+                    <div className="flex flex-col gap-2 justify-end">
+                        <label className="inline-flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
+                            <input
+                                type="checkbox"
+                                checked={chart.showGrid !== false}
+                                onChange={e => onUpdate({ showGrid: e.target.checked })}
+                                className="rounded border-gray-300 text-indigo-600"
+                            />
+                            Cuadrícula
+                        </label>
+                        <label className="inline-flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
+                            <input
+                                type="checkbox"
+                                checked={chart.showLegend !== false}
+                                onChange={e => onUpdate({ showLegend: e.target.checked })}
+                                className="rounded border-gray-300 text-indigo-600"
+                            />
+                            Leyenda
+                        </label>
+                    </div>
+                    {multiSeries && chart.chartType !== 'line' && chart.chartType !== 'pie' && (
+                        <div className="flex items-end">
+                            <label className="inline-flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
+                                <input
+                                    type="checkbox"
+                                    checked={!!chart.stacked}
+                                    onChange={e => onUpdate({ stacked: e.target.checked })}
+                                    className="rounded border-gray-300 text-indigo-600"
+                                />
+                                Apilar series
+                            </label>
+                        </div>
+                    )}
+                </div>
+            )}
+        </div>
     );
 };
 
@@ -166,7 +466,18 @@ export const BulkProcessStatsModal: React.FC<Props> = ({
         if (!isOpen) return;
         const saved = process.bulkConfig?.customStats ?? [];
         if (saved.length > 0) {
-            setCharts(saved);
+            setCharts(
+                saved.map(c => ({
+                    showGrid: true,
+                    showLegend: true,
+                    sortBy: 'auto' as BulkStatSortBy,
+                    ...c,
+                    series:
+                        c.series && c.series.length > 0
+                            ? c.series
+                            : [createDefaultStatSeries(c.id, c.columnId)],
+                }))
+            );
         } else if (columnOptions.length > 0) {
             setCharts([createDefaultStatChart(columnOptions[0].id)]);
         } else {
@@ -196,27 +507,91 @@ export const BulkProcessStatsModal: React.FC<Props> = ({
         return base;
     }, [allCandidates, candidates, dataScope, selectedStageId]);
 
-    const chartDataById = useMemo(() => {
-        const map = new Map<string, { name: string; value: number }[]>();
+    const chartBundleById = useMemo(() => {
+        const map = new Map<
+            string,
+            {
+                merged: BulkStatMergedRow[];
+                resolved: BulkStatResolvedSeries[];
+                pie: { name: string; value: number }[];
+            }
+        >();
         for (const chart of charts) {
-            map.set(chart.id, aggregateBulkStatData(candidatePool, chart.columnId, statContext));
+            const resolved = resolveChartSeries(chart, columnOptions, CHART_COLORS);
+            const primaryColumn = getChartSeries(chart)[0]?.columnId ?? chart.columnId;
+            const pie = aggregateBulkStatData(candidatePool, primaryColumn, statContext);
+            const merged = mergeBulkStatSeriesData(candidatePool, chart, resolved, statContext);
+            map.set(chart.id, { merged, resolved, pie });
         }
         return map;
-    }, [charts, candidatePool, statContext]);
+    }, [charts, candidatePool, statContext, columnOptions]);
 
     const addChart = useCallback(() => {
-        const used = new Set(charts.map(c => c.columnId));
+        const used = new Set(charts.flatMap(c => getChartSeries(c).map(s => s.columnId)));
         const nextCol = columnOptions.find(c => !used.has(c.id)) ?? columnOptions[0];
         if (!nextCol) return;
         setCharts(prev => [...prev, createDefaultStatChart(nextCol.id, nextCol.suggestedChart)]);
     }, [charts, columnOptions]);
 
     const updateChart = useCallback((id: string, patch: Partial<BulkProcessStatChart>) => {
-        setCharts(prev => prev.map(c => (c.id === id ? { ...c, ...patch } : c)));
+        setCharts(prev =>
+            prev.map(c => {
+                if (c.id !== id) return c;
+                const next = { ...c, ...patch };
+                if (patch.columnId && !patch.series) {
+                    const series = getChartSeries(next);
+                    if (series.length === 1) {
+                        next.series = [{ ...series[0], columnId: patch.columnId }];
+                    }
+                }
+                return next;
+            })
+        );
     }, []);
 
     const removeChart = useCallback((id: string) => {
         setCharts(prev => prev.filter(c => c.id !== id));
+    }, []);
+
+    const addSeries = useCallback(
+        (chartId: string) => {
+            setCharts(prev =>
+                prev.map(c => {
+                    if (c.id !== chartId) return c;
+                    const current = getChartSeries(c);
+                    const used = new Set(current.map(s => s.columnId));
+                    const nextCol = columnOptions.find(col => !used.has(col.id)) ?? columnOptions[0];
+                    if (!nextCol) return c;
+                    return {
+                        ...c,
+                        series: [...current, createDefaultStatSeries(c.id, nextCol.id)],
+                    };
+                })
+            );
+        },
+        [columnOptions]
+    );
+
+    const updateSeries = useCallback((chartId: string, seriesId: string, patch: Partial<BulkStatSeries>) => {
+        setCharts(prev =>
+            prev.map(c => {
+                if (c.id !== chartId) return c;
+                const series = getChartSeries(c).map(s => (s.id === seriesId ? { ...s, ...patch } : s));
+                const primary = series[0]?.columnId ?? c.columnId;
+                return { ...c, series, columnId: primary };
+            })
+        );
+    }, []);
+
+    const removeSeries = useCallback((chartId: string, seriesId: string) => {
+        setCharts(prev =>
+            prev.map(c => {
+                if (c.id !== chartId) return c;
+                const series = getChartSeries(c).filter(s => s.id !== seriesId);
+                if (series.length === 0) return c;
+                return { ...c, series, columnId: series[0].columnId };
+            })
+        );
     }, []);
 
     const handleSave = async () => {
@@ -245,7 +620,7 @@ export const BulkProcessStatsModal: React.FC<Props> = ({
                             <h2 className="text-lg font-semibold text-gray-900">Estadísticas del proceso</h2>
                         </div>
                         <p className="text-sm text-gray-500 mt-1">
-                            Gráficos personalizados por columna · {process.title}
+                            Gráficos personalizados · varias columnas, líneas y ejes configurables · {process.title}
                         </p>
                     </div>
                     <button
@@ -301,32 +676,20 @@ export const BulkProcessStatsModal: React.FC<Props> = ({
                         </p>
                     ) : (
                         charts.map(chart => {
-                            const data = chartDataById.get(chart.id) ?? [];
+                            const bundle = chartBundleById.get(chart.id);
+                            const mergedData = bundle?.merged ?? [];
+                            const resolvedSeries = bundle?.resolved ?? [];
+                            const pieData = bundle?.pie ?? [];
                             const title = getStatChartTitle(chart, columnOptions);
+                            const seriesList = getChartSeries(chart);
+                            const isPie = chart.chartType === 'pie';
+
                             return (
                                 <div
                                     key={chart.id}
-                                    className="border border-gray-200 rounded-xl p-4 bg-white shadow-sm"
+                                    className="border border-gray-200 rounded-xl p-4 bg-white shadow-sm space-y-3"
                                 >
-                                    <div className="flex flex-wrap items-end gap-3 mb-4">
-                                        <div className="flex-1 min-w-[160px]">
-                                            <label className="block text-xs font-medium text-gray-600 mb-1">
-                                                Columna
-                                            </label>
-                                            <select
-                                                value={chart.columnId}
-                                                onChange={e =>
-                                                    updateChart(chart.id, { columnId: e.target.value })
-                                                }
-                                                className="w-full text-sm border border-gray-300 rounded-md px-2 py-1.5"
-                                            >
-                                                {columnOptions.map(col => (
-                                                    <option key={col.id} value={col.id}>
-                                                        {col.label}
-                                                    </option>
-                                                ))}
-                                            </select>
-                                        </div>
+                                    <div className="flex flex-wrap items-end gap-3">
                                         <div className="min-w-[160px]">
                                             <label className="block text-xs font-medium text-gray-600 mb-1">
                                                 Tipo de gráfico
@@ -370,15 +733,112 @@ export const BulkProcessStatsModal: React.FC<Props> = ({
                                             <Trash2 className="w-4 h-4" />
                                         </button>
                                     </div>
-                                    <h3 className="text-sm font-semibold text-gray-800 mb-2 flex items-center gap-1.5">
+
+                                    <div className="space-y-2">
+                                        <div className="flex items-center justify-between gap-2">
+                                            <label className="text-xs font-medium text-gray-600">
+                                                {isPie ? 'Columna' : 'Series de datos'}
+                                            </label>
+                                            {!isPie && (
+                                                <button
+                                                    type="button"
+                                                    onClick={() => addSeries(chart.id)}
+                                                    disabled={seriesList.length >= columnOptions.length}
+                                                    className="inline-flex items-center gap-1 text-xs font-medium text-indigo-700 hover:text-indigo-900 disabled:opacity-50"
+                                                >
+                                                    <Plus className="w-3.5 h-3.5" />
+                                                    Añadir serie
+                                                </button>
+                                            )}
+                                        </div>
+                                        {seriesList.map((series, idx) => (
+                                            <div
+                                                key={series.id}
+                                                className="flex flex-wrap items-end gap-2 p-2 rounded-lg bg-gray-50 border border-gray-100"
+                                            >
+                                                <div className="w-3 h-3 rounded-full flex-shrink-0 mb-2" style={{ backgroundColor: resolvedSeries[idx]?.color ?? CHART_COLORS[idx % CHART_COLORS.length] }} />
+                                                <div className="flex-1 min-w-[140px]">
+                                                    <label className="block text-[11px] text-gray-500 mb-0.5">
+                                                        Columna
+                                                    </label>
+                                                    <select
+                                                        value={series.columnId}
+                                                        onChange={e =>
+                                                            updateSeries(chart.id, series.id, {
+                                                                columnId: e.target.value,
+                                                            })
+                                                        }
+                                                        className="w-full text-sm border border-gray-300 rounded-md px-2 py-1.5 bg-white"
+                                                    >
+                                                        {columnOptions.map(col => (
+                                                            <option key={col.id} value={col.id}>
+                                                                {col.label}
+                                                            </option>
+                                                        ))}
+                                                    </select>
+                                                </div>
+                                                {!isPie && (
+                                                    <div className="flex-1 min-w-[120px]">
+                                                        <label className="block text-[11px] text-gray-500 mb-0.5">
+                                                            Etiqueta serie
+                                                        </label>
+                                                        <input
+                                                            type="text"
+                                                            value={series.label ?? ''}
+                                                            onChange={e =>
+                                                                updateSeries(chart.id, series.id, {
+                                                                    label: e.target.value,
+                                                                })
+                                                            }
+                                                            placeholder={
+                                                                columnOptions.find(c => c.id === series.columnId)
+                                                                    ?.label
+                                                            }
+                                                            className="w-full text-sm border border-gray-300 rounded-md px-2 py-1.5 bg-white"
+                                                        />
+                                                    </div>
+                                                )}
+                                                {!isPie && seriesList.length > 1 && (
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => removeSeries(chart.id, series.id)}
+                                                        className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-md mb-0.5"
+                                                        title="Quitar serie"
+                                                    >
+                                                        <Trash2 className="w-3.5 h-3.5" />
+                                                    </button>
+                                                )}
+                                            </div>
+                                        ))}
+                                        {isPie && seriesList.length > 1 && (
+                                            <p className="text-xs text-amber-700 bg-amber-50 px-2 py-1 rounded">
+                                                El gráfico circular usa solo la primera serie.
+                                            </p>
+                                        )}
+                                    </div>
+
+                                    <ChartAdvancedOptions
+                                        chart={chart}
+                                        onUpdate={patch => updateChart(chart.id, patch)}
+                                        multiSeries={seriesList.length > 1}
+                                    />
+
+                                    <h3 className="text-sm font-semibold text-gray-800 flex items-center gap-1.5">
                                         {chart.chartType === 'pie' ? (
                                             <PieChartIcon className="w-4 h-4 text-indigo-500" />
+                                        ) : chart.chartType === 'line' ? (
+                                            <LineChartIcon className="w-4 h-4 text-indigo-500" />
                                         ) : (
                                             <BarChart3 className="w-4 h-4 text-indigo-500" />
                                         )}
                                         {title}
                                     </h3>
-                                    <StatChartPreview chart={chart} title={title} data={data} />
+                                    <StatChartPreview
+                                        chart={chart}
+                                        mergedData={mergedData}
+                                        resolvedSeries={resolvedSeries}
+                                        pieData={pieData}
+                                    />
                                 </div>
                             );
                         })

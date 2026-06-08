@@ -17,6 +17,9 @@ import {
     BulkProcessConfig,
     BulkProcessStatChart,
     BulkStatChartType,
+    BulkStatAxisConfig,
+    BulkStatSeries,
+    BulkStatSortBy,
     IdealProfileConfig,
     Process,
 } from '../types';
@@ -43,6 +46,17 @@ export interface BulkStatColumnOption {
 export interface BulkStatDatum {
     name: string;
     value: number;
+}
+
+/** Fila para gráficos con varias series (Recharts) */
+export type BulkStatMergedRow = Record<string, string | number> & { name: string };
+
+export interface BulkStatResolvedSeries {
+    id: string;
+    columnId: string;
+    label: string;
+    color: string;
+    dataKey: string;
 }
 
 export interface BulkStatContext {
@@ -97,6 +111,7 @@ function inferValueKind(columnId: string, customColumns: CustomColumn[]): BulkSt
 }
 
 function suggestedChartFor(kind: BulkStatValueKind): BulkStatChartType {
+    if (kind === 'date') return 'line';
     if (kind === 'numeric') return 'bar';
     return 'bar';
 }
@@ -392,11 +407,169 @@ function collapseTopCategories(counts: Map<string, number>, max: number): BulkSt
 }
 
 export function createDefaultStatChart(columnId: string, chartType?: BulkStatChartType): BulkProcessStatChart {
+    const id = `stat-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
     return {
-        id: `stat-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        id,
         columnId,
         chartType: chartType ?? 'bar',
+        series: [createDefaultStatSeries(id, columnId)],
+        showGrid: true,
+        showLegend: true,
+        sortBy: 'auto',
     };
+}
+
+export function createDefaultStatSeries(chartId: string, columnId: string): BulkStatSeries {
+    return {
+        id: `${chartId}-s-${Math.random().toString(36).slice(2, 7)}`,
+        columnId,
+    };
+}
+
+/** Normaliza gráficos antiguos (solo columnId) a la lista de series */
+export function getChartSeries(chart: BulkProcessStatChart): BulkStatSeries[] {
+    if (chart.series && chart.series.length > 0) return chart.series;
+    return [{ id: `${chart.id}-primary`, columnId: chart.columnId }];
+}
+
+export function resolveChartSeries(
+    chart: BulkProcessStatChart,
+    columnOptions: BulkStatColumnOption[],
+    colorPalette: string[]
+): BulkStatResolvedSeries[] {
+    return getChartSeries(chart).map((s, i) => {
+        const col = columnOptions.find(c => c.id === s.columnId);
+        return {
+            id: s.id,
+            columnId: s.columnId,
+            label: s.label?.trim() || col?.label || s.columnId,
+            color: s.color || colorPalette[i % colorPalette.length],
+            dataKey: `s_${s.id.replace(/[^a-zA-Z0-9]/g, '_')}`,
+        };
+    });
+}
+
+function sortCategoryNames(
+    names: string[],
+    rowByName: Map<string, BulkStatMergedRow>,
+    primaryDataKey: string,
+    sortBy: BulkStatSortBy | undefined
+): string[] {
+    const mode = sortBy ?? 'auto';
+    const unique = [...new Set(names)];
+
+    if (mode === 'category') {
+        return unique.sort((a, b) => a.localeCompare(b, 'es'));
+    }
+
+    const sumValue = (name: string) => {
+        const row = rowByName.get(name);
+        if (!row) return 0;
+        const v = row[primaryDataKey];
+        return typeof v === 'number' ? v : 0;
+    };
+
+    if (mode === 'valueAsc') {
+        return unique.sort((a, b) => sumValue(a) - sumValue(b) || a.localeCompare(b, 'es'));
+    }
+    if (mode === 'valueDesc') {
+        return unique.sort((a, b) => sumValue(b) - sumValue(a) || a.localeCompare(b, 'es'));
+    }
+
+    // auto: fechas tipo "ene 2024" y rangos numéricos en orden natural si aplica
+    const monthLike = unique.every(n => /^\w{3}\.?\s+\d{4}$/i.test(n.trim()));
+    if (monthLike) {
+        return unique.sort((a, b) => {
+            const da = Date.parse(a.replace('.', ''));
+            const db = Date.parse(b.replace('.', ''));
+            if (!Number.isNaN(da) && !Number.isNaN(db)) return da - db;
+            return a.localeCompare(b, 'es');
+        });
+    }
+
+    const rangeLike = unique.every(n => /^\d+–\d+$/.test(n.trim()));
+    if (rangeLike) {
+        return unique.sort((a, b) => {
+            const lowA = parseInt(a.split('–')[0], 10);
+            const lowB = parseInt(b.split('–')[0], 10);
+            if (!Number.isNaN(lowA) && !Number.isNaN(lowB)) return lowA - lowB;
+            return a.localeCompare(b, 'es');
+        });
+    }
+
+    return unique.sort((a, b) => sumValue(b) - sumValue(a) || a.localeCompare(b, 'es'));
+}
+
+export function mergeBulkStatSeriesData(
+    candidates: BulkCandidate[],
+    chart: BulkProcessStatChart,
+    resolvedSeries: BulkStatResolvedSeries[],
+    ctx: BulkStatContext
+): BulkStatMergedRow[] {
+    if (resolvedSeries.length === 0) return [];
+
+    const rowByName = new Map<string, BulkStatMergedRow>();
+    const allNames = new Set<string>();
+
+    for (const series of resolvedSeries) {
+        const aggregated = aggregateBulkStatData(candidates, series.columnId, ctx);
+        for (const { name, value } of aggregated) {
+            allNames.add(name);
+            const existing = rowByName.get(name) ?? { name };
+            existing[series.dataKey] = value;
+            rowByName.set(name, existing);
+        }
+    }
+
+    for (const name of allNames) {
+        const row = rowByName.get(name)!;
+        for (const series of resolvedSeries) {
+            if (row[series.dataKey] === undefined) row[series.dataKey] = 0;
+        }
+    }
+
+    const primaryKey = resolvedSeries[0]?.dataKey ?? 'value';
+    const orderedNames = sortCategoryNames([...allNames], rowByName, primaryKey, chart.sortBy);
+    return orderedNames.map(name => rowByName.get(name)!);
+}
+
+export function computeNumericAxisDomain(
+    data: BulkStatMergedRow[],
+    dataKeys: string[],
+    axis?: BulkStatAxisConfig
+): [number | 'auto', number | 'auto'] | [number, number] {
+    const scale = axis?.scale ?? 'auto';
+    let maxVal = 0;
+    let minVal = Infinity;
+
+    for (const row of data) {
+        for (const key of dataKeys) {
+            const v = row[key];
+            if (typeof v === 'number' && !Number.isNaN(v)) {
+                maxVal = Math.max(maxVal, v);
+                minVal = Math.min(minVal, v);
+            }
+        }
+    }
+
+    if (minVal === Infinity) minVal = 0;
+
+    const hasMin = axis?.min !== undefined && axis.min !== null && !Number.isNaN(axis.min);
+    const hasMax = axis?.max !== undefined && axis.max !== null && !Number.isNaN(axis.max);
+
+    if (scale === 'log') {
+        const safeMin = hasMin ? Math.max(1, axis!.min!) : Math.max(1, minVal || 1);
+        const safeMax = hasMax ? Math.max(safeMin + 1, axis!.max!) : Math.max(safeMin + 1, maxVal || 10);
+        return [safeMin, safeMax];
+    }
+
+    if (hasMin || hasMax) {
+        const lo = hasMin ? axis!.min! : 0;
+        const hi = hasMax ? axis!.max! : Math.max(maxVal, lo + 1);
+        return [lo, hi];
+    }
+
+    return ['auto', 'auto'];
 }
 
 export function getStatChartTitle(
@@ -404,6 +577,16 @@ export function getStatChartTitle(
     columnOptions: BulkStatColumnOption[]
 ): string {
     if (chart.title?.trim()) return chart.title.trim();
+    const series = getChartSeries(chart);
+    if (series.length > 1) {
+        const labels = series
+            .map(s => {
+                const col = columnOptions.find(c => c.id === s.columnId);
+                return s.label?.trim() || col?.label || s.columnId;
+            })
+            .filter(Boolean);
+        return labels.join(' · ');
+    }
     const col = columnOptions.find(c => c.id === chart.columnId);
     return col?.label ?? chart.columnId;
 }
