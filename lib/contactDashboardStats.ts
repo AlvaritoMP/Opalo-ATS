@@ -99,11 +99,12 @@ export function isCountableContactAction(attempt: Pick<ContactAttempt, 'outcome'
     return attempt.outcome !== 'reset_all';
 }
 
-/** Marca interés: clic en "Interesado" o cambio de estado a interesado. */
+/** Marca interés: botón «Interesado», outcome interested o cambio de estado a interesado. */
 export function isEffectiveContactAttempt(
     attempt: Pick<ContactAttempt, 'outcome' | 'statusAfter'>
 ): boolean {
-    return attempt.statusAfter === 'interesado' || attempt.outcome === 'interested';
+    if (attempt.outcome === 'interested') return true;
+    return attempt.outcome === 'status_change' && attempt.statusAfter === 'interesado';
 }
 
 /** Intento efectivo en un canal (incluye marcar interesado desde menú de estado). */
@@ -332,9 +333,63 @@ function countTopConsultantByChannel(
     return best;
 }
 
+export interface ContactChannelSummaryInput {
+    id: string;
+    processId: string;
+    contactPhone?: { status: string; attemptCount?: number; lastAttemptAt?: string };
+    contactWhatsapp?: { status: string; attemptCount?: number; lastAttemptAt?: string };
+    contactEmail?: { status: string; attemptCount?: number; lastAttemptAt?: string };
+}
+
+function summaryForChannelInput(
+    candidate: ContactChannelSummaryInput,
+    channel: ContactAttemptChannel
+) {
+    if (channel === 'call') return candidate.contactPhone;
+    if (channel === 'whatsapp') return candidate.contactWhatsapp;
+    return candidate.contactEmail;
+}
+
+/** Suma interesados visibles en la tabla masiva que no tienen fila efectiva en el historial. */
+function applyInterestedFromContactSummaries(
+    channelTotals: Map<ContactAttemptChannel, { total: number; effective: number }>,
+    summaries: ContactChannelSummaryInput[],
+    startKey: string,
+    endKey: string,
+    scopedAttempts: ContactAttempt[]
+): void {
+    const channels = Object.keys(CONTACT_CHANNELS) as ContactAttemptChannel[];
+    const alreadyCounted = new Set<string>();
+
+    for (const attempt of scopedAttempts) {
+        const ch = attempt.channel as ContactAttemptChannel;
+        if (isEffectiveContactAttemptForChannel(attempt, ch)) {
+            alreadyCounted.add(`${attempt.candidateId}:${ch}`);
+        }
+    }
+
+    for (const candidate of summaries) {
+        for (const channel of channels) {
+            const summary = summaryForChannelInput(candidate, channel);
+            if (summary?.status !== 'interesado' || !summary.lastAttemptAt) continue;
+
+            const dateKey = formatDateKeyLima(summary.lastAttemptAt);
+            if (!dateKey || dateKey < startKey || dateKey > endKey) continue;
+
+            const dedupeKey = `${candidate.id}:${channel}`;
+            if (alreadyCounted.has(dedupeKey)) continue;
+            alreadyCounted.add(dedupeKey);
+
+            const bucket = channelTotals.get(channel);
+            if (bucket) bucket.effective += 1;
+        }
+    }
+}
+
 export function computeContactDashboardStats(
     attempts: ContactAttempt[],
-    period: ContactConsultantPeriod = 'month'
+    period: ContactConsultantPeriod = 'month',
+    contactSummaries: ContactChannelSummaryInput[] = []
 ): ContactChannelDashboardStats {
     const { startKey, endKey, label: periodLabel } = getContactPeriodRange(period);
     const scoped = filterAttemptsInDateRange(attempts, startKey, endKey);
@@ -359,6 +414,8 @@ export function computeContactDashboardStats(
             bucket.effective += 1;
         }
     }
+
+    applyInterestedFromContactSummaries(channelTotals, contactSummaries, startKey, endKey, scoped);
 
     const totalActions = scoped.filter(a =>
         isChannelVolumeAttempt(a, a.channel as ContactAttemptChannel)

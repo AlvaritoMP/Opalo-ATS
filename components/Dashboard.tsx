@@ -18,6 +18,7 @@ import {
     reconcileContactAttemptsWithSummaries,
     attributeContactAttemptsFromSummaries,
     synthesizeVolumeAttemptsFromSummaries,
+    synthesizeInteresadoAttemptsFromSummaries,
     mergeContactAttemptsDedupe,
     backfillContactAttemptProcessIds,
 } from '../lib/contactAttemptReconcile';
@@ -953,9 +954,16 @@ export const Dashboard: React.FC = () => {
         let rows = scopedContactAttempts;
         rows = synthesizeVolumeAttemptsFromSummaries(rows, summaries);
         rows = reconcileContactAttemptsWithSummaries(rows, summaries);
+        rows = synthesizeInteresadoAttemptsFromSummaries(rows, summaries);
         rows = attributeContactAttemptsFromSummaries(rows, summaries);
         return rows;
     }, [scopedContactAttempts, bulkContactSummaries, scopedProcessIds]);
+
+    const contactSummariesForStats = useMemo(
+        () =>
+            Object.values(bulkContactSummaries).filter(c => scopedProcessIds.has(c.processId)),
+        [bulkContactSummaries, scopedProcessIds]
+    );
 
     const enrichedContactAttempts = useMemo(
         () =>
@@ -966,8 +974,13 @@ export const Dashboard: React.FC = () => {
     );
 
     const contactStats = useMemo(
-        () => computeContactDashboardStats(enrichedContactAttempts, contactConsultantPeriod),
-        [enrichedContactAttempts, contactConsultantPeriod]
+        () =>
+            computeContactDashboardStats(
+                enrichedContactAttempts,
+                contactConsultantPeriod,
+                contactSummariesForStats
+            ),
+        [enrichedContactAttempts, contactConsultantPeriod, contactSummariesForStats]
     );
 
     const schedulingStats = useMemo(() => {

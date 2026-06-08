@@ -1,7 +1,12 @@
 import type { ContactAttempt } from './contactTracking';
 import type { ContactAttemptChannel, ChannelContactSummary } from './contactChannelConfig';
 import { CONTACT_CHANNELS } from './contactChannelConfig';
-import { addDaysToDateKey, formatDateKeyLima, isChannelVolumeAttempt } from './contactDashboardStats';
+import {
+    addDaysToDateKey,
+    formatDateKeyLima,
+    isChannelVolumeAttempt,
+    isEffectiveContactAttemptForChannel,
+} from './contactDashboardStats';
 
 export interface ContactSummaryCandidate {
     id: string;
@@ -36,7 +41,7 @@ function syntheticAttempt(
         channel,
         outcome: channel === 'email' ? 'no_response' : channel === 'whatsapp' ? 'no_response' : 'no_answer',
         attemptNumber,
-        statusAfter: summary.status,
+        statusAfter: summary.status === 'interesado' ? 'en_intento' : summary.status,
         createdAt,
     };
 }
@@ -232,6 +237,45 @@ export function synthesizeVolumeAttemptsFromSummaries(
                     )
                 );
             }
+        }
+    }
+
+    return result;
+}
+
+/**
+ * Genera un cambio a «interesado» cuando la tabla masiva ya lo muestra pero falta en el historial.
+ */
+export function synthesizeInteresadoAttemptsFromSummaries(
+    attempts: ContactAttempt[],
+    candidates: ContactSummaryCandidate[]
+): ContactAttempt[] {
+    const result = [...attempts];
+    const channels = Object.keys(CONTACT_CHANNELS) as ContactAttemptChannel[];
+
+    for (const candidate of candidates) {
+        for (const channel of channels) {
+            const summary = summaryForChannel(candidate, channel);
+            if (summary?.status !== 'interesado' || !summary.lastAttemptAt) continue;
+
+            const hasEffective = result.some(
+                a =>
+                    a.candidateId === candidate.id &&
+                    isEffectiveContactAttemptForChannel(a, channel)
+            );
+            if (hasEffective) continue;
+
+            result.push({
+                id: `reconcile-interesado-${candidate.id}-${channel}-${summary.lastAttemptAt}`,
+                candidateId: candidate.id,
+                processId: candidate.processId,
+                userName: summary.lastUserName,
+                channel,
+                outcome: 'status_change',
+                attemptNumber: Math.max(summary.attemptCount ?? 0, 1),
+                statusAfter: 'interesado',
+                createdAt: summary.lastAttemptAt,
+            });
         }
     }
 
