@@ -10,7 +10,7 @@ import {
     buildStandardFieldTextCasePatch,
     repairTextCaseColumnValues,
 } from '../bulkTableColumns';
-import type { BulkProcessConfig } from '../../types';
+import type { BulkProcessConfig, CandidateHistory } from '../../types';
 import { readChannelSummaryFromRow } from '../contactChannelConfig';
 import type { ChannelContactSummary } from '../contactChannelConfig';
 import { buildInterviewMapFromRows } from '../bulkInterviewUtils';
@@ -28,6 +28,13 @@ const BULK_SELECT_WITH_CONTACT = `${BULK_SELECT_BASE}, contact_status, contact_a
 const BULK_SELECT_WITH_CREATED = `${BULK_SELECT_WITH_CONTACT}, created_at`;
 const BULK_SELECT_WITH_APPLICATION = `${BULK_SELECT_WITH_CREATED}, application_count, first_application_at`;
 const BULK_SELECT_FULL = `${BULK_SELECT_WITH_APPLICATION}, bulk_column_values`;
+const BULK_EFFICIENCY_FIELDS =
+    'hire_date, offer_accepted_date, application_started_date, application_completed_date';
+const BULK_SELECT_FULL_EFFICIENCY = `${BULK_SELECT_FULL}, ${BULK_EFFICIENCY_FIELDS}`;
+const BULK_SELECT_WITH_APPLICATION_EFFICIENCY = `${BULK_SELECT_WITH_APPLICATION}, ${BULK_EFFICIENCY_FIELDS}`;
+const BULK_SELECT_WITH_CREATED_EFFICIENCY = `${BULK_SELECT_WITH_CREATED}, ${BULK_EFFICIENCY_FIELDS}`;
+const BULK_SELECT_WITH_CONTACT_EFFICIENCY = `${BULK_SELECT_WITH_CONTACT}, ${BULK_EFFICIENCY_FIELDS}`;
+const BULK_SELECT_BASE_EFFICIENCY = `${BULK_SELECT_BASE}, ${BULK_EFFICIENCY_FIELDS}`;
 
 /** Cache del select que funcionó en este entorno (evita reintentos en cada página) */
 let cachedBulkSelect: string | null = null;
@@ -40,10 +47,15 @@ function isNotFoundError(error: { message?: string; code?: string } | null): boo
 
 function getBulkSelectCandidates(): string[] {
     const allVariants = [
+        BULK_SELECT_FULL_EFFICIENCY,
         BULK_SELECT_FULL,
+        BULK_SELECT_WITH_APPLICATION_EFFICIENCY,
         BULK_SELECT_WITH_APPLICATION,
+        BULK_SELECT_WITH_CREATED_EFFICIENCY,
         BULK_SELECT_WITH_CREATED,
+        BULK_SELECT_WITH_CONTACT_EFFICIENCY,
         BULK_SELECT_WITH_CONTACT,
+        BULK_SELECT_BASE_EFFICIENCY,
         BULK_SELECT_BASE,
     ];
     if (!cachedBulkSelect) return allVariants;
@@ -81,6 +93,10 @@ function mapBulkCandidateRow(
         nextInterviewerId: nextInterview?.interviewerId || undefined,
         nextInterviewEventId: nextInterview?.eventId || undefined,
         bulkColumnValues: (c.bulk_column_values as Record<string, unknown>) || undefined,
+        hireDate: (c.hire_date as string) || undefined,
+        offerAcceptedDate: (c.offer_accepted_date as string) || undefined,
+        applicationStartedDate: (c.application_started_date as string) || undefined,
+        applicationCompletedDate: (c.application_completed_date as string) || undefined,
     };
 }
 
@@ -119,10 +135,14 @@ export interface BulkCandidate {
     nextInterviewEventId?: string;
     /** Valores de columnas personalizadas (tabla alta densidad) */
     bulkColumnValues?: Record<string, unknown>;
+    hireDate?: string;
+    offerAcceptedDate?: string;
+    applicationStartedDate?: string;
+    applicationCompletedDate?: string;
     // Campos adicionales para el drawer (se cargan bajo demanda)
     description?: string;
     attachments?: any[];
-    history?: any[];
+    history?: CandidateHistory[];
 }
 
 // Resultado de la query paginada
@@ -276,6 +296,38 @@ export const bulkCandidatesApi = {
             out.push(...r.candidates);
             if (!r.hasMore) break;
         }
+        return out;
+    },
+
+    /** Historial de etapas por candidato (Panel de estadísticas en procesos masivos). */
+    async loadCandidateHistoryByIds(
+        candidateIds: string[]
+    ): Promise<Record<string, CandidateHistory[]>> {
+        const out: Record<string, CandidateHistory[]> = {};
+        if (candidateIds.length === 0) return out;
+
+        for (let offset = 0; offset < candidateIds.length; offset += 200) {
+            const chunk = candidateIds.slice(offset, offset + 200);
+            const { data, error } = await supabase
+                .from('candidate_history')
+                .select('candidate_id, stage_id, moved_at, moved_by')
+                .in('candidate_id', chunk)
+                .eq('app_name', APP_NAME)
+                .order('moved_at', { ascending: true });
+
+            if (error) throw error;
+
+            for (const row of data || []) {
+                const candidateId = row.candidate_id as string;
+                if (!out[candidateId]) out[candidateId] = [];
+                out[candidateId].push({
+                    stageId: row.stage_id as string,
+                    movedAt: row.moved_at as string,
+                    movedBy: (row.moved_by as string) || 'System',
+                });
+            }
+        }
+
         return out;
     },
 

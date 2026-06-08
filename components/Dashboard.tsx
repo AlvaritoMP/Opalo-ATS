@@ -468,13 +468,19 @@ export const Dashboard: React.FC = () => {
             for (const processId of bulkProcessIdsInScope) {
                 try {
                     const process = processMap.get(processId);
-                    const [all, columnValuesMap] = await Promise.all([
-                        bulkCandidatesApi.getAllCandidates(processId),
+                    const all = await bulkCandidatesApi.getAllCandidates(processId);
+                    const candidateIds = all.map(c => c.id);
+                    const [columnValuesMap, historyByCandidate] = await Promise.all([
                         bulkCandidatesApi.loadAllBulkColumnValues(processId),
+                        bulkCandidatesApi.loadCandidateHistoryByIds(candidateIds),
                     ]);
                     for (const c of all) {
                         const columnRow = columnValuesMap[c.id] || {};
-                        const mapped = enrichBulkCandidateForDashboard(c, process, columnRow);
+                        const withHistory: typeof c = {
+                            ...c,
+                            history: historyByCandidate[c.id] ?? [],
+                        };
+                        const mapped = enrichBulkCandidateForDashboard(withHistory, process, columnRow);
                         pool.push(mapped);
                         fields[c.id] = bulkDashboardFieldExtrasFromCandidate(mapped);
                         summaries[c.id] = {
