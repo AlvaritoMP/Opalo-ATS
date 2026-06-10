@@ -126,24 +126,36 @@ const ChartContainer: React.FC<{
     hasData: boolean;
     className?: string;
     height?: number;
-}> = ({ title, description, children, hasData, className = '', height = 280 }) => (
-    <div className={`bg-white p-4 md:p-6 rounded-xl border border-gray-200 shadow-sm min-w-0 ${className}`}>
+    /** Contenido a altura completa sin Recharts (p. ej. mapa SVG) */
+    fillContent?: boolean;
+}> = ({ title, description, children, hasData, className = '', height = 280, fillContent = false }) => (
+    <div className={`bg-white p-4 md:p-6 rounded-xl border border-gray-200 shadow-sm min-w-0 flex flex-col ${className}`}>
         <h2 className="text-lg md:text-xl font-semibold text-gray-800">{title}</h2>
         {description && <p className="text-xs md:text-sm text-gray-500 mt-1 mb-3">{description}</p>}
         {!description && <div className="mb-3 md:mb-4" />}
         {hasData ? (
-            <MeasuredChartArea height={height}>
-                {({ width, height: chartHeight }) =>
-                    React.Children.map(children, child =>
+            fillContent ? (
+                <div className="flex-1 min-h-0" style={{ minHeight: height }}>
+                    {React.Children.map(children, child =>
                         React.isValidElement(child)
-                            ? React.cloneElement(child as React.ReactElement<{ width?: number; height?: number }>, {
-                                width,
-                                height: chartHeight,
-                            })
+                            ? React.cloneElement(child as React.ReactElement<{ height?: number }>, { height })
                             : child
-                    )
-                }
-            </MeasuredChartArea>
+                    )}
+                </div>
+            ) : (
+                <MeasuredChartArea height={height}>
+                    {({ width, height: chartHeight }) =>
+                        React.Children.map(children, child =>
+                            React.isValidElement(child)
+                                ? React.cloneElement(child as React.ReactElement<{ width?: number; height?: number }>, {
+                                    width,
+                                    height: chartHeight,
+                                })
+                                : child
+                        )
+                    }
+                </MeasuredChartArea>
+            )
         ) : (
             <div className="flex items-center justify-center text-gray-500 text-sm md:text-base" style={{ height }}>
                 Sin datos para los filtros seleccionados.
@@ -1654,12 +1666,13 @@ export const Dashboard: React.FC = () => {
                 </ChartContainer>
             </div>
 
-            <div className="grid grid-cols-1 xl:grid-cols-2 gap-8 mb-8 min-w-0">
+            <div className="grid grid-cols-1 xl:grid-cols-5 gap-6 md:gap-8 mb-8 min-w-0">
                 <ChartContainer
+                    className="xl:col-span-2"
                     title="Candidatos por distrito"
                     description="Distrito de residencia. En procesos masivos, asigne «Distrito» en la clasificación de la columna correspondiente."
                     hasData={candidateDistricts.some(d => d.Candidatos > 0 && d.name !== 'Sin distrito') || candidateDistricts.some(d => d.name === 'Sin distrito' && d.Candidatos > 0)}
-                    height={Math.max(280, candidateDistricts.length * 36)}
+                    height={Math.max(420, candidateDistricts.length * 36)}
                 >
                     <BarChart data={candidateDistricts} layout="vertical" margin={{ top: 5, right: 20, left: 10, bottom: 5 }}>
                         <CartesianGrid strokeDasharray="3 3" />
@@ -1671,14 +1684,16 @@ export const Dashboard: React.FC = () => {
                 </ChartContainer>
 
                 <ChartContainer
+                    className="xl:col-span-3"
                     title="Mapa de candidatos (Lima y Callao)"
-                    description="Zona limítrofe por distrito. El número sobre cada zona indica candidatos del filtro actual; pase el cursor para ver el nombre."
+                    description="Zona limítrofe por distrito con zoom. Rueda del ratón o botones +/−; arrastre para desplazar; ícono de expandir para pantalla completa."
                     hasData={[...candidateDistrictCounts.entries()].some(
                         ([name, n]) => n > 0 && name !== 'Sin distrito' && name !== 'Otros'
                     )}
-                    height={380}
+                    height={520}
+                    fillContent
                 >
-                    <LimaDistrictMap countsByLabel={candidateDistrictCounts} height={340} />
+                    <LimaDistrictMap countsByLabel={candidateDistrictCounts} height={500} />
                 </ChartContainer>
             </div>
 
