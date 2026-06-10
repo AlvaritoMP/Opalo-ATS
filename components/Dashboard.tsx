@@ -45,6 +45,8 @@ import {
     resolveDashboardApplicationDate,
 } from '../lib/dashboardCandidatePool';
 import type { ContactSummaryCandidate } from '../lib/contactAttemptReconcile';
+import { LimaDistrictMap } from './LimaDistrictMap';
+import { normalizeDistrictLabel } from '../lib/limaDistrictMap';
 
 const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#AF19FF', '#6366f1', '#14b8a6', '#f97316'];
 
@@ -160,15 +162,7 @@ const translateSource = (source: string) => {
     }
 };
 
-const normalizeDistrictName = (raw?: string): string | null => {
-    if (!raw?.trim()) return null;
-    return raw
-        .trim()
-        .replace(/\s+/g, ' ')
-        .split(' ')
-        .map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
-        .join(' ');
-};
+const normalizeDistrictName = normalizeDistrictLabel;
 
 const isHiredInProcess = (candidate: Candidate, process?: Process): boolean => {
     const hiringStageId = resolveHiringStageId(process);
@@ -723,7 +717,7 @@ export const Dashboard: React.FC = () => {
         return Array.from(sourceMap, ([name, value]) => ({ name, value }));
     }, [filteredCandidates, processMap, bulkCandidateFields]);
 
-    const candidateDistricts = useMemo(() => {
+    const candidateDistrictCounts = useMemo(() => {
         const districtMap = new Map<string, number>();
         filteredCandidates.forEach(c => {
             const process = processMap.get(c.processId);
@@ -733,8 +727,13 @@ export const Dashboard: React.FC = () => {
             const key = district || 'Sin distrito';
             districtMap.set(key, (districtMap.get(key) || 0) + 1);
         });
-        return topNWithOthers(Array.from(districtMap.entries()), 10);
+        return districtMap;
     }, [filteredCandidates, processMap, bulkCandidateFields]);
+
+    const candidateDistricts = useMemo(
+        () => topNWithOthers([...candidateDistrictCounts.entries()], 10),
+        [candidateDistrictCounts]
+    );
 
     const candidatesByStage = useMemo(() => {
         const stageMap = new Map<string, number>();
@@ -1655,7 +1654,7 @@ export const Dashboard: React.FC = () => {
                 </ChartContainer>
             </div>
 
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8 min-w-0">
+            <div className="grid grid-cols-1 xl:grid-cols-2 gap-8 mb-8 min-w-0">
                 <ChartContainer
                     title="Candidatos por distrito"
                     description="Distrito de residencia. En procesos masivos, asigne «Distrito» en la clasificación de la columna correspondiente."
@@ -1671,7 +1670,20 @@ export const Dashboard: React.FC = () => {
                     </BarChart>
                 </ChartContainer>
 
-                <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
+                <ChartContainer
+                    title="Mapa de candidatos (Lima y Callao)"
+                    description="Zona limítrofe por distrito. El número sobre cada zona indica candidatos del filtro actual; pase el cursor para ver el nombre."
+                    hasData={[...candidateDistrictCounts.entries()].some(
+                        ([name, n]) => n > 0 && name !== 'Sin distrito' && name !== 'Otros'
+                    )}
+                    height={380}
+                >
+                    <LimaDistrictMap countsByLabel={candidateDistrictCounts} height={340} />
+                </ChartContainer>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8 min-w-0">
+                <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm lg:col-span-2">
                     <h2 className="text-xl font-semibold text-gray-800 mb-1 flex items-center">
                         <Calendar className="w-5 h-5 mr-2 text-primary-500" />
                         {getLabel('dashboard_upcoming_interviews', 'Próximas entrevistas')}
