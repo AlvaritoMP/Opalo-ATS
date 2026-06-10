@@ -704,6 +704,287 @@ function sortCategoryNames(
     return unique.sort((a, b) => sumValue(b) - sumValue(a) || a.localeCompare(b, 'es'));
 }
 
+export interface BulkStatChartDataBundle {
+    rows: BulkStatMergedRow[];
+    series: BulkStatResolvedSeries[];
+    crossTab: boolean;
+    crossTabHint?: string;
+}
+
+function customColumnForStat(columnId: string, ctx: BulkStatContext): CustomColumn | undefined {
+    if (!columnId.startsWith('custom_')) return undefined;
+    const customId = columnId.replace('custom_', '');
+    return ctx.customColumns.find(c => c.id === customId);
+}
+
+/** Etiqueta de eje X o de cruce para un candidato (fecha agrupada o categoría). */
+function resolveCrossTabPrimaryLabel(
+    candidate: BulkCandidate,
+    columnId: string,
+    ctx: BulkStatContext,
+    dateGranularity?: BulkStatDateGranularity
+): { label: string; sortKey?: number } {
+    const kind = inferValueKind(columnId, ctx.customColumns);
+    if (kind === 'date') {
+        const raw = resolveBulkStatDateRaw(candidate, columnId, ctx);
+        const parsed = parseBulkStatDateValue(raw);
+        if (!parsed) return { label: EMPTY_LABEL, sortKey: -1 };
+        const gran = dateGranularity ?? getDefaultDateGranularity(columnId);
+        const bucket = formatDateBucketLabel(parsed, gran);
+        return { label: bucket.label, sortKey: bucket.sortKey };
+    }
+    return { label: resolveBulkStatCellLabel(candidate, columnId, ctx) };
+}
+
+/** Categorías ordenadas para una columna (respeta opciones predefinidas de select). */
+function getOrderedCategoryLabels(
+    candidates: BulkCandidate[],
+    columnId: string,
+    ctx: BulkStatContext,
+    options?: { includeAllSelectOptions?: boolean }
+): string[] {
+    const col = customColumnForStat(columnId, ctx);
+
+    if (columnId === 'stage' && ctx.process?.stages?.length) {
+        const names = ctx.process.stages.map(s => s.name);
+        const hasEmpty = candidates.some(
+            c => resolveBulkStatCellLabel(c, columnId, ctx) === EMPTY_LABEL
+        );
+        return hasEmpty ? [...names, EMPTY_LABEL] : names;
+    }
+
+    if (col?.type === 'select' && col.options?.length) {
+        const ordered = [...col.options];
+        const seen = new Set<string>(ordered);
+        let hasEmpty = false;
+        for (const c of candidates) {
+            const label = resolveBulkStatCellLabel(c, columnId, ctx);
+            if (label === EMPTY_LABEL) {
+                hasEmpty = true;
+            } else if (!seen.has(label)) {
+                ordered.push(label);
+                seen.add(label);
+            }
+        }
+        if (hasEmpty && !seen.has(EMPTY_LABEL)) ordered.push(EMPTY_LABEL);
+        return ordered;
+    }
+
+    if (col?.type === 'checkbox') {
+        const hasEmpty = candidates.some(
+            c => resolveBulkStatCellLabel(c, columnId, ctx) === EMPTY_LABEL
+        );
+        return hasEmpty ? ['Sí', 'No', EMPTY_LABEL] : ['Sí', 'No'];
+    }
+
+    const counts = new Map<string, number>();
+    for (const c of candidates) {
+        const label = resolveBulkStatCellLabel(c, columnId, ctx);
+        counts.set(label, (counts.get(label) ?? 0) + 1);
+    }
+
+    let entries = [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], 'es'));
+
+    if (options?.includeAllSelectOptions === false && entries.length > MAX_CATEGORIES) {
+        const top = entries.slice(0, MAX_CATEGORIES - 1);
+        const rest = entries.slice(MAX_CATEGORIES - 1).reduce((sum, [, v]) => sum + v, 0);
+        entries = rest > 0 ? [...top, [OTHER_LABEL, rest] as [string, number]] : top;
+    }
+
+    return entries.map(([name]) => name);
+}
+
+/**
+ * Cruce de columnas: eje X = primera serie; barras = valores de la segunda columna
+ * (p. ej. Speech × Asistencia).
+ */
+export function shouldUseCrossTabMerge(
+    chart: BulkProcessStatChart,
+    columnOptions: BulkStatColumnOption[]
+): boolean {
+    if (chart.chartType === 'pie') return false;
+    const series = getChartSeries(chart);
+    if (series.length < 2) return false;
+
+    const primary = columnOptions.find(c => c.id === series[0].columnId);
+    const secondary = columnOptions.find(c => c.id === series[1].columnId);
+    if (!primary || !secondary) return false;
+
+    const primaryOk = primary.valueKind === 'categorical' || primary.valueKind === 'date';
+    return primaryOk && secondary.valueKind === 'categorical';
+}
+
+function buildCrossTabChartData(
+    candidates: BulkCandidate[],
+    chart: BulkProcessStatChart,
+    resolvedSeries: BulkStatResolvedSeries[],
+    ctx: BulkStatContext,
+    columnOptions: BulkStatColumnOption[],
+    colorPalette: string[]
+): BulkStatChartDataBundle {
+    const primarySeries = resolvedSeries[0];
+    const secondarySeries = resolvedSeries[1];
+    const primaryColumnId = primarySeries.columnId;
+    const secondaryColumnId = secondarySeries.columnId;
+    const dateGranularity = resolveChartDateGranularity(chart, columnOptions);
+    const primaryKind = inferValueKind(primaryColumnId, ctx.customColumns);
+
+    const primaryGranularity =
+        primaryKind === 'date'
+            ? (dateGranularity ?? getDefaultDateGranularity(primaryColumnId))
+            : undefined;
+
+    let primaryCategories: string[];
+    if (primaryKind === 'date') {
+        const seen = new Map<string, number>();
+        for (const c of candidates) {
+            const { label, sortKey } = resolveCrossTabPrimaryLabel(
+                c,
+                primaryColumnId,
+                ctx,
+                primaryGranularity
+            );
+            if (!seen.has(label)) seen.set(label, sortKey ?? -1);
+        }
+        primaryCategories = [...seen.entries()]
+            .sort((a, b) => a[1] - b[1] || a[0].localeCompare(b[0], 'es'))
+            .map(([name]) => name);
+    } else {
+        primaryCategories = getOrderedCategoryLabels(candidates, primaryColumnId, ctx, {
+            includeAllSelectOptions: true,
+        });
+    }
+    const secondaryCategories = getOrderedCategoryLabels(candidates, secondaryColumnId, ctx);
+
+    const crossSeries: BulkStatResolvedSeries[] = secondaryCategories.map((cat, i) => ({
+        id: `${secondarySeries.id}_x_${i}`,
+        columnId: secondaryColumnId,
+        label: cat,
+        color: colorPalette[i % colorPalette.length],
+        dataKey: `x_${i}`,
+    }));
+
+    const counts = new Map<string, Map<string, number>>();
+    const sortKeys = new Map<string, number>();
+
+    for (const candidate of candidates) {
+        const { label: primaryLabel, sortKey } = resolveCrossTabPrimaryLabel(
+            candidate,
+            primaryColumnId,
+            ctx,
+            primaryGranularity
+        );
+        const secondaryLabel = resolveBulkStatCellLabel(candidate, secondaryColumnId, ctx);
+
+        if (!counts.has(primaryLabel)) counts.set(primaryLabel, new Map());
+        const inner = counts.get(primaryLabel)!;
+        inner.set(secondaryLabel, (inner.get(secondaryLabel) ?? 0) + 1);
+
+        if (sortKey !== undefined && !sortKeys.has(primaryLabel)) {
+            sortKeys.set(primaryLabel, sortKey);
+        }
+    }
+
+    const primaryOrder = new Map<string, number>();
+    primaryCategories.forEach((name, idx) => primaryOrder.set(name, idx));
+    for (const name of counts.keys()) {
+        if (!primaryOrder.has(name)) primaryOrder.set(name, primaryCategories.length + primaryOrder.size);
+    }
+
+    const rowByName = new Map<string, BulkStatMergedRow>();
+
+    const ensureRow = (name: string): BulkStatMergedRow => {
+        let row = rowByName.get(name);
+        if (!row) {
+            row = { name };
+            crossSeries.forEach((s, i) => {
+                row![s.dataKey] = 0;
+            });
+            if (sortKeys.has(name)) row._sortKey = sortKeys.get(name);
+            rowByName.set(name, row);
+        }
+        return row;
+    };
+
+    for (const primaryName of primaryOrder.keys()) {
+        ensureRow(primaryName);
+    }
+
+    for (const [primaryName, inner] of counts) {
+        const row = ensureRow(primaryName);
+        secondaryCategories.forEach((cat, i) => {
+            row[crossSeries[i].dataKey] = inner.get(cat) ?? 0;
+        });
+    }
+
+    let orderedNames: string[];
+    if (primaryKind === 'date') {
+        const primaryDataKey = crossSeries[0]?.dataKey ?? 'x_0';
+        orderedNames = sortCategoryNames(
+            [...rowByName.keys()],
+            rowByName,
+            primaryDataKey,
+            chart.sortBy
+        );
+    } else if (chart.sortBy === 'valueDesc' || chart.sortBy === 'valueAsc') {
+        const primaryDataKey = crossSeries[0]?.dataKey ?? 'x_0';
+        orderedNames = sortCategoryNames(
+            [...rowByName.keys()],
+            rowByName,
+            primaryDataKey,
+            chart.sortBy
+        );
+    } else {
+        const extras = [...rowByName.keys()].filter(n => !primaryOrder.has(n));
+        extras.sort((a, b) => a.localeCompare(b, 'es'));
+        orderedNames = [
+            ...primaryCategories.filter(n => rowByName.has(n)),
+            ...extras,
+        ];
+        for (const name of rowByName.keys()) {
+            if (!orderedNames.includes(name)) orderedNames.push(name);
+        }
+    }
+
+    const primaryCol = columnOptions.find(c => c.id === primaryColumnId);
+    const secondaryCol = columnOptions.find(c => c.id === secondaryColumnId);
+    const extraSeries = resolvedSeries.length > 2 ? resolvedSeries.length - 2 : 0;
+
+    let crossTabHint =
+        `Cruce: cada categoría del eje X es «${primaryCol?.label ?? primaryColumnId}»; ` +
+        `las barras muestran cuántos candidatos tienen cada valor de «${secondaryCol?.label ?? secondaryColumnId}» dentro de esa categoría.`;
+    if (extraSeries > 0) {
+        crossTabHint += ` Solo se cruza con la 2.ª serie (${extraSeries} serie(s) adicional(es) omitida(s)).`;
+    }
+
+    return {
+        rows: orderedNames.map(name => rowByName.get(name)!),
+        series: crossSeries,
+        crossTab: true,
+        crossTabHint,
+    };
+}
+
+export function resolveBulkStatChartData(
+    candidates: BulkCandidate[],
+    chart: BulkProcessStatChart,
+    columnOptions: BulkStatColumnOption[],
+    colorPalette: string[],
+    ctx: BulkStatContext
+): BulkStatChartDataBundle {
+    const baseResolved = resolveChartSeries(chart, columnOptions, colorPalette);
+
+    if (shouldUseCrossTabMerge(chart, columnOptions)) {
+        return buildCrossTabChartData(candidates, chart, baseResolved, ctx, columnOptions, colorPalette);
+    }
+
+    return {
+        rows: mergeBulkStatSeriesData(candidates, chart, baseResolved, ctx, columnOptions),
+        series: baseResolved,
+        crossTab: false,
+    };
+}
+
 export function mergeBulkStatSeriesData(
     candidates: BulkCandidate[],
     chart: BulkProcessStatChart,
@@ -791,10 +1072,18 @@ export function computeNumericAxisDomain(
 
 export function getStatChartTitle(
     chart: BulkProcessStatChart,
-    columnOptions: BulkStatColumnOption[]
+    columnOptions: BulkStatColumnOption[],
+    options?: { crossTab?: boolean }
 ): string {
     if (chart.title?.trim()) return chart.title.trim();
     const series = getChartSeries(chart);
+    if (series.length > 1 && options?.crossTab) {
+        const prim = columnOptions.find(c => c.id === series[0].columnId);
+        const sec = columnOptions.find(c => c.id === series[1].columnId);
+        const p = series[0].label?.trim() || prim?.label || series[0].columnId;
+        const s = series[1].label?.trim() || sec?.label || series[1].columnId;
+        return `${p} × ${s}`;
+    }
     if (series.length > 1) {
         const labels = series
             .map(s => {

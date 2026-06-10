@@ -45,8 +45,8 @@ import {
     getBulkStatChartableColumns,
     getStatChartTitle,
     getChartSeries,
-    mergeBulkStatSeriesData,
-    resolveChartSeries,
+    resolveBulkStatChartData,
+    shouldUseCrossTabMerge,
     computeNumericAxisDomain,
     chartHasDateColumn,
     resolveChartDateGranularity,
@@ -525,23 +525,30 @@ export const BulkProcessStatsModal: React.FC<Props> = ({
                 merged: BulkStatMergedRow[];
                 resolved: BulkStatResolvedSeries[];
                 pie: { name: string; value: number }[];
+                crossTab: boolean;
+                crossTabHint?: string;
             }
         >();
         for (const chart of charts) {
-            const resolved = resolveChartSeries(chart, columnOptions, CHART_COLORS);
             const primaryColumn = getChartSeries(chart)[0]?.columnId ?? chart.columnId;
             const dateGranularity = resolveChartDateGranularity(chart, columnOptions);
             const pie = aggregateBulkStatData(candidatePool, primaryColumn, statContext, {
                 dateGranularity,
             });
-            const merged = mergeBulkStatSeriesData(
+            const bundle = resolveBulkStatChartData(
                 candidatePool,
                 chart,
-                resolved,
-                statContext,
-                columnOptions
+                columnOptions,
+                CHART_COLORS,
+                statContext
             );
-            map.set(chart.id, { merged, resolved, pie });
+            map.set(chart.id, {
+                merged: bundle.rows,
+                resolved: bundle.series,
+                pie,
+                crossTab: bundle.crossTab,
+                crossTabHint: bundle.crossTabHint,
+            });
         }
         return map;
     }, [charts, candidatePool, statContext, columnOptions]);
@@ -715,10 +722,13 @@ export const BulkProcessStatsModal: React.FC<Props> = ({
                             const mergedData = bundle?.merged ?? [];
                             const resolvedSeries = bundle?.resolved ?? [];
                             const pieData = bundle?.pie ?? [];
-                            const title = getStatChartTitle(chart, columnOptions);
+                            const title = getStatChartTitle(chart, columnOptions, {
+                                crossTab: bundle?.crossTab,
+                            });
                             const seriesList = getChartSeries(chart);
                             const isPie = chart.chartType === 'pie';
                             const hasDateColumn = chartHasDateColumn(chart, columnOptions);
+                            const isCrossTab = bundle?.crossTab ?? false;
 
                             return (
                                 <div
@@ -773,7 +783,11 @@ export const BulkProcessStatsModal: React.FC<Props> = ({
                                     <div className="space-y-2">
                                         <div className="flex items-center justify-between gap-2">
                                             <label className="text-xs font-medium text-gray-600">
-                                                {isPie ? 'Columna' : 'Series de datos'}
+                                                {isPie
+                                                    ? 'Columna'
+                                                    : isCrossTab
+                                                      ? 'Columnas del cruce'
+                                                      : 'Series de datos'}
                                             </label>
                                             {!isPie && (
                                                 <button
@@ -795,7 +809,13 @@ export const BulkProcessStatsModal: React.FC<Props> = ({
                                                 <div className="w-3 h-3 rounded-full flex-shrink-0 mb-2" style={{ backgroundColor: resolvedSeries[idx]?.color ?? CHART_COLORS[idx % CHART_COLORS.length] }} />
                                                 <div className="flex-1 min-w-[140px]">
                                                     <label className="block text-[11px] text-gray-500 mb-0.5">
-                                                        Columna
+                                                        {isCrossTab
+                                                            ? idx === 0
+                                                                ? 'Eje X (categoría base)'
+                                                                : idx === 1
+                                                                  ? 'Cruce (valores en barras)'
+                                                                  : 'Columna'
+                                                            : 'Columna'}
                                                     </label>
                                                     <select
                                                         value={series.columnId}
@@ -851,6 +871,20 @@ export const BulkProcessStatsModal: React.FC<Props> = ({
                                                 El gráfico circular usa solo la primera serie.
                                             </p>
                                         )}
+                                        {isCrossTab && bundle?.crossTabHint && (
+                                            <p className="text-xs text-indigo-800 bg-indigo-50 border border-indigo-100 px-2 py-1.5 rounded">
+                                                {bundle.crossTabHint}
+                                            </p>
+                                        )}
+                                        {!isCrossTab &&
+                                            seriesList.length > 1 &&
+                                            shouldUseCrossTabMerge(chart, columnOptions) === false && (
+                                                <p className="text-xs text-gray-600 bg-gray-50 px-2 py-1 rounded">
+                                                    Las series se superponen por etiqueta del eje X. Para cruzar dos
+                                                    columnas categóricas (p. ej. Speech × Asistencia), use columnas de
+                                                    tipo lista o texto.
+                                                </p>
+                                            )}
                                     </div>
 
                                     {hasDateColumn && (
