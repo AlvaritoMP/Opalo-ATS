@@ -1229,8 +1229,8 @@ export const Dashboard: React.FC = () => {
                         <h2 className="text-xl font-semibold text-gray-800 mb-1">Canales de atención</h2>
                         <p className="text-sm text-gray-500">
                             Uso y efectividad de llamadas, WhatsApp y correo. Cada canal incluye gráficos de
-                            intentos totales, fallidos y efectivos. Los conteos coinciden con la columna de contacto
-                            de la tabla; el rango semanal/mensual/anual aplica a la fecha del intento, no a la
+                            intentos totales, fallidos y efectivos (total = fallidos + efectivos, incluye marcar
+                            «Interesado»). El rango semanal/mensual/anual aplica a la fecha del intento, no a la
                             fecha de postulación del candidato.
                         </p>
                     </div>

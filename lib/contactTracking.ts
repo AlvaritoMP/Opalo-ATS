@@ -42,7 +42,8 @@ export interface ContactSummary {
 
 export const CONTACT_COOLDOWN_MS = 10 * 60 * 1000;
 
-export const UNREACHABLE_AFTER_CALL_ATTEMPTS = 3;
+/** Inubicable automático cuando los intentos fallidos en un canal superan este número (> 10 → desde el 11.º). */
+export const UNREACHABLE_ATTEMPT_THRESHOLD = 10;
 
 export const CONTACT_STATUS_META: Record<
     ContactStatus,
@@ -216,16 +217,19 @@ function formatHistoryTime(iso: string): string {
     });
 }
 
+function isFailedContactOutcome(outcome: ContactOutcome): boolean {
+    return outcome === 'no_answer' || outcome === 'busy' || outcome === 'no_response';
+}
+
 export function shouldAutoMarkUnreachable(
     status: ContactStatus,
     attemptCount: number,
-    channel: ContactChannel,
+    _channel: ContactChannel,
     outcome: ContactOutcome
 ): boolean {
     return (
-        channel === 'call' &&
-        (outcome === 'no_answer' || outcome === 'busy') &&
-        attemptCount >= UNREACHABLE_AFTER_CALL_ATTEMPTS &&
+        isFailedContactOutcome(outcome) &&
+        attemptCount > UNREACHABLE_ATTEMPT_THRESHOLD &&
         status !== 'inubicable' &&
         status !== 'interesado' &&
         status !== 'no_interesado'

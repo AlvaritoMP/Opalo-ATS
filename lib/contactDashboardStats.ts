@@ -130,14 +130,25 @@ export function isFailedContactVolumeAttempt(
     return isChannelVolumeAttempt(attempt, channel) && !isEffectiveContactAttempt(attempt);
 }
 
+/** Intentos que entran en el gráfico «Total» = fallidos ∪ efectivos (sin doble conteo). */
+export function isTotalContactVolumeMetric(
+    attempt: Pick<ContactAttempt, 'channel' | 'outcome' | 'statusAfter' | 'notes'>,
+    channel: ContactAttemptChannel
+): boolean {
+    return (
+        isFailedContactVolumeAttempt(attempt, channel) ||
+        isEffectiveContactAttemptForChannel(attempt, channel)
+    );
+}
+
 export function matchesContactVolumeMetric(
     attempt: ContactAttempt,
     channel: ContactAttemptChannel,
     metric: ContactVolumeMetric
 ): boolean {
-    if (metric === 'total') return isChannelVolumeAttempt(attempt, channel);
     if (metric === 'effective') return isEffectiveContactAttemptForChannel(attempt, channel);
-    return isFailedContactVolumeAttempt(attempt, channel);
+    if (metric === 'failed') return isFailedContactVolumeAttempt(attempt, channel);
+    return isTotalContactVolumeMetric(attempt, channel);
 }
 
 const LIMA_TZ = 'America/Lima';
@@ -381,7 +392,10 @@ function applyInterestedFromContactSummaries(
             alreadyCounted.add(dedupeKey);
 
             const bucket = channelTotals.get(channel);
-            if (bucket) bucket.effective += 1;
+            if (bucket) {
+                bucket.effective += 1;
+                bucket.total += 1;
+            }
         }
     }
 }
@@ -407,19 +421,17 @@ export function computeContactDashboardStats(
         const bucket = channelTotals.get(ch);
         if (!bucket) continue;
 
-        if (isChannelVolumeAttempt(a, ch)) {
-            bucket.total += 1;
-        }
         if (isEffectiveContactAttemptForChannel(a, ch)) {
             bucket.effective += 1;
+        }
+        if (isTotalContactVolumeMetric(a, ch)) {
+            bucket.total += 1;
         }
     }
 
     applyInterestedFromContactSummaries(channelTotals, contactSummaries, startKey, endKey, scoped);
 
-    const totalActions = scoped.filter(a =>
-        isChannelVolumeAttempt(a, a.channel as ContactAttemptChannel)
-    ).length;
+    const totalActions = [...channelTotals.values()].reduce((sum, b) => sum + b.total, 0);
 
     let mostUsedChannel: ContactChannelDashboardStats['mostUsedChannel'] = null;
     let maxVolume = 0;
