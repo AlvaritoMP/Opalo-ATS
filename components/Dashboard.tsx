@@ -16,7 +16,7 @@ import {
 } from '../lib/contactDashboardStats';
 import {
     computeContactologyAdvancedStats,
-    resolveCandidateRegisteredAt,
+    resolveCandidateRecordCreatedAt,
 } from '../lib/contactologyAnalytics';
 import { computeRegistrationCreationStats } from '../lib/registrationCreationStats';
 import {
@@ -1067,15 +1067,23 @@ export const Dashboard: React.FC = () => {
             .map(c => ({
                 id: c.id,
                 processId: c.processId,
-                registeredAt: resolveCandidateRegisteredAt(c),
+                recordCreatedAt: resolveCandidateRecordCreatedAt(c),
             }));
         return computeContactologyAdvancedStats(
             enrichedContactAttempts,
+            enrichedContactAttempts,
             candidateInputs,
+            contactSummariesForStats,
             contactConsultantPeriod,
             contactStatsCandidateIds
         );
-    }, [enrichedContactAttempts, analyticsCandidates, contactConsultantPeriod, contactStatsCandidateIds]);
+    }, [
+        enrichedContactAttempts,
+        analyticsCandidates,
+        contactConsultantPeriod,
+        contactStatsCandidateIds,
+        contactSummariesForStats,
+    ]);
 
     const registrationCreationStats = useMemo(
         () =>
@@ -1084,6 +1092,9 @@ export const Dashboard: React.FC = () => {
                     id: c.id,
                     createdAt: c.createdAt,
                     firstApplicationAt: c.firstApplicationAt,
+                    applicationStartedDate: c.applicationStartedDate,
+                    registrationOrigin: c.registrationOrigin,
+                    applicationCount: c.applicationCount,
                 }))
             ),
         [filteredCandidates]
@@ -1415,26 +1426,31 @@ export const Dashboard: React.FC = () => {
                         <div className={`${contactStats.totalActions > 0 ? 'mt-8 pt-6 border-t border-gray-200' : 'mt-2'}`}>
                             <h3 className="text-lg font-semibold text-gray-800 mb-1">Análisis avanzado de contactología</h3>
                             <p className="text-sm text-gray-500 mb-4">
-                                Métricas de respuesta del candidato, tiempos de reacción e intentos hasta lograr contacto
-                                efectivo (cuando el candidato contesta o responde). Periodo: {contactologyAdvanced.periodLabel.toLowerCase()}.
+                                Métricas de respuesta del candidato e intentos hasta lograr contacto. Los ratios de
+                                interés usan estados «Interesado» / «No interesado» (intentos + columnas de contacto).
+                                Periodo de intentos: {contactologyAdvanced.periodLabel.toLowerCase()}.
                             </p>
 
                             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
                                 <StatCard
                                     icon={Clock}
                                     title="Tiempo al 1.er contacto"
-                                    value={contactologyAdvanced.avgRegistrationToFirstContactLabel}
-                                    subtitle="Promedio desde origen del registro hasta el primer intento"
+                                    value={contactologyAdvanced.weeklyFirstContact.currentWeekAvgLabel}
+                                    subtitle={
+                                        contactologyAdvanced.weeklyFirstContact.currentWeekRegistrationCount > 0
+                                            ? `Semana ${contactologyAdvanced.weeklyFirstContact.currentWeekLabel} · ${contactologyAdvanced.weeklyFirstContact.currentWeekContactedCount} de ${contactologyAdvanced.weeklyFirstContact.currentWeekRegistrationCount} registros contactados`
+                                            : 'Sin registros nuevos esta semana'
+                                    }
                                     color="bg-blue-500"
                                 />
                                 <StatCard
                                     icon={Zap}
                                     title="Reacción más rápida"
-                                    value={contactologyAdvanced.fastestFirstContactConsultant?.userName ?? 'N/D'}
+                                    value={contactologyAdvanced.weeklyFirstContact.fastestFirstContactConsultant?.userName ?? 'N/D'}
                                     subtitle={
-                                        contactologyAdvanced.fastestFirstContactConsultant
-                                            ? `${contactologyAdvanced.fastestFirstContactConsultant.avgHours} h prom. · ${contactologyAdvanced.fastestFirstContactConsultant.sampleCount} caso${contactologyAdvanced.fastestFirstContactConsultant.sampleCount !== 1 ? 's' : ''}`
-                                            : 'Sin primer contacto atribuido'
+                                        contactologyAdvanced.weeklyFirstContact.fastestFirstContactConsultant
+                                            ? `${contactologyAdvanced.weeklyFirstContact.fastestFirstContactConsultant.avgHours} h prom. · registros de esta semana`
+                                            : 'Sin primer contacto atribuido esta semana'
                                     }
                                     color="bg-violet-500"
                                 />
@@ -1458,9 +1474,9 @@ export const Dashboard: React.FC = () => {
                                             : 'N/D'
                                     }
                                     subtitle={
-                                        contactologyAdvanced.totalEffectiveResponses > 0
-                                            ? `${contactologyAdvanced.interestedResponseCount} de ${contactologyAdvanced.totalEffectiveResponses} contactos con respuesta`
-                                            : 'Sin respuestas registradas'
+                                        contactologyAdvanced.totalClassifiedResponses > 0
+                                            ? `${contactologyAdvanced.interestedResponseCount} de ${contactologyAdvanced.totalClassifiedResponses} clasificados con interés`
+                                            : 'Sin contactos clasificados como interesado / no interesado'
                                     }
                                     color="bg-emerald-500"
                                 />
@@ -1473,12 +1489,76 @@ export const Dashboard: React.FC = () => {
                                             : 'N/D'
                                     }
                                     subtitle={
-                                        contactologyAdvanced.totalEffectiveResponses > 0
-                                            ? `${contactologyAdvanced.notInterestedResponseCount} de ${contactologyAdvanced.totalEffectiveResponses} contactos con respuesta`
-                                            : 'Sin respuestas registradas'
+                                        contactologyAdvanced.totalClassifiedResponses > 0
+                                            ? `${contactologyAdvanced.notInterestedResponseCount} de ${contactologyAdvanced.totalClassifiedResponses} clasificados sin interés`
+                                            : 'Sin contactos clasificados como interesado / no interesado'
                                     }
                                     color="bg-red-500"
                                 />
+                            </div>
+
+                            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
+                                <ChartContainer
+                                    title="Evolución semana en curso"
+                                    description="Promedio acumulado de tiempo al primer contacto para registros creados en la semana actual (cohorte por fecha de alta)."
+                                    hasData={contactologyAdvanced.weeklyFirstContact.currentWeekDailyTrend.some(d => d.contactedCumulative > 0)}
+                                    height={260}
+                                >
+                                    <LineChart
+                                        data={contactologyAdvanced.weeklyFirstContact.currentWeekDailyTrend.map(d => ({
+                                            ...d,
+                                            horas: d.avgHours ?? 0,
+                                        }))}
+                                        margin={{ top: 10, right: 20, left: 0, bottom: 5 }}
+                                    >
+                                        <CartesianGrid strokeDasharray="3 3" />
+                                        <XAxis dataKey="label" tick={{ fontSize: 10 }} />
+                                        <YAxis allowDecimals={false} unit=" h" tick={{ fontSize: 10 }} />
+                                        <Tooltip
+                                            formatter={(value: number, _name, item) => [
+                                                item.payload.contactedCumulative > 0
+                                                    ? `${item.payload.avgLabel} (${item.payload.contactedCumulative}/${item.payload.registrationsCumulative} contactados)`
+                                                    : 'Sin contactos aún',
+                                                'Promedio',
+                                            ]}
+                                        />
+                                        <Line type="monotone" dataKey="horas" name="Horas" stroke="#2563eb" strokeWidth={2} dot={{ r: 3 }} />
+                                    </LineChart>
+                                </ChartContainer>
+
+                                <ChartContainer
+                                    title="Tiempo al 1.er contacto por semana"
+                                    description="Promedio por cohorte semanal de registros generados. Semanas cerradas vs. semana en curso (parcial)."
+                                    hasData={contactologyAdvanced.weeklyFirstContact.weeklyTrend.some(w => w.contactedCount > 0)}
+                                    height={260}
+                                >
+                                    <BarChart
+                                        data={contactologyAdvanced.weeklyFirstContact.weeklyTrend.map(w => ({
+                                            ...w,
+                                            horas: w.avgHours ?? 0,
+                                            name: w.isCurrent ? `${w.label}*` : w.label,
+                                        }))}
+                                        margin={{ top: 10, right: 20, left: 10, bottom: 5 }}
+                                    >
+                                        <CartesianGrid strokeDasharray="3 3" />
+                                        <XAxis dataKey="name" tick={{ fontSize: 9 }} interval={0} angle={-25} textAnchor="end" height={60} />
+                                        <YAxis allowDecimals={false} unit=" h" tick={{ fontSize: 10 }} />
+                                        <Tooltip
+                                            formatter={(value: number, _name, item) => [
+                                                item.payload.contactedCount > 0
+                                                    ? `${item.payload.avgLabel} · ${item.payload.contactedCount}/${item.payload.registrationCount} contactados`
+                                                    : `${item.payload.registrationCount} registro(s) sin contacto aún`,
+                                                item.payload.isCurrent ? 'Semana en curso' : 'Semana cerrada',
+                                            ]}
+                                        />
+                                        <Bar
+                                            dataKey="horas"
+                                            name="Horas prom."
+                                            fill="#6366f1"
+                                            radius={[4, 4, 0, 0]}
+                                        />
+                                    </BarChart>
+                                </ChartContainer>
                             </div>
 
                             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -1541,20 +1621,20 @@ export const Dashboard: React.FC = () => {
                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
                             <StatCard
                                 icon={Clock}
-                                title="Tiempo formulario → registro"
-                                value={registrationCreationStats.avgFormToRecordLabel}
-                                subtitle={
-                                    registrationCreationStats.formToRecordSampleCount > 0
-                                        ? `Promedio en ${registrationCreationStats.formToRecordSampleCount} postulación${registrationCreationStats.formToRecordSampleCount !== 1 ? 'es' : ''} con formulario`
-                                        : 'Sin datos de primera postulación'
+                                title="Latencia Tally (formulario → alta)"
+                                value={
+                                    registrationCreationStats.avgFormToRecordMinutes !== null
+                                        ? registrationCreationStats.avgFormToRecordLabel
+                                        : 'N/D'
                                 }
+                                subtitle={registrationCreationStats.formToRecordDescription}
                                 color="bg-violet-500"
                             />
                             <StatCard
                                 icon={TrendingUp}
-                                title="Intervalo entre registros"
+                                title="Intervalo entre altas"
                                 value={registrationCreationStats.avgIntervalBetweenRecordsLabel}
-                                subtitle="Tiempo promedio entre altas consecutivas en el alcance"
+                                subtitle="Tiempo promedio entre registros consecutivos según fecha de alta"
                                 color="bg-sky-500"
                             />
                             <StatCard

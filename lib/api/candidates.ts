@@ -110,6 +110,7 @@ function mapListCandidate(dbCandidate: any, extras: Partial<Candidate> = {}): Ca
         contactLockUserName: dbCandidate.contact_lock_user_name || undefined,
         contactLockUntil: dbCandidate.contact_lock_until || undefined,
         contactLockReason: dbCandidate.contact_lock_reason || undefined,
+        createdAt: dbCandidate.created_at || undefined,
         bulkColumnValues: mapBulkColumnValues(dbCandidate),
         ...extras,
     };
@@ -243,6 +244,7 @@ async function dbToCandidate(dbCandidate: any): Promise<Candidate> {
         contactLockUserName: dbCandidate.contact_lock_user_name || undefined,
         contactLockUntil: dbCandidate.contact_lock_until || undefined,
         contactLockReason: dbCandidate.contact_lock_reason || undefined,
+        createdAt: dbCandidate.created_at || undefined,
         bulkColumnValues: mapBulkColumnValues(dbCandidate),
     };
 }

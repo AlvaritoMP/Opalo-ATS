@@ -191,7 +191,7 @@ function weekdayIndexLima(refDate: Date): number {
     return LIMA_WEEKDAY[wd] ?? 0;
 }
 
-function startOfWeekMondayLimaKey(refDate = new Date()): string {
+export function startOfWeekMondayLimaKey(refDate = new Date()): string {
     const todayKey = formatDateKeyLima(refDate);
     return addDaysToDateKey(todayKey, -weekdayIndexLima(refDate));
 }

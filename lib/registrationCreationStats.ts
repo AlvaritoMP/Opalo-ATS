@@ -20,19 +20,39 @@ export interface RegistrationCreationCandidateInput {
     id: string;
     createdAt?: string;
     firstApplicationAt?: string;
+    applicationStartedDate?: string;
+    registrationOrigin?: 'formulario' | 'manual' | 'masivo';
+    applicationCount?: number;
 }
 
 export interface RegistrationCreationStats {
     totalWithTimestamp: number;
-    /** Tiempo promedio entre postulación (formulario) y alta en sistema, cuando aplica */
+    formSubmissionCount: number;
+    /** Solo postulaciones Tally/formulario con first_application_at y created_at */
     avgFormToRecordMinutes: number | null;
     avgFormToRecordLabel: string;
     formToRecordSampleCount: number;
-    /** Intervalo promedio entre registros consecutivos (todos los orígenes) */
+    formToRecordDescription: string;
     avgIntervalBetweenRecordsMinutes: number | null;
     avgIntervalBetweenRecordsLabel: string;
     timeBandDistribution: { band: RegistrationTimeBand; label: string; count: number; pct: number }[];
     peakTimeBand: { band: RegistrationTimeBand; label: string; count: number } | null;
+}
+
+/** Timestamp usado para franjas horarias y tiempos entre altas. */
+export function resolveRecordCreatedAt(candidate: RegistrationCreationCandidateInput): string | undefined {
+    return (
+        candidate.createdAt ||
+        candidate.firstApplicationAt ||
+        candidate.applicationStartedDate ||
+        undefined
+    );
+}
+
+function isFormSubmission(candidate: RegistrationCreationCandidateInput): boolean {
+    if (candidate.registrationOrigin === 'formulario') return true;
+    if (candidate.firstApplicationAt && (candidate.applicationCount ?? 0) > 0) return true;
+    return false;
 }
 
 function getLimaHourMinute(iso: string): { hour: number; minute: number } | null {
@@ -55,9 +75,9 @@ export function classifyRegistrationTimeBand(iso: string): RegistrationTimeBand 
     const hm = getLimaHourMinute(iso);
     if (!hm) return null;
     const minutes = hm.hour * 60 + hm.minute;
-    const morningStart = 8 * 60 + 30; // 8:30
-    const afternoonStart = 15 * 60; // 15:00
-    const eveningStart = 18 * 60; // 18:00
+    const morningStart = 8 * 60 + 30;
+    const afternoonStart = 15 * 60;
+    const eveningStart = 18 * 60;
 
     if (minutes >= morningStart && minutes < afternoonStart) return 'morning';
     if (minutes >= afternoonStart && minutes < eveningStart) return 'afternoon';
@@ -77,7 +97,12 @@ function msToReadableDuration(ms: number): string {
 export function computeRegistrationCreationStats(
     candidates: RegistrationCreationCandidateInput[]
 ): RegistrationCreationStats {
-    const withCreatedAt = candidates.filter(c => c.createdAt && !Number.isNaN(new Date(c.createdAt).getTime()));
+    const withCreatedAt = candidates
+        .map(c => ({ c, createdAt: resolveRecordCreatedAt(c) }))
+        .filter(
+            (row): row is { c: RegistrationCreationCandidateInput; createdAt: string } =>
+                !!row.createdAt && !Number.isNaN(new Date(row.createdAt).getTime())
+        );
 
     const bandCounts: Record<RegistrationTimeBand, number> = {
         morning: 0,
@@ -86,8 +111,8 @@ export function computeRegistrationCreationStats(
         overnight: 0,
     };
 
-    for (const c of withCreatedAt) {
-        const band = classifyRegistrationTimeBand(c.createdAt!);
+    for (const { createdAt } of withCreatedAt) {
+        const band = classifyRegistrationTimeBand(createdAt);
         if (band) bandCounts[band] += 1;
     }
 
@@ -110,11 +135,14 @@ export function computeRegistrationCreationStats(
         }
     }
 
+    const formCandidates = withCreatedAt.filter(({ c }) => isFormSubmission(c));
+    const formSubmissionCount = formCandidates.length;
+
     const formLagMs: number[] = [];
-    for (const c of withCreatedAt) {
+    for (const { c, createdAt } of formCandidates) {
         if (!c.firstApplicationAt) continue;
         const formTs = new Date(c.firstApplicationAt).getTime();
-        const createdTs = new Date(c.createdAt!).getTime();
+        const createdTs = new Date(createdAt).getTime();
         if (Number.isNaN(formTs) || Number.isNaN(createdTs) || createdTs < formTs) continue;
         formLagMs.push(createdTs - formTs);
     }
@@ -122,8 +150,20 @@ export function computeRegistrationCreationStats(
     const avgFormToRecordMs =
         formLagMs.length > 0 ? formLagMs.reduce((s, n) => s + n, 0) / formLagMs.length : null;
 
+    let formToRecordDescription: string;
+    if (formSubmissionCount === 0) {
+        formToRecordDescription =
+            'No hay postulaciones por formulario (Tally) en el filtro. Altas manuales o masivas no tienen este dato.';
+    } else if (formLagMs.length === 0) {
+        formToRecordDescription =
+            'Hay postulaciones por formulario, pero falta first_application_at o created_at para calcular la latencia.';
+    } else {
+        formToRecordDescription =
+            'Tiempo entre la primera postulación Tally (first_application_at) y el alta en sistema (created_at).';
+    }
+
     const sortedCreated = withCreatedAt
-        .map(c => new Date(c.createdAt!).getTime())
+        .map(({ createdAt }) => new Date(createdAt).getTime())
         .filter(ts => !Number.isNaN(ts))
         .sort((a, b) => a - b);
 
@@ -137,11 +177,13 @@ export function computeRegistrationCreationStats(
 
     return {
         totalWithTimestamp,
+        formSubmissionCount,
         avgFormToRecordMinutes: avgFormToRecordMs
             ? Math.round(avgFormToRecordMs / (1000 * 60))
             : null,
         avgFormToRecordLabel: avgFormToRecordMs ? msToReadableDuration(avgFormToRecordMs) : 'N/D',
         formToRecordSampleCount: formLagMs.length,
+        formToRecordDescription,
         avgIntervalBetweenRecordsMinutes: avgIntervalMs
             ? Math.round(avgIntervalMs / (1000 * 60))
             : null,
