@@ -283,6 +283,13 @@ export type BulkStatSortBy = 'auto' | 'category' | 'valueDesc' | 'valueAsc';
 /** Agrupación temporal para columnas de fecha en el eje X */
 export type BulkStatDateGranularity = 'day' | 'week' | 'month' | 'year';
 
+/**
+ * Modo al usar varias series:
+ * - crossTab: cruce tipo Speech × Asistencia (eje X = 1.ª columna, barras = valores de la 2.ª)
+ * - overlay: superponer conteos de cada columna sobre las mismas etiquetas del eje X
+ */
+export type BulkStatSeriesMode = 'crossTab' | 'overlay';
+
 /** Configuración de un gráfico personalizado en el proceso masivo */
 export interface BulkProcessStatChart {
     id: string;
@@ -301,6 +308,8 @@ export interface BulkProcessStatChart {
     sortBy?: BulkStatSortBy;
     /** Agrupación del eje X cuando la columna es de tipo fecha */
     dateGranularity?: BulkStatDateGranularity;
+    /** Cómo combinar varias columnas (cruce vs superposición) */
+    seriesMode?: BulkStatSeriesMode;
 }
 
 /** Modo de comparación por criterio del perfil ideal */

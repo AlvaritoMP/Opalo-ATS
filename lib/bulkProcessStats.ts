@@ -21,6 +21,7 @@ import {
     BulkStatSeries,
     BulkStatSortBy,
     BulkStatDateGranularity,
+    BulkStatSeriesMode,
     IdealProfileConfig,
     Process,
 } from '../types';
@@ -794,11 +795,8 @@ function getOrderedCategoryLabels(
     return entries.map(([name]) => name);
 }
 
-/**
- * Cruce de columnas: eje X = primera serie; barras = valores de la segunda columna
- * (p. ej. Speech × Asistencia).
- */
-export function shouldUseCrossTabMerge(
+/** ¿Se puede cruzar la 1.ª y 2.ª serie (eje X × valores de la 2.ª columna)? */
+export function canUseCrossTab(
     chart: BulkProcessStatChart,
     columnOptions: BulkStatColumnOption[]
 ): boolean {
@@ -811,7 +809,33 @@ export function shouldUseCrossTabMerge(
     if (!primary || !secondary) return false;
 
     const primaryOk = primary.valueKind === 'categorical' || primary.valueKind === 'date';
-    return primaryOk && secondary.valueKind === 'categorical';
+    const secondaryOk =
+        secondary.valueKind === 'categorical' ||
+        secondary.valueKind === 'numeric' ||
+        secondary.valueKind === 'date';
+    return primaryOk && secondaryOk;
+}
+
+/** Modo efectivo al combinar series (por defecto: cruce si es posible). */
+export function resolveSeriesMode(
+    chart: BulkProcessStatChart,
+    columnOptions: BulkStatColumnOption[]
+): BulkStatSeriesMode {
+    const series = getChartSeries(chart);
+    if (series.length < 2 || chart.chartType === 'pie') return 'overlay';
+    if (chart.seriesMode === 'overlay') return 'overlay';
+    if (chart.seriesMode === 'crossTab') {
+        return canUseCrossTab(chart, columnOptions) ? 'crossTab' : 'overlay';
+    }
+    return canUseCrossTab(chart, columnOptions) ? 'crossTab' : 'overlay';
+}
+
+/** @deprecated Use resolveSeriesMode + canUseCrossTab */
+export function shouldUseCrossTabMerge(
+    chart: BulkProcessStatChart,
+    columnOptions: BulkStatColumnOption[]
+): boolean {
+    return resolveSeriesMode(chart, columnOptions) === 'crossTab';
 }
 
 function buildCrossTabChartData(
@@ -974,7 +998,7 @@ export function resolveBulkStatChartData(
 ): BulkStatChartDataBundle {
     const baseResolved = resolveChartSeries(chart, columnOptions, colorPalette);
 
-    if (shouldUseCrossTabMerge(chart, columnOptions)) {
+    if (resolveSeriesMode(chart, columnOptions) === 'crossTab') {
         return buildCrossTabChartData(candidates, chart, baseResolved, ctx, columnOptions, colorPalette);
     }
 

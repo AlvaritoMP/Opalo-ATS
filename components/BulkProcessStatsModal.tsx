@@ -37,6 +37,7 @@ import {
     BulkStatSortBy,
     BulkStatSeries,
     BulkStatDateGranularity,
+    BulkStatSeriesMode,
 } from '../types';
 import {
     aggregateBulkStatData,
@@ -46,7 +47,8 @@ import {
     getStatChartTitle,
     getChartSeries,
     resolveBulkStatChartData,
-    shouldUseCrossTabMerge,
+    canUseCrossTab,
+    resolveSeriesMode,
     computeNumericAxisDomain,
     chartHasDateColumn,
     resolveChartDateGranularity,
@@ -85,6 +87,21 @@ const DATE_GRANULARITY_OPTIONS: { id: BulkStatDateGranularity; label: string }[]
     { id: 'week', label: 'Por semana' },
     { id: 'month', label: 'Por mes' },
     { id: 'year', label: 'Por año' },
+];
+
+const SERIES_MODE_OPTIONS: { id: BulkStatSeriesMode; label: string; description: string }[] = [
+    {
+        id: 'crossTab',
+        label: 'Cruce de columnas',
+        description:
+            'Como Speech × Asistencia: el eje X muestra la 1.ª columna y cada barra/línea es un valor de la 2.ª columna dentro de esa categoría.',
+    },
+    {
+        id: 'overlay',
+        label: 'Superponer conteos',
+        description:
+            'Cada serie cuenta su propia columna y se dibuja sobre las mismas etiquetas del eje X (comparación de distribuciones).',
+    },
 ];
 
 type DataScope = 'all' | 'stage';
@@ -594,12 +611,19 @@ export const BulkProcessStatsModal: React.FC<Props> = ({
                 prev.map(c => {
                     if (c.id !== chartId) return c;
                     const current = getChartSeries(c);
+                    const effectiveMode = resolveSeriesMode(c, columnOptions);
+                    if (effectiveMode === 'crossTab' && current.length >= 2) return c;
                     const used = new Set(current.map(s => s.columnId));
                     const nextCol = columnOptions.find(col => !used.has(col.id)) ?? columnOptions[0];
                     if (!nextCol) return c;
+                    const nextSeries = [...current, createDefaultStatSeries(c.id, nextCol.id)];
+                    const draft: BulkProcessStatChart = { ...c, series: nextSeries };
+                    const useCross = canUseCrossTab(draft, columnOptions);
                     return {
                         ...c,
-                        series: [...current, createDefaultStatSeries(c.id, nextCol.id)],
+                        series: nextSeries,
+                        seriesMode: nextSeries.length >= 2 && useCross ? 'crossTab' : c.seriesMode,
+                        stacked: useCross ? false : c.stacked,
                     };
                 })
             );
@@ -728,7 +752,9 @@ export const BulkProcessStatsModal: React.FC<Props> = ({
                             const seriesList = getChartSeries(chart);
                             const isPie = chart.chartType === 'pie';
                             const hasDateColumn = chartHasDateColumn(chart, columnOptions);
+                            const effectiveSeriesMode = resolveSeriesMode(chart, columnOptions);
                             const isCrossTab = bundle?.crossTab ?? false;
+                            const crossTabAvailable = canUseCrossTab(chart, columnOptions);
 
                             return (
                                 <div
@@ -780,6 +806,51 @@ export const BulkProcessStatsModal: React.FC<Props> = ({
                                         </button>
                                     </div>
 
+                                    {!isPie && seriesList.length >= 2 && (
+                                        <div className="p-3 rounded-lg border border-teal-100 bg-teal-50/50 space-y-2">
+                                            <label className="block text-xs font-medium text-teal-900">
+                                                Modo de varias columnas
+                                            </label>
+                                            <div className="flex flex-wrap gap-2">
+                                                {SERIES_MODE_OPTIONS.map(opt => {
+                                                    const disabled =
+                                                        opt.id === 'crossTab' && !crossTabAvailable;
+                                                    return (
+                                                        <button
+                                                            key={opt.id}
+                                                            type="button"
+                                                            disabled={disabled}
+                                                            onClick={() =>
+                                                                updateChart(chart.id, {
+                                                                    seriesMode: opt.id,
+                                                                    ...(opt.id === 'crossTab'
+                                                                        ? { stacked: false }
+                                                                        : {}),
+                                                                })
+                                                            }
+                                                            className={`text-left px-3 py-2 rounded-md border text-sm max-w-md transition-colors ${
+                                                                effectiveSeriesMode === opt.id
+                                                                    ? 'border-teal-500 bg-white text-teal-900 shadow-sm'
+                                                                    : 'border-gray-200 bg-white/80 text-gray-700 hover:border-teal-300'
+                                                            } ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                                        >
+                                                            <span className="font-medium block">{opt.label}</span>
+                                                            <span className="text-[11px] text-gray-500 leading-snug">
+                                                                {opt.description}
+                                                            </span>
+                                                        </button>
+                                                    );
+                                                })}
+                                            </div>
+                                            {!crossTabAvailable && (
+                                                <p className="text-[11px] text-amber-800">
+                                                    El cruce requiere que la 1.ª columna sea categórica o de fecha y la
+                                                    2.ª sea categórica, numérica o de fecha.
+                                                </p>
+                                            )}
+                                        </div>
+                                    )}
+
                                     <div className="space-y-2">
                                         <div className="flex items-center justify-between gap-2">
                                             <label className="text-xs font-medium text-gray-600">
@@ -793,7 +864,10 @@ export const BulkProcessStatsModal: React.FC<Props> = ({
                                                 <button
                                                     type="button"
                                                     onClick={() => addSeries(chart.id)}
-                                                    disabled={seriesList.length >= columnOptions.length}
+                                                    disabled={
+                                                        seriesList.length >= columnOptions.length ||
+                                                        (isCrossTab && seriesList.length >= 2)
+                                                    }
                                                     className="inline-flex items-center gap-1 text-xs font-medium text-indigo-700 hover:text-indigo-900 disabled:opacity-50"
                                                 >
                                                     <Plus className="w-3.5 h-3.5" />
@@ -806,7 +880,16 @@ export const BulkProcessStatsModal: React.FC<Props> = ({
                                                 key={series.id}
                                                 className="flex flex-wrap items-end gap-2 p-2 rounded-lg bg-gray-50 border border-gray-100"
                                             >
-                                                <div className="w-3 h-3 rounded-full flex-shrink-0 mb-2" style={{ backgroundColor: resolvedSeries[idx]?.color ?? CHART_COLORS[idx % CHART_COLORS.length] }} />
+                                                {!isCrossTab && (
+                                                    <div
+                                                        className="w-3 h-3 rounded-full flex-shrink-0 mb-2"
+                                                        style={{
+                                                            backgroundColor:
+                                                                resolvedSeries[idx]?.color ??
+                                                                CHART_COLORS[idx % CHART_COLORS.length],
+                                                        }}
+                                                    />
+                                                )}
                                                 <div className="flex-1 min-w-[140px]">
                                                     <label className="block text-[11px] text-gray-500 mb-0.5">
                                                         {isCrossTab
@@ -833,7 +916,7 @@ export const BulkProcessStatsModal: React.FC<Props> = ({
                                                         ))}
                                                     </select>
                                                 </div>
-                                                {!isPie && (
+                                                {!isPie && !isCrossTab && (
                                                     <div className="flex-1 min-w-[120px]">
                                                         <label className="block text-[11px] text-gray-500 mb-0.5">
                                                             Etiqueta serie
@@ -878,11 +961,11 @@ export const BulkProcessStatsModal: React.FC<Props> = ({
                                         )}
                                         {!isCrossTab &&
                                             seriesList.length > 1 &&
-                                            shouldUseCrossTabMerge(chart, columnOptions) === false && (
+                                            effectiveSeriesMode === 'overlay' && (
                                                 <p className="text-xs text-gray-600 bg-gray-50 px-2 py-1 rounded">
-                                                    Las series se superponen por etiqueta del eje X. Para cruzar dos
-                                                    columnas categóricas (p. ej. Speech × Asistencia), use columnas de
-                                                    tipo lista o texto.
+                                                    Modo superposición: cada columna aporta sus propias etiquetas al
+                                                    eje X. Para un cruce tipo Speech × Asistencia, elija{' '}
+                                                    <strong>Cruce de columnas</strong> arriba.
                                                 </p>
                                             )}
                                     </div>
