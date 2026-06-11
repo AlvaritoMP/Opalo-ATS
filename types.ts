@@ -426,6 +426,8 @@ export interface Candidate {
     applicationCount?: number;
     /** Primera postulación; createdAt refleja la última */
     firstApplicationAt?: string;
+    /** Fecha de alta / última actualización del registro en sistema */
+    createdAt?: string;
     criticalStageReviewedAt?: string; // Fecha en que un usuario revisó el candidato en etapa crítica (para ocultar alertas)
     metadataIa?: string; // Resumen/metadata generado por IA (OpenAI)
     scoreIa?: number; // Score/puntuación generado por IA

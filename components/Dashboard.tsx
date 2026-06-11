@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { useAppState } from '../App';
-import { Briefcase, Users, FileText, CheckCircle, Calendar, Grid3x3, Phone, TrendingUp, UserCheck, Headphones, UserPlus, MessageCircle, Mail } from 'lucide-react';
+import { Briefcase, Users, FileText, CheckCircle, Calendar, Grid3x3, Phone, TrendingUp, UserCheck, Headphones, UserPlus, MessageCircle, Mail, Clock, Target, Zap } from 'lucide-react';
 import { PieChart, Pie, Cell, Tooltip, Legend, BarChart, CartesianGrid, XAxis, YAxis, Bar, LineChart, Line } from 'recharts';
 import { Candidate, Process } from '../types';
 import { resolveCandidateAgeForProcess, resolveCandidateHomonymField, buildLegacyColumnIdToName } from '../lib/bulkTableColumns';
@@ -14,6 +14,11 @@ import {
     type ContactHourlyDistribution,
     type ContactVolumeMetric,
 } from '../lib/contactDashboardStats';
+import {
+    computeContactologyAdvancedStats,
+    resolveCandidateRegisteredAt,
+} from '../lib/contactologyAnalytics';
+import { computeRegistrationCreationStats } from '../lib/registrationCreationStats';
 import {
     reconcileContactAttemptsWithSummaries,
     attributeContactAttemptsFromSummaries,
@@ -1056,6 +1061,34 @@ export const Dashboard: React.FC = () => {
         >;
     }, [enrichedContactAttempts, contactConsultantPeriod, contactTrendOpts]);
 
+    const contactologyAdvanced = useMemo(() => {
+        const candidateInputs = analyticsCandidates
+            .filter(c => contactStatsCandidateIds.has(c.id))
+            .map(c => ({
+                id: c.id,
+                processId: c.processId,
+                registeredAt: resolveCandidateRegisteredAt(c),
+            }));
+        return computeContactologyAdvancedStats(
+            enrichedContactAttempts,
+            candidateInputs,
+            contactConsultantPeriod,
+            contactStatsCandidateIds
+        );
+    }, [enrichedContactAttempts, analyticsCandidates, contactConsultantPeriod, contactStatsCandidateIds]);
+
+    const registrationCreationStats = useMemo(
+        () =>
+            computeRegistrationCreationStats(
+                filteredCandidates.map(c => ({
+                    id: c.id,
+                    createdAt: c.createdAt,
+                    firstApplicationAt: c.firstApplicationAt,
+                }))
+            ),
+        [filteredCandidates]
+    );
+
     const hiringConsultantStats = useMemo(
         () =>
             computeHiringStageConsultantStats(
@@ -1373,6 +1406,190 @@ export const Dashboard: React.FC = () => {
                                 <Legend />
                                 <Bar dataKey="total" name="Total" fill="#0ea5e9" radius={[4, 4, 0, 0]} />
                                 <Bar dataKey="effective" name="Interesado" fill="#10b981" radius={[4, 4, 0, 0]} />
+                            </BarChart>
+                        </ChartContainer>
+                    </>
+                )}
+
+                {!contactStatsLoading && (
+                        <div className={`${contactStats.totalActions > 0 ? 'mt-8 pt-6 border-t border-gray-200' : 'mt-2'}`}>
+                            <h3 className="text-lg font-semibold text-gray-800 mb-1">Análisis avanzado de contactología</h3>
+                            <p className="text-sm text-gray-500 mb-4">
+                                Métricas de respuesta del candidato, tiempos de reacción e intentos hasta lograr contacto
+                                efectivo (cuando el candidato contesta o responde). Periodo: {contactologyAdvanced.periodLabel.toLowerCase()}.
+                            </p>
+
+                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+                                <StatCard
+                                    icon={Clock}
+                                    title="Tiempo al 1.er contacto"
+                                    value={contactologyAdvanced.avgRegistrationToFirstContactLabel}
+                                    subtitle="Promedio desde origen del registro hasta el primer intento"
+                                    color="bg-blue-500"
+                                />
+                                <StatCard
+                                    icon={Zap}
+                                    title="Reacción más rápida"
+                                    value={contactologyAdvanced.fastestFirstContactConsultant?.userName ?? 'N/D'}
+                                    subtitle={
+                                        contactologyAdvanced.fastestFirstContactConsultant
+                                            ? `${contactologyAdvanced.fastestFirstContactConsultant.avgHours} h prom. · ${contactologyAdvanced.fastestFirstContactConsultant.sampleCount} caso${contactologyAdvanced.fastestFirstContactConsultant.sampleCount !== 1 ? 's' : ''}`
+                                            : 'Sin primer contacto atribuido'
+                                    }
+                                    color="bg-violet-500"
+                                />
+                                <StatCard
+                                    icon={Target}
+                                    title="Intentos hasta respuesta"
+                                    value={
+                                        contactologyAdvanced.avgAttemptsUntilEffectiveResponse !== null
+                                            ? String(contactologyAdvanced.avgAttemptsUntilEffectiveResponse)
+                                            : 'N/D'
+                                    }
+                                    subtitle={`Promedio sobre ${contactologyAdvanced.candidatesWithResponse} candidato${contactologyAdvanced.candidatesWithResponse !== 1 ? 's' : ''} con respuesta`}
+                                    color="bg-amber-500"
+                                />
+                                <StatCard
+                                    icon={TrendingUp}
+                                    title="Ratio con interés"
+                                    value={
+                                        contactologyAdvanced.interestedResponseRatio !== null
+                                            ? `${contactologyAdvanced.interestedResponseRatio}%`
+                                            : 'N/D'
+                                    }
+                                    subtitle={
+                                        contactologyAdvanced.totalEffectiveResponses > 0
+                                            ? `${contactologyAdvanced.interestedResponseCount} de ${contactologyAdvanced.totalEffectiveResponses} contactos con respuesta`
+                                            : 'Sin respuestas registradas'
+                                    }
+                                    color="bg-emerald-500"
+                                />
+                                <StatCard
+                                    icon={Users}
+                                    title="Ratio sin interés"
+                                    value={
+                                        contactologyAdvanced.notInterestedResponseRatio !== null
+                                            ? `${contactologyAdvanced.notInterestedResponseRatio}%`
+                                            : 'N/D'
+                                    }
+                                    subtitle={
+                                        contactologyAdvanced.totalEffectiveResponses > 0
+                                            ? `${contactologyAdvanced.notInterestedResponseCount} de ${contactologyAdvanced.totalEffectiveResponses} contactos con respuesta`
+                                            : 'Sin respuestas registradas'
+                                    }
+                                    color="bg-red-500"
+                                />
+                            </div>
+
+                            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                                <ChartContainer
+                                    title="Resultado de llamadas con respuesta"
+                                    description="Cantidad por tipo de resultado cuando el candidato contestó o marcó interés/desinterés por teléfono."
+                                    hasData={contactologyAdvanced.effectiveCallOutcomeBreakdown.length > 0}
+                                    height={260}
+                                >
+                                    <BarChart
+                                        data={contactologyAdvanced.effectiveCallOutcomeBreakdown}
+                                        layout="vertical"
+                                        margin={{ top: 5, right: 20, left: 10, bottom: 5 }}
+                                    >
+                                        <CartesianGrid strokeDasharray="3 3" />
+                                        <XAxis type="number" allowDecimals={false} />
+                                        <YAxis type="category" dataKey="name" width={130} tick={{ fontSize: 11 }} />
+                                        <Tooltip formatter={(value: number) => [`${value} llamada${value !== 1 ? 's' : ''}`, 'Cantidad']} />
+                                        <Bar dataKey="count" name="Cantidad" fill="#6366f1" radius={[0, 4, 4, 0]} />
+                                    </BarChart>
+                                </ChartContainer>
+
+                                <ChartContainer
+                                    title="Intentos hasta lograr contacto"
+                                    description="Cuántos intentos (cualquier canal) se necesitaron antes de la primera respuesta del candidato."
+                                    hasData={contactologyAdvanced.attemptsUntilResponseDistribution.length > 0}
+                                    height={260}
+                                >
+                                    <BarChart
+                                        data={contactologyAdvanced.attemptsUntilResponseDistribution}
+                                        margin={{ top: 10, right: 20, left: 10, bottom: 5 }}
+                                    >
+                                        <CartesianGrid strokeDasharray="3 3" />
+                                        <XAxis dataKey="name" tick={{ fontSize: 11 }} />
+                                        <YAxis allowDecimals={false} />
+                                        <Tooltip formatter={(value: number) => [`${value} candidato${value !== 1 ? 's' : ''}`, 'Cantidad']} />
+                                        <Bar dataKey="count" name="Candidatos" fill="#14b8a6" radius={[4, 4, 0, 0]} />
+                                    </BarChart>
+                                </ChartContainer>
+                            </div>
+                        </div>
+                )}
+            </div>
+
+            <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm mb-8">
+                <div className="mb-4">
+                    <h2 className="text-xl font-semibold text-gray-800 mb-1">Generación de registros</h2>
+                    <p className="text-sm text-gray-500">
+                        Tiempos y franjas horarias de creación de candidatos según el filtro de postulación actual
+                        ({filteredCandidates.length} registro{filteredCandidates.length !== 1 ? 's' : ''} en alcance).
+                    </p>
+                </div>
+
+                {registrationCreationStats.totalWithTimestamp === 0 ? (
+                    <p className="text-sm text-gray-500 py-6 text-center">
+                        Sin fechas de creación disponibles para los candidatos del filtro actual.
+                    </p>
+                ) : (
+                    <>
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
+                            <StatCard
+                                icon={Clock}
+                                title="Tiempo formulario → registro"
+                                value={registrationCreationStats.avgFormToRecordLabel}
+                                subtitle={
+                                    registrationCreationStats.formToRecordSampleCount > 0
+                                        ? `Promedio en ${registrationCreationStats.formToRecordSampleCount} postulación${registrationCreationStats.formToRecordSampleCount !== 1 ? 'es' : ''} con formulario`
+                                        : 'Sin datos de primera postulación'
+                                }
+                                color="bg-violet-500"
+                            />
+                            <StatCard
+                                icon={TrendingUp}
+                                title="Intervalo entre registros"
+                                value={registrationCreationStats.avgIntervalBetweenRecordsLabel}
+                                subtitle="Tiempo promedio entre altas consecutivas en el alcance"
+                                color="bg-sky-500"
+                            />
+                            <StatCard
+                                icon={Calendar}
+                                title="Franja con más registros"
+                                value={registrationCreationStats.peakTimeBand?.label ?? 'N/D'}
+                                subtitle={
+                                    registrationCreationStats.peakTimeBand
+                                        ? `${registrationCreationStats.peakTimeBand.count} registro${registrationCreationStats.peakTimeBand.count !== 1 ? 's' : ''} · hora Lima`
+                                        : 'Sin datos'
+                                }
+                                color="bg-teal-500"
+                            />
+                        </div>
+
+                        <ChartContainer
+                            title="Registros por franja horaria"
+                            description="Distribución según hora de creación (America/Lima): mañana 8:30–15:00, tarde 15:00–18:00, noche 18:00–00:00 y madrugada 00:00–8:30."
+                            hasData={registrationCreationStats.timeBandDistribution.some(b => b.count > 0)}
+                            height={280}
+                        >
+                            <BarChart
+                                data={registrationCreationStats.timeBandDistribution}
+                                margin={{ top: 10, right: 20, left: 10, bottom: 5 }}
+                            >
+                                <CartesianGrid strokeDasharray="3 3" />
+                                <XAxis dataKey="label" tick={{ fontSize: 11 }} />
+                                <YAxis allowDecimals={false} />
+                                <Tooltip
+                                    formatter={(value: number, _name, item) => [
+                                        `${value} registro${value !== 1 ? 's' : ''} (${item.payload.pct}%)`,
+                                        'Cantidad',
+                                    ]}
+                                />
+                                <Bar dataKey="count" name="Registros" fill="#f97316" radius={[4, 4, 0, 0]} />
                             </BarChart>
                         </ChartContainer>
                     </>
