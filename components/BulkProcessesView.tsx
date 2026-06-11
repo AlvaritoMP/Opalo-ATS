@@ -27,6 +27,16 @@ import {
     formatHiredStageActorTooltip,
     type HiredStageActor,
 } from '../lib/hiringStageTracking';
+import {
+    formatRegistrationOrigin,
+    REGISTRATION_ORIGIN_BADGE_CLASS,
+    REGISTRATION_ORIGIN_COLUMN_ID,
+    isCandidateRegistrationOrigin,
+} from '../lib/candidateRegistrationOrigin';
+import {
+    resolveActiveContactLock,
+    isContactLockedForUser,
+} from '../lib/contactLock';
 import { processesApi } from '../lib/api/processes';
 import { useDebouncedValue } from '../lib/useDebouncedValue';
 import { Check, X, Loader2, Send, Archive, Search, ChevronDown, ChevronUp, Plus, Edit, Trash2, ArrowLeft, MessageCircle, Phone, Upload, Download, Filter, Mail, Calendar, Settings, ArrowUp, ArrowDown, Pin, FileText, BookOpen, Paperclip, ClipboardList, ListPlus, RefreshCw, HardDrive, CaseSensitive, Package, History, Target, BarChart3, UserCheck, Coins, Bus, Undo2 } from 'lucide-react';
@@ -625,6 +635,8 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
     const [cellMeta, setCellMeta] = useState<BulkCellMetaStore>({});
     const [cellContextMenu, setCellContextMenu] = useState<{ x: number; y: number; candidateId: string; colId: string } | null>(null);
     const [columnFilters, setColumnFilters] = useState<Record<string, string>>({});
+    /** Refresco cada minuto para expirar reservas de contactología en UI */
+    const [contactLockTick, setContactLockTick] = useState(0);
     const [sortColumn, setSortColumn] = useState<string | null>(null);
     const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
     const [activeCell, setActiveCell] = useState<CellCoord | null>(null);
@@ -1499,6 +1511,26 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
         };
     }, [selectedProcess]);
 
+    useEffect(() => {
+        const intervalId = window.setInterval(() => {
+            setContactLockTick(t => t + 1);
+        }, 60_000);
+        return () => window.clearInterval(intervalId);
+    }, []);
+
+    const resolveCandidateContactLock = useCallback((candidate: BulkCandidate) => {
+        void contactLockTick;
+        return resolveActiveContactLock({
+            contact_lock_user_id: candidate.contactLockUserId,
+            contact_lock_user_name: candidate.contactLockUserName,
+            contact_lock_until: candidate.contactLockUntil,
+            contact_lock_reason: candidate.contactLockReason,
+            created_by: candidate.createdBy,
+            created_at: candidate.createdAt,
+            registration_origin: candidate.registrationOrigin,
+        });
+    }, [contactLockTick]);
+
     // Sincronizar semáforo de contacto entre reclutadores en la misma lista
     useEffect(() => {
         if (!selectedProcess) return;
@@ -1514,6 +1546,13 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                               contactPhone: readChannelSummaryFromRow(row, 'call'),
                               contactWhatsapp: readChannelSummaryFromRow(row, 'whatsapp'),
                               contactEmail: readChannelSummaryFromRow(row, 'email'),
+                              contactLockUserId: (row.contact_lock_user_id as string) || undefined,
+                              contactLockUserName: (row.contact_lock_user_name as string) || undefined,
+                              contactLockUntil: (row.contact_lock_until as string) || undefined,
+                              contactLockReason:
+                                  (row.contact_lock_reason as BulkCandidate['contactLockReason']) ||
+                                  undefined,
+                              createdBy: (row.created_by as string) || c.createdBy,
                           }
                         : c
                 )
@@ -3478,6 +3517,10 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                     valueA = (candidateA.source || '').toLowerCase();
                     valueB = (candidateB.source || '').toLowerCase();
                     break;
+                case REGISTRATION_ORIGIN_COLUMN_ID:
+                    valueA = formatRegistrationOrigin(candidateA.registrationOrigin).toLowerCase();
+                    valueB = formatRegistrationOrigin(candidateB.registrationOrigin).toLowerCase();
+                    break;
                 case 'province':
                     valueA = (candidateA.province || '').toLowerCase();
                     valueB = (candidateB.province || '').toLowerCase();
@@ -3623,6 +3666,10 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
             if (columnFilters.source) {
                 const sourceVal = resolveStandardFieldValue('source', candidate.id, displayCandidate, columnValues, customColumns);
                 if (!sourceVal.toLowerCase().includes(columnFilters.source.toLowerCase())) return false;
+            }
+            if (columnFilters[REGISTRATION_ORIGIN_COLUMN_ID]) {
+                const originLabel = formatRegistrationOrigin(displayCandidate.registrationOrigin).toLowerCase();
+                if (!originLabel.includes(columnFilters[REGISTRATION_ORIGIN_COLUMN_ID].toLowerCase())) return false;
             }
             if (columnFilters.province) {
                 const provinceVal = resolveStandardFieldValue('province', candidate.id, displayCandidate, columnValues, customColumns);
@@ -4916,6 +4963,19 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                             </BulkTh>
                                         );
                                     }
+                                    if (colId === REGISTRATION_ORIGIN_COLUMN_ID) {
+                                        return (
+                                            <BulkTh colId={colId} headerProps={commonProps} style={thStyle()} onResizeStart={handleColumnResizeStart}>
+                                                <div className="flex flex-col gap-1">
+                                                    <button onClick={() => handleSort(REGISTRATION_ORIGIN_COLUMN_ID)} className="flex items-center gap-1 hover:text-primary-600 transition-colors">
+                                                        <span>Origen alta</span>
+                                                        {sortColumn === REGISTRATION_ORIGIN_COLUMN_ID ? (sortDirection === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />) : <div className="w-3 h-3 opacity-30"><ArrowUp className="w-3 h-3" /></div>}
+                                                    </button>
+                                                    <input type="text" placeholder="Filtrar..." value={columnFilters[REGISTRATION_ORIGIN_COLUMN_ID] || ''} onChange={(e) => setColumnFilters({ ...columnFilters, [REGISTRATION_ORIGIN_COLUMN_ID]: e.target.value })} className="text-xs px-2 py-1 border border-gray-300 rounded focus:ring-1 focus:ring-primary-500 focus:border-primary-500 font-normal normal-case" onClick={(e) => e.stopPropagation()} />
+                                                </div>
+                                            </BulkTh>
+                                        );
+                                    }
                                     if (colId === 'province') {
                                         return (
                                             <BulkTh colId={colId} headerProps={commonProps} style={thStyle()} onResizeStart={handleColumnResizeStart}>
@@ -5218,6 +5278,11 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                                     channel === 'email'
                                                         ? displayEmail || undefined
                                                         : displayCandidate.phone;
+                                                const contactLock = resolveCandidateContactLock(displayCandidate);
+                                                const isContactLocked = isContactLockedForUser(
+                                                    contactLock,
+                                                    state.currentUser?.id
+                                                );
                                                 return (
                                                     <td key={colId} {...tdProps(candidate.id, colId)}>
                                                         <BulkContactStatusCell
@@ -5231,6 +5296,11 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                                             userName={
                                                                 state.currentUser?.name ||
                                                                 state.currentUser?.email
+                                                            }
+                                                            contactLock={contactLock}
+                                                            isContactLocked={isContactLocked}
+                                                            onLockBlocked={msg =>
+                                                                actions.showToast(msg, 'info', 5000)
                                                             }
                                                             onSummaryChange={(s, actionType, ch) =>
                                                                 handleContactSummaryChange(
@@ -5293,6 +5363,23 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                                         ) : (
                                                             <span className="hover:bg-gray-50 px-1 py-0.5 rounded cursor-pointer" onDoubleClick={() => handleStartEdit(candidate.id, 'source', displaySource)} title="Doble clic para editar">{displaySource || '-'}</span>
                                                         )}
+                                                    </td>
+                                                );
+                                            }
+                                            if (colId === REGISTRATION_ORIGIN_COLUMN_ID) {
+                                                const origin = displayCandidate.registrationOrigin;
+                                                const originLabel = formatRegistrationOrigin(origin);
+                                                const badgeClass = origin && isCandidateRegistrationOrigin(origin)
+                                                    ? REGISTRATION_ORIGIN_BADGE_CLASS[origin]
+                                                    : 'bg-gray-100 text-gray-500 border-gray-200';
+                                                return (
+                                                    <td key={REGISTRATION_ORIGIN_COLUMN_ID} {...tdProps(candidate.id, REGISTRATION_ORIGIN_COLUMN_ID)}>
+                                                        <span
+                                                            className={`inline-flex items-center px-1.5 py-0.5 rounded border text-[10px] font-medium leading-tight ${badgeClass}`}
+                                                            title={origin ? `Incorporado por ${originLabel}` : 'Sin dato de origen (registro anterior)'}
+                                                        >
+                                                            {originLabel}
+                                                        </span>
                                                     </td>
                                                 );
                                             }

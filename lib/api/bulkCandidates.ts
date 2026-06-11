@@ -27,10 +27,12 @@ const BULK_SELECT_WITH_CONTACT = `${BULK_SELECT_BASE}, contact_status, contact_a
 
 const BULK_SELECT_WITH_CREATED = `${BULK_SELECT_WITH_CONTACT}, created_at`;
 const BULK_SELECT_WITH_APPLICATION = `${BULK_SELECT_WITH_CREATED}, application_count, first_application_at`;
-const BULK_SELECT_FULL = `${BULK_SELECT_WITH_APPLICATION}, bulk_column_values`;
+const BULK_SELECT_WITH_REGISTRATION = `${BULK_SELECT_WITH_APPLICATION}, registration_origin, created_by, contact_lock_user_id, contact_lock_user_name, contact_lock_until, contact_lock_reason`;
+const BULK_SELECT_FULL = `${BULK_SELECT_WITH_REGISTRATION}, bulk_column_values`;
 const BULK_EFFICIENCY_FIELDS =
     'hire_date, offer_accepted_date, application_started_date, application_completed_date';
 const BULK_SELECT_FULL_EFFICIENCY = `${BULK_SELECT_FULL}, ${BULK_EFFICIENCY_FIELDS}`;
+const BULK_SELECT_WITH_REGISTRATION_EFFICIENCY = `${BULK_SELECT_WITH_REGISTRATION}, ${BULK_EFFICIENCY_FIELDS}`;
 const BULK_SELECT_WITH_APPLICATION_EFFICIENCY = `${BULK_SELECT_WITH_APPLICATION}, ${BULK_EFFICIENCY_FIELDS}`;
 const BULK_SELECT_WITH_CREATED_EFFICIENCY = `${BULK_SELECT_WITH_CREATED}, ${BULK_EFFICIENCY_FIELDS}`;
 const BULK_SELECT_WITH_CONTACT_EFFICIENCY = `${BULK_SELECT_WITH_CONTACT}, ${BULK_EFFICIENCY_FIELDS}`;
@@ -49,6 +51,8 @@ function getBulkSelectCandidates(): string[] {
     const allVariants = [
         BULK_SELECT_FULL_EFFICIENCY,
         BULK_SELECT_FULL,
+        BULK_SELECT_WITH_REGISTRATION_EFFICIENCY,
+        BULK_SELECT_WITH_REGISTRATION,
         BULK_SELECT_WITH_APPLICATION_EFFICIENCY,
         BULK_SELECT_WITH_APPLICATION,
         BULK_SELECT_WITH_CREATED_EFFICIENCY,
@@ -89,6 +93,12 @@ function mapBulkCandidateRow(
         createdAt: (c.created_at as string) || undefined,
         applicationCount: c.application_count != null ? Number(c.application_count) : undefined,
         firstApplicationAt: (c.first_application_at as string) || undefined,
+        registrationOrigin: (c.registration_origin as BulkCandidate['registrationOrigin']) || undefined,
+        createdBy: (c.created_by as string) || undefined,
+        contactLockUserId: (c.contact_lock_user_id as string) || undefined,
+        contactLockUserName: (c.contact_lock_user_name as string) || undefined,
+        contactLockUntil: (c.contact_lock_until as string) || undefined,
+        contactLockReason: (c.contact_lock_reason as BulkCandidate['contactLockReason']) || undefined,
         nextInterviewAt: nextInterview?.start || undefined,
         nextInterviewerId: nextInterview?.interviewerId || undefined,
         nextInterviewEventId: nextInterview?.eventId || undefined,
@@ -127,6 +137,13 @@ export interface BulkCandidate {
     contactWhatsapp?: ChannelContactSummary;
     contactEmail?: ChannelContactSummary;
     createdAt?: string;
+    /** Origen de incorporación: formulario, manual o carga masiva */
+    registrationOrigin?: 'formulario' | 'manual' | 'masivo';
+    createdBy?: string;
+    contactLockUserId?: string;
+    contactLockUserName?: string;
+    contactLockUntil?: string;
+    contactLockReason?: 'upload' | 'success';
     /** Última postulación por formulario (created_at se actualiza en re-postulaciones) */
     applicationCount?: number;
     firstApplicationAt?: string;

@@ -17,6 +17,7 @@ import {
     resolveStandardFieldValue,
     shouldApplyScoreAutoFilter,
 } from './bulkTableColumns';
+import { formatRegistrationOrigin } from './candidateRegistrationOrigin';
 import { buildRouteColumnLink } from './transitRouteLinks';
 import { extractRouteCostTotal } from './routeCostStorage';
 
@@ -84,6 +85,9 @@ export function getBulkExportCellValue(
     if (colId === 'phone') return candidate.phone || '';
     if (colId === 'source') {
         return resolveStandardFieldValue('source', candidate.id, candidate, columnValues, customColumns) || '';
+    }
+    if (colId === 'registrationOrigin') {
+        return formatRegistrationOrigin(candidate.registrationOrigin);
     }
     if (colId === 'province') {
         return resolveStandardFieldValue('province', candidate.id, candidate, columnValues, customColumns) || '';

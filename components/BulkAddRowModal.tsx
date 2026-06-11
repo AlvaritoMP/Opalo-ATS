@@ -26,7 +26,13 @@ function candidateToBulkRow(c: Candidate): BulkCandidate {
         age: c.age,
         stageId: c.stageId,
         processId: c.processId,
-        createdAt: new Date().toISOString(),
+        createdAt: c.applicationStartedDate || new Date().toISOString(),
+        registrationOrigin: c.registrationOrigin || 'manual',
+        createdBy: c.createdBy,
+        contactLockUserId: c.contactLockUserId,
+        contactLockUserName: c.contactLockUserName,
+        contactLockUntil: c.contactLockUntil,
+        contactLockReason: c.contactLockReason,
     };
 }
 
@@ -88,6 +94,7 @@ export const BulkAddRowModal: React.FC<BulkAddRowModalProps> = ({
                     processId: process.id,
                     stageId: firstStageId,
                     attachments: [],
+                    registrationOrigin: 'manual',
                 },
                 { skipGoogleDrive: true, silent: true }
             );

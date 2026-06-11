@@ -19,6 +19,14 @@ import {
 } from '../contactHistorySync';
 import type { ContactSummaryCandidate } from '../contactAttemptReconcile';
 import { bulkProcessActivityApi } from './bulkProcessActivity';
+import {
+    ContactLockError,
+    buildSuccessContactLockUpdate,
+    mergeContactLockUpdate,
+    resolveActiveContactLock,
+    shouldApplySuccessContactLock,
+    isContactLockedForUser,
+} from '../contactLock';
 
 export type { ChannelContactSummary as ContactSummary };
 export type { ContactAttemptChannel as ContactChannel };
@@ -103,7 +111,8 @@ function isMissingContactColumnError(error: { message?: string; code?: string } 
         error.code === '42703' ||
         msg.includes('contact_phone') ||
         msg.includes('contact_status') ||
-        msg.includes('candidate_contact_attempts')
+        msg.includes('candidate_contact_attempts') ||
+        msg.includes('contact_lock')
     );
 }
 
@@ -113,7 +122,33 @@ const CHANNEL_SELECT_FIELDS = [
     'contact_email_status', 'contact_email_attempt_count', 'contact_email_last_at', 'contact_email_last_user_name',
     'contact_status', 'contact_attempt_count', 'contact_last_attempt_at', 'contact_last_user_name',
     'last_whatsapp_interaction_at',
+    'created_by', 'created_at', 'registration_origin',
+    'contact_lock_user_id', 'contact_lock_user_name', 'contact_lock_until', 'contact_lock_reason',
 ].join(', ');
+
+function assertContactEditAllowed(
+    row: Record<string, unknown>,
+    userId?: string
+): void {
+    const lock = resolveActiveContactLock(row as Parameters<typeof resolveActiveContactLock>[0]);
+    if (isContactLockedForUser(lock, userId)) {
+        throw new ContactLockError(lock!);
+    }
+}
+
+function successLockPatch(
+    row: Record<string, unknown>,
+    userId: string | undefined,
+    userName: string | undefined,
+    newStatus: ContactStatus,
+    outcome: ContactOutcome
+): Record<string, string | null> {
+    if (!shouldApplySuccessContactLock(newStatus, outcome)) return {};
+    return mergeContactLockUpdate(
+        row as Parameters<typeof mergeContactLockUpdate>[0],
+        buildSuccessContactLockUpdate(userId, userName)
+    );
+}
 
 function buildChannelUpdate(
     channel: ContactAttemptChannel,
@@ -268,6 +303,8 @@ export const contactTrackingApi = {
             throw readErr;
         }
 
+        assertContactEditAllowed(current as Record<string, unknown>, input.userId);
+
         const prev = readChannelSummaryFromRow(current as Record<string, unknown>, input.channel);
         if (prev.status === input.status) return { ...prev };
 
@@ -278,9 +315,20 @@ export const contactTrackingApi = {
             lastUserName: input.userName,
         };
 
+        const statusUpdate: Record<string, unknown> = {
+            ...buildChannelUpdate(input.channel, summary, input.userId, input.userName),
+            ...successLockPatch(
+                current as Record<string, unknown>,
+                input.userId,
+                input.userName,
+                input.status,
+                'status_change'
+            ),
+        };
+
         const { error: updErr } = await supabase
             .from('candidates')
-            .update(buildChannelUpdate(input.channel, summary, input.userId, input.userName))
+            .update(statusUpdate)
             .eq('id', input.candidateId)
             .eq('app_name', APP_NAME);
 
@@ -325,6 +373,8 @@ export const contactTrackingApi = {
             throw readErr;
         }
 
+        assertContactEditAllowed(current as Record<string, unknown>, input.userId);
+
         const prev = readChannelSummaryFromRow(current as Record<string, unknown>, input.channel);
         const prevStatus = prev.status;
         const prevCount = prev.attemptCount;
@@ -352,12 +402,16 @@ export const contactTrackingApi = {
             lastUserName: input.userName,
         };
 
-        const updatePayload: Record<string, unknown> = buildChannelUpdate(
-            input.channel,
-            summary,
-            input.userId,
-            input.userName
-        );
+        const updatePayload: Record<string, unknown> = {
+            ...buildChannelUpdate(input.channel, summary, input.userId, input.userName),
+            ...successLockPatch(
+                current as Record<string, unknown>,
+                input.userId,
+                input.userName,
+                newStatus,
+                input.outcome
+            ),
+        };
         if (input.channel === 'whatsapp') {
             updatePayload.last_whatsapp_interaction_at = now;
         }
@@ -422,6 +476,23 @@ export const contactTrackingApi = {
         userId?: string;
         userName?: string;
     }): Promise<ChannelContactSummary | null> {
+        const { data: current, error: readErr } = await supabase
+            .from('candidates')
+            .select(CHANNEL_SELECT_FIELDS)
+            .eq('id', input.candidateId)
+            .eq('app_name', APP_NAME)
+            .single();
+
+        if (readErr) {
+            if (isMissingContactColumnError(readErr)) {
+                contactColumnsSupported = false;
+                return null;
+            }
+            throw readErr;
+        }
+
+        assertContactEditAllowed(current as Record<string, unknown>, input.userId);
+
         const history = await this.getHistory(input.candidateId, input.channel, 1);
         const latest = history[0];
         if (!latest) return null;
@@ -486,6 +557,23 @@ export const contactTrackingApi = {
         userId?: string;
         userName?: string;
     }): Promise<ResetContactTrackingResult | null> {
+        const { data: current, error: lockReadErr } = await supabase
+            .from('candidates')
+            .select(CHANNEL_SELECT_FIELDS)
+            .eq('id', input.candidateId)
+            .eq('app_name', APP_NAME)
+            .single();
+
+        if (lockReadErr) {
+            if (isMissingContactColumnError(lockReadErr)) {
+                contactColumnsSupported = false;
+                return null;
+            }
+            throw lockReadErr;
+        }
+
+        assertContactEditAllowed(current as Record<string, unknown>, input.userId);
+
         const { count, error: countErr } = await supabase
             .from('candidate_contact_attempts')
             .select('id', { count: 'exact', head: true })

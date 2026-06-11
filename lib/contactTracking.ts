@@ -149,6 +149,35 @@ export function isContactCooldownActive(lastAttemptAt?: string | null, now = Dat
     return now - t < CONTACT_COOLDOWN_MS;
 }
 
+export interface ContactAttemptSyncMeta {
+    sync?: string;
+    source?: string;
+}
+
+export function parseContactAttemptNotes(notes?: string | null): ContactAttemptSyncMeta | null {
+    if (!notes) return null;
+    try {
+        const parsed = JSON.parse(notes) as ContactAttemptSyncMeta;
+        if (parsed.sync || parsed.source === 'contactHistorySync') return parsed;
+    } catch {
+        /* notas en texto plano */
+    }
+    return null;
+}
+
+/** Intento reconstruido por syncContactHistoryForCandidates, no una acción en vivo del reclutador. */
+export function isSyncedContactAttempt(attempt: Pick<ContactAttempt, 'notes'>): boolean {
+    const meta = parseContactAttemptNotes(attempt.notes);
+    return (
+        meta?.sync === 'summary_backfill' ||
+        meta?.sync === 'interesado_backfill' ||
+        meta?.source === 'contactHistorySync'
+    );
+}
+
+export const SYNCED_CONTACT_ATTEMPT_LABEL =
+    'Sincronizado (reconstruido desde la tabla, no fue una acción en vivo)';
+
 export function formatContactCooldownWarning(lastAttemptAt: string, lastUserName?: string): string {
     const who = lastUserName ? ` por ${lastUserName}` : '';
     const mins = Math.max(1, Math.ceil((CONTACT_COOLDOWN_MS - (Date.now() - new Date(lastAttemptAt).getTime())) / 60000));
@@ -188,7 +217,8 @@ export function formatAttemptHistoryLine(attempt: ContactAttempt): string {
         attempt.attemptNumber > 0
             ? ` (Intento ${attempt.attemptNumber})`
             : '';
-    return `${time} - ${who}: ${channel} - ${outcome}${attemptSuffix}`;
+    const syncSuffix = isSyncedContactAttempt(attempt) ? ` · ${SYNCED_CONTACT_ATTEMPT_LABEL}` : '';
+    return `${time} - ${who}: ${channel} - ${outcome}${attemptSuffix}${syncSuffix}`;
 }
 
 function formatHistoryTime(iso: string): string {

@@ -285,9 +285,21 @@ export async function processTallyCandidateUpsert(
             ...baseInsert,
             first_application_at: nowIso,
             application_count: 1,
+            registration_origin: 'formulario',
         })
         .select('id, application_count')
         .single());
+
+    if (insertError && isMissingColumnError(insertError)) {
+        ({ data: created, error: insertError } = await supabase
+            .from('candidates')
+            .insert({
+                ...baseInsert,
+                registration_origin: 'formulario',
+            })
+            .select('id')
+            .single());
+    }
 
     if (insertError && isMissingColumnError(insertError)) {
         ({ data: created, error: insertError } = await supabase

@@ -231,6 +231,7 @@ export const BulkImportView: React.FC = () => {
                             processId,
                             stageId: firstStageId,
                             attachments: [],
+                            registrationOrigin: 'masivo',
                         };
                         
                         // Agregar campos opcionales solo si tienen valor definido

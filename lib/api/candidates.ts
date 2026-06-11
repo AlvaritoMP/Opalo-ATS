@@ -4,6 +4,7 @@ import { processesApi } from './processes';
 import { convertirSalarioALetras } from '../numberToWords';
 import { APP_NAME } from '../appConfig';
 import { isMissingColumnError } from '../supabaseColumnErrors';
+import { buildUploadContactLockUpdate } from '../contactLock';
 
 const CANDIDATE_LIST_SELECT_CORE =
     'id, name, email, phone, phone2, process_id, stage_id, description, avatar_url, source, salary_expectation, agreed_salary, agreed_salary_in_words, age, dni, linkedin_url, address, province, district, archived, archived_at, discarded, discard_reason, discarded_at, hire_date, google_drive_folder_id, google_drive_folder_name, visible_to_clients, offer_accepted_date, application_started_date, application_completed_date, critical_stage_reviewed_at, created_at';
@@ -103,6 +104,12 @@ function mapListCandidate(dbCandidate: any, extras: Partial<Candidate> = {}): Ca
         criticalStageReviewedAt: dbCandidate.critical_stage_reviewed_at,
         applicationCount: dbCandidate.application_count != null ? Number(dbCandidate.application_count) : undefined,
         firstApplicationAt: dbCandidate.first_application_at || undefined,
+        registrationOrigin: dbCandidate.registration_origin || undefined,
+        createdBy: dbCandidate.created_by || undefined,
+        contactLockUserId: dbCandidate.contact_lock_user_id || undefined,
+        contactLockUserName: dbCandidate.contact_lock_user_name || undefined,
+        contactLockUntil: dbCandidate.contact_lock_until || undefined,
+        contactLockReason: dbCandidate.contact_lock_reason || undefined,
         bulkColumnValues: mapBulkColumnValues(dbCandidate),
         ...extras,
     };
@@ -230,6 +237,12 @@ async function dbToCandidate(dbCandidate: any): Promise<Candidate> {
         criticalStageReviewedAt: dbCandidate.critical_stage_reviewed_at,
         applicationCount: dbCandidate.application_count != null ? Number(dbCandidate.application_count) : undefined,
         firstApplicationAt: dbCandidate.first_application_at || undefined,
+        registrationOrigin: dbCandidate.registration_origin || undefined,
+        createdBy: dbCandidate.created_by || undefined,
+        contactLockUserId: dbCandidate.contact_lock_user_id || undefined,
+        contactLockUserName: dbCandidate.contact_lock_user_name || undefined,
+        contactLockUntil: dbCandidate.contact_lock_until || undefined,
+        contactLockReason: dbCandidate.contact_lock_reason || undefined,
         bulkColumnValues: mapBulkColumnValues(dbCandidate),
     };
 }
@@ -282,6 +295,7 @@ function candidateToDb(candidate: Partial<Candidate>): any {
     if (candidate.applicationStartedDate !== undefined) dbCandidate.application_started_date = candidate.applicationStartedDate;
     if (candidate.applicationCompletedDate !== undefined) dbCandidate.application_completed_date = candidate.applicationCompletedDate;
     if (candidate.criticalStageReviewedAt !== undefined) dbCandidate.critical_stage_reviewed_at = candidate.criticalStageReviewedAt || null;
+    if (candidate.registrationOrigin !== undefined) dbCandidate.registration_origin = candidate.registrationOrigin;
     return dbCandidate;
 }
 
@@ -602,9 +616,23 @@ export const candidatesApi = {
     },
 
     // Crear candidato
-    async create(candidateData: Omit<Candidate, 'id' | 'history'>, createdBy?: string): Promise<Candidate> {
+    async create(
+        candidateData: Omit<Candidate, 'id' | 'history'>,
+        createdBy?: string,
+        options?: { createdByName?: string }
+    ): Promise<Candidate> {
         const dbData = candidateToDb(candidateData);
         if (createdBy) dbData.created_by = createdBy;
+        if (
+            createdBy &&
+            (candidateData.registrationOrigin === 'manual' ||
+                candidateData.registrationOrigin === 'masivo')
+        ) {
+            Object.assign(
+                dbData,
+                buildUploadContactLockUpdate(createdBy, options?.createdByName)
+            );
+        }
         dbData.app_name = APP_NAME; // Asegurar que siempre se asigne el app_name
         // Set application_started_date if not provided
         if (!dbData.application_started_date) {
@@ -628,7 +656,19 @@ export const candidatesApi = {
             
             if (isColumnError) {
                 // Separar campos opcionales y reintentar
-                const { agreed_salary_in_words, province, district, critical_stage_reviewed_at, ...standardCreateFields } = dbData;
+                const {
+                    agreed_salary_in_words,
+                    province,
+                    district,
+                    critical_stage_reviewed_at,
+                    registration_origin,
+                    contact_lock_user_id,
+                    contact_lock_user_name,
+                    contact_lock_until,
+                    contact_lock_reason,
+                    created_by,
+                    ...standardCreateFields
+                } = dbData;
                 standardCreateFields.app_name = APP_NAME; // Asegurar app_name en el reintento
                 
                 const { data: data2, error: error2 } = await supabase
@@ -645,6 +685,12 @@ export const candidatesApi = {
                 if (province !== undefined) optionalFields.province = province;
                 if (district !== undefined) optionalFields.district = district;
                 if (critical_stage_reviewed_at !== undefined) optionalFields.critical_stage_reviewed_at = critical_stage_reviewed_at;
+                if (registration_origin !== undefined) optionalFields.registration_origin = registration_origin;
+                if (created_by !== undefined) optionalFields.created_by = created_by;
+                if (contact_lock_user_id !== undefined) optionalFields.contact_lock_user_id = contact_lock_user_id;
+                if (contact_lock_user_name !== undefined) optionalFields.contact_lock_user_name = contact_lock_user_name;
+                if (contact_lock_until !== undefined) optionalFields.contact_lock_until = contact_lock_until;
+                if (contact_lock_reason !== undefined) optionalFields.contact_lock_reason = contact_lock_reason;
                 
                 if (Object.keys(optionalFields).length > 0 && data2) {
                     try {

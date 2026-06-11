@@ -1,11 +1,12 @@
 import React, { useState, useEffect, useRef, useCallback, useLayoutEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { Phone, MessageCircle, Mail, Loader2, Clock, ChevronDown, X, Undo2, Trash2 } from 'lucide-react';
+import { Phone, MessageCircle, Mail, Loader2, Clock, ChevronDown, X, Undo2, Trash2, Lock } from 'lucide-react';
 import {
     contactTrackingApi,
     parseUndoFromAttemptNotes,
     type ResetContactTrackingResult,
 } from '../lib/api/contactTracking';
+import { ContactLockError, formatContactLockMessage, type ContactLockInfo } from '../lib/contactLock';
 import type { ContactAttempt, ContactOutcome, ContactStatus } from '../lib/contactTracking';
 import type { ContactAttemptChannel } from '../lib/contactChannelConfig';
 import { CONTACT_CHANNELS, hasChannelContactTracking } from '../lib/contactChannelConfig';
@@ -17,6 +18,7 @@ import {
     formatContactLastAtCompact,
     formatContactCooldownWarning,
     formatAttemptHistoryLine,
+    isSyncedContactAttempt,
     CONTACT_OUTCOME_LABELS,
 } from '../lib/contactTracking';
 import { formatBulkDateTime } from '../lib/bulkTableColumns';
@@ -55,6 +57,10 @@ export interface BulkContactStatusCellProps {
     ) => void;
     onResetChannel?: (result: ResetContactTrackingResult) => void;
     disabled?: boolean;
+    /** Reserva activa de contactología (otro usuario o ventana de subida) */
+    contactLock?: ContactLockInfo | null;
+    isContactLocked?: boolean;
+    onLockBlocked?: (message: string) => void;
 }
 
 type PopoverMode = 'status' | 'history' | null;
@@ -110,9 +116,22 @@ export const BulkContactStatusCell: React.FC<BulkContactStatusCellProps> = ({
     onSummaryChange,
     onResetChannel,
     disabled = false,
+    contactLock = null,
+    isContactLocked = false,
+    onLockBlocked,
 }) => {
     const { status, attemptCount, lastAttemptAt, lastUserName } = summary;
     const channelDef = CONTACT_CHANNELS[channel];
+    const effectiveDisabled = disabled || isContactLocked;
+    const lockMessage = isContactLocked && contactLock ? formatContactLockMessage(contactLock) : undefined;
+
+    const handleContactError = (error: unknown) => {
+        if (error instanceof ContactLockError) {
+            onLockBlocked?.(formatContactLockMessage(error.lock));
+            return;
+        }
+        throw error;
+    };
 
     const [popover, setPopover] = useState<PopoverMode>(null);
     const [popoverPos, setPopoverPos] = useState({ left: 0, top: 0, maxHeight: POPOVER_MAX_HEIGHT });
@@ -132,8 +151,8 @@ export const BulkContactStatusCell: React.FC<BulkContactStatusCellProps> = ({
     const cellTooltip = buildCellTooltip(
         lastAttemptAt,
         lastUserName,
-        cooldown,
-        cooldown && lastAttemptAt
+        cooldown && !isContactLocked,
+        !isContactLocked && cooldown && lastAttemptAt
             ? formatContactCooldownWarning(lastAttemptAt, lastUserName)
             : undefined
     );
@@ -236,7 +255,7 @@ export const BulkContactStatusCell: React.FC<BulkContactStatusCellProps> = ({
     );
 
     const handleMarkAttempt = async (outcome: ContactOutcome) => {
-        if (disabled || saving) return;
+        if (effectiveDisabled || saving) return;
         setSaving(true);
         try {
             const result = await contactTrackingApi.recordAttempt({
@@ -249,13 +268,15 @@ export const BulkContactStatusCell: React.FC<BulkContactStatusCellProps> = ({
             });
             applySummary(result, 'contact_attempt');
             closePopover();
+        } catch (error) {
+            handleContactError(error);
         } finally {
             setSaving(false);
         }
     };
 
     const handleSetStatus = async (newStatus: ContactStatus) => {
-        if (disabled || saving || newStatus === status) return;
+        if (effectiveDisabled || saving || newStatus === status) return;
         setSaving(true);
         try {
             const result = await contactTrackingApi.setStatus({
@@ -268,13 +289,15 @@ export const BulkContactStatusCell: React.FC<BulkContactStatusCellProps> = ({
             });
             applySummary(result, 'contact_status');
             closePopover();
+        } catch (error) {
+            handleContactError(error);
         } finally {
             setSaving(false);
         }
     };
 
     const handleUndo = async () => {
-        if (disabled || saving || !canUndo) return;
+        if (effectiveDisabled || saving || !canUndo) return;
         setSaving(true);
         try {
             const result = await contactTrackingApi.revertLastAction({
@@ -286,13 +309,15 @@ export const BulkContactStatusCell: React.FC<BulkContactStatusCellProps> = ({
             });
             applySummary(result, 'contact_status');
             closePopover();
+        } catch (error) {
+            handleContactError(error);
         } finally {
             setSaving(false);
         }
     };
 
     const handleQuickAction = async () => {
-        if (disabled || saving || !contactAddress) return;
+        if (effectiveDisabled || saving || !contactAddress) return;
 
         if (channel === 'whatsapp') {
             const clean = contactAddress.replace(/[^\d]/g, '');
@@ -309,7 +334,7 @@ export const BulkContactStatusCell: React.FC<BulkContactStatusCellProps> = ({
     };
 
     const handleResetChannel = async () => {
-        if (disabled || saving || !onResetChannel) return;
+        if (effectiveDisabled || saving || !onResetChannel) return;
         const msg =
             `¿Reiniciar el seguimiento de ${channelDef.label}?\n\n` +
             `Esta columna quedará como si nunca se hubiera contactado por este canal. Quedará registrado en el log quién lo hizo.`;
@@ -328,6 +353,8 @@ export const BulkContactStatusCell: React.FC<BulkContactStatusCellProps> = ({
                 onResetChannel(result);
                 closePopover();
             }
+        } catch (error) {
+            handleContactError(error);
         } finally {
             setSaving(false);
         }
@@ -475,14 +502,21 @@ export const BulkContactStatusCell: React.FC<BulkContactStatusCellProps> = ({
                                     <p className="text-xs text-gray-500 px-2 py-4">Sin registros en este canal.</p>
                                 ) : (
                                     <ul className="space-y-2 pr-1">
-                                        {history.map((a) => (
-                                            <li
-                                                key={a.id}
-                                                className="text-[11px] text-gray-700 leading-snug border-l-2 border-gray-200 pl-2"
-                                            >
-                                                {formatAttemptHistoryLine(a)}
-                                            </li>
-                                        ))}
+                                        {history.map((a) => {
+                                            const synced = isSyncedContactAttempt(a);
+                                            return (
+                                                <li
+                                                    key={a.id}
+                                                    className={`text-[11px] leading-snug border-l-2 pl-2 ${
+                                                        synced
+                                                            ? 'text-amber-800 border-amber-300 bg-amber-50/80 rounded-r pr-1 py-1'
+                                                            : 'text-gray-700 border-gray-200'
+                                                    }`}
+                                                >
+                                                    {formatAttemptHistoryLine(a)}
+                                                </li>
+                                            );
+                                        })}
                                     </ul>
                                 )}
                                 <button
@@ -503,14 +537,23 @@ export const BulkContactStatusCell: React.FC<BulkContactStatusCellProps> = ({
     return (
         <div
             ref={rootRef}
-            className={`flex items-center gap-0.5 min-w-0 max-w-full leading-none ${cooldown ? 'ring-1 ring-red-300 rounded px-0.5' : ''}`}
+            className={`flex items-center gap-0.5 min-w-0 max-w-full leading-none ${
+                isContactLocked
+                    ? 'ring-1 ring-amber-400 bg-amber-50/60 rounded px-0.5'
+                    : cooldown
+                      ? 'ring-1 ring-red-300 rounded px-0.5'
+                      : ''
+            }`}
             onClick={(e) => e.stopPropagation()}
-            title={cellTooltip}
+            title={lockMessage || cellTooltip}
         >
+            {isContactLocked && (
+                <Lock className="w-3 h-3 text-amber-700 shrink-0" aria-hidden />
+            )}
             <button
                 ref={badgeRef}
                 type="button"
-                disabled={disabled || saving}
+                disabled={effectiveDisabled || saving}
                 onClick={toggleStatusPopover}
                 className={`inline-flex items-center gap-0.5 shrink-0 h-5 min-w-[22px] pl-0.5 pr-1 rounded border text-[10px] font-semibold leading-none whitespace-nowrap ${meta.badgeClass}`}
                 aria-expanded={popover === 'status'}
@@ -533,7 +576,7 @@ export const BulkContactStatusCell: React.FC<BulkContactStatusCellProps> = ({
                         else openPopover('history', e.currentTarget);
                     }}
                     className="shrink-0 inline-flex items-center justify-center min-w-[18px] h-5 px-0.5 text-[10px] font-bold text-gray-600 hover:text-primary-700 hover:bg-gray-50 rounded tabular-nums leading-none"
-                    title={cellTooltip || 'Ver historial'}
+                    title={lockMessage || cellTooltip || 'Ver historial'}
                 >
                     {status !== 'en_intento' ? attemptCount : null}
                 </button>
@@ -542,7 +585,7 @@ export const BulkContactStatusCell: React.FC<BulkContactStatusCellProps> = ({
             {contactAddress && (
                 <button
                     type="button"
-                    disabled={disabled || saving}
+                    disabled={effectiveDisabled || saving}
                     onClick={(e) => {
                         e.stopPropagation();
                         void handleQuickAction();

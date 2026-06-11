@@ -8,8 +8,14 @@ import {
 import { workerHandoffApi } from './workerHandoff';
 import type { Process, DocumentCategory, Attachment, PsycholaboralEvaluation } from '../../types';
 import type { ContactAttempt } from '../contactTracking';
-import { CONTACT_OUTCOME_LABELS, CONTACT_STATUS_META, normalizeContactStatus } from '../contactTracking';
+import {
+    CONTACT_OUTCOME_LABELS,
+    CONTACT_STATUS_META,
+    isSyncedContactAttempt,
+    normalizeContactStatus,
+} from '../contactTracking';
 import { DELIVERY_STATUS_LABELS } from '../workerHandoffFields';
+import { formatRegistrationOrigin } from '../candidateRegistrationOrigin';
 
 export type BulkTimelineEventKind =
     | 'incorporation'
@@ -208,7 +214,7 @@ export const bulkCandidateTimelineApi = {
             supabase
                 .from('candidates')
                 .select(`
-                    id, name, source, created_at, stage_id, process_id,
+                    id, name, source, registration_origin, created_at, stage_id, process_id,
                     discarded, discarded_at, discard_reason,
                     archived, archived_at,
                     hire_date, offer_accepted_date,
@@ -264,9 +270,14 @@ export const bulkCandidateTimelineApi = {
                 kind: 'incorporation',
                 timestamp: candidate.created_at,
                 title: 'Incorporación al ATS',
-                description: candidate.source
-                    ? `Origen: ${candidate.source}`
-                    : 'Postulante registrado en el proceso masivo',
+                description: [
+                    candidate.registration_origin
+                        ? `Alta: ${formatRegistrationOrigin(candidate.registration_origin as 'formulario' | 'manual' | 'masivo')}`
+                        : null,
+                    candidate.source ? `Fuente: ${candidate.source}` : null,
+                ]
+                    .filter(Boolean)
+                    .join(' · ') || 'Postulante registrado en el proceso masivo',
             });
         }
 
@@ -314,12 +325,19 @@ export const bulkCandidateTimelineApi = {
             const statusAfter = attempt.statusAfter
                 ? CONTACT_STATUS_META[normalizeContactStatus(attempt.statusAfter)].label
                 : undefined;
+            const synced = isSyncedContactAttempt(attempt);
             events.push({
                 id: `contact-${attempt.id}`,
                 kind: 'contact',
                 timestamp: attempt.createdAt,
-                title: `Contacto por ${channel}`,
-                description: [outcome, statusAfter ? `Estado: ${statusAfter}` : null, attempt.notes].filter(Boolean).join(' · '),
+                title: synced ? `Contacto por ${channel} (sincronizado)` : `Contacto por ${channel}`,
+                description: [
+                    outcome,
+                    statusAfter ? `Estado: ${statusAfter}` : null,
+                    synced ? 'Registro reconstruido automáticamente desde la tabla' : null,
+                ]
+                    .filter(Boolean)
+                    .join(' · '),
                 userName: attempt.userName,
             });
         }

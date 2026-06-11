@@ -6,6 +6,16 @@ import { usersApi, processesApi, candidatesApi, postItsApi, commentsApi, intervi
 import { isCorsError, getErrorMessage, isSupabaseConfigured } from './lib/supabase';
 import { googleDriveService } from './lib/googleDrive';
 import { debugLog } from './lib/debugLog';
+import {
+    getStoredUserId,
+    establishSession,
+    clearStoredSession,
+    ensureSessionActivityBaseline,
+    isSessionExpired,
+    expireSessionDueToInactivity,
+    touchSessionActivity,
+    consumeSessionExpiredNotice,
+} from './lib/sessionActivity';
 import { getBulkSelectedProcessId, setBulkSelectedProcessId } from './lib/bulkTableColumns';
 import {
     loadDashboardFilters,
@@ -164,8 +174,15 @@ const LoginPage: React.FC = () => {
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [error, setError] = useState('');
+    const [sessionExpiredInfo, setSessionExpiredInfo] = useState(false);
     const [isLoggingIn, setIsLoggingIn] = useState(false);
     const [isForgotPasswordOpen, setIsForgotPasswordOpen] = useState(false);
+
+    useEffect(() => {
+        if (consumeSessionExpiredNotice()) {
+            setSessionExpiredInfo(true);
+        }
+    }, []);
 
     const handleLogin = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -187,6 +204,11 @@ const LoginPage: React.FC = () => {
                         <h1 className="text-3xl font-bold text-gray-900">{state.settings?.appName || 'Opalo ATS'}</h1>
                         <p className="mt-2 text-sm text-gray-600">Please sign in to your account</p>
                     </div>
+                    {sessionExpiredInfo && (
+                        <p className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-md px-3 py-2 text-center">
+                            Tu sesión se cerró por inactividad (más de 1 hora). Vuelve a iniciar sesión.
+                        </p>
+                    )}
                     <form className="space-y-6" onSubmit={handleLogin}>
                         <div>
                             <label htmlFor="email" className="block text-sm font-medium text-gray-700">Email Address</label>
@@ -529,7 +551,14 @@ const App: React.FC = () => {
                 const newDiscarded = discardedCandidates.filter(c => !activeIds.has(c.id));
                 const candidates = [...activeCandidates, ...newDiscarded];
 
-                const sessionUserId = localStorage.getItem('ats_pro_user');
+                let sessionUserId = getStoredUserId();
+                if (sessionUserId && isSessionExpired()) {
+                    expireSessionDueToInactivity();
+                    sessionUserId = null;
+                } else if (sessionUserId) {
+                    ensureSessionActivityBaseline();
+                }
+
                 let currentUser: User | null = null;
                 
                 if (sessionUserId) {
@@ -542,6 +571,7 @@ const App: React.FC = () => {
                         }
                     }
                     if (currentUser) {
+                        touchSessionActivity();
                         await setCurrentUser(currentUser.id).catch(() => {});
                     }
                 }
@@ -612,12 +642,18 @@ const App: React.FC = () => {
                 console.error('Error loading data:', error);
                 // NO usar datos de prueba como fallback - usar arrays vacíos
                 const loadedSettings = getSettings();
-                const sessionUserId = localStorage.getItem('ats_pro_user');
+                let sessionUserId = getStoredUserId();
+                if (sessionUserId && isSessionExpired()) {
+                    expireSessionDueToInactivity();
+                    sessionUserId = null;
+                }
+
                 let currentUser: User | null = null;
                 
                 if (sessionUserId) {
                     try {
                         currentUser = await usersApi.getById(sessionUserId);
+                        if (currentUser) ensureSessionActivityBaseline();
                     } catch (err) {
                         console.error('Error loading current user:', err);
                     }
@@ -670,7 +706,7 @@ const App: React.FC = () => {
             try {
                 const user = await usersApi.login(email, password);
                 if (user) {
-                    localStorage.setItem('ats_pro_user', user.id);
+                    establishSession(user.id);
                     await setCurrentUser(user.id);
                     window.location.reload(); // Recargar para filtrar datos según el usuario
                     return true;
@@ -681,7 +717,7 @@ const App: React.FC = () => {
                 // Fallback a búsqueda local
                 const user = state.users.find(u => u.email.toLowerCase() === email.toLowerCase());
                 if (user && user.password === password) {
-                    localStorage.setItem('ats_pro_user', user.id);
+                    establishSession(user.id);
                     window.location.reload(); // Recargar para filtrar datos según el usuario
                     return true;
                 }
@@ -689,7 +725,7 @@ const App: React.FC = () => {
             }
         },
         logout: () => {
-            localStorage.removeItem('ats_pro_user');
+            clearStoredSession();
             window.location.reload(); // Recargar para limpiar datos en memoria
         },
         setView: (type, payload) => {
@@ -1140,7 +1176,9 @@ const App: React.FC = () => {
                     googleDriveFolderName: folderName,
                 };
                 
-                const newCandidate = await candidatesApi.create(candidateDataWithFolder, state.currentUser?.id);
+                const newCandidate = await candidatesApi.create(candidateDataWithFolder, state.currentUser?.id, {
+                    createdByName: state.currentUser?.name || state.currentUser?.email,
+                });
                 
                 // Recargar el candidato desde la BD para asegurar que tiene todos los datos (attachments, history, etc.)
                 let finalCandidate = newCandidate;
@@ -1717,6 +1755,42 @@ const App: React.FC = () => {
             hideToastHelper(id);
         },
     }), [state.currentUser, state.users]);
+
+    // Cerrar sesión tras 1 hora sin actividad (clics, teclas, scroll)
+    useEffect(() => {
+        if (!state.currentUser) return;
+
+        touchSessionActivity();
+
+        let lastTouch = Date.now();
+        const ACTIVITY_THROTTLE_MS = 30_000;
+
+        const onActivity = () => {
+            const now = Date.now();
+            if (now - lastTouch < ACTIVITY_THROTTLE_MS) return;
+            lastTouch = now;
+            touchSessionActivity(now);
+        };
+
+        const activityEvents = ['mousedown', 'keydown', 'scroll', 'touchstart', 'click'] as const;
+        for (const eventName of activityEvents) {
+            window.addEventListener(eventName, onActivity, { passive: true });
+        }
+
+        const intervalId = window.setInterval(() => {
+            if (isSessionExpired()) {
+                expireSessionDueToInactivity();
+                window.location.reload();
+            }
+        }, 60_000);
+
+        return () => {
+            for (const eventName of activityEvents) {
+                window.removeEventListener(eventName, onActivity);
+            }
+            window.clearInterval(intervalId);
+        };
+    }, [state.currentUser?.id]);
 
     // Sincronización automática DESHABILITADA para reducir consumo de compute hours
     // La sincronización ahora es manual mediante el botón "Actualizar" en el sidebar

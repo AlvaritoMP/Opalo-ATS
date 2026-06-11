@@ -415,6 +415,13 @@ export interface Candidate {
     offerAcceptedDate?: string; // Fecha de aceptación de oferta (para Time to Hire)
     applicationStartedDate?: string; // Fecha de inicio de solicitud (para Application Completion Rate)
     applicationCompletedDate?: string; // Fecha de finalización de solicitud (para Application Completion Rate)
+    /** Origen de incorporación al proceso masivo: formulario, manual o carga masiva */
+    registrationOrigin?: 'formulario' | 'manual' | 'masivo';
+    createdBy?: string;
+    contactLockUserId?: string;
+    contactLockUserName?: string;
+    contactLockUntil?: string;
+    contactLockReason?: 'upload' | 'success';
     /** Veces que postuló por formulario en este proceso (Tally) */
     applicationCount?: number;
     /** Primera postulación; createdAt refleja la última */

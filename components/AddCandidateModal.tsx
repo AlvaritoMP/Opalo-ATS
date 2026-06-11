@@ -76,6 +76,7 @@ export const AddCandidateModal: React.FC<AddCandidateModalProps> = ({ process, o
                 province,
                 district,
                 applicationStartedDate: new Date().toISOString(), // Set automatically when candidate is created
+                registrationOrigin: 'manual',
             });
             
             if (onSuccess) {

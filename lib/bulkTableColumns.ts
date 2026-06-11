@@ -2,6 +2,10 @@ import { BulkProcessConfig, CustomColumn, FieldMapping, Process } from '../types
 import { normalizeImportTextCase } from './importTextCase.js';
 import { migrateBulkColumnOrder, CONTACT_COLUMN_IDS, CONTACT_LAST_USER_COLUMN_ID } from './contactChannelConfig';
 import { ensureHiredStageUserColumnInOrder, HIRED_STAGE_USER_COLUMN_ID } from './hiringStageTracking';
+import {
+    ensureRegistrationOriginColumnInOrder,
+    REGISTRATION_ORIGIN_COLUMN_ID,
+} from './candidateRegistrationOrigin';
 import { APP_NAME } from './appConfig';
 import { readBulkTableTemplatesCache } from './bulkTableTemplates';
 import { extractRouteCostTotal } from './routeCostStorage';
@@ -551,6 +555,7 @@ export const BASE_COLUMNS: BaseColumn[] = [
     { id: 'contactWhatsapp', label: 'WhatsApp' },
     { id: 'contactLastUser', label: 'Últ. contacto por' },
     { id: 'source', label: 'Fuente', importKey: 'source' },
+    { id: REGISTRATION_ORIGIN_COLUMN_ID, label: 'Origen alta' },
     { id: 'province', label: 'Provincia', importKey: 'province' },
     { id: 'district', label: 'Distrito', importKey: 'district' },
     { id: 'createdAt', label: 'Fecha creación' },
@@ -578,6 +583,7 @@ export const COLUMN_WIDTHS: Record<string, number> = {
     contactEmail: 100,
     contactLastUser: 108,
     source: 88,
+    registrationOrigin: 100,
     province: 88,
     district: 88,
     createdAt: 120,
@@ -979,6 +985,7 @@ export function resolveColumnOrder(
         ordered = migrateBulkColumnOrder(ordered).filter(
             id => allIds.includes(id) || id === HIRED_STAGE_USER_COLUMN_ID
         );
+        ordered = ensureRegistrationOriginColumnInOrder(ordered);
         ordered = ensureHiredStageUserColumnInOrder(ordered).filter(
             id => allIds.includes(id) || id === HIRED_STAGE_USER_COLUMN_ID
         );
