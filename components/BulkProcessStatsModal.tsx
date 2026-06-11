@@ -48,6 +48,7 @@ import {
     getChartSeries,
     resolveBulkStatChartData,
     canUseCrossTab,
+    crossTabBlockedReason,
     resolveSeriesMode,
     computeNumericAxisDomain,
     chartHasDateColumn,
@@ -92,15 +93,15 @@ const DATE_GRANULARITY_OPTIONS: { id: BulkStatDateGranularity; label: string }[]
 const SERIES_MODE_OPTIONS: { id: BulkStatSeriesMode; label: string; description: string }[] = [
     {
         id: 'crossTab',
-        label: 'Cruce de columnas',
+        label: 'Cuántos de A cumplen B',
         description:
-            'Como Speech × Asistencia: el eje X muestra la 1.ª columna y cada barra/línea es un valor de la 2.ª columna dentro de esa categoría.',
+            'Eje X = columna A. Eje Y = cantidad de candidatos (da igual el tipo de columna). Cada barra cuenta cuántos cumplen A y cada valor de B.',
     },
     {
         id: 'overlay',
-        label: 'Superponer conteos',
+        label: 'Comparar distribuciones',
         description:
-            'Cada serie cuenta su propia columna y se dibuja sobre las mismas etiquetas del eje X (comparación de distribuciones).',
+            'Cada columna se cuenta por separado sobre las mismas etiquetas del eje X (no cruza candidato a candidato).',
     },
 ];
 
@@ -127,7 +128,8 @@ const StatChartPreview: React.FC<{
     mergedData: BulkStatMergedRow[];
     resolvedSeries: BulkStatResolvedSeries[];
     pieData: { name: string; value: number }[];
-}> = ({ chart, mergedData, resolvedSeries, pieData }) => {
+    isCrossTab?: boolean;
+}> = ({ chart, mergedData, resolvedSeries, pieData, isCrossTab }) => {
     const dataKeys = resolvedSeries.map(s => s.dataKey);
     const hasData = mergedData.some(row => dataKeys.some(k => (row[k] as number) > 0));
 
@@ -143,7 +145,8 @@ const StatChartPreview: React.FC<{
     const yScale = chart.axisY?.scale === 'log' ? 'log' : 'linear';
     const showGrid = chart.showGrid !== false;
     const showLegend = chart.showLegend !== false;
-    const stacked = !!chart.stacked && chart.chartType !== 'line';
+    const stacked = !!chart.stacked && chart.chartType !== 'line' && !isCrossTab;
+    const yAxisLabel = chart.axisY?.label?.trim() || (isCrossTab ? 'Cantidad de candidatos' : undefined);
 
     if (chart.chartType === 'pie') {
         return (
@@ -197,15 +200,15 @@ const StatChartPreview: React.FC<{
                         domain={yDomain}
                         allowDecimals={false}
                         label={
-                            chart.axisY?.label
-                                ? { value: chart.axisY.label, angle: -90, position: 'insideLeft', fontSize: 11 }
+                            yAxisLabel
+                                ? { value: yAxisLabel, angle: -90, position: 'insideLeft', fontSize: 11 }
                                 : undefined
                         }
                     />
                     <Tooltip
                         formatter={(v: number, name: string) => {
                             const series = resolvedSeries.find(s => s.dataKey === name);
-                            return [v, series?.label ?? name];
+                            return [v, isCrossTab ? `${v} candidatos · ${series?.label ?? name}` : series?.label ?? name];
                         }}
                     />
                     {showLegend && <Legend />}
@@ -249,8 +252,8 @@ const StatChartPreview: React.FC<{
                             domain={yDomain}
                             allowDecimals={false}
                             label={
-                                chart.axisY?.label
-                                    ? { value: chart.axisY.label, position: 'insideBottom', offset: -4, fontSize: 11 }
+                                yAxisLabel
+                                    ? { value: yAxisLabel, position: 'insideBottom', offset: -4, fontSize: 11 }
                                     : undefined
                             }
                         />
@@ -286,8 +289,8 @@ const StatChartPreview: React.FC<{
                             domain={yDomain}
                             allowDecimals={false}
                             label={
-                                chart.axisY?.label
-                                    ? { value: chart.axisY.label, angle: -90, position: 'insideLeft', fontSize: 11 }
+                                yAxisLabel
+                                    ? { value: yAxisLabel, angle: -90, position: 'insideLeft', fontSize: 11 }
                                     : undefined
                             }
                         />
@@ -296,7 +299,12 @@ const StatChartPreview: React.FC<{
                 <Tooltip
                     formatter={(v: number, name: string) => {
                         const series = resolvedSeries.find(s => s.dataKey === name);
-                        return [v, series?.label ?? name];
+                        return [
+                            v,
+                            isCrossTab
+                                ? `${v} candidatos · ${series?.label ?? name}`
+                                : series?.label ?? name,
+                        ];
                     }}
                 />
                 {showLegend && resolvedSeries.length > 1 && <Legend />}
@@ -754,7 +762,7 @@ export const BulkProcessStatsModal: React.FC<Props> = ({
                             const hasDateColumn = chartHasDateColumn(chart, columnOptions);
                             const effectiveSeriesMode = resolveSeriesMode(chart, columnOptions);
                             const isCrossTab = bundle?.crossTab ?? false;
-                            const crossTabAvailable = canUseCrossTab(chart, columnOptions);
+                            const crossTabBlocked = crossTabBlockedReason(chart, columnOptions);
 
                             return (
                                 <div
@@ -809,17 +817,13 @@ export const BulkProcessStatsModal: React.FC<Props> = ({
                                     {!isPie && seriesList.length >= 2 && (
                                         <div className="p-3 rounded-lg border border-teal-100 bg-teal-50/50 space-y-2">
                                             <label className="block text-xs font-medium text-teal-900">
-                                                Modo de varias columnas
+                                                ¿Cómo combinar las dos columnas?
                                             </label>
                                             <div className="flex flex-wrap gap-2">
-                                                {SERIES_MODE_OPTIONS.map(opt => {
-                                                    const disabled =
-                                                        opt.id === 'crossTab' && !crossTabAvailable;
-                                                    return (
+                                                {SERIES_MODE_OPTIONS.map(opt => (
                                                         <button
                                                             key={opt.id}
                                                             type="button"
-                                                            disabled={disabled}
                                                             onClick={() =>
                                                                 updateChart(chart.id, {
                                                                     seriesMode: opt.id,
@@ -832,21 +836,17 @@ export const BulkProcessStatsModal: React.FC<Props> = ({
                                                                 effectiveSeriesMode === opt.id
                                                                     ? 'border-teal-500 bg-white text-teal-900 shadow-sm'
                                                                     : 'border-gray-200 bg-white/80 text-gray-700 hover:border-teal-300'
-                                                            } ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                                            }`}
                                                         >
                                                             <span className="font-medium block">{opt.label}</span>
                                                             <span className="text-[11px] text-gray-500 leading-snug">
                                                                 {opt.description}
                                                             </span>
                                                         </button>
-                                                    );
-                                                })}
+                                                ))}
                                             </div>
-                                            {!crossTabAvailable && (
-                                                <p className="text-[11px] text-amber-800">
-                                                    El cruce requiere que la 1.ª columna sea categórica o de fecha y la
-                                                    2.ª sea categórica, numérica o de fecha.
-                                                </p>
+                                            {crossTabBlocked && (
+                                                <p className="text-[11px] text-amber-800">{crossTabBlocked}</p>
                                             )}
                                         </div>
                                     )}
@@ -857,7 +857,7 @@ export const BulkProcessStatsModal: React.FC<Props> = ({
                                                 {isPie
                                                     ? 'Columna'
                                                     : isCrossTab
-                                                      ? 'Columnas del cruce'
+                                                      ? 'Columna A y columna B'
                                                       : 'Series de datos'}
                                             </label>
                                             {!isPie && (
@@ -894,10 +894,10 @@ export const BulkProcessStatsModal: React.FC<Props> = ({
                                                     <label className="block text-[11px] text-gray-500 mb-0.5">
                                                         {isCrossTab
                                                             ? idx === 0
-                                                                ? 'Eje X (categoría base)'
+                                                                ? 'Columna A — eje X (grupo base)'
                                                                 : idx === 1
-                                                                  ? 'Cruce (valores en barras)'
-                                                                  : 'Columna'
+                                                                  ? 'Columna B — qué se cuenta (barras / leyenda)'
+                                                                  : 'Columna (no usada en cruce)'
                                                             : 'Columna'}
                                                     </label>
                                                     <select
@@ -959,13 +959,20 @@ export const BulkProcessStatsModal: React.FC<Props> = ({
                                                 {bundle.crossTabHint}
                                             </p>
                                         )}
+                                        {seriesList.length === 1 && !isPie && (
+                                            <p className="text-xs text-teal-800 bg-teal-50 border border-teal-100 px-2 py-1.5 rounded">
+                                                Añada una <strong>2.ª columna (B)</strong> para ver cuántos candidatos
+                                                de cada valor de A también cumplen cada valor de B (como Speech ×
+                                                Asistencia).
+                                            </p>
+                                        )}
                                         {!isCrossTab &&
                                             seriesList.length > 1 &&
                                             effectiveSeriesMode === 'overlay' && (
                                                 <p className="text-xs text-gray-600 bg-gray-50 px-2 py-1 rounded">
-                                                    Modo superposición: cada columna aporta sus propias etiquetas al
-                                                    eje X. Para un cruce tipo Speech × Asistencia, elija{' '}
-                                                    <strong>Cruce de columnas</strong> arriba.
+                                                    Modo comparación: no cruza A con B candidato a candidato. Para
+                                                    contar «cuántos de A cumplen B», elija{' '}
+                                                    <strong>Cuántos de A cumplen B</strong> arriba.
                                                 </p>
                                             )}
                                     </div>
@@ -1026,6 +1033,7 @@ export const BulkProcessStatsModal: React.FC<Props> = ({
                                         mergedData={mergedData}
                                         resolvedSeries={resolvedSeries}
                                         pieData={pieData}
+                                        isCrossTab={isCrossTab}
                                     />
                                 </div>
                             );

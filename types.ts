@@ -285,7 +285,7 @@ export type BulkStatDateGranularity = 'day' | 'week' | 'month' | 'year';
 
 /**
  * Modo al usar varias series:
- * - crossTab: cruce tipo Speech × Asistencia (eje X = 1.ª columna, barras = valores de la 2.ª)
+ * - crossTab: cuántos candidatos cumplen A y B (eje X = A, eje Y = cantidades, leyenda = valores de B)
  * - overlay: superponer conteos de cada columna sobre las mismas etiquetas del eje X
  */
 export type BulkStatSeriesMode = 'crossTab' | 'overlay';

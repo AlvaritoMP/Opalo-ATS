@@ -718,8 +718,8 @@ function customColumnForStat(columnId: string, ctx: BulkStatContext): CustomColu
     return ctx.customColumns.find(c => c.id === customId);
 }
 
-/** Etiqueta de eje X o de cruce para un candidato (fecha agrupada o categoría). */
-function resolveCrossTabPrimaryLabel(
+/** Etiqueta agrupada para cruce (fecha, numérico en rangos o categoría). */
+function resolveCrossTabCellLabel(
     candidate: BulkCandidate,
     columnId: string,
     ctx: BulkStatContext,
@@ -735,6 +735,26 @@ function resolveCrossTabPrimaryLabel(
         return { label: bucket.label, sortKey: bucket.sortKey };
     }
     return { label: resolveBulkStatCellLabel(candidate, columnId, ctx) };
+}
+
+/** Etiqueta de eje X en un cruce A × B. */
+function resolveCrossTabPrimaryLabel(
+    candidate: BulkCandidate,
+    columnId: string,
+    ctx: BulkStatContext,
+    dateGranularity?: BulkStatDateGranularity
+): { label: string; sortKey?: number } {
+    return resolveCrossTabCellLabel(candidate, columnId, ctx, dateGranularity);
+}
+
+/** Valor de la columna B para contar «cuántos de A también cumplen B». */
+function resolveCrossTabSecondaryLabel(
+    candidate: BulkCandidate,
+    columnId: string,
+    ctx: BulkStatContext,
+    dateGranularity?: BulkStatDateGranularity
+): string {
+    return resolveCrossTabCellLabel(candidate, columnId, ctx, dateGranularity).label;
 }
 
 /** Categorías ordenadas para una columna (respeta opciones predefinidas de select). */
@@ -795,7 +815,54 @@ function getOrderedCategoryLabels(
     return entries.map(([name]) => name);
 }
 
-/** ¿Se puede cruzar la 1.ª y 2.ª serie (eje X × valores de la 2.ª columna)? */
+function resolveCrossTabDateGranularity(
+    columnId: string,
+    ctx: BulkStatContext,
+    chartGranularity?: BulkStatDateGranularity
+): BulkStatDateGranularity | undefined {
+    if (inferValueKind(columnId, ctx.customColumns) !== 'date') return undefined;
+    return chartGranularity ?? getDefaultDateGranularity(columnId);
+}
+
+/** Etiquetas del eje para un cruce: cualquier tipo de columna → grupos contables. */
+function getCrossTabAxisCategories(
+    candidates: BulkCandidate[],
+    columnId: string,
+    ctx: BulkStatContext,
+    dateGranularity?: BulkStatDateGranularity
+): string[] {
+    const col = customColumnForStat(columnId, ctx);
+
+    if (columnId === 'stage' && ctx.process?.stages?.length) {
+        return getOrderedCategoryLabels(candidates, columnId, ctx, { includeAllSelectOptions: true });
+    }
+    if (col?.type === 'select' && col.options?.length) {
+        return getOrderedCategoryLabels(candidates, columnId, ctx, { includeAllSelectOptions: true });
+    }
+    if (col?.type === 'checkbox') {
+        return getOrderedCategoryLabels(candidates, columnId, ctx);
+    }
+
+    const seen = new Map<string, number>();
+    for (const c of candidates) {
+        const { label, sortKey } = resolveCrossTabCellLabel(c, columnId, ctx, dateGranularity);
+        if (!seen.has(label)) seen.set(label, sortKey ?? seen.size);
+    }
+
+    return [...seen.entries()]
+        .sort((a, b) => {
+            const aKey = a[1];
+            const bKey = b[1];
+            if (aKey >= 0 && bKey >= 0 && aKey !== bKey) return aKey - bKey;
+            return a[0].localeCompare(b[0], 'es');
+        })
+        .map(([name]) => name);
+}
+
+/**
+ * Cruce A × B: sin restricción por tipo de columna.
+ * El eje Y siempre es cantidad de candidatos que cumplen A y B a la vez.
+ */
 export function canUseCrossTab(
     chart: BulkProcessStatChart,
     columnOptions: BulkStatColumnOption[]
@@ -808,12 +875,23 @@ export function canUseCrossTab(
     const secondary = columnOptions.find(c => c.id === series[1].columnId);
     if (!primary || !secondary) return false;
 
-    const primaryOk = primary.valueKind === 'categorical' || primary.valueKind === 'date';
-    const secondaryOk =
-        secondary.valueKind === 'categorical' ||
-        secondary.valueKind === 'numeric' ||
-        secondary.valueKind === 'date';
-    return primaryOk && secondaryOk;
+    return series[0].columnId !== series[1].columnId;
+}
+
+export function crossTabBlockedReason(
+    chart: BulkProcessStatChart,
+    columnOptions: BulkStatColumnOption[]
+): string | undefined {
+    if (chart.chartType === 'pie') return 'El gráfico circular no admite cruce de dos columnas.';
+    const series = getChartSeries(chart);
+    if (series.length < 2) return undefined;
+    if (series[0].columnId === series[1].columnId) {
+        return 'Elija dos columnas distintas: A (eje X) y B (valores que se cuentan en el eje Y).';
+    }
+    const primary = columnOptions.find(c => c.id === series[0].columnId);
+    const secondary = columnOptions.find(c => c.id === series[1].columnId);
+    if (!primary || !secondary) return 'Columna no disponible para graficar.';
+    return undefined;
 }
 
 /** Modo efectivo al combinar series (por defecto: cruce si es posible). */
@@ -850,35 +928,31 @@ function buildCrossTabChartData(
     const secondarySeries = resolvedSeries[1];
     const primaryColumnId = primarySeries.columnId;
     const secondaryColumnId = secondarySeries.columnId;
-    const dateGranularity = resolveChartDateGranularity(chart, columnOptions);
+    const chartDateGranularity = resolveChartDateGranularity(chart, columnOptions);
     const primaryKind = inferValueKind(primaryColumnId, ctx.customColumns);
+    const primaryGranularity = resolveCrossTabDateGranularity(
+        primaryColumnId,
+        ctx,
+        chartDateGranularity
+    );
+    const secondaryGranularity = resolveCrossTabDateGranularity(
+        secondaryColumnId,
+        ctx,
+        chartDateGranularity
+    );
 
-    const primaryGranularity =
-        primaryKind === 'date'
-            ? (dateGranularity ?? getDefaultDateGranularity(primaryColumnId))
-            : undefined;
-
-    let primaryCategories: string[];
-    if (primaryKind === 'date') {
-        const seen = new Map<string, number>();
-        for (const c of candidates) {
-            const { label, sortKey } = resolveCrossTabPrimaryLabel(
-                c,
-                primaryColumnId,
-                ctx,
-                primaryGranularity
-            );
-            if (!seen.has(label)) seen.set(label, sortKey ?? -1);
-        }
-        primaryCategories = [...seen.entries()]
-            .sort((a, b) => a[1] - b[1] || a[0].localeCompare(b[0], 'es'))
-            .map(([name]) => name);
-    } else {
-        primaryCategories = getOrderedCategoryLabels(candidates, primaryColumnId, ctx, {
-            includeAllSelectOptions: true,
-        });
-    }
-    const secondaryCategories = getOrderedCategoryLabels(candidates, secondaryColumnId, ctx);
+    const primaryCategories = getCrossTabAxisCategories(
+        candidates,
+        primaryColumnId,
+        ctx,
+        primaryGranularity
+    );
+    const secondaryCategories = getCrossTabAxisCategories(
+        candidates,
+        secondaryColumnId,
+        ctx,
+        secondaryGranularity
+    );
 
     const crossSeries: BulkStatResolvedSeries[] = secondaryCategories.map((cat, i) => ({
         id: `${secondarySeries.id}_x_${i}`,
@@ -898,7 +972,12 @@ function buildCrossTabChartData(
             ctx,
             primaryGranularity
         );
-        const secondaryLabel = resolveBulkStatCellLabel(candidate, secondaryColumnId, ctx);
+        const secondaryLabel = resolveCrossTabSecondaryLabel(
+            candidate,
+            secondaryColumnId,
+            ctx,
+            secondaryGranularity
+        );
 
         if (!counts.has(primaryLabel)) counts.set(primaryLabel, new Map());
         const inner = counts.get(primaryLabel)!;
@@ -974,9 +1053,11 @@ function buildCrossTabChartData(
     const secondaryCol = columnOptions.find(c => c.id === secondaryColumnId);
     const extraSeries = resolvedSeries.length > 2 ? resolvedSeries.length - 2 : 0;
 
+    const aLabel = primaryCol?.label ?? primaryColumnId;
+    const bLabel = secondaryCol?.label ?? secondaryColumnId;
     let crossTabHint =
-        `Cruce: cada categoría del eje X es «${primaryCol?.label ?? primaryColumnId}»; ` +
-        `las barras muestran cuántos candidatos tienen cada valor de «${secondaryCol?.label ?? secondaryColumnId}» dentro de esa categoría.`;
+        `Por cada valor de «${aLabel}» en el eje X, el eje Y muestra cuántos candidatos ` +
+        `también cumplen cada valor de «${bLabel}» (mismo sentido que Speech × Asistencia).`;
     if (extraSeries > 0) {
         crossTabHint += ` Solo se cruza con la 2.ª serie (${extraSeries} serie(s) adicional(es) omitida(s)).`;
     }
