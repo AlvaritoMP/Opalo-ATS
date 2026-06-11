@@ -31,8 +31,12 @@ import {
     formatRegistrationOrigin,
     REGISTRATION_ORIGIN_BADGE_CLASS,
     REGISTRATION_ORIGIN_COLUMN_ID,
+    REGISTRATION_ORIGIN_INFERRED_BADGE_CLASS,
     isCandidateRegistrationOrigin,
+    resolveRegistrationOrigin,
+    registrationOriginInputFromBulkCandidate,
 } from '../lib/candidateRegistrationOrigin';
+import { backfillRegistrationOriginsForProcess } from '../lib/api/registrationOriginBackfill';
 import {
     resolveActiveContactLock,
     isContactLockedForUser,
@@ -1577,6 +1581,25 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
 
         return () => {
             void supabase.removeChannel(channel);
+        };
+    }, [selectedProcess]);
+
+    // Rellenar registration_origin NULL en BD (registros anteriores al campo)
+    useEffect(() => {
+        if (!selectedProcess) return;
+        let cancelled = false;
+        (async () => {
+            try {
+                const { updated } = await backfillRegistrationOriginsForProcess(selectedProcess);
+                if (!cancelled && updated > 0) {
+                    loadCandidates(currentPage, true);
+                }
+            } catch (error) {
+                console.warn('No se pudo completar origen de alta histórico:', error);
+            }
+        })();
+        return () => {
+            cancelled = true;
         };
     }, [selectedProcess]);
 
@@ -3517,10 +3540,13 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                     valueA = (candidateA.source || '').toLowerCase();
                     valueB = (candidateB.source || '').toLowerCase();
                     break;
-                case REGISTRATION_ORIGIN_COLUMN_ID:
-                    valueA = formatRegistrationOrigin(candidateA.registrationOrigin).toLowerCase();
-                    valueB = formatRegistrationOrigin(candidateB.registrationOrigin).toLowerCase();
+                case REGISTRATION_ORIGIN_COLUMN_ID: {
+                    const oA = resolveRegistrationOrigin(registrationOriginInputFromBulkCandidate(candidateA)).origin;
+                    const oB = resolveRegistrationOrigin(registrationOriginInputFromBulkCandidate(candidateB)).origin;
+                    valueA = formatRegistrationOrigin(oA).toLowerCase();
+                    valueB = formatRegistrationOrigin(oB).toLowerCase();
                     break;
+                }
                 case 'province':
                     valueA = (candidateA.province || '').toLowerCase();
                     valueB = (candidateB.province || '').toLowerCase();
@@ -3668,7 +3694,10 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                 if (!sourceVal.toLowerCase().includes(columnFilters.source.toLowerCase())) return false;
             }
             if (columnFilters[REGISTRATION_ORIGIN_COLUMN_ID]) {
-                const originLabel = formatRegistrationOrigin(displayCandidate.registrationOrigin).toLowerCase();
+                const resolved = resolveRegistrationOrigin(
+                    registrationOriginInputFromBulkCandidate(displayCandidate)
+                );
+                const originLabel = formatRegistrationOrigin(resolved.origin, resolved.inferred).toLowerCase();
                 if (!originLabel.includes(columnFilters[REGISTRATION_ORIGIN_COLUMN_ID].toLowerCase())) return false;
             }
             if (columnFilters.province) {
@@ -5367,16 +5396,28 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                                 );
                                             }
                                             if (colId === REGISTRATION_ORIGIN_COLUMN_ID) {
-                                                const origin = displayCandidate.registrationOrigin;
-                                                const originLabel = formatRegistrationOrigin(origin);
-                                                const badgeClass = origin && isCandidateRegistrationOrigin(origin)
-                                                    ? REGISTRATION_ORIGIN_BADGE_CLASS[origin]
-                                                    : 'bg-gray-100 text-gray-500 border-gray-200';
+                                                const resolved = resolveRegistrationOrigin(
+                                                    registrationOriginInputFromBulkCandidate(displayCandidate)
+                                                );
+                                                const { origin, inferred } = resolved;
+                                                const originLabel = formatRegistrationOrigin(origin, inferred);
+                                                const badgeClass =
+                                                    origin && isCandidateRegistrationOrigin(origin)
+                                                        ? inferred
+                                                            ? REGISTRATION_ORIGIN_INFERRED_BADGE_CLASS[origin]
+                                                            : REGISTRATION_ORIGIN_BADGE_CLASS[origin]
+                                                        : 'bg-gray-100 text-gray-500 border-gray-200';
                                                 return (
                                                     <td key={REGISTRATION_ORIGIN_COLUMN_ID} {...tdProps(candidate.id, REGISTRATION_ORIGIN_COLUMN_ID)}>
                                                         <span
                                                             className={`inline-flex items-center px-1.5 py-0.5 rounded border text-[10px] font-medium leading-tight ${badgeClass}`}
-                                                            title={origin ? `Incorporado por ${originLabel}` : 'Sin dato de origen (registro anterior)'}
+                                                            title={
+                                                                origin
+                                                                    ? inferred
+                                                                        ? `${originLabel} — inferido de registro anterior; se guardará al abrir el proceso`
+                                                                        : `Incorporado por ${originLabel}`
+                                                                    : 'Sin datos suficientes para inferir el origen'
+                                                            }
                                                         >
                                                             {originLabel}
                                                         </span>

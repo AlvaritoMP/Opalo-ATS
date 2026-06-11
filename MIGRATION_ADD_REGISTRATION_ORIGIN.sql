@@ -22,14 +22,15 @@ CREATE INDEX IF NOT EXISTS idx_candidates_registration_origin
 ON candidates (registration_origin)
 WHERE registration_origin IS NOT NULL;
 
--- Heurística opcional: postulaciones por formulario Tally (emails placeholder)
+-- Heurística inicial (solo Tally / postulaciones — no usar @import.opalo genérico)
 UPDATE candidates
 SET registration_origin = 'formulario'
 WHERE registration_origin IS NULL
   AND (
-    email ILIKE '%@import.opalo%'
-    OR email ILIKE '%tally@import%'
-    OR (application_count IS NOT NULL AND application_count > 0 AND first_application_at IS NOT NULL)
+    email ILIKE '%tally@import%'
+    OR email ILIKE '%.tally@import.opalo'
+    OR first_application_at IS NOT NULL
+    OR (application_count IS NOT NULL AND application_count > 0)
   );
 
 SELECT column_name, data_type, is_nullable

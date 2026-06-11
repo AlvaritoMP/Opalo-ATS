@@ -63,8 +63,12 @@ function getBulkSelectCandidates(): string[] {
         BULK_SELECT_BASE,
     ];
     if (!cachedBulkSelect) return allVariants;
-    // Si el caché omitió application_count, reintentar variantes más completas
-    if (!cachedBulkSelect.includes('application_count')) return allVariants;
+    if (
+        !cachedBulkSelect.includes('application_count') ||
+        !cachedBulkSelect.includes('registration_origin')
+    ) {
+        return allVariants;
+    }
     return [cachedBulkSelect, ...allVariants.filter(v => v !== cachedBulkSelect)];
 }
 
@@ -218,9 +222,16 @@ export const bulkCandidatesApi = {
             if (!error) {
                 data = (rows || []) as Record<string, unknown>[];
                 count = total;
-                if (selectFields.includes('application_count') || selectFields === BULK_SELECT_FULL || selectFields === BULK_SELECT_WITH_APPLICATION) {
+                if (
+                    selectFields.includes('registration_origin') ||
+                    selectFields.includes('application_count') ||
+                    selectFields === BULK_SELECT_FULL
+                ) {
                     cachedBulkSelect = selectFields;
-                } else if (!cachedBulkSelect?.includes('application_count')) {
+                } else if (
+                    !cachedBulkSelect?.includes('application_count') &&
+                    !cachedBulkSelect?.includes('registration_origin')
+                ) {
                     cachedBulkSelect = selectFields;
                 }
                 bulkColumnValuesWriteSupported = selectFields.includes('bulk_column_values');
@@ -254,6 +265,34 @@ export const bulkCandidatesApi = {
             if (countById.size > 0) {
                 data = data.map(row => {
                     const extra = countById.get(row.id as string);
+                    return extra ? { ...row, ...extra } : row;
+                });
+            }
+        }
+
+        if (data && data.length > 0 && data[0].registration_origin === undefined) {
+            const ids = data.map(row => row.id as string);
+            const originById = new Map<string, Record<string, unknown>>();
+            for (let offset = 0; offset < ids.length; offset += 200) {
+                const chunk = ids.slice(offset, offset + 200);
+                const { data: originRows, error: originError } = await supabase
+                    .from('candidates')
+                    .select(
+                        'id, registration_origin, email, application_count, first_application_at, created_by'
+                    )
+                    .in('id', chunk)
+                    .eq('app_name', APP_NAME);
+                if (originError) {
+                    if (!isMissingColumnError(originError)) break;
+                    continue;
+                }
+                for (const row of originRows || []) {
+                    originById.set(row.id as string, row as Record<string, unknown>);
+                }
+            }
+            if (originById.size > 0) {
+                data = data.map(row => {
+                    const extra = originById.get(row.id as string);
                     return extra ? { ...row, ...extra } : row;
                 });
             }
