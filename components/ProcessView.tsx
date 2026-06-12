@@ -1,12 +1,13 @@
 import React, { useState } from 'react';
 import { useAppState } from '../App';
 import { CandidateCard } from './CandidateCard';
-import { Plus, Edit, Briefcase, DollarSign, BarChart, Clock, Paperclip, X, FileText, ClipboardList, Tag, Users, ArrowLeft, CheckCircle, Mail, MessageCircle, Download } from 'lucide-react';
+import { Plus, Edit, Briefcase, DollarSign, BarChart, Clock, Paperclip, X, FileText, ClipboardList, Tag, Users, ArrowLeft, CheckCircle, Mail, MessageCircle, Download, FileUp } from 'lucide-react';
 import { AddCandidateModal } from './AddCandidateModal';
 import { ProcessEditorModal } from './ProcessEditorModal';
 import { BulkLetterModal } from './BulkLetterModal';
 import { CloseProcessModal } from './CloseProcessModal';
 import { ProcessCommunicationModal } from './ProcessCommunicationModal';
+import { ProcessImportModal } from './BulkImportView';
 import { Attachment, UserRole, ProcessStatus, Candidate } from '../types';
 import * as XLSX from 'xlsx';
 import { openMailCompose, getMailComposeToastMessage } from '../lib/openMailto';
@@ -100,6 +101,7 @@ export const ProcessView: React.FC<ProcessViewProps> = ({ processId }) => {
     const [isBulkLetterOpen, setIsBulkLetterOpen] = useState(false);
     const [isCloseProcessOpen, setIsCloseProcessOpen] = useState(false);
     const [isCommunicationOpen, setIsCommunicationOpen] = useState(false);
+    const [isImportOpen, setIsImportOpen] = useState(false);
     const [selectedCandidates, setSelectedCandidates] = useState<string[]>([]);
     const [attachmentsCount, setAttachmentsCount] = useState<number | null>(null);
     const [processAttachments, setProcessAttachments] = useState<Attachment[]>([]);
@@ -507,6 +509,16 @@ export const ProcessView: React.FC<ProcessViewProps> = ({ processId }) => {
                             <button onClick={() => setIsProcessEditorOpen(true)} className="flex items-center px-3 md:px-4 py-2 bg-white border border-gray-300 rounded-md shadow-sm text-xs md:text-sm font-medium text-gray-700 hover:bg-gray-50 whitespace-nowrap">
                                 <Edit className="w-4 h-4 mr-1 md:mr-2"/> <span className="hidden md:inline">Editar proceso</span> <span className="md:hidden">Editar</span>
                             </button>
+                            {!process.isBulkProcess && (
+                                <button
+                                    onClick={() => setIsImportOpen(true)}
+                                    className="flex items-center px-3 md:px-4 py-2 bg-green-600 text-white rounded-lg shadow-sm hover:bg-green-700 whitespace-nowrap"
+                                >
+                                    <FileUp className="w-4 h-4 md:w-5 md:h-5 mr-1 md:mr-2" />
+                                    <span className="hidden md:inline">Importar candidatos</span>
+                                    <span className="md:hidden">Importar</span>
+                                </button>
+                            )}
                             <button onClick={() => setIsAddCandidateOpen(true)} className="flex items-center px-3 md:px-4 py-2 bg-primary-600 text-white rounded-lg shadow-sm hover:bg-primary-700 whitespace-nowrap">
                                 <Plus className="w-4 h-4 md:w-5 md:h-5 mr-1 md:mr-2" /> <span className="hidden md:inline">Añadir candidato</span> <span className="md:hidden">Añadir</span>
                             </button>
@@ -565,6 +577,16 @@ export const ProcessView: React.FC<ProcessViewProps> = ({ processId }) => {
                 ))}
             </main>
             {isAddCandidateOpen && <AddCandidateModal process={process} onClose={() => setIsAddCandidateOpen(false)} />}
+            {isImportOpen && !process.isBulkProcess && (
+                <ProcessImportModal
+                    process={process}
+                    onClose={() => setIsImportOpen(false)}
+                    onImportComplete={() => {
+                        setIsImportOpen(false);
+                        void actions.reloadCandidates?.();
+                    }}
+                />
+            )}
             {isProcessEditorOpen && <ProcessEditorModal process={process} onClose={() => setIsProcessEditorOpen(false)} />}
             {isAttachmentsModalOpen && (
                 <ProcessAttachmentsModal 

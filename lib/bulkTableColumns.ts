@@ -1223,6 +1223,24 @@ export function shouldApplyScoreAutoFilter(bulkConfig?: BulkProcessConfig): bool
     return !!(bulkConfig?.autoFilterEnabled && bulkConfig.scoreThreshold !== undefined);
 }
 
+/** Combina bulkConfig persistido con el layout actual de la tabla en pantalla (importación / plantilla). */
+export function buildImportBulkConfig(
+    bulkConfig: BulkProcessConfig | undefined,
+    tableLayout?: {
+        customColumns?: CustomColumn[];
+        columnOrder?: string[];
+        hiddenColumns?: string[];
+    }
+): BulkProcessConfig {
+    if (!tableLayout) return bulkConfig || {};
+    return {
+        ...(bulkConfig || {}),
+        customColumns: tableLayout.customColumns ?? bulkConfig?.customColumns ?? [],
+        columnOrder: tableLayout.columnOrder ?? bulkConfig?.columnOrder,
+        hiddenColumns: tableLayout.hiddenColumns ?? bulkConfig?.hiddenColumns,
+    };
+}
+
 export function getImportHeaders(
     bulkConfig?: BulkProcessConfig
 ): { header: string; field: string; isCustom: boolean; columnId?: string }[] {

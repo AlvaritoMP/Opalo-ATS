@@ -38,7 +38,7 @@ import { Spinner } from './components/Spinner';
 import { ArchivedCandidates } from './components/ArchivedCandidates';
 import { Letters } from './components/Letters';
 import { ToastContainer } from './components/Toast';
-import { LayoutDashboard, Briefcase, FileText, Settings as SettingsIcon, Users as UsersIcon, ChevronsLeft, ChevronsRight, BarChart2, Calendar, FileUp, LogOut, X, Archive, RefreshCw, Menu, Grid3x3, Send } from 'lucide-react';
+import { LayoutDashboard, Briefcase, FileText, Settings as SettingsIcon, Users as UsersIcon, ChevronsLeft, ChevronsRight, BarChart2, Calendar, LogOut, X, Archive, RefreshCw, Menu, Grid3x3, Send } from 'lucide-react';
 import { CandidateComparator } from './components/CandidateComparator';
 
 
@@ -270,8 +270,8 @@ const getVisibleSections = (user: User | null): Section[] => {
         return user.visibleSections;
     }
     const defaultSections: Record<UserRole, Section[]> = {
-        admin: ['dashboard', 'processes', 'archived', 'candidates', 'forms', 'letters', 'calendar', 'reports', 'compare', 'bulk-import', 'bulk-processes', 'opsflow-handoffs', 'users', 'settings'],
-        recruiter: ['dashboard', 'processes', 'archived', 'candidates', 'forms', 'letters', 'calendar', 'reports', 'compare', 'bulk-import', 'bulk-processes', 'opsflow-handoffs'],
+        admin: ['dashboard', 'processes', 'archived', 'candidates', 'forms', 'letters', 'calendar', 'reports', 'compare', 'bulk-processes', 'opsflow-handoffs', 'users', 'settings'],
+        recruiter: ['dashboard', 'processes', 'archived', 'candidates', 'forms', 'letters', 'calendar', 'reports', 'compare', 'bulk-processes', 'opsflow-handoffs'],
         client: ['dashboard', 'processes', 'candidates', 'calendar', 'reports', 'compare'],
         viewer: ['dashboard', 'processes', 'candidates', 'calendar', 'reports']
     };
@@ -373,7 +373,6 @@ const Sidebar: React.FC = () => {
                 {canSeeSection('calendar') && <NavItem icon={Calendar} label={getLabel('sidebar_calendar', 'Calendario')} view="calendar" currentView={state.view.type} setView={actions.setView} isCollapsed={isCollapsed} />}
                 {canSeeSection('reports') && <NavItem icon={BarChart2} label={getLabel('sidebar_reports', 'Reportes')} view="reports" currentView={state.view.type} setView={actions.setView} isCollapsed={isCollapsed} />}
                 {canSeeSection('compare') && <NavItem icon={BarChart2} label={getLabel('sidebar_compare', 'Comparador')} view="compare" currentView={state.view.type} setView={actions.setView} isCollapsed={isCollapsed} />}
-                {canSeeSection('bulk-import') && <NavItem icon={FileUp} label={getLabel('sidebar_bulk_import', 'Importación Masiva')} view="bulk-import" currentView={state.view.type} setView={actions.setView} isCollapsed={isCollapsed} />}
             </nav>
             <div className="p-2 border-t space-y-2">
                  <div className="p-2">

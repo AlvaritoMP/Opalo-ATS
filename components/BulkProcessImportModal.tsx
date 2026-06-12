@@ -1,7 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useAppState } from '../App';
 import { Upload, FileText, X, Loader2, Download } from 'lucide-react';
-import { Candidate, Process } from '../types';
+import { Candidate, CustomColumn, Process } from '../types';
 import * as XLSX from 'xlsx';
 import { getImportHeaders,
     mapImportHeader,
@@ -16,6 +16,7 @@ import { getImportHeaders,
     normalizeDniKey,
     normalizePhoneKey,
     normalizeImportTextCase,
+    buildImportBulkConfig,
 } from '../lib/bulkTableColumns';
 import { bulkCandidatesApi } from '../lib/api/bulkCandidates';
 
@@ -25,6 +26,12 @@ interface BulkProcessImportModalProps {
     onImportComplete: () => void;
     /** Modo restauración: solo actualiza existentes, no crea candidatos nuevos */
     restoreMode?: boolean;
+    /** Layout actual de la tabla en pantalla (columnas, orden y visibilidad) */
+    tableLayout?: {
+        customColumns: CustomColumn[];
+        columnOrder: string[];
+        hiddenColumns: string[];
+    };
 }
 
 interface ParsedRow {
@@ -198,6 +205,7 @@ export const BulkProcessImportModal: React.FC<BulkProcessImportModalProps> = ({
     onClose,
     onImportComplete,
     restoreMode = false,
+    tableLayout,
 }) => {
     const { actions } = useAppState();
     const [file, setFile] = useState<File | null>(null);
@@ -216,8 +224,13 @@ export const BulkProcessImportModal: React.FC<BulkProcessImportModalProps> = ({
         errors: string[];
     } | null>(null);
 
-    const importHeaders = getImportHeaders(process.bulkConfig);
-    const customColumns = (process.bulkConfig?.customColumns || []).map(c => ({
+    const effectiveBulkConfig = useMemo(
+        () => buildImportBulkConfig(process.bulkConfig, tableLayout),
+        [process.bulkConfig, tableLayout]
+    );
+
+    const importHeaders = getImportHeaders(effectiveBulkConfig);
+    const customColumns = (effectiveBulkConfig.customColumns || []).map(c => ({
         id: c.id,
         name: c.name,
         type: c.type,
@@ -308,7 +321,7 @@ export const BulkProcessImportModal: React.FC<BulkProcessImportModalProps> = ({
                 const errors: string[] = [];
                 const columnValuesUpdates: Record<string, Record<string, any>> = {};
 
-                const customColumnsFull = process.bulkConfig?.customColumns || [];
+                const customColumnsFull = effectiveBulkConfig.customColumns || [];
                 const existingCandidates = await bulkCandidatesApi.getAllCandidates(process.id);
                 const normalizeMatchKey = (s?: string) =>
                     (s || '').trim().toLowerCase().replace(/\s+/g, '');
@@ -359,7 +372,7 @@ export const BulkProcessImportModal: React.FC<BulkProcessImportModalProps> = ({
                         name,
                         dni,
                         phone,
-                        'import'
+                        'manual'
                     );
 
                     if (email && !EMAIL_REGEX.test(email)) {
@@ -418,8 +431,7 @@ export const BulkProcessImportModal: React.FC<BulkProcessImportModalProps> = ({
                             processId: process.id,
                             stageId: firstStageId,
                             attachments: [],
-                            applicationStartedDate: new Date().toISOString(),
-                            registrationOrigin: 'masivo',
+                            registrationOrigin: 'manual',
                         };
 
                         OPTIONAL_IMPORT_FIELDS.forEach(field => {

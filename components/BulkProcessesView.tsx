@@ -5854,6 +5854,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
             {showImportModal && process && (
                 <BulkProcessImportModal
                     process={process}
+                    tableLayout={{ customColumns, columnOrder, hiddenColumns }}
                     restoreMode={importRestoreMode}
                     onClose={() => {
                         setShowImportModal(false);

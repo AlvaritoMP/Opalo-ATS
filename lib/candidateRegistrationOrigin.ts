@@ -69,11 +69,11 @@ export function inferRegistrationOrigin(input: RegistrationOriginInput): Candida
     const email = (input.email || '').trim().toLowerCase();
 
     if (isTallyFormEmail(email)) return 'formulario';
-    if (input.firstApplicationAt) return 'formulario';
-    if (input.applicationCount != null && input.applicationCount > 0) return 'formulario';
-
     if (isManualPlaceholderEmail(email)) return 'manual';
     if (isBulkImportPlaceholderEmail(email) || isGenericImportPlaceholderEmail(email)) return 'masivo';
+
+    if (input.firstApplicationAt) return 'formulario';
+    if (input.applicationCount != null && input.applicationCount > 0) return 'formulario';
 
     // Email real u otro caso: alta por reclutador (Excel o fila manual con email)
     if (input.createdBy) return 'masivo';
