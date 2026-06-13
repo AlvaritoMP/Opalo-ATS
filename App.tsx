@@ -22,6 +22,7 @@ import {
     saveDashboardFilters,
     type DashboardFiltersState,
 } from './lib/dashboardFilters';
+import { fetchDashboardData, type DashboardDataCache } from './lib/dashboardDataLoader';
 import { Dashboard } from './components/Dashboard';
 import { ProcessList } from './components/ProcessList';
 import { ProcessView } from './components/ProcessView';
@@ -57,6 +58,8 @@ interface AppState {
     /** Proceso masivo abierto; '' = lista de procesos masivos */
     lastViewedBulkProcessId: string;
     dashboardFilters: DashboardFiltersState;
+    dashboardCache: DashboardDataCache | null;
+    dashboardCacheLoading: boolean;
     loading: boolean;
     toasts: Array<{ id: string; message: string; type: 'success' | 'error' | 'loading' | 'info'; duration?: number }>;
 }
@@ -96,6 +99,7 @@ interface AppActions {
     setView: (type: string, payload?: any) => void;
     setLastViewedBulkProcessId: (processId: string) => void;
     setDashboardFilters: (patch: Partial<DashboardFiltersState>) => void;
+    loadDashboardCache: (force?: boolean) => Promise<void>;
     showToast: (message: string, type: 'success' | 'error' | 'loading' | 'info', duration?: number) => string;
     hideToast: (id: string) => void;
 }
@@ -471,6 +475,8 @@ const App: React.FC = () => {
         lastViewedProcessId: null,
         lastViewedBulkProcessId: '',
         dashboardFilters: loadDashboardFilters(),
+        dashboardCache: null,
+        dashboardCacheLoading: false,
         loading: true,
         toasts: [],
     });
@@ -634,9 +640,24 @@ const App: React.FC = () => {
                     lastViewedProcessId: null,
                     lastViewedBulkProcessId: bulkProcessId,
                     dashboardFilters: loadDashboardFilters(currentUser?.id),
+                    dashboardCache: null,
+                    dashboardCacheLoading: true,
                     loading: false,
                     toasts: [],
                 });
+
+                void fetchDashboardData(filteredProcesses, users, currentUser)
+                    .then(cache => {
+                        setState(s => ({
+                            ...s,
+                            dashboardCache: cache,
+                            dashboardCacheLoading: false,
+                        }));
+                    })
+                    .catch(err => {
+                        console.warn('Error precargando panel de datos:', err);
+                        setState(s => ({ ...s, dashboardCacheLoading: false }));
+                    });
             } catch (error) {
                 console.error('Error loading data:', error);
                 // NO usar datos de prueba como fallback - usar arrays vacíos
@@ -674,6 +695,8 @@ const App: React.FC = () => {
                         ? getBulkSelectedProcessId(currentUser.id) ?? ''
                         : '',
                     dashboardFilters: loadDashboardFilters(currentUser?.id),
+                    dashboardCache: null,
+                    dashboardCacheLoading: false,
                     loading: false,
                     toasts: [],
                 });
@@ -761,6 +784,36 @@ const App: React.FC = () => {
                 saveDashboardFilters(dashboardFilters, s.currentUser?.id);
                 return { ...s, dashboardFilters };
             });
+        },
+        loadDashboardCache: async (force = false) => {
+            if (!force && state.dashboardCache) return;
+            if (state.dashboardCacheLoading) return;
+
+            setState(s => ({ ...s, dashboardCacheLoading: true }));
+            const toastId = force
+                ? showToastHelper('Actualizando panel de datos...', 'loading', 0)
+                : null;
+            try {
+                const cache = await fetchDashboardData(
+                    state.processes,
+                    state.users,
+                    state.currentUser
+                );
+                setState(s => ({
+                    ...s,
+                    dashboardCache: cache,
+                    dashboardCacheLoading: false,
+                }));
+                if (toastId) {
+                    hideToastHelper(toastId);
+                    showToastHelper('Panel de datos actualizado', 'success', 2500);
+                }
+            } catch (error) {
+                console.error('Error cargando datos del panel:', error);
+                setState(s => ({ ...s, dashboardCacheLoading: false }));
+                if (toastId) hideToastHelper(toastId);
+                showToastHelper('No se pudo actualizar el panel de datos', 'error', 4000);
+            }
         },
         saveSettings: async (settings) => {
             try {
@@ -1753,7 +1806,7 @@ const App: React.FC = () => {
         hideToast: (id: string) => {
             hideToastHelper(id);
         },
-    }), [state.currentUser, state.users]);
+    }), [state.currentUser, state.users, state.processes, state.dashboardCache, state.dashboardCacheLoading]);
 
     // Cerrar sesión tras 1 hora sin actividad (clics, teclas, scroll)
     useEffect(() => {

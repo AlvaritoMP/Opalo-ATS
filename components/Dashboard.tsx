@@ -1,11 +1,9 @@
 import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { useAppState } from '../App';
-import { Briefcase, Users, FileText, CheckCircle, Calendar, Grid3x3, Phone, TrendingUp, UserCheck, Headphones, UserPlus, MessageCircle, Mail, Clock, Target, Zap } from 'lucide-react';
+import { Briefcase, Users, FileText, CheckCircle, Calendar, Grid3x3, Phone, TrendingUp, UserCheck, Headphones, UserPlus, MessageCircle, Mail, Clock, Target, Zap, RefreshCw } from 'lucide-react';
 import { Tooltip, Legend, BarChart, CartesianGrid, XAxis, YAxis, Bar, LineChart, Line, ComposedChart } from 'recharts';
 import { Candidate, Process } from '../types';
 import { resolveCandidateAgeForProcess, resolveCandidateHomonymField, buildLegacyColumnIdToName } from '../lib/bulkTableColumns';
-import { bulkCandidatesApi } from '../lib/api/bulkCandidates';
-import { contactTrackingApi } from '../lib/api/contactTracking';
 import {
     computeContactDashboardStats,
     buildChannelTrendBundle,
@@ -25,15 +23,11 @@ import {
     attributeContactAttemptsFromSummaries,
     synthesizeVolumeAttemptsFromSummaries,
     synthesizeInteresadoAttemptsFromSummaries,
-    mergeContactAttemptsDedupe,
-    backfillContactAttemptProcessIds,
 } from '../lib/contactAttemptReconcile';
 import type { ContactAttemptChannel } from '../lib/contactChannelConfig';
-import { computeHiringStageConsultantStats, resolveHiringStageId, mapRawHiringMoves, type HiredStageActor } from '../lib/hiringStageTracking';
-import { interviewSchedulingApi } from '../lib/api/interviewScheduling';
+import { computeHiringStageConsultantStats, resolveHiringStageId, type HiredStageActor } from '../lib/hiringStageTracking';
 import { computeInterviewSchedulingStats } from '../lib/interviewSchedulingStats';
 import { reconcileInterviewSchedulingFromBulkCandidates } from '../lib/interviewSchedulingReconcile';
-import type { BulkSchedulingCandidateRow } from '../lib/interviewSchedulingReconcile';
 import {
     buildUserLookupForStats,
     enrichContactAttemptsForStats,
@@ -45,11 +39,8 @@ import {
     resolveApplicationCompletedDate,
     getLastStageId,
 } from '../lib/dashboardEfficiencyMetrics';
-import {
-    enrichBulkCandidateForDashboard,
-    bulkDashboardFieldExtrasFromCandidate,
-    resolveDashboardApplicationDate,
-} from '../lib/dashboardCandidatePool';
+import { resolveDashboardApplicationDate } from '../lib/dashboardCandidatePool';
+import type { BulkCandidateFieldExtras } from '../lib/dashboardDataLoader';
 import type { ContactSummaryCandidate } from '../lib/contactAttemptReconcile';
 import { LimaDistrictMap } from './LimaDistrictMap';
 import { normalizeDistrictLabel } from '../lib/limaDistrictMap';
@@ -223,14 +214,6 @@ const topNWithOthers = (
         ...top.map(([name, Candidatos]) => ({ name, Candidatos })),
         { name: 'Otros', Candidatos: others },
     ];
-};
-
-type BulkCandidateFieldExtras = {
-    bulkColumnValues?: Record<string, unknown>;
-    age?: number;
-    source?: string;
-    province?: string;
-    district?: string;
 };
 
 const resolveDashboardCandidateField = (
@@ -425,7 +408,16 @@ const ContactChannelChartsRow: React.FC<{
 
 export const Dashboard: React.FC = () => {
     const { state, getLabel, actions } = useAppState();
-    const { processes, candidates: allCandidates, interviewEvents, users, currentUser, dashboardFilters } = state;
+    const {
+        processes,
+        candidates: allCandidates,
+        interviewEvents,
+        users,
+        currentUser,
+        dashboardFilters,
+        dashboardCache,
+        dashboardCacheLoading,
+    } = state;
 
     const {
         processFilter,
@@ -462,21 +454,6 @@ export const Dashboard: React.FC = () => {
 
     const processMap = useMemo(() => new Map(processes.map(p => [p.id, p])), [processes]);
 
-    /** Datos masivos por candidato (columnas + edad desde API de procesos masivos) */
-    const [bulkCandidateFields, setBulkCandidateFields] = useState<Record<string, BulkCandidateFieldExtras>>({});
-    const [bulkPoolCandidates, setBulkPoolCandidates] = useState<Candidate[]>([]);
-    const [bulkContactSummaries, setBulkContactSummaries] = useState<Record<string, ContactSummaryCandidate>>({});
-    const [bulkSchedulingRows, setBulkSchedulingRows] = useState<BulkSchedulingCandidateRow[]>([]);
-    const [bulkHiringActorsByProcess, setBulkHiringActorsByProcess] = useState<
-        Record<string, Record<string, HiredStageActor>>
-    >({});
-
-    const [contactAttempts, setContactAttempts] = useState<Awaited<ReturnType<typeof contactTrackingApi.getAttemptsForProcesses>>>([]);
-    const [contactStatsLoading, setContactStatsLoading] = useState(false);
-    const [schedulingLogs, setSchedulingLogs] = useState<Awaited<ReturnType<typeof interviewSchedulingApi.getLogsForProcesses>>>([]);
-    const [schedulingCycles, setSchedulingCycles] = useState<Awaited<ReturnType<typeof interviewSchedulingApi.getCyclesForProcesses>>>([]);
-    const [schedulingStatsLoading, setSchedulingStatsLoading] = useState(false);
-
     const bulkProcessIdsInScope = useMemo(() => {
         if (processFilter !== 'all') {
             const p = processMap.get(processFilter);
@@ -485,106 +462,83 @@ export const Dashboard: React.FC = () => {
         return scopedProcesses.filter(p => p.isBulkProcess).map(p => p.id);
     }, [processFilter, scopedProcesses, processMap]);
 
-    useEffect(() => {
-        if (bulkProcessIdsInScope.length === 0) {
-            setBulkPoolCandidates([]);
-            setBulkCandidateFields({});
-            setBulkContactSummaries({});
-            setBulkSchedulingRows([]);
-            return;
+    const bulkProcessIdSet = useMemo(
+        () => new Set(bulkProcessIdsInScope),
+        [bulkProcessIdsInScope]
+    );
+
+    const bulkPoolCandidates = useMemo(() => {
+        if (!dashboardCache || bulkProcessIdsInScope.length === 0) return [];
+        return dashboardCache.bulkPoolCandidates.filter(c => bulkProcessIdSet.has(c.processId));
+    }, [dashboardCache, bulkProcessIdsInScope, bulkProcessIdSet]);
+
+    const bulkCandidateFields = useMemo(() => {
+        if (!dashboardCache) return {};
+        const fields: Record<string, BulkCandidateFieldExtras> = {};
+        for (const candidate of bulkPoolCandidates) {
+            const extra = dashboardCache.bulkCandidateFields[candidate.id];
+            if (extra) fields[candidate.id] = extra;
         }
+        return fields;
+    }, [dashboardCache, bulkPoolCandidates]);
 
-        let cancelled = false;
-        (async () => {
-            const pool: Candidate[] = [];
-            const fields: Record<string, BulkCandidateFieldExtras> = {};
-            const summaries: Record<string, ContactSummaryCandidate> = {};
-            const schedulingRows: BulkSchedulingCandidateRow[] = [];
-            for (const processId of bulkProcessIdsInScope) {
-                try {
-                    const process = processMap.get(processId);
-                    const all = await bulkCandidatesApi.getAllCandidates(processId);
-                    const candidateIds = all.map(c => c.id);
-                    const [columnValuesMap, historyByCandidate] = await Promise.all([
-                        bulkCandidatesApi.loadAllBulkColumnValues(processId),
-                        bulkCandidatesApi.loadCandidateHistoryByIds(candidateIds),
-                    ]);
-                    for (const c of all) {
-                        const columnRow = columnValuesMap[c.id] || {};
-                        const withHistory: typeof c = {
-                            ...c,
-                            history: historyByCandidate[c.id] ?? [],
-                        };
-                        const mapped = enrichBulkCandidateForDashboard(withHistory, process, columnRow);
-                        pool.push(mapped);
-                        fields[c.id] = bulkDashboardFieldExtrasFromCandidate(mapped);
-                        summaries[c.id] = {
-                            id: c.id,
-                            processId: c.processId,
-                            contactPhone: c.contactPhone,
-                            contactWhatsapp: c.contactWhatsapp,
-                            contactEmail: c.contactEmail,
-                        };
-                        schedulingRows.push({
-                            id: c.id,
-                            processId: c.processId,
-                            bulkColumnValues: {
-                                ...(c.bulkColumnValues || {}),
-                                ...columnRow,
-                            },
-                            nextInterviewAt: c.nextInterviewAt,
-                            nextInterviewerId: c.nextInterviewerId,
-                        });
-                    }
-                } catch {
-                    /* continuar con otros procesos */
-                }
-            }
-            if (!cancelled) {
-                setBulkPoolCandidates(pool);
-                setBulkCandidateFields(fields);
-                setBulkContactSummaries(summaries);
-                setBulkSchedulingRows(schedulingRows);
-            }
-        })();
+    const bulkContactSummaries = useMemo(() => {
+        if (!dashboardCache || bulkProcessIdsInScope.length === 0) return {};
+        const summaries: Record<string, ContactSummaryCandidate> = {};
+        for (const [id, summary] of Object.entries(dashboardCache.bulkContactSummaries)) {
+            if (bulkProcessIdSet.has(summary.processId)) summaries[id] = summary;
+        }
+        return summaries;
+    }, [dashboardCache, bulkProcessIdsInScope, bulkProcessIdSet]);
 
-        return () => {
-            cancelled = true;
-        };
-    }, [bulkProcessIdsInScope, processMap]);
+    const bulkSchedulingRows = useMemo(() => {
+        if (!dashboardCache || bulkProcessIdsInScope.length === 0) return [];
+        return dashboardCache.bulkSchedulingRows.filter(row => bulkProcessIdSet.has(row.processId));
+    }, [dashboardCache, bulkProcessIdsInScope, bulkProcessIdSet]);
+
+    const bulkHiringActorsByProcess = useMemo(() => {
+        if (!dashboardCache || bulkProcessIdsInScope.length === 0) return {};
+        const byProcess: Record<string, Record<string, HiredStageActor>> = {};
+        for (const processId of bulkProcessIdsInScope) {
+            const actors = dashboardCache.bulkHiringActorsByProcess[processId];
+            if (actors) byProcess[processId] = actors;
+        }
+        return byProcess;
+    }, [dashboardCache, bulkProcessIdsInScope]);
+
+    const targetProcessIds = useMemo(() => {
+        if (processFilter !== 'all') return [processFilter];
+        return scopedProcesses.map(p => p.id);
+    }, [processFilter, scopedProcesses]);
+
+    const targetProcessIdSet = useMemo(
+        () => new Set(targetProcessIds),
+        [targetProcessIds]
+    );
+
+    const contactAttempts = useMemo(() => {
+        if (!dashboardCache || targetProcessIds.length === 0) return [];
+        return dashboardCache.contactAttempts.filter(attempt => targetProcessIdSet.has(attempt.processId));
+    }, [dashboardCache, targetProcessIds, targetProcessIdSet]);
+
+    const schedulingLogs = useMemo(() => {
+        if (!dashboardCache || targetProcessIds.length === 0) return [];
+        return dashboardCache.schedulingLogs.filter(log => targetProcessIdSet.has(log.processId));
+    }, [dashboardCache, targetProcessIds, targetProcessIdSet]);
+
+    const schedulingCycles = useMemo(() => {
+        if (!dashboardCache || targetProcessIds.length === 0) return [];
+        return dashboardCache.schedulingCycles.filter(cycle => targetProcessIdSet.has(cycle.processId));
+    }, [dashboardCache, targetProcessIds, targetProcessIdSet]);
+
+    const contactStatsLoading = dashboardCacheLoading && !dashboardCache;
+    const schedulingStatsLoading = dashboardCacheLoading && !dashboardCache;
 
     useEffect(() => {
-        if (bulkProcessIdsInScope.length === 0) {
-            setBulkHiringActorsByProcess({});
-            return;
+        if (!dashboardCache && !dashboardCacheLoading) {
+            void actions.loadDashboardCache();
         }
-
-        let cancelled = false;
-        (async () => {
-            const byProcess: Record<string, Record<string, HiredStageActor>> = {};
-            await Promise.all(
-                bulkProcessIdsInScope.map(async processId => {
-                    const process = processMap.get(processId);
-                    const hiringStageId = resolveHiringStageId(process);
-                    if (!hiringStageId) return;
-                    try {
-                        const rows = await bulkCandidatesApi.getHiringStageActorsForProcess(
-                            processId,
-                            hiringStageId
-                        );
-                        byProcess[processId] = mapRawHiringMoves(rows, statsUsers);
-                    } catch {
-                        byProcess[processId] = {};
-                    }
-                })
-            );
-            if (!cancelled) setBulkHiringActorsByProcess(byProcess);
-        })();
-
-        return () => {
-            cancelled = true;
-        };
-    }, [bulkProcessIdsInScope, processMap, statsUsers]);
+    }, [dashboardCache, dashboardCacheLoading, actions]);
 
     const analyticsCandidates = useMemo(() => {
         const standardProcessIds = new Set(
@@ -594,21 +548,6 @@ export const Dashboard: React.FC = () => {
         return [...standard, ...bulkPoolCandidates];
     }, [allCandidates, bulkPoolCandidates, scopedProcesses]);
 
-    const targetProcessIds = useMemo(() => {
-        if (processFilter !== 'all') return [processFilter];
-        return scopedProcesses.map(p => p.id);
-    }, [processFilter, scopedProcesses]);
-
-    const bulkCandidateIdsInScope = useMemo(() => {
-        const processIdSet = new Set(targetProcessIds);
-        const ids: string[] = [];
-        for (const c of analyticsCandidates) {
-            if (!processIdSet.has(c.processId)) continue;
-            if (processMap.get(c.processId)?.isBulkProcess) ids.push(c.id);
-        }
-        return ids;
-    }, [analyticsCandidates, targetProcessIds, processMap]);
-
     const candidateProcessIdMap = useMemo(() => {
         const map = new Map<string, string>();
         for (const c of analyticsCandidates) {
@@ -616,89 +555,6 @@ export const Dashboard: React.FC = () => {
         }
         return map;
     }, [analyticsCandidates]);
-
-    useEffect(() => {
-        if (targetProcessIds.length === 0) {
-            setContactAttempts([]);
-            return;
-        }
-
-        let cancelled = false;
-        setContactStatsLoading(true);
-        (async () => {
-            try {
-                const summaries = Object.values(bulkContactSummaries).filter(c =>
-                    targetProcessIds.includes(c.processId)
-                );
-                if (summaries.length > 0) {
-                    await contactTrackingApi.syncSummariesToHistory(
-                        summaries,
-                        bulkProcessIdsInScope.length > 0 ? bulkProcessIdsInScope : targetProcessIds
-                    );
-                }
-
-                const [byProcess, byCandidates] = await Promise.all([
-                    contactTrackingApi.getAttemptsForProcesses(targetProcessIds),
-                    bulkCandidateIdsInScope.length > 0
-                        ? contactTrackingApi.getAttemptsForCandidateIds(bulkCandidateIdsInScope)
-                        : Promise.resolve([]),
-                ]);
-                const merged = backfillContactAttemptProcessIds(
-                    mergeContactAttemptsDedupe([...byProcess, ...byCandidates]),
-                    candidateProcessIdMap
-                );
-                if (!cancelled) setContactAttempts(merged);
-            } catch {
-                if (!cancelled) setContactAttempts([]);
-            } finally {
-                if (!cancelled) setContactStatsLoading(false);
-            }
-        })();
-
-        return () => {
-            cancelled = true;
-        };
-    }, [
-        targetProcessIds,
-        bulkCandidateIdsInScope,
-        candidateProcessIdMap,
-        bulkContactSummaries,
-        bulkProcessIdsInScope,
-    ]);
-
-    useEffect(() => {
-        if (targetProcessIds.length === 0) {
-            setSchedulingLogs([]);
-            setSchedulingCycles([]);
-            return;
-        }
-
-        let cancelled = false;
-        setSchedulingStatsLoading(true);
-        (async () => {
-            try {
-                const [logs, cycles] = await Promise.all([
-                    interviewSchedulingApi.getLogsForProcesses(targetProcessIds),
-                    interviewSchedulingApi.getCyclesForProcesses(targetProcessIds),
-                ]);
-                if (!cancelled) {
-                    setSchedulingLogs(logs);
-                    setSchedulingCycles(cycles);
-                }
-            } catch {
-                if (!cancelled) {
-                    setSchedulingLogs([]);
-                    setSchedulingCycles([]);
-                }
-            } finally {
-                if (!cancelled) setSchedulingStatsLoading(false);
-            }
-        })();
-
-        return () => {
-            cancelled = true;
-        };
-    }, [targetProcessIds]);
 
     const filteredCandidates = useMemo(() => {
         const userRole = state.currentUser?.role;
@@ -1278,8 +1134,29 @@ export const Dashboard: React.FC = () => {
 
     return (
         <div className="p-4 md:p-8 bg-gray-50/50 min-h-full overflow-y-auto">
-            <div className="flex justify-between items-center mb-4 md:mb-6">
+            <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 mb-4 md:mb-6">
                 <h1 className="text-2xl md:text-3xl font-bold text-gray-800">{getLabel('sidebar_dashboard', 'Panel')}</h1>
+                <div className="flex items-center gap-3 shrink-0">
+                    {dashboardCache?.loadedAt && (
+                        <span className="text-xs text-gray-400 hidden md:inline">
+                            Datos al{' '}
+                            {new Date(dashboardCache.loadedAt).toLocaleString('es-PE', {
+                                dateStyle: 'short',
+                                timeStyle: 'short',
+                            })}
+                        </span>
+                    )}
+                    <button
+                        type="button"
+                        onClick={() => void actions.loadDashboardCache(true)}
+                        disabled={dashboardCacheLoading}
+                        className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-60 disabled:cursor-not-allowed"
+                        title="Actualizar datos del panel"
+                    >
+                        <RefreshCw className={`w-4 h-4 ${dashboardCacheLoading ? 'animate-spin' : ''}`} />
+                        Actualizar
+                    </button>
+                </div>
             </div>
 
             <div className="bg-white p-3 md:p-4 rounded-xl border border-gray-200 shadow-sm mb-6 md:mb-8 flex flex-col lg:flex-row lg:flex-wrap lg:items-end gap-3 md:gap-4">
