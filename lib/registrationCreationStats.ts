@@ -28,6 +28,7 @@ export interface RegistrationCreationCandidateInput {
 export interface RegistrationCreationStats {
     totalWithTimestamp: number;
     formSubmissionCount: number;
+    atsManualCount: number;
     /** Solo postulaciones Tally/formulario con first_application_at y created_at */
     avgFormToRecordMinutes: number | null;
     avgFormToRecordLabel: string;
@@ -35,8 +36,18 @@ export interface RegistrationCreationStats {
     formToRecordDescription: string;
     avgIntervalBetweenRecordsMinutes: number | null;
     avgIntervalBetweenRecordsLabel: string;
-    timeBandDistribution: { band: RegistrationTimeBand; label: string; count: number; pct: number }[];
+    timeBandDistribution: {
+        band: RegistrationTimeBand;
+        label: string;
+        formCount: number;
+        manualCount: number;
+        count: number;
+        formPct: number;
+        manualPct: number;
+        pct: number;
+    }[];
     peakTimeBand: { band: RegistrationTimeBand; label: string; count: number } | null;
+    peakFormTimeBand: { band: RegistrationTimeBand; label: string; count: number } | null;
 }
 
 /** Timestamp usado para franjas horarias y tiempos entre altas. */
@@ -51,8 +62,14 @@ export function resolveRecordCreatedAt(candidate: RegistrationCreationCandidateI
 
 function isFormSubmission(candidate: RegistrationCreationCandidateInput): boolean {
     if (candidate.registrationOrigin === 'formulario') return true;
+    if (candidate.registrationOrigin === 'manual' || candidate.registrationOrigin === 'masivo') return false;
     if (candidate.firstApplicationAt && (candidate.applicationCount ?? 0) > 0) return true;
     return false;
+}
+
+/** Altas por reclutadores en el ATS (fila manual, Excel, importación masiva, etc.). */
+function isAtsManualRegistration(candidate: RegistrationCreationCandidateInput): boolean {
+    return !isFormSubmission(candidate);
 }
 
 function getLimaHourMinute(iso: string): { hour: number; minute: number } | null {
@@ -110,17 +127,45 @@ export function computeRegistrationCreationStats(
         evening: 0,
         overnight: 0,
     };
+    const formBandCounts: Record<RegistrationTimeBand, number> = {
+        morning: 0,
+        afternoon: 0,
+        evening: 0,
+        overnight: 0,
+    };
+    const manualBandCounts: Record<RegistrationTimeBand, number> = {
+        morning: 0,
+        afternoon: 0,
+        evening: 0,
+        overnight: 0,
+    };
 
-    for (const { createdAt } of withCreatedAt) {
+    for (const { c, createdAt } of withCreatedAt) {
         const band = classifyRegistrationTimeBand(createdAt);
-        if (band) bandCounts[band] += 1;
+        if (!band) continue;
+        bandCounts[band] += 1;
+        if (isFormSubmission(c)) formBandCounts[band] += 1;
+        else if (isAtsManualRegistration(c)) manualBandCounts[band] += 1;
     }
 
     const totalWithTimestamp = withCreatedAt.length;
+    const formSubmissionCount = withCreatedAt.filter(({ c }) => isFormSubmission(c)).length;
+    const atsManualCount = withCreatedAt.filter(({ c }) => isAtsManualRegistration(c)).length;
+
     const timeBandDistribution = (Object.keys(bandCounts) as RegistrationTimeBand[]).map(band => ({
         band,
         label: REGISTRATION_TIME_BAND_SHORT[band],
+        formCount: formBandCounts[band],
+        manualCount: manualBandCounts[band],
         count: bandCounts[band],
+        formPct:
+            formSubmissionCount > 0
+                ? Math.round((formBandCounts[band] / formSubmissionCount) * 1000) / 10
+                : 0,
+        manualPct:
+            atsManualCount > 0
+                ? Math.round((manualBandCounts[band] / atsManualCount) * 1000) / 10
+                : 0,
         pct:
             totalWithTimestamp > 0
                 ? Math.round((bandCounts[band] / totalWithTimestamp) * 1000) / 10
@@ -128,15 +173,17 @@ export function computeRegistrationCreationStats(
     }));
 
     let peakTimeBand: RegistrationCreationStats['peakTimeBand'] = null;
+    let peakFormTimeBand: RegistrationCreationStats['peakFormTimeBand'] = null;
     for (const row of timeBandDistribution) {
-        if (row.count === 0) continue;
-        if (!peakTimeBand || row.count > peakTimeBand.count) {
+        if (row.count > 0 && (!peakTimeBand || row.count > peakTimeBand.count)) {
             peakTimeBand = { band: row.band, label: row.label, count: row.count };
+        }
+        if (row.formCount > 0 && (!peakFormTimeBand || row.formCount > peakFormTimeBand.count)) {
+            peakFormTimeBand = { band: row.band, label: row.label, count: row.formCount };
         }
     }
 
     const formCandidates = withCreatedAt.filter(({ c }) => isFormSubmission(c));
-    const formSubmissionCount = formCandidates.length;
 
     const formLagMs: number[] = [];
     for (const { c, createdAt } of formCandidates) {
@@ -178,6 +225,7 @@ export function computeRegistrationCreationStats(
     return {
         totalWithTimestamp,
         formSubmissionCount,
+        atsManualCount,
         avgFormToRecordMinutes: avgFormToRecordMs
             ? Math.round(avgFormToRecordMs / (1000 * 60))
             : null,
@@ -190,5 +238,6 @@ export function computeRegistrationCreationStats(
         avgIntervalBetweenRecordsLabel: avgIntervalMs ? msToReadableDuration(avgIntervalMs) : 'N/D',
         timeBandDistribution,
         peakTimeBand,
+        peakFormTimeBand,
     };
 }

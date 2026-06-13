@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { useAppState } from '../App';
 import { Briefcase, Users, FileText, CheckCircle, Calendar, Grid3x3, Phone, TrendingUp, UserCheck, Headphones, UserPlus, MessageCircle, Mail, Clock, Target, Zap } from 'lucide-react';
-import { PieChart, Pie, Cell, Tooltip, Legend, BarChart, CartesianGrid, XAxis, YAxis, Bar, LineChart, Line } from 'recharts';
+import { Tooltip, Legend, BarChart, CartesianGrid, XAxis, YAxis, Bar, LineChart, Line, ComposedChart } from 'recharts';
 import { Candidate, Process } from '../types';
 import { resolveCandidateAgeForProcess, resolveCandidateHomonymField, buildLegacyColumnIdToName } from '../lib/bulkTableColumns';
 import { bulkCandidatesApi } from '../lib/api/bulkCandidates';
@@ -9,6 +9,7 @@ import { contactTrackingApi } from '../lib/api/contactTracking';
 import {
     computeContactDashboardStats,
     buildChannelTrendBundle,
+    matchesContactVolumeMetric,
     type ContactConsultantPeriod,
     type ContactDailyTrendSeries,
     type ContactHourlyDistribution,
@@ -51,7 +52,19 @@ import {
 } from '../lib/dashboardCandidatePool';
 import type { ContactSummaryCandidate } from '../lib/contactAttemptReconcile';
 import { LimaDistrictMap } from './LimaDistrictMap';
-import { normalizeDistrictLabel } from '../lib/limaDistrictMap';
+import {
+    buildDashboardHiredContext,
+    augmentNamedCountRows,
+    augmentValueRows,
+    countHiredByBucket,
+    countHiredByTimeBand,
+    injectHiredIntoDailyTrendSeries,
+    injectHiredIntoHourlyDistribution,
+    HIRED_METRIC_KEY,
+    HIRED_METRIC_COLOR,
+    HIRED_CHART_HINT,
+} from '../lib/dashboardHiredComparison';
+import { startOfWeekMondayLimaKey } from '../lib/contactDashboardStats';
 
 const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#AF19FF', '#6366f1', '#14b8a6', '#f97316'];
 
@@ -318,9 +331,10 @@ const ContactDailyTrendChart: React.FC<{ series: ContactDailyTrendSeries }> = ({
                         type="monotone"
                         dataKey={userName}
                         name={userName}
-                        stroke={COLORS[index % COLORS.length]}
-                        strokeWidth={2}
-                        dot={false}
+                        stroke={userName === HIRED_METRIC_KEY ? HIRED_METRIC_COLOR : COLORS[index % COLORS.length]}
+                        strokeWidth={userName === HIRED_METRIC_KEY ? 2.5 : 2}
+                        strokeDasharray={userName === HIRED_METRIC_KEY ? '6 3' : undefined}
+                        dot={userName === HIRED_METRIC_KEY ? { r: 3 } : false}
                         activeDot={{ r: 4 }}
                     />
                 ))}
@@ -367,7 +381,16 @@ const ContactHourlyChart: React.FC<{ series: ContactHourlyDistribution }> = ({ s
                     ]}
                     labelFormatter={label => `Hora ${label}`}
                 />
+                <Legend />
                 <Bar dataKey="count" name="Contactos" fill={fill} radius={[2, 2, 0, 0]} />
+                {series.data.some(d => (d as { hiredCount?: number }).hiredCount > 0) && (
+                    <Bar
+                        dataKey="hiredCount"
+                        name={HIRED_METRIC_KEY}
+                        fill={HIRED_METRIC_COLOR}
+                        radius={[2, 2, 0, 0]}
+                    />
+                )}
             </BarChart>
         </CompactChartContainer>
     );
@@ -703,6 +726,11 @@ export const Dashboard: React.FC = () => {
             return processMatch && dateMatch;
         });
     }, [analyticsCandidates, processFilter, dateFilter, scopedProcesses, state.currentUser?.role]);
+
+    const dashboardHiredContext = useMemo(
+        () => buildDashboardHiredContext(filteredCandidates, processMap),
+        [filteredCandidates, processMap]
+    );
 
     const activeProcesses = scopedProcesses.filter(p => p.status === 'en_proceso');
     const bulkActiveCount = activeProcesses.filter(p => p.isBulkProcess).length;
@@ -1045,21 +1073,38 @@ export const Dashboard: React.FC = () => {
     const contactChannelTrends = useMemo(() => {
         const channels: ContactAttemptChannel[] = ['call', 'whatsapp', 'email'];
         return Object.fromEntries(
-            channels.map(ch => [
-                ch,
-                buildChannelTrendBundle(
+            channels.map(ch => {
+                const bundle = buildChannelTrendBundle(
                     enrichedContactAttempts,
                     contactConsultantPeriod,
                     ch,
                     10,
                     contactTrendOpts
-                ),
-            ])
+                );
+                return [
+                    ch,
+                    {
+                        ...bundle,
+                        total: {
+                            daily: injectHiredIntoDailyTrendSeries(
+                                bundle.total.daily,
+                                dashboardHiredContext,
+                                contactConsultantPeriod
+                            ),
+                            hourly: injectHiredIntoHourlyDistribution(
+                                bundle.total.hourly,
+                                dashboardHiredContext,
+                                contactConsultantPeriod
+                            ),
+                        },
+                    },
+                ];
+            })
         ) as Record<
             ContactAttemptChannel,
             Record<ContactVolumeMetric, { daily: ContactDailyTrendSeries; hourly: ContactHourlyDistribution }>
         >;
-    }, [enrichedContactAttempts, contactConsultantPeriod, contactTrendOpts]);
+    }, [enrichedContactAttempts, contactConsultantPeriod, contactTrendOpts, dashboardHiredContext]);
 
     const contactologyAdvanced = useMemo(() => {
         const candidateInputs = analyticsCandidates
@@ -1117,7 +1162,118 @@ export const Dashboard: React.FC = () => {
         [filteredCandidates, processMap, statsUsers, bulkHiringActorsByProcess]
     );
 
-    const stageChartHeight = Math.max(280, candidatesByStage.length * 36);
+    const candidatesByStageChart = useMemo(() => {
+        const hiredByStage = countHiredByBucket(dashboardHiredContext, e =>
+            getStageName(e.candidate, processes)
+        );
+        return augmentNamedCountRows(candidatesByStage, 'name', hiredByStage);
+    }, [candidatesByStage, dashboardHiredContext, processes]);
+
+    const candidateSourcesChart = useMemo(() => {
+        const hiredBySource = countHiredByBucket(dashboardHiredContext, e => {
+            const process = processMap.get(e.candidate.processId);
+            const bulkExtra = bulkCandidateFields[e.candidate.id];
+            const rawSource = resolveDashboardCandidateField(e.candidate, 'source', process, bulkExtra);
+            return translateSource(rawSource || 'Otro');
+        });
+        return augmentValueRows(candidateSources, hiredBySource);
+    }, [candidateSources, dashboardHiredContext, processMap, bulkCandidateFields]);
+
+    const candidatesByPositionChart = useMemo(() => {
+        const hiredByPosition = countHiredByBucket(dashboardHiredContext, e => {
+            const process = processMap.get(e.candidate.processId);
+            return process?.title?.trim() || 'Sin puesto asignado';
+        });
+        return augmentNamedCountRows(candidatesByPosition, 'name', hiredByPosition);
+    }, [candidatesByPosition, dashboardHiredContext, processMap]);
+
+    const ageDistributionChart = useMemo(() => {
+        const hiredByAge = countHiredByBucket(dashboardHiredContext, e => {
+            const process = processMap.get(e.candidate.processId);
+            const bulkExtra = bulkCandidateFields[e.candidate.id];
+            const enrichedRow = {
+                ...(e.candidate.bulkColumnValues || {}),
+                ...(bulkExtra?.bulkColumnValues || {}),
+            };
+            const age = resolveCandidateAgeForProcess(
+                {
+                    id: e.candidate.id,
+                    age: bulkExtra?.age ?? e.candidate.age,
+                    bulkColumnValues: Object.keys(enrichedRow).length > 0 ? enrichedRow : undefined,
+                },
+                process,
+                Object.keys(enrichedRow).length > 0 ? { [e.candidate.id]: enrichedRow } : {}
+            );
+            if (age == null) return 'Sin dato';
+            if (age < 20) return '<20';
+            if (age <= 29) return '20-29';
+            if (age <= 39) return '30-39';
+            if (age <= 49) return '40-49';
+            return '50+';
+        });
+        return augmentNamedCountRows(ageDistribution, 'name', hiredByAge);
+    }, [ageDistribution, dashboardHiredContext, processMap, bulkCandidateFields]);
+
+    const candidateDistrictsChart = useMemo(() => {
+        const hiredByDistrict = countHiredByBucket(dashboardHiredContext, e => {
+            const process = processMap.get(e.candidate.processId);
+            const bulkExtra = bulkCandidateFields[e.candidate.id];
+            const rawDistrict = resolveDashboardCandidateField(e.candidate, 'district', process, bulkExtra);
+            return normalizeDistrictName(rawDistrict) || 'Sin distrito';
+        });
+        return augmentNamedCountRows(candidateDistricts, 'name', hiredByDistrict);
+    }, [candidateDistricts, dashboardHiredContext, processMap, bulkCandidateFields]);
+
+    const registrationTimeBandChart = useMemo(() => {
+        const hiredBands = countHiredByTimeBand(dashboardHiredContext);
+        return registrationCreationStats.timeBandDistribution.map(row => ({
+            ...row,
+            hiredCount: hiredBands[row.band],
+        }));
+    }, [registrationCreationStats, dashboardHiredContext]);
+
+    const contactologyWeeklyTrendChart = useMemo(() => {
+        const hiredByWeek = countHiredByBucket(dashboardHiredContext, e =>
+            startOfWeekMondayLimaKey(new Date(e.hireDateIso))
+        );
+        return contactologyAdvanced.weeklyFirstContact.weeklyTrend.map(w => ({
+            ...w,
+            name: w.isCurrent ? `${w.label}*` : w.label,
+            horas: w.avgHours ?? 0,
+            Contratados: hiredByWeek.get(w.weekKey) || 0,
+        }));
+    }, [contactologyAdvanced, dashboardHiredContext]);
+
+    const contactologyCurrentWeekDailyChart = useMemo(() => {
+        const hiredByDay = countHiredByBucket(dashboardHiredContext, e => e.hireDateKey);
+        return contactologyAdvanced.weeklyFirstContact.currentWeekDailyTrend.map(d => ({
+            ...d,
+            horas: d.avgHours ?? 0,
+            Contratados: hiredByDay.get(d.dayKey) || 0,
+        }));
+    }, [contactologyAdvanced, dashboardHiredContext]);
+
+    const contactChannelVolumeChart = useMemo(() => {
+        const hiredIds = dashboardHiredContext.idSet;
+        const channels: ContactAttemptChannel[] = ['call', 'whatsapp', 'email'];
+        const hiredUniqueByLabel = new Map<string, number>();
+        for (const ch of channels) {
+            const contacted = new Set<string>();
+            for (const a of enrichedContactAttempts) {
+                if (!hiredIds.has(a.candidateId)) continue;
+                if (matchesContactVolumeMetric(a, ch, 'total')) contacted.add(a.candidateId);
+            }
+            const label =
+                ch === 'call' ? 'Llamadas' : ch === 'whatsapp' ? 'WhatsApp' : 'Correo';
+            hiredUniqueByLabel.set(label, contacted.size);
+        }
+        return contactStats.channelVolume.map(row => ({
+            ...row,
+            Contratados: hiredUniqueByLabel.get(row.name) || 0,
+        }));
+    }, [contactStats.channelVolume, enrichedContactAttempts, dashboardHiredContext]);
+
+    const stageChartHeight = Math.max(280, candidatesByStageChart.length * 36);
 
     return (
         <div className="p-4 md:p-8 bg-gray-50/50 min-h-full overflow-y-auto">
@@ -1399,16 +1555,19 @@ export const Dashboard: React.FC = () => {
 
                         <ChartContainer
                             title="Acciones por canal"
-                            description="Total de contactos vs. los que terminaron en interesado en el periodo seleccionado."
+                            description={`Total de contactos vs. los que terminaron en interesado. ${HIRED_CHART_HINT}`}
                             hasData={contactStats.channelVolume.length > 0}
                             className="mt-2"
                         >
-                            <BarChart data={contactStats.channelVolume} margin={{ top: 10, right: 20, left: 10, bottom: 5 }}>
+                            <BarChart data={contactChannelVolumeChart} margin={{ top: 10, right: 20, left: 10, bottom: 5 }}>
                                 <CartesianGrid strokeDasharray="3 3" />
                                 <XAxis dataKey="name" />
                                 <YAxis allowDecimals={false} />
                                 <Tooltip
                                     formatter={(value: number, name: string) => {
+                                        if (name === HIRED_METRIC_KEY) {
+                                            return [`${value} contratado${value !== 1 ? 's' : ''} contactado${value !== 1 ? 's' : ''}`, name];
+                                        }
                                         if (name === 'total') return [`${value} acciones`, 'Total'];
                                         if (name === 'effective') return [`${value} interesado${value !== 1 ? 's' : ''}`, 'Efectivas'];
                                         return [value, name];
@@ -1417,6 +1576,7 @@ export const Dashboard: React.FC = () => {
                                 <Legend />
                                 <Bar dataKey="total" name="Total" fill="#0ea5e9" radius={[4, 4, 0, 0]} />
                                 <Bar dataKey="effective" name="Interesado" fill="#10b981" radius={[4, 4, 0, 0]} />
+                                <Bar dataKey="Contratados" name={HIRED_METRIC_KEY} fill={HIRED_METRIC_COLOR} radius={[4, 4, 0, 0]} />
                             </BarChart>
                         </ChartContainer>
                     </>
@@ -1500,64 +1660,68 @@ export const Dashboard: React.FC = () => {
                             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
                                 <ChartContainer
                                     title="Evolución semana en curso"
-                                    description="Promedio acumulado de tiempo al primer contacto para registros creados en la semana actual (cohorte por fecha de alta)."
-                                    hasData={contactologyAdvanced.weeklyFirstContact.currentWeekDailyTrend.some(d => d.contactedCumulative > 0)}
+                                    description={`Promedio acumulado de tiempo al primer contacto. ${HIRED_CHART_HINT}`}
+                                    hasData={contactologyAdvanced.weeklyFirstContact.currentWeekDailyTrend.some(d => d.contactedCumulative > 0) || contactologyCurrentWeekDailyChart.some(d => d.Contratados > 0)}
                                     height={260}
                                 >
-                                    <LineChart
-                                        data={contactologyAdvanced.weeklyFirstContact.currentWeekDailyTrend.map(d => ({
-                                            ...d,
-                                            horas: d.avgHours ?? 0,
-                                        }))}
+                                    <ComposedChart
+                                        data={contactologyCurrentWeekDailyChart}
                                         margin={{ top: 10, right: 20, left: 0, bottom: 5 }}
                                     >
                                         <CartesianGrid strokeDasharray="3 3" />
                                         <XAxis dataKey="label" tick={{ fontSize: 10 }} />
-                                        <YAxis allowDecimals={false} unit=" h" tick={{ fontSize: 10 }} />
+                                        <YAxis yAxisId="left" allowDecimals={false} unit=" h" tick={{ fontSize: 10 }} />
+                                        <YAxis yAxisId="right" orientation="right" allowDecimals={false} tick={{ fontSize: 10 }} />
                                         <Tooltip
-                                            formatter={(value: number, _name, item) => [
-                                                item.payload.contactedCumulative > 0
-                                                    ? `${item.payload.avgLabel} (${item.payload.contactedCumulative}/${item.payload.registrationsCumulative} contactados)`
-                                                    : 'Sin contactos aún',
-                                                'Promedio',
-                                            ]}
+                                            formatter={(value: number, name: string, item) => {
+                                                if (name === HIRED_METRIC_KEY) {
+                                                    return [`${value} contratación${value !== 1 ? 'es' : ''}`, name];
+                                                }
+                                                return [
+                                                    item.payload.contactedCumulative > 0
+                                                        ? `${item.payload.avgLabel} (${item.payload.contactedCumulative}/${item.payload.registrationsCumulative} contactados)`
+                                                        : 'Sin contactos aún',
+                                                    'Promedio',
+                                                ];
+                                            }}
                                         />
-                                        <Line type="monotone" dataKey="horas" name="Horas" stroke="#2563eb" strokeWidth={2} dot={{ r: 3 }} />
-                                    </LineChart>
+                                        <Legend />
+                                        <Line yAxisId="left" type="monotone" dataKey="horas" name="Horas prom." stroke="#2563eb" strokeWidth={2} dot={{ r: 3 }} />
+                                        <Bar yAxisId="right" dataKey="Contratados" name={HIRED_METRIC_KEY} fill={HIRED_METRIC_COLOR} radius={[4, 4, 0, 0]} />
+                                    </ComposedChart>
                                 </ChartContainer>
 
                                 <ChartContainer
                                     title="Tiempo al 1.er contacto por semana"
-                                    description="Promedio por cohorte semanal de registros generados. Semanas cerradas vs. semana en curso (parcial)."
-                                    hasData={contactologyAdvanced.weeklyFirstContact.weeklyTrend.some(w => w.contactedCount > 0)}
+                                    description={`Promedio por cohorte semanal de registros generados. ${HIRED_CHART_HINT}`}
+                                    hasData={contactologyAdvanced.weeklyFirstContact.weeklyTrend.some(w => w.contactedCount > 0) || contactologyWeeklyTrendChart.some(w => w.Contratados > 0)}
                                     height={260}
                                 >
-                                    <BarChart
-                                        data={contactologyAdvanced.weeklyFirstContact.weeklyTrend.map(w => ({
-                                            ...w,
-                                            horas: w.avgHours ?? 0,
-                                            name: w.isCurrent ? `${w.label}*` : w.label,
-                                        }))}
+                                    <ComposedChart
+                                        data={contactologyWeeklyTrendChart}
                                         margin={{ top: 10, right: 20, left: 10, bottom: 5 }}
                                     >
                                         <CartesianGrid strokeDasharray="3 3" />
                                         <XAxis dataKey="name" tick={{ fontSize: 9 }} interval={0} angle={-25} textAnchor="end" height={60} />
-                                        <YAxis allowDecimals={false} unit=" h" tick={{ fontSize: 10 }} />
+                                        <YAxis yAxisId="left" allowDecimals={false} unit=" h" tick={{ fontSize: 10 }} />
+                                        <YAxis yAxisId="right" orientation="right" allowDecimals={false} tick={{ fontSize: 10 }} />
                                         <Tooltip
-                                            formatter={(value: number, _name, item) => [
-                                                item.payload.contactedCount > 0
-                                                    ? `${item.payload.avgLabel} · ${item.payload.contactedCount}/${item.payload.registrationCount} contactados`
-                                                    : `${item.payload.registrationCount} registro(s) sin contacto aún`,
-                                                item.payload.isCurrent ? 'Semana en curso' : 'Semana cerrada',
-                                            ]}
+                                            formatter={(value: number, name: string, item) => {
+                                                if (name === HIRED_METRIC_KEY) {
+                                                    return [`${value} contratación${value !== 1 ? 'es' : ''} en la semana`, name];
+                                                }
+                                                return [
+                                                    item.payload.contactedCount > 0
+                                                        ? `${item.payload.avgLabel} · ${item.payload.contactedCount}/${item.payload.registrationCount} contactados`
+                                                        : `${item.payload.registrationCount} registro(s) sin contacto aún`,
+                                                    item.payload.isCurrent ? 'Semana en curso' : 'Semana cerrada',
+                                                ];
+                                            }}
                                         />
-                                        <Bar
-                                            dataKey="horas"
-                                            name="Horas prom."
-                                            fill="#6366f1"
-                                            radius={[4, 4, 0, 0]}
-                                        />
-                                    </BarChart>
+                                        <Legend />
+                                        <Bar yAxisId="left" dataKey="horas" name="Horas prom." fill="#6366f1" radius={[4, 4, 0, 0]} />
+                                        <Bar yAxisId="right" dataKey="Contratados" name={HIRED_METRIC_KEY} fill={HIRED_METRIC_COLOR} radius={[4, 4, 0, 0]} />
+                                    </ComposedChart>
                                 </ChartContainer>
                             </div>
 
@@ -1639,12 +1803,14 @@ export const Dashboard: React.FC = () => {
                             />
                             <StatCard
                                 icon={Calendar}
-                                title="Franja con más registros"
-                                value={registrationCreationStats.peakTimeBand?.label ?? 'N/D'}
+                                title="Franja con más postulaciones"
+                                value={registrationCreationStats.peakFormTimeBand?.label ?? 'N/D'}
                                 subtitle={
-                                    registrationCreationStats.peakTimeBand
-                                        ? `${registrationCreationStats.peakTimeBand.count} registro${registrationCreationStats.peakTimeBand.count !== 1 ? 's' : ''} · hora Lima`
-                                        : 'Sin datos'
+                                    registrationCreationStats.peakFormTimeBand
+                                        ? `${registrationCreationStats.peakFormTimeBand.count} por formulario · hora Lima`
+                                        : registrationCreationStats.formSubmissionCount === 0
+                                            ? 'Sin postulaciones por formulario en el filtro'
+                                            : 'Sin datos'
                                 }
                                 color="bg-teal-500"
                             />
@@ -1652,24 +1818,42 @@ export const Dashboard: React.FC = () => {
 
                         <ChartContainer
                             title="Registros por franja horaria"
-                            description="Distribución según hora de creación (America/Lima): mañana 8:30–15:00, tarde 15:00–18:00, noche 18:00–00:00 y madrugada 00:00–8:30."
-                            hasData={registrationCreationStats.timeBandDistribution.some(b => b.count > 0)}
+                            description={`Postulaciones directas por formulario vs altas manuales del ATS. ${HIRED_CHART_HINT}`}
+                            hasData={registrationTimeBandChart.some(
+                                b => b.formCount > 0 || b.manualCount > 0 || b.hiredCount > 0
+                            )}
                             height={280}
                         >
                             <BarChart
-                                data={registrationCreationStats.timeBandDistribution}
+                                data={registrationTimeBandChart}
                                 margin={{ top: 10, right: 20, left: 10, bottom: 5 }}
                             >
                                 <CartesianGrid strokeDasharray="3 3" />
                                 <XAxis dataKey="label" tick={{ fontSize: 11 }} />
                                 <YAxis allowDecimals={false} />
                                 <Tooltip
-                                    formatter={(value: number, _name, item) => [
-                                        `${value} registro${value !== 1 ? 's' : ''} (${item.payload.pct}%)`,
-                                        'Cantidad',
-                                    ]}
+                                    formatter={(value: number, name: string, item) => {
+                                        const payload = item.payload as {
+                                            formPct?: number;
+                                            manualPct?: number;
+                                        };
+                                        if (name === HIRED_METRIC_KEY) {
+                                            return [`${value} contratación${value !== 1 ? 'es' : ''} en esta franja (fecha de contrato)`, name];
+                                        }
+                                        const pct =
+                                            name === 'Formulario'
+                                                ? payload.formPct
+                                                : payload.manualPct;
+                                        return [
+                                            `${value} registro${value !== 1 ? 's' : ''}${pct != null ? ` (${pct}%)` : ''}`,
+                                            name,
+                                        ];
+                                    }}
                                 />
-                                <Bar dataKey="count" name="Registros" fill="#f97316" radius={[4, 4, 0, 0]} />
+                                <Legend />
+                                <Bar dataKey="formCount" name="Formulario" fill="#8b5cf6" radius={[4, 4, 0, 0]} />
+                                <Bar dataKey="manualCount" name="Manual (ATS)" fill="#64748b" radius={[4, 4, 0, 0]} />
+                                <Bar dataKey="hiredCount" name={HIRED_METRIC_KEY} fill={HIRED_METRIC_COLOR} radius={[4, 4, 0, 0]} />
                             </BarChart>
                         </ChartContainer>
                     </>
@@ -1883,57 +2067,60 @@ export const Dashboard: React.FC = () => {
                 <ChartContainer
                     title="Candidatos por etapa"
                     description={
-                        processFilter !== 'all'
+                        (processFilter !== 'all'
                             ? 'Distribución actual según el pipeline del proceso seleccionado.'
-                            : 'Agrupado por nombre de etapa. Al filtrar un proceso se respeta el orden del pipeline.'
+                            : 'Agrupado por nombre de etapa. Al filtrar un proceso se respeta el orden del pipeline.') +
+                        ` ${HIRED_CHART_HINT}`
                     }
-                    hasData={candidatesByStage.some(d => d.Candidatos > 0)}
+                    hasData={candidatesByStageChart.some(d => d.Candidatos > 0 || d.Contratados > 0)}
                     height={stageChartHeight}
                 >
-                    <BarChart data={candidatesByStage} layout="vertical" margin={{ top: 5, right: 20, left: 10, bottom: 5 }}>
+                    <BarChart data={candidatesByStageChart} layout="vertical" margin={{ top: 5, right: 20, left: 10, bottom: 5 }}>
                         <CartesianGrid strokeDasharray="3 3" />
                         <XAxis type="number" allowDecimals={false} />
                         <YAxis type="category" dataKey="name" width={130} tick={{ fontSize: 12 }} />
-                        <Tooltip formatter={(value: number) => [`${value} candidato${value !== 1 ? 's' : ''}`, 'Total']} />
-                        <Bar dataKey="Candidatos" fill="#6366f1" radius={[0, 4, 4, 0]} />
+                        <Tooltip
+                            formatter={(value: number, name: string) => [
+                                `${value} candidato${value !== 1 ? 's' : ''}`,
+                                name,
+                            ]}
+                        />
+                        <Legend />
+                        <Bar dataKey="Candidatos" name="Total" fill="#6366f1" radius={[0, 4, 4, 0]} />
+                        <Bar dataKey="Contratados" name={HIRED_METRIC_KEY} fill={HIRED_METRIC_COLOR} radius={[0, 4, 4, 0]} />
                     </BarChart>
                 </ChartContainer>
 
                 <ChartContainer
                     title={getLabel('dashboard_candidate_source', 'Fuentes de candidatos')}
-                    description="Origen de postulación. En procesos masivos, asigne «Fuente de candidato» en la clasificación de la columna si el encabezado no es estándar."
-                    hasData={candidateSources.length > 0}
+                    description={`Origen de postulación. ${HIRED_CHART_HINT}`}
+                    hasData={candidateSourcesChart.length > 0}
                 >
-                    <PieChart>
-                        <Pie
-                            data={candidateSources}
-                            cx="50%"
-                            cy="50%"
-                            labelLine={false}
-                            outerRadius={90}
-                            fill="#8884d8"
-                            dataKey="value"
-                            nameKey="name"
-                            label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
-                        >
-                            {candidateSources.map((_entry, index) => (
-                                <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                            ))}
-                        </Pie>
-                        <Tooltip formatter={(value: number, name: string) => [`${value} candidatos`, name]} />
+                    <BarChart data={candidateSourcesChart} margin={{ top: 10, right: 20, left: 10, bottom: 5 }}>
+                        <CartesianGrid strokeDasharray="3 3" />
+                        <XAxis dataKey="name" tick={{ fontSize: 11 }} />
+                        <YAxis allowDecimals={false} />
+                        <Tooltip
+                            formatter={(value: number, name: string) => [
+                                `${value} candidato${value !== 1 ? 's' : ''}`,
+                                name === 'value' ? 'Total' : name,
+                            ]}
+                        />
                         <Legend />
-                    </PieChart>
+                        <Bar dataKey="value" name="Total" fill="#8884d8" radius={[4, 4, 0, 0]} />
+                        <Bar dataKey="Contratados" name={HIRED_METRIC_KEY} fill={HIRED_METRIC_COLOR} radius={[4, 4, 0, 0]} />
+                    </BarChart>
                 </ChartContainer>
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8 min-w-0">
                 <ChartContainer
                     title="Candidatos por puesto"
-                    description="Cantidad de candidatos según el proceso o puesto al que postularon (incluye procesos masivos)."
-                    hasData={candidatesByPosition.some(d => d.Candidatos > 0)}
-                    height={Math.max(280, candidatesByPosition.length * 44)}
+                    description={`Cantidad de candidatos según el proceso o puesto. ${HIRED_CHART_HINT}`}
+                    hasData={candidatesByPositionChart.some(d => d.Candidatos > 0 || d.Contratados > 0)}
+                    height={Math.max(280, candidatesByPositionChart.length * 44)}
                 >
-                    <BarChart data={candidatesByPosition} layout="vertical" margin={{ top: 5, right: 20, left: 10, bottom: 5 }}>
+                    <BarChart data={candidatesByPositionChart} layout="vertical" margin={{ top: 5, right: 20, left: 10, bottom: 5 }}>
                         <CartesianGrid strokeDasharray="3 3" />
                         <XAxis type="number" allowDecimals={false} />
                         <YAxis
@@ -1943,22 +2130,36 @@ export const Dashboard: React.FC = () => {
                             tick={{ fontSize: 11 }}
                             tickFormatter={(v: string) => truncateLabel(v, 22)}
                         />
-                        <Tooltip formatter={(value: number) => [`${value} candidato${value !== 1 ? 's' : ''}`, 'Total']} />
-                        <Bar dataKey="Candidatos" fill="#0ea5e9" radius={[0, 4, 4, 0]} />
+                        <Tooltip
+                            formatter={(value: number, name: string) => [
+                                `${value} candidato${value !== 1 ? 's' : ''}`,
+                                name,
+                            ]}
+                        />
+                        <Legend />
+                        <Bar dataKey="Candidatos" name="Total" fill="#0ea5e9" radius={[0, 4, 4, 0]} />
+                        <Bar dataKey="Contratados" name={HIRED_METRIC_KEY} fill={HIRED_METRIC_COLOR} radius={[0, 4, 4, 0]} />
                     </BarChart>
                 </ChartContainer>
 
                 <ChartContainer
                     title={getLabel('dashboard_age_distribution', 'Distribución por edad')}
-                    description="Rangos etarios. En procesos masivos, marque la columna de edad con «Edad» en Clasificación para el Panel."
-                    hasData={ageDistribution.some(d => d.Candidatos > 0)}
+                    description={`Rangos etarios. ${HIRED_CHART_HINT}`}
+                    hasData={ageDistributionChart.some(d => d.Candidatos > 0 || d.Contratados > 0)}
                 >
-                    <BarChart data={ageDistribution} margin={{ top: 10, right: 20, left: 10, bottom: 5 }}>
+                    <BarChart data={ageDistributionChart} margin={{ top: 10, right: 20, left: 10, bottom: 5 }}>
                         <CartesianGrid strokeDasharray="3 3" />
                         <XAxis dataKey="name" />
                         <YAxis allowDecimals={false} />
-                        <Tooltip formatter={(value: number) => [`${value} candidato${value !== 1 ? 's' : ''}`, 'Total']} />
-                        <Bar dataKey="Candidatos" fill="#82ca9d" radius={[4, 4, 0, 0]} />
+                        <Tooltip
+                            formatter={(value: number, name: string) => [
+                                `${value} candidato${value !== 1 ? 's' : ''}`,
+                                name,
+                            ]}
+                        />
+                        <Legend />
+                        <Bar dataKey="Candidatos" name="Total" fill="#82ca9d" radius={[4, 4, 0, 0]} />
+                        <Bar dataKey="Contratados" name={HIRED_METRIC_KEY} fill={HIRED_METRIC_COLOR} radius={[4, 4, 0, 0]} />
                     </BarChart>
                 </ChartContainer>
             </div>
@@ -1967,16 +2168,23 @@ export const Dashboard: React.FC = () => {
                 <ChartContainer
                     className="xl:col-span-2"
                     title="Candidatos por distrito"
-                    description="Distrito de residencia. En procesos masivos, asigne «Distrito» en la clasificación de la columna correspondiente."
-                    hasData={candidateDistricts.some(d => d.Candidatos > 0 && d.name !== 'Sin distrito') || candidateDistricts.some(d => d.name === 'Sin distrito' && d.Candidatos > 0)}
-                    height={Math.max(420, candidateDistricts.length * 36)}
+                    description={`Distrito de residencia. ${HIRED_CHART_HINT}`}
+                    hasData={candidateDistrictsChart.some(d => d.Candidatos > 0 || d.Contratados > 0)}
+                    height={Math.max(420, candidateDistrictsChart.length * 36)}
                 >
-                    <BarChart data={candidateDistricts} layout="vertical" margin={{ top: 5, right: 20, left: 10, bottom: 5 }}>
+                    <BarChart data={candidateDistrictsChart} layout="vertical" margin={{ top: 5, right: 20, left: 10, bottom: 5 }}>
                         <CartesianGrid strokeDasharray="3 3" />
                         <XAxis type="number" allowDecimals={false} />
                         <YAxis type="category" dataKey="name" width={130} tick={{ fontSize: 12 }} />
-                        <Tooltip formatter={(value: number) => [`${value} candidato${value !== 1 ? 's' : ''}`, 'Total']} />
-                        <Bar dataKey="Candidatos" fill="#9333ea" radius={[0, 4, 4, 0]} />
+                        <Tooltip
+                            formatter={(value: number, name: string) => [
+                                `${value} candidato${value !== 1 ? 's' : ''}`,
+                                name,
+                            ]}
+                        />
+                        <Legend />
+                        <Bar dataKey="Candidatos" name="Total" fill="#9333ea" radius={[0, 4, 4, 0]} />
+                        <Bar dataKey="Contratados" name={HIRED_METRIC_KEY} fill={HIRED_METRIC_COLOR} radius={[0, 4, 4, 0]} />
                     </BarChart>
                 </ChartContainer>
 

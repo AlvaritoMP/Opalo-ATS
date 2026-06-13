@@ -174,6 +174,8 @@ function formatMonthKeyLima(iso: string | Date): string {
     return key ? key.slice(0, 7) : '';
 }
 
+export { formatMonthKeyLima };
+
 function parseDateKey(key: string): { y: number; m: number; d: number } {
     const [y, m, d] = key.split('-').map(Number);
     return { y, m, d };
