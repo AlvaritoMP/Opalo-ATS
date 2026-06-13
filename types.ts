@@ -240,6 +240,8 @@ export interface BulkProcessConfig {
     customStats?: BulkProcessStatChart[];
     /** Referencias rápidas tipo post-it (título + contenido) visibles en la tabla */
     infoPins?: BulkInfoPin[];
+    /** Respuestas rápidas copiables al portapapeles (texto + adjuntos) */
+    quickReplies?: BulkQuickReply[];
 }
 
 export type BulkInfoPinColor = 'yellow' | 'pink' | 'blue' | 'green' | 'purple';
@@ -253,6 +255,29 @@ export interface BulkInfoPin {
     /** PNG en data URL (base64); permite consulta con desplazamiento en el panel flotante */
     imageDataUrl?: string;
     imageFileName?: string;
+}
+
+export type BulkQuickReplyAttachmentType = 'image' | 'video' | 'file';
+
+/** Adjunto de una respuesta rápida (imagen, video o archivo embebido o enlace) */
+export interface BulkQuickReplyAttachment {
+    id: string;
+    type: BulkQuickReplyAttachmentType;
+    fileName: string;
+    mimeType?: string;
+    /** Contenido embebido en data URL (base64) */
+    dataUrl?: string;
+    /** Enlace externo (YouTube, Drive, etc.) */
+    url?: string;
+}
+
+/** Respuesta rápida copiable al portapapeles en procesos masivos */
+export interface BulkQuickReply {
+    id: string;
+    title: string;
+    content: string;
+    color?: BulkInfoPinColor;
+    attachments?: BulkQuickReplyAttachment[];
 }
 
 /** Tipo de gráfico para estadísticas del proceso masivo */

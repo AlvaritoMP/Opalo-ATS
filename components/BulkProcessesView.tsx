@@ -45,7 +45,7 @@ import { processesApi } from '../lib/api/processes';
 import { useDebouncedValue } from '../lib/useDebouncedValue';
 import { Check, X, Loader2, Send, Archive, Search, ChevronDown, ChevronUp, Plus, Edit, Trash2, ArrowLeft, MessageCircle, Phone, Upload, Download, Filter, Mail, Calendar, Settings, ArrowUp, ArrowDown, Pin, FileText, BookOpen, Paperclip, ClipboardList, ListPlus, RefreshCw, HardDrive, CaseSensitive, Package, History, Target, BarChart3, UserCheck, Coins, Bus, Undo2 } from 'lucide-react';
 import { BulkCandidateTimeline } from './BulkCandidateTimeline';
-import { Process, CustomColumn, BulkProcessConfig, Candidate, IdealProfileConfig, BulkProcessStatChart, BulkInfoPin } from '../types';
+import { Process, CustomColumn, BulkProcessConfig, Candidate, IdealProfileConfig, BulkProcessStatChart, BulkInfoPin, BulkQuickReply } from '../types';
 import { candidatesApi } from '../lib/api/candidates';
 import {
     BASE_COLUMNS,
@@ -127,7 +127,10 @@ import { TransportFaresModal } from './TransportFaresModal';
 import { BulkInfoPinsBar } from './BulkInfoPinsBar';
 import { BulkInfoPinModal } from './BulkInfoPinModal';
 import { BulkInfoPinPanel } from './BulkInfoPinPanel';
+import { BulkQuickRepliesBar } from './BulkQuickRepliesBar';
+import { BulkQuickReplyModal } from './BulkQuickReplyModal';
 import { createBulkInfoPin } from '../lib/bulkInfoPins';
+import { copyBulkQuickReplyToClipboard, createBulkQuickReply } from '../lib/bulkQuickReplies';
 import {
     BULK_UNDO_MAX_STACK,
     BulkUndoCellMetaSnapshot,
@@ -666,6 +669,9 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
     const [showTransportFaresModal, setShowTransportFaresModal] = useState(false);
     const [infoPinModal, setInfoPinModal] = useState<{ pin: BulkInfoPin; isNew: boolean } | null>(null);
     const [activeInfoPinId, setActiveInfoPinId] = useState<string | null>(null);
+    const [quickReplyModal, setQuickReplyModal] = useState<{ reply: BulkQuickReply; isNew: boolean } | null>(null);
+    const [isSavingQuickReply, setIsSavingQuickReply] = useState(false);
+    const [copyingQuickReplyId, setCopyingQuickReplyId] = useState<string | null>(null);
     const undoStackRef = useRef<BulkUndoEntry[]>([]);
     const [undoStackSize, setUndoStackSize] = useState(0);
     const isUndoingRef = useRef(false);
@@ -704,10 +710,16 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
 
     const canSendToOpsFlow = state.currentUser?.role === 'admin' || state.currentUser?.role === 'recruiter';
     const canEditBulkInfoPins = canSendToOpsFlow;
+    const canEditBulkQuickReplies = canSendToOpsFlow;
 
     const infoPins = useMemo(
         () => process?.bulkConfig?.infoPins ?? [],
         [process?.bulkConfig?.infoPins]
+    );
+
+    const quickReplies = useMemo(
+        () => process?.bulkConfig?.quickReplies ?? [],
+        [process?.bulkConfig?.quickReplies]
     );
 
     const activeInfoPin = useMemo(
@@ -927,6 +939,47 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
             setIsSavingInfoPin(false);
         }
     }, [infoPins, persistBulkConfig, actions, activeInfoPinId]);
+
+    const handleSaveQuickReply = useCallback(async (reply: BulkQuickReply) => {
+        setIsSavingQuickReply(true);
+        try {
+            const exists = quickReplies.some(r => r.id === reply.id);
+            const next = exists
+                ? quickReplies.map(r => (r.id === reply.id ? reply : r))
+                : [...quickReplies, reply];
+            await persistBulkConfig({ quickReplies: next });
+            actions.showToast(exists ? 'Respuesta actualizada' : 'Respuesta creada', 'success', 2500);
+            setQuickReplyModal(null);
+        } catch {
+            actions.showToast('Error al guardar respuesta', 'error', 3000);
+        } finally {
+            setIsSavingQuickReply(false);
+        }
+    }, [quickReplies, persistBulkConfig, actions]);
+
+    const handleDeleteQuickReply = useCallback(async (replyId: string) => {
+        if (!window.confirm('¿Eliminar esta respuesta rápida?')) return;
+        setIsSavingQuickReply(true);
+        try {
+            await persistBulkConfig({ quickReplies: quickReplies.filter(r => r.id !== replyId) });
+            actions.showToast('Respuesta eliminada', 'success', 2500);
+            setQuickReplyModal(null);
+        } catch {
+            actions.showToast('Error al eliminar respuesta', 'error', 3000);
+        } finally {
+            setIsSavingQuickReply(false);
+        }
+    }, [quickReplies, persistBulkConfig, actions]);
+
+    const handleCopyQuickReply = useCallback(async (reply: BulkQuickReply) => {
+        setCopyingQuickReplyId(reply.id);
+        try {
+            const result = await copyBulkQuickReplyToClipboard(reply);
+            actions.showToast(result.message, result.success ? 'success' : 'error', 3000);
+        } finally {
+            setCopyingQuickReplyId(null);
+        }
+    }, [actions]);
 
     useEffect(() => {
         setActiveInfoPinId(null);
@@ -4381,16 +4434,43 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                     {total} candidatos
                                 </span>
                             </div>
-                            {process && (infoPins.length > 0 || canEditBulkInfoPins) && (
-                                <BulkInfoPinsBar
-                                    pins={infoPins}
-                                    canEdit={canEditBulkInfoPins}
-                                    activePinId={activeInfoPinId}
-                                    onSelectPin={pin =>
-                                        setActiveInfoPinId(prev => (prev === pin.id ? null : pin.id))
-                                    }
-                                    onAddPin={() => setInfoPinModal({ pin: createBulkInfoPin(), isNew: true })}
-                                />
+                            {process &&
+                                (infoPins.length > 0 ||
+                                    quickReplies.length > 0 ||
+                                    canEditBulkInfoPins ||
+                                    canEditBulkQuickReplies) && (
+                                <div className="flex flex-wrap items-start gap-x-4 gap-y-2 w-full min-w-0">
+                                    {(infoPins.length > 0 || canEditBulkInfoPins) && (
+                                        <BulkInfoPinsBar
+                                            pins={infoPins}
+                                            canEdit={canEditBulkInfoPins}
+                                            activePinId={activeInfoPinId}
+                                            onSelectPin={pin =>
+                                                setActiveInfoPinId(prev => (prev === pin.id ? null : pin.id))
+                                            }
+                                            onAddPin={() =>
+                                                setInfoPinModal({ pin: createBulkInfoPin(), isNew: true })
+                                            }
+                                        />
+                                    )}
+                                    {(quickReplies.length > 0 || canEditBulkQuickReplies) && (
+                                        <BulkQuickRepliesBar
+                                            replies={quickReplies}
+                                            canEdit={canEditBulkQuickReplies}
+                                            isCopyingId={copyingQuickReplyId}
+                                            onCopyReply={handleCopyQuickReply}
+                                            onEditReply={reply =>
+                                                setQuickReplyModal({ reply, isNew: false })
+                                            }
+                                            onAddReply={() =>
+                                                setQuickReplyModal({
+                                                    reply: createBulkQuickReply(),
+                                                    isNew: true,
+                                                })
+                                            }
+                                        />
+                                    )}
+                                </div>
                             )}
                             {process && (
                                 <div className="flex flex-wrap items-end gap-2 w-full min-w-0">
@@ -6115,6 +6195,18 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                     onClose={() => setInfoPinModal(null)}
                     onSave={handleSaveInfoPin}
                     onDelete={handleDeleteInfoPin}
+                />
+            )}
+
+            {canEditBulkQuickReplies && (
+                <BulkQuickReplyModal
+                    isOpen={!!quickReplyModal}
+                    reply={quickReplyModal?.reply ?? null}
+                    isNew={quickReplyModal?.isNew ?? false}
+                    isSaving={isSavingQuickReply}
+                    onClose={() => setQuickReplyModal(null)}
+                    onSave={handleSaveQuickReply}
+                    onDelete={handleDeleteQuickReply}
                 />
             )}
         </div>
