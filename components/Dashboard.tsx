@@ -52,6 +52,7 @@ import {
 } from '../lib/dashboardCandidatePool';
 import type { ContactSummaryCandidate } from '../lib/contactAttemptReconcile';
 import { LimaDistrictMap } from './LimaDistrictMap';
+import { normalizeDistrictLabel } from '../lib/limaDistrictMap';
 import {
     buildDashboardHiredContext,
     augmentNamedCountRows,
