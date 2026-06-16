@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { useAppState } from '../App';
 import { Briefcase, Users, FileText, CheckCircle, Calendar, Grid3x3, Phone, TrendingUp, UserCheck, Headphones, UserPlus, MessageCircle, Mail, Clock, Target, Zap, RefreshCw } from 'lucide-react';
-import { Tooltip, Legend, BarChart, CartesianGrid, XAxis, YAxis, Bar, LineChart, Line, ComposedChart } from 'recharts';
+import { Tooltip, Legend, BarChart, CartesianGrid, XAxis, YAxis, Bar, LineChart, Line, ComposedChart, Cell } from 'recharts';
 import { Candidate, Process } from '../types';
 import { resolveCandidateAgeForProcess, resolveCandidateHomonymField, buildLegacyColumnIdToName } from '../lib/bulkTableColumns';
 import {
@@ -27,6 +27,12 @@ import {
 import type { ContactAttemptChannel } from '../lib/contactChannelConfig';
 import { computeHiringStageConsultantStats, resolveHiringStageId, type HiredStageActor } from '../lib/hiringStageTracking';
 import { computeInterviewSchedulingStats } from '../lib/interviewSchedulingStats';
+import {
+    computeSchedulingEffectiveness,
+    SCHEDULING_OUTCOME_COLORS,
+    SCHEDULING_OUTCOME_LABELS,
+} from '../lib/interviewSchedulingEffectiveness';
+import { computeHiredProfileSummary, HIRED_PROFILE_GROUP_LABELS } from '../lib/dashboardHiredProfileSummary';
 import { reconcileInterviewSchedulingFromBulkCandidates } from '../lib/interviewSchedulingReconcile';
 import {
     buildUserLookupForStats,
@@ -57,6 +63,14 @@ import {
     HIRED_CHART_HINT,
 } from '../lib/dashboardHiredComparison';
 import { startOfWeekMondayLimaKey } from '../lib/contactDashboardStats';
+import {
+    CONTACTOLOGY_DEFS,
+    CONTACT_CHANNEL_DEFS,
+    REGISTRATION_DEFS,
+    SCHEDULING_DEFS,
+    FIRST_CONTACT_LINE_LABEL,
+    HIRED_PROFILE_DEF,
+} from '../lib/dashboardMetricDefinitions';
 
 const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#AF19FF', '#6366f1', '#14b8a6', '#f97316'];
 
@@ -66,9 +80,11 @@ const StatCard: React.FC<{
     value: number | string;
     subtitle: string;
     color: string;
-}> = ({ icon: Icon, title, value, subtitle, color }) => (
-    <div className="bg-white p-4 md:p-6 rounded-xl border border-gray-200 shadow-sm">
-        <div className="flex items-start gap-3 md:gap-4">
+    /** Definición para interpretar correctamente el indicador */
+    definition?: string;
+}> = ({ icon: Icon, title, value, subtitle, color, definition }) => (
+    <div className="bg-white p-4 md:p-6 rounded-xl border border-gray-200 shadow-sm flex flex-col">
+        <div className="flex items-start gap-3 md:gap-4 flex-1">
             <div className={`p-2 md:p-3 rounded-full flex-shrink-0 ${color}`}>
                 <Icon className="w-5 h-5 md:w-6 md:h-6 text-white" />
             </div>
@@ -78,6 +94,11 @@ const StatCard: React.FC<{
                 <p className="text-xs text-gray-400 mt-1 leading-snug">{subtitle}</p>
             </div>
         </div>
+        {definition && (
+            <p className="text-[11px] text-gray-500 mt-3 pt-3 border-t border-gray-100 leading-relaxed">
+                {definition}
+            </p>
+        )}
     </div>
 );
 
@@ -382,6 +403,12 @@ const ContactHourlyChart: React.FC<{ series: ContactHourlyDistribution }> = ({ s
 
 const CONTACT_METRICS: ContactVolumeMetric[] = ['total', 'failed', 'effective'];
 
+function contactVolumeMetricDefinition(metric: ContactVolumeMetric): string {
+    if (metric === 'failed') return CONTACT_CHANNEL_DEFS.intentosFallidos;
+    if (metric === 'effective') return CONTACT_CHANNEL_DEFS.intentosEfectivos;
+    return CONTACT_CHANNEL_DEFS.intentosTotales;
+}
+
 const ContactChannelChartsRow: React.FC<{
     bundle: Record<ContactVolumeMetric, { daily: ContactDailyTrendSeries; hourly: ContactHourlyDistribution }>;
 }> = ({ bundle }) => {
@@ -392,8 +419,11 @@ const ContactChannelChartsRow: React.FC<{
             <div className="space-y-4">
                 {CONTACT_METRICS.map(metric => (
                     <div key={metric}>
-                        <p className="text-xs font-medium text-gray-500 mb-2">
+                        <p className="text-xs font-medium text-gray-500 mb-1">
                             {bundle[metric].daily.metricLabel}
+                        </p>
+                        <p className="text-[11px] text-gray-400 mb-2 leading-snug">
+                            {contactVolumeMetricDefinition(metric)}
                         </p>
                         <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
                             <ContactDailyTrendChart series={bundle[metric].daily} />
@@ -929,6 +959,37 @@ export const Dashboard: React.FC = () => {
         ]
     );
 
+    const schedulingEffectiveness = useMemo(
+        () =>
+            computeSchedulingEffectiveness(
+                schedulingReconciled.logs,
+                schedulingReconciled.cycles,
+                contactConsultantPeriod,
+                statsUsers,
+                filteredCandidateIdSet
+            ),
+        [schedulingReconciled, contactConsultantPeriod, statsUsers, filteredCandidateIdSet]
+    );
+
+    const hiredProfileSummary = useMemo(
+        () =>
+            computeHiredProfileSummary(
+                dashboardHiredContext,
+                processMap,
+                bulkCandidateFields,
+                enrichedContactAttempts,
+                schedulingReconciled.logs,
+                schedulingReconciled.cycles
+            ),
+        [
+            dashboardHiredContext,
+            processMap,
+            bulkCandidateFields,
+            enrichedContactAttempts,
+            schedulingReconciled,
+        ]
+    );
+
     const contactTrendOpts = useMemo(() => {
         const names = new Set<string>();
         if (currentUser?.name?.trim()) names.add(currentUser.name.trim());
@@ -1382,6 +1443,7 @@ export const Dashboard: React.FC = () => {
                                         ? `${contactStats.topCaller.callCount} llamada${contactStats.topCaller.callCount !== 1 ? 's' : ''}`
                                         : 'Sin llamadas'
                                 }
+                                definition={CONTACT_CHANNEL_DEFS.masLlamadas}
                                 color="bg-violet-500"
                             />
                             <StatCard
@@ -1393,6 +1455,7 @@ export const Dashboard: React.FC = () => {
                                         ? `${contactStats.topWhatsappUser.count} contacto${contactStats.topWhatsappUser.count !== 1 ? 's' : ''}`
                                         : 'Sin WhatsApp'
                                 }
+                                definition={CONTACT_CHANNEL_DEFS.masWhatsapp}
                                 color="bg-emerald-500"
                             />
                             <StatCard
@@ -1404,6 +1467,7 @@ export const Dashboard: React.FC = () => {
                                         ? `${contactStats.topEmailUser.count} correo${contactStats.topEmailUser.count !== 1 ? 's' : ''}`
                                         : 'Sin correos'
                                 }
+                                definition={CONTACT_CHANNEL_DEFS.masCorreos}
                                 color="bg-sky-500"
                             />
                             <StatCard
@@ -1415,6 +1479,7 @@ export const Dashboard: React.FC = () => {
                                         ? `${contactStats.topEffectiveCaller.effectiveCalls} interesado${contactStats.topEffectiveCaller.effectiveCalls !== 1 ? 's' : ''} · ${contactStats.topEffectiveCaller.rate}%`
                                         : 'Sin interés por llamada'
                                 }
+                                definition={CONTACT_CHANNEL_DEFS.llamadasEfectivas}
                                 color="bg-amber-500"
                             />
                             <StatCard
@@ -1426,6 +1491,7 @@ export const Dashboard: React.FC = () => {
                                         ? `${contactStats.mostUsedChannel.count} · ${contactStats.mostUsedChannel.pct}%`
                                         : 'Sin datos'
                                 }
+                                definition={CONTACT_CHANNEL_DEFS.canalMasUsado}
                                 color="bg-indigo-500"
                             />
                             <StatCard
@@ -1437,6 +1503,7 @@ export const Dashboard: React.FC = () => {
                                         ? `${contactStats.mostEffectiveChannel.rate}% interesado`
                                         : 'Sin datos'
                                 }
+                                definition={CONTACT_CHANNEL_DEFS.mayorEfectividad}
                                 color="bg-teal-500"
                             />
                         </div>
@@ -1447,7 +1514,7 @@ export const Dashboard: React.FC = () => {
 
                         <ChartContainer
                             title="Acciones por canal"
-                            description={`Total de contactos vs. los que terminaron en interesado. ${HIRED_CHART_HINT}`}
+                            description={`Total de contactos vs. interesados en el periodo. ${CONTACT_CHANNEL_DEFS.intentosTotales} ${HIRED_CHART_HINT}`}
                             hasData={contactStats.channelVolume.length > 0}
                             className="mt-2"
                         >
@@ -1478,9 +1545,8 @@ export const Dashboard: React.FC = () => {
                         <div className={`${contactStats.totalActions > 0 ? 'mt-8 pt-6 border-t border-gray-200' : 'mt-2'}`}>
                             <h3 className="text-lg font-semibold text-gray-800 mb-1">Análisis avanzado de contactología</h3>
                             <p className="text-sm text-gray-500 mb-4">
-                                Métricas de respuesta del candidato e intentos hasta lograr contacto. Los ratios de
-                                interés usan estados «Interesado» / «No interesado» (intentos + columnas de contacto).
-                                Periodo de intentos: {contactologyAdvanced.periodLabel.toLowerCase()}.
+                                {CONTACTOLOGY_DEFS.seccionAvanzada} Periodo de intentos:{' '}
+                                {contactologyAdvanced.periodLabel.toLowerCase()}.
                             </p>
 
                             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
@@ -1493,6 +1559,7 @@ export const Dashboard: React.FC = () => {
                                             ? `Semana ${contactologyAdvanced.weeklyFirstContact.currentWeekLabel} · ${contactologyAdvanced.weeklyFirstContact.currentWeekContactedCount} de ${contactologyAdvanced.weeklyFirstContact.currentWeekRegistrationCount} registros contactados`
                                             : 'Sin registros nuevos esta semana'
                                     }
+                                    definition={CONTACTOLOGY_DEFS.tiempoPrimerContacto}
                                     color="bg-blue-500"
                                 />
                                 <StatCard
@@ -1504,6 +1571,7 @@ export const Dashboard: React.FC = () => {
                                             ? `${contactologyAdvanced.weeklyFirstContact.fastestFirstContactConsultant.avgHours} h prom. · registros de esta semana`
                                             : 'Sin primer contacto atribuido esta semana'
                                     }
+                                    definition={CONTACTOLOGY_DEFS.reaccionMasRapida}
                                     color="bg-violet-500"
                                 />
                                 <StatCard
@@ -1515,6 +1583,7 @@ export const Dashboard: React.FC = () => {
                                             : 'N/D'
                                     }
                                     subtitle={`Promedio sobre ${contactologyAdvanced.candidatesWithResponse} candidato${contactologyAdvanced.candidatesWithResponse !== 1 ? 's' : ''} con respuesta`}
+                                    definition={CONTACTOLOGY_DEFS.intentosHastaRespuesta}
                                     color="bg-amber-500"
                                 />
                                 <StatCard
@@ -1530,6 +1599,7 @@ export const Dashboard: React.FC = () => {
                                             ? `${contactologyAdvanced.interestedResponseCount} de ${contactologyAdvanced.totalClassifiedResponses} clasificados con interés`
                                             : 'Sin contactos clasificados como interesado / no interesado'
                                     }
+                                    definition={CONTACTOLOGY_DEFS.ratioConInteres}
                                     color="bg-emerald-500"
                                 />
                                 <StatCard
@@ -1545,6 +1615,7 @@ export const Dashboard: React.FC = () => {
                                             ? `${contactologyAdvanced.notInterestedResponseCount} de ${contactologyAdvanced.totalClassifiedResponses} clasificados sin interés`
                                             : 'Sin contactos clasificados como interesado / no interesado'
                                     }
+                                    definition={CONTACTOLOGY_DEFS.ratioSinInteres}
                                     color="bg-red-500"
                                 />
                             </div>
@@ -1552,7 +1623,7 @@ export const Dashboard: React.FC = () => {
                             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
                                 <ChartContainer
                                     title="Evolución semana en curso"
-                                    description={`Tiempo acumulado al primer contacto (línea azul) y contratados por día (barras verdes). ${HIRED_CHART_HINT}`}
+                                    description={CONTACTOLOGY_DEFS.evolucionSemanaEnCurso}
                                     hasData={contactologyAdvanced.weeklyFirstContact.currentWeekDailyTrend.some(d => d.contactedCumulative > 0) || contactologyCurrentWeekDailyChart.some(d => d.Contratados > 0)}
                                     height={260}
                                 >
@@ -1562,7 +1633,7 @@ export const Dashboard: React.FC = () => {
                                     >
                                         <CartesianGrid strokeDasharray="3 3" />
                                         <XAxis dataKey="label" tick={{ fontSize: 10 }} />
-                                        <YAxis yAxisId="time" allowDecimals={false} unit=" h" tick={{ fontSize: 10 }} />
+                                        <YAxis yAxisId="time" allowDecimals={false} tick={{ fontSize: 10 }} />
                                         <YAxis yAxisId="count" orientation="right" allowDecimals={false} tick={{ fontSize: 10 }} />
                                         <Tooltip
                                             formatter={(value: number, name: string, item) => {
@@ -1573,7 +1644,7 @@ export const Dashboard: React.FC = () => {
                                                     item.payload.contactedCumulative > 0
                                                         ? `${item.payload.avgLabel} (${item.payload.contactedCumulative}/${item.payload.registrationsCumulative} contactados)`
                                                         : 'Sin contactos aún',
-                                                    'Tiempo al 1.er contacto',
+                                                    FIRST_CONTACT_LINE_LABEL,
                                                 ];
                                             }}
                                         />
@@ -1582,7 +1653,7 @@ export const Dashboard: React.FC = () => {
                                             yAxisId="time"
                                             type="monotone"
                                             dataKey="tiempoHoras"
-                                            name="Tiempo al 1.er contacto (h)"
+                                            name={FIRST_CONTACT_LINE_LABEL}
                                             stroke="#2563eb"
                                             strokeWidth={2}
                                             dot={{ r: 3 }}
@@ -1594,7 +1665,7 @@ export const Dashboard: React.FC = () => {
 
                                 <ChartContainer
                                     title="Contactados y contratados por semana de alta"
-                                    description="Cohorte semanal de registros nuevos: barras = cuántos ya fueron contactados (azul) y contratados (verde). Línea = horas promedio desde el alta hasta el primer intento de contacto. * = semana en curso."
+                                    description={CONTACTOLOGY_DEFS.contactadosPorSemana}
                                     hasData={contactologyAdvanced.weeklyFirstContact.weeklyTrend.some(w => w.contactedCount > 0) || contactologyWeeklyTrendChart.some(w => w.Contratados > 0)}
                                     height={280}
                                 >
@@ -1605,7 +1676,7 @@ export const Dashboard: React.FC = () => {
                                         <CartesianGrid strokeDasharray="3 3" />
                                         <XAxis dataKey="name" tick={{ fontSize: 9 }} interval={0} angle={-25} textAnchor="end" height={60} />
                                         <YAxis yAxisId="count" allowDecimals={false} tick={{ fontSize: 10 }} />
-                                        <YAxis yAxisId="time" orientation="right" allowDecimals={false} unit=" h" tick={{ fontSize: 10 }} />
+                                        <YAxis yAxisId="time" orientation="right" allowDecimals={false} tick={{ fontSize: 10 }} />
                                         <Tooltip
                                             formatter={(value: number, name: string, item) => {
                                                 if (name === HIRED_METRIC_KEY) {
@@ -1617,7 +1688,7 @@ export const Dashboard: React.FC = () => {
                                                         name,
                                                     ];
                                                 }
-                                                if (name === 'Tiempo al 1.er contacto (h)') {
+                                                if (name === FIRST_CONTACT_LINE_LABEL) {
                                                     return [
                                                         item.payload.contactedCount > 0
                                                             ? item.payload.tiempoLabel
@@ -1635,7 +1706,7 @@ export const Dashboard: React.FC = () => {
                                             yAxisId="time"
                                             type="monotone"
                                             dataKey="tiempoHoras"
-                                            name="Tiempo al 1.er contacto (h)"
+                                            name={FIRST_CONTACT_LINE_LABEL}
                                             stroke="#2563eb"
                                             strokeWidth={2}
                                             dot={{ r: 3 }}
@@ -1648,7 +1719,7 @@ export const Dashboard: React.FC = () => {
                             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                                 <ChartContainer
                                     title="Resultado de llamadas con respuesta"
-                                    description="Cantidad por tipo de resultado cuando el candidato contestó o marcó interés/desinterés por teléfono."
+                                    description={CONTACTOLOGY_DEFS.resultadoLlamadas}
                                     hasData={contactologyAdvanced.effectiveCallOutcomeBreakdown.length > 0}
                                     height={260}
                                 >
@@ -1667,7 +1738,7 @@ export const Dashboard: React.FC = () => {
 
                                 <ChartContainer
                                     title="Intentos hasta lograr contacto"
-                                    description="Cuántos intentos (cualquier canal) se necesitaron antes de la primera respuesta del candidato."
+                                    description={CONTACTOLOGY_DEFS.intentosHastaContactoDist}
                                     hasData={contactologyAdvanced.attemptsUntilResponseDistribution.length > 0}
                                     height={260}
                                 >
@@ -1704,14 +1775,17 @@ export const Dashboard: React.FC = () => {
                     <>
                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
                             <StatCard
-                                icon={Clock}
-                                title="Latencia Tally (formulario → alta)"
-                                value={
+                                icon={Users}
+                                title="Origen de los registros"
+                                value={`${registrationCreationStats.formSubmissionCount} formulario · ${registrationCreationStats.atsManualCount} ATS`}
+                                subtitle={
                                     registrationCreationStats.avgFormToRecordMinutes !== null
-                                        ? registrationCreationStats.avgFormToRecordLabel
-                                        : 'N/D'
+                                        ? `Sincronización Tally→ATS: ${registrationCreationStats.avgFormToRecordLabel} (${registrationCreationStats.formToRecordSampleCount} caso${registrationCreationStats.formToRecordSampleCount !== 1 ? 's' : ''})`
+                                        : registrationCreationStats.formSubmissionCount === 0
+                                            ? 'Sin postulaciones Tally en este filtro — no aplica latencia'
+                                            : 'Hay formularios Tally pero faltan fechas para latencia'
                                 }
-                                subtitle={registrationCreationStats.formToRecordDescription}
+                                definition={REGISTRATION_DEFS.origenRegistros}
                                 color="bg-violet-500"
                             />
                             <StatCard
@@ -1719,6 +1793,7 @@ export const Dashboard: React.FC = () => {
                                 title="Intervalo entre altas"
                                 value={registrationCreationStats.avgIntervalBetweenRecordsLabel}
                                 subtitle="Tiempo promedio entre registros consecutivos según fecha de alta"
+                                definition={REGISTRATION_DEFS.intervaloAltas}
                                 color="bg-sky-500"
                             />
                             <StatCard
@@ -1732,13 +1807,14 @@ export const Dashboard: React.FC = () => {
                                             ? 'Sin postulaciones por formulario en el filtro'
                                             : 'Sin datos'
                                 }
+                                definition={REGISTRATION_DEFS.franjaMayor}
                                 color="bg-teal-500"
                             />
                         </div>
 
                         <ChartContainer
                             title="Registros por franja horaria"
-                            description={`Postulaciones directas por formulario vs altas manuales del ATS. ${HIRED_CHART_HINT}`}
+                            description={REGISTRATION_DEFS.graficoFranjas}
                             hasData={registrationTimeBandChart.some(
                                 b => b.formCount > 0 || b.manualCount > 0 || b.hiredCount > 0
                             )}
@@ -1808,6 +1884,7 @@ export const Dashboard: React.FC = () => {
                                 title="Total agendas + reagendas"
                                 value={String(schedulingStats.totalSchedulingActions)}
                                 subtitle={`${schedulingStats.totalReschedules} reagenda${schedulingStats.totalReschedules !== 1 ? 's' : ''}`}
+                                definition={SCHEDULING_DEFS.totalAgendas}
                                 color="bg-sky-500"
                             />
                             <StatCard
@@ -1815,6 +1892,7 @@ export const Dashboard: React.FC = () => {
                                 title="Citas con asistencia"
                                 value={String(schedulingStats.totalAttended)}
                                 subtitle={`${schedulingStats.openCycles} ciclo${schedulingStats.openCycles !== 1 ? 's' : ''} abierto${schedulingStats.openCycles !== 1 ? 's' : ''}`}
+                                definition={SCHEDULING_DEFS.citasAsistencia}
                                 color="bg-emerald-500"
                             />
                             <StatCard
@@ -1826,6 +1904,7 @@ export const Dashboard: React.FC = () => {
                                         : 'N/D'
                                 }
                                 subtitle="Acciones (agenda + reagendas) por candidato que asistió"
+                                definition={SCHEDULING_DEFS.promedioHastaAsistir}
                                 color="bg-amber-500"
                             />
                             <StatCard
@@ -1837,6 +1916,7 @@ export const Dashboard: React.FC = () => {
                                         ? `${schedulingStats.topScheduler.count} acción${schedulingStats.topScheduler.count !== 1 ? 'es' : ''}`
                                         : 'Sin datos'
                                 }
+                                definition={SCHEDULING_DEFS.quienMasAgenda}
                                 color="bg-violet-500"
                             />
                         </div>
@@ -1851,6 +1931,7 @@ export const Dashboard: React.FC = () => {
                                         : 'N/D'
                                 }
                                 subtitle={`${schedulingStats.funnel.uniqueAttended} asistieron de ${schedulingStats.funnel.uniqueScheduled} agendados (únicos)`}
+                                definition={SCHEDULING_DEFS.tasaAsistencia}
                                 color="bg-emerald-500"
                             />
                             <StatCard
@@ -1862,6 +1943,7 @@ export const Dashboard: React.FC = () => {
                                         : 'N/D'
                                 }
                                 subtitle={`${schedulingStats.funnel.uniqueHiredAmongAttended} contratados de ${schedulingStats.funnel.uniqueAttended} que asistieron`}
+                                definition={SCHEDULING_DEFS.contratadosTrasAsistir}
                                 color="bg-teal-500"
                             />
                             <StatCard
@@ -1873,6 +1955,7 @@ export const Dashboard: React.FC = () => {
                                         : 'N/D'
                                 }
                                 subtitle="Promedio desde la primera agenda hasta marcar asistencia"
+                                definition={SCHEDULING_DEFS.diasAgendaAsistencia}
                                 color="bg-amber-500"
                             />
                             <StatCard
@@ -1888,9 +1971,100 @@ export const Dashboard: React.FC = () => {
                                         ? `Incl. ${schedulingStats.funnel.avgDaysAttendanceToHire} d prom. desde asistencia`
                                         : 'Promedio hasta contratación entre agendados'
                                 }
+                                definition={SCHEDULING_DEFS.diasAgendaContratacion}
                                 color="bg-violet-500"
                             />
                         </div>
+
+                        {schedulingEffectiveness.totals.total > 0 && (
+                            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
+                                <ChartContainer
+                                    title="Efectividad de las agendas"
+                                    description={SCHEDULING_DEFS.efectividadAgendas}
+                                    hasData={schedulingEffectiveness.pieData.length > 0}
+                                    height={280}
+                                >
+                                    <BarChart
+                                        data={schedulingEffectiveness.pieData}
+                                        layout="vertical"
+                                        margin={{ top: 10, right: 24, left: 8, bottom: 5 }}
+                                    >
+                                        <CartesianGrid strokeDasharray="3 3" />
+                                        <XAxis type="number" allowDecimals={false} />
+                                        <YAxis type="category" dataKey="name" width={140} tick={{ fontSize: 11 }} />
+                                        <Tooltip
+                                            formatter={(value: number, _name, item) => {
+                                                const pct = schedulingEffectiveness.totals.total
+                                                    ? Math.round((value / schedulingEffectiveness.totals.total) * 1000) / 10
+                                                    : 0;
+                                                return [`${value} candidato${value !== 1 ? 's' : ''} (${pct}%)`, 'Cantidad'];
+                                            }}
+                                        />
+                                        <Bar dataKey="value" name="Candidatos" radius={[0, 4, 4, 0]}>
+                                            {schedulingEffectiveness.pieData.map(entry => (
+                                                <Cell
+                                                    key={entry.kind}
+                                                    fill={SCHEDULING_OUTCOME_COLORS[entry.kind]}
+                                                />
+                                            ))}
+                                        </Bar>
+                                    </BarChart>
+                                </ChartContainer>
+
+                                <ChartContainer
+                                    title="Efectividad por quien agenda"
+                                    description={SCHEDULING_DEFS.efectividadPorUsuario}
+                                    hasData={schedulingEffectiveness.byScheduler.length > 0}
+                                    height={Math.max(280, schedulingEffectiveness.byScheduler.length * 40)}
+                                >
+                                    <BarChart
+                                        data={schedulingEffectiveness.byScheduler}
+                                        layout="vertical"
+                                        margin={{ top: 10, right: 24, left: 8, bottom: 5 }}
+                                    >
+                                        <CartesianGrid strokeDasharray="3 3" />
+                                        <XAxis type="number" allowDecimals={false} />
+                                        <YAxis
+                                            type="category"
+                                            dataKey="name"
+                                            width={110}
+                                            tick={{ fontSize: 10 }}
+                                            tickFormatter={(v: string) => truncateLabel(v, 16)}
+                                        />
+                                        <Tooltip
+                                            formatter={(value: number, name: string) => {
+                                                const labels: Record<string, string> = {
+                                                    effective: SCHEDULING_OUTCOME_LABELS.effective,
+                                                    notEffective: SCHEDULING_OUTCOME_LABELS.not_effective,
+                                                    noData: SCHEDULING_OUTCOME_LABELS.no_data,
+                                                };
+                                                return [`${value}`, labels[name] ?? name];
+                                            }}
+                                        />
+                                        <Legend />
+                                        <Bar
+                                            stackId="outcome"
+                                            dataKey="effective"
+                                            name={SCHEDULING_OUTCOME_LABELS.effective}
+                                            fill={SCHEDULING_OUTCOME_COLORS.effective}
+                                        />
+                                        <Bar
+                                            stackId="outcome"
+                                            dataKey="notEffective"
+                                            name={SCHEDULING_OUTCOME_LABELS.not_effective}
+                                            fill={SCHEDULING_OUTCOME_COLORS.not_effective}
+                                        />
+                                        <Bar
+                                            stackId="outcome"
+                                            dataKey="noData"
+                                            name={SCHEDULING_OUTCOME_LABELS.no_data}
+                                            fill={SCHEDULING_OUTCOME_COLORS.no_data}
+                                            radius={[0, 4, 4, 0]}
+                                        />
+                                    </BarChart>
+                                </ChartContainer>
+                            </div>
+                        )}
 
                         {schedulingStats.dailyTrend.some(
                             d => d.agendas > 0 || d.asistencias > 0 || d.contratados > 0
@@ -1898,7 +2072,7 @@ export const Dashboard: React.FC = () => {
                             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
                                 <ChartContainer
                                     title="Evolución diaria de agendas"
-                                    description="Cantidad de acciones de agenda y reagenda por día (fecha en que se registró la acción, hora Lima)."
+                                    description={SCHEDULING_DEFS.evolucionAgendas}
                                     hasData={schedulingStats.dailyTrend.some(d => d.agendas > 0)}
                                     height={280}
                                 >
@@ -1925,7 +2099,7 @@ export const Dashboard: React.FC = () => {
 
                                 <ChartContainer
                                     title="Asistencias vs contratados por día"
-                                    description="Comparación diaria: citas con asistencia registrada y contrataciones (fecha del evento, hora Lima)."
+                                    description={SCHEDULING_DEFS.asistenciasVsContratados}
                                     hasData={schedulingStats.dailyTrend.some(
                                         d => d.asistencias > 0 || d.contratados > 0
                                     )}
@@ -1944,7 +2118,7 @@ export const Dashboard: React.FC = () => {
                                         <YAxis allowDecimals={false} />
                                         <Tooltip />
                                         <Legend />
-                                        <Bar dataKey="asistencias" name="Asistencias" fill="#10b981" radius={[4, 4, 0, 0]} />
+                                        <Bar dataKey="asistencias" name="Asistencias" fill="#2563eb" radius={[4, 4, 0, 0]} />
                                         <Bar dataKey="contratados" name={HIRED_METRIC_KEY} fill={HIRED_METRIC_COLOR} radius={[4, 4, 0, 0]} />
                                     </BarChart>
                                 </ChartContainer>
@@ -1955,7 +2129,7 @@ export const Dashboard: React.FC = () => {
                             schedulingStats.funnel.uniqueAttended > 0) && (
                             <ChartContainer
                                 title="Embudo: agendados → asistieron → contratados"
-                                description="Candidatos únicos en el periodo. Las barras muestran cuántos pasaron cada etapa; los tiempos promedio en días aparecen en las tarjetas superiores."
+                                description={SCHEDULING_DEFS.embudo}
                                 hasData
                                 height={260}
                                 className="mb-6"
@@ -2271,6 +2445,45 @@ export const Dashboard: React.FC = () => {
                 >
                     <LimaDistrictMap countsByLabel={candidateDistrictCounts} height={500} />
                 </ChartContainer>
+            </div>
+
+            <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm mb-8">
+                <h2 className="text-xl font-semibold text-gray-800 mb-1">Perfil promedio del contratado</h2>
+                <p className="text-sm text-gray-500 mb-6">{HIRED_PROFILE_DEF}</p>
+
+                {hiredProfileSummary.totalHired === 0 ? (
+                    <p className="text-sm text-gray-500 py-6 text-center">
+                        Sin contratados en el filtro actual para calcular el perfil promedio.
+                    </p>
+                ) : (
+                    <div className="space-y-8">
+                        {(
+                            ['demografia', 'origen', 'proceso', 'tiempos', 'citas'] as const
+                        ).map(group => {
+                            const items = hiredProfileSummary.indicators.filter(i => i.group === group);
+                            if (items.length === 0) return null;
+                            return (
+                                <div key={group}>
+                                    <h3 className="text-sm font-semibold text-gray-700 mb-3">
+                                        {HIRED_PROFILE_GROUP_LABELS[group]}
+                                    </h3>
+                                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                                        {items.map(ind => (
+                                            <StatCard
+                                                key={ind.id}
+                                                icon={CheckCircle}
+                                                title={ind.label}
+                                                value={ind.value}
+                                                subtitle={ind.detail ?? ''}
+                                                color="bg-teal-500"
+                                            />
+                                        ))}
+                                    </div>
+                                </div>
+                            );
+                        })}
+                    </div>
+                )}
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8 min-w-0">
