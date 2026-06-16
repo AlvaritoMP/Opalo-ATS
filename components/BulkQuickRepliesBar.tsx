@@ -1,29 +1,37 @@
 import React from 'react';
-import { Plus, MessageSquare, Paperclip, Pencil } from 'lucide-react';
+import { Plus, MessageSquare, Paperclip, Pencil, LayoutGrid } from 'lucide-react';
 import type { BulkQuickReply } from '../types';
 import {
     bulkQuickReplyAttachmentCount,
     getBulkInfoPinStyle,
+    quickReplyCopyKey,
 } from '../lib/bulkQuickReplies';
 
 interface BulkQuickRepliesBarProps {
     replies: BulkQuickReply[];
     canEdit: boolean;
+    currentProcessId?: string;
     isCopyingId?: string | null;
+    globalReplyCount?: number;
     onCopyReply: (reply: BulkQuickReply) => void;
     onEditReply: (reply: BulkQuickReply) => void;
     onAddReply: () => void;
+    onOpenGlobalPanel?: () => void;
 }
 
 export const BulkQuickRepliesBar: React.FC<BulkQuickRepliesBarProps> = ({
     replies,
     canEdit,
+    currentProcessId,
     isCopyingId,
+    globalReplyCount = 0,
     onCopyReply,
     onEditReply,
     onAddReply,
+    onOpenGlobalPanel,
 }) => {
-    if (replies.length === 0 && !canEdit) return null;
+    const showGlobalPanel = Boolean(onOpenGlobalPanel && globalReplyCount > 0);
+    if (replies.length === 0 && !canEdit && !showGlobalPanel) return null;
 
     return (
         <div className="flex flex-col gap-1 min-w-0">
@@ -37,7 +45,10 @@ export const BulkQuickRepliesBar: React.FC<BulkQuickRepliesBarProps> = ({
                 {replies.map(reply => {
                     const style = getBulkInfoPinStyle(reply.color);
                     const attachmentCount = bulkQuickReplyAttachmentCount(reply);
-                    const isCopying = isCopyingId === reply.id;
+                    const copyKey = currentProcessId
+                        ? quickReplyCopyKey(currentProcessId, reply.id)
+                        : reply.id;
+                    const isCopying = isCopyingId === copyKey;
                     return (
                         <div key={reply.id} className="inline-flex items-center max-w-[220px]">
                             <button
@@ -68,6 +79,17 @@ export const BulkQuickRepliesBar: React.FC<BulkQuickRepliesBarProps> = ({
                         </div>
                     );
                 })}
+                {showGlobalPanel && (
+                    <button
+                        type="button"
+                        onClick={onOpenGlobalPanel}
+                        className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-sky-700 bg-sky-50 border border-sky-200 rounded-md hover:bg-sky-100 hover:border-sky-300 transition-colors shrink-0"
+                        title="Ver respuestas de todos los procesos masivos"
+                    >
+                        <LayoutGrid className="w-3.5 h-3.5" />
+                        Todas ({globalReplyCount})
+                    </button>
+                )}
                 {canEdit && (
                     <button
                         type="button"

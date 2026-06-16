@@ -2,6 +2,7 @@ import type {
     BulkQuickReply,
     BulkQuickReplyAttachment,
     BulkQuickReplyAttachmentType,
+    Process,
 } from '../types';
 import { getBulkInfoPinStyle } from './bulkInfoPins';
 
@@ -18,6 +19,43 @@ const ACCEPTED_MIME_PREFIX: Record<BulkQuickReplyAttachmentType, string[]> = {
     video: ['video/'],
     file: [],
 };
+
+export interface BulkQuickReplyProcessEntry {
+    processId: string;
+    processTitle: string;
+    reply: BulkQuickReply;
+}
+
+export function quickReplyCopyKey(processId: string, replyId: string): string {
+    return `${processId}:${replyId}`;
+}
+
+export function collectQuickRepliesFromProcesses(
+    processes: Process[],
+    options?: { currentProcessId?: string }
+): BulkQuickReplyProcessEntry[] {
+    const entries: BulkQuickReplyProcessEntry[] = [];
+    for (const p of processes) {
+        for (const reply of p.bulkConfig?.quickReplies ?? []) {
+            entries.push({
+                processId: p.id,
+                processTitle: p.title,
+                reply,
+            });
+        }
+    }
+    entries.sort((a, b) => {
+        if (options?.currentProcessId) {
+            const aCurrent = a.processId === options.currentProcessId;
+            const bCurrent = b.processId === options.currentProcessId;
+            if (aCurrent !== bCurrent) return aCurrent ? -1 : 1;
+        }
+        const byProcess = a.processTitle.localeCompare(b.processTitle, 'es');
+        if (byProcess !== 0) return byProcess;
+        return a.reply.title.localeCompare(b.reply.title, 'es');
+    });
+    return entries;
+}
 
 export function createBulkQuickReply(partial?: Partial<BulkQuickReply>): BulkQuickReply {
     return {

@@ -129,8 +129,15 @@ import { BulkInfoPinModal } from './BulkInfoPinModal';
 import { BulkInfoPinPanel } from './BulkInfoPinPanel';
 import { BulkQuickRepliesBar } from './BulkQuickRepliesBar';
 import { BulkQuickReplyModal } from './BulkQuickReplyModal';
+import { BulkQuickRepliesGlobalPanel } from './BulkQuickRepliesGlobalPanel';
 import { createBulkInfoPin } from '../lib/bulkInfoPins';
-import { copyBulkQuickReplyToClipboard, createBulkQuickReply } from '../lib/bulkQuickReplies';
+import {
+    collectQuickRepliesFromProcesses,
+    copyBulkQuickReplyToClipboard,
+    createBulkQuickReply,
+    quickReplyCopyKey,
+    type BulkQuickReplyProcessEntry,
+} from '../lib/bulkQuickReplies';
 import {
     BULK_UNDO_MAX_STACK,
     BulkUndoCellMetaSnapshot,
@@ -672,6 +679,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
     const [quickReplyModal, setQuickReplyModal] = useState<{ reply: BulkQuickReply; isNew: boolean } | null>(null);
     const [isSavingQuickReply, setIsSavingQuickReply] = useState(false);
     const [copyingQuickReplyId, setCopyingQuickReplyId] = useState<string | null>(null);
+    const [showGlobalQuickRepliesPanel, setShowGlobalQuickRepliesPanel] = useState(false);
     const undoStackRef = useRef<BulkUndoEntry[]>([]);
     const [undoStackSize, setUndoStackSize] = useState(0);
     const isUndoingRef = useRef(false);
@@ -720,6 +728,11 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
     const quickReplies = useMemo(
         () => process?.bulkConfig?.quickReplies ?? [],
         [process?.bulkConfig?.quickReplies]
+    );
+
+    const allQuickReplyEntries = useMemo(
+        () => collectQuickRepliesFromProcesses(bulkProcesses, { currentProcessId: process?.id }),
+        [bulkProcesses, process?.id]
     );
 
     const activeInfoPin = useMemo(
@@ -971,8 +984,9 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
         }
     }, [quickReplies, persistBulkConfig, actions]);
 
-    const handleCopyQuickReply = useCallback(async (reply: BulkQuickReply) => {
-        setCopyingQuickReplyId(reply.id);
+    const handleCopyQuickReply = useCallback(async (reply: BulkQuickReply, processId?: string) => {
+        const copyKey = processId ? quickReplyCopyKey(processId, reply.id) : reply.id;
+        setCopyingQuickReplyId(copyKey);
         try {
             const result = await copyBulkQuickReplyToClipboard(reply);
             actions.showToast(result.message, result.success ? 'success' : 'error', 3000);
@@ -980,6 +994,11 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
             setCopyingQuickReplyId(null);
         }
     }, [actions]);
+
+    const handleCopyQuickReplyEntry = useCallback(
+        (entry: BulkQuickReplyProcessEntry) => handleCopyQuickReply(entry.reply, entry.processId),
+        [handleCopyQuickReply]
+    );
 
     useEffect(() => {
         setActiveInfoPinId(null);
@@ -4437,6 +4456,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                             {process &&
                                 (infoPins.length > 0 ||
                                     quickReplies.length > 0 ||
+                                    allQuickReplyEntries.length > 0 ||
                                     canEditBulkInfoPins ||
                                     canEditBulkQuickReplies) && (
                                 <div className="flex flex-wrap items-start gap-x-4 gap-y-2 w-full min-w-0">
@@ -4453,12 +4473,18 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                             }
                                         />
                                     )}
-                                    {(quickReplies.length > 0 || canEditBulkQuickReplies) && (
+                                    {(quickReplies.length > 0 ||
+                                        canEditBulkQuickReplies ||
+                                        allQuickReplyEntries.length > 0) && (
                                         <BulkQuickRepliesBar
                                             replies={quickReplies}
                                             canEdit={canEditBulkQuickReplies}
+                                            currentProcessId={process.id}
                                             isCopyingId={copyingQuickReplyId}
-                                            onCopyReply={handleCopyQuickReply}
+                                            globalReplyCount={allQuickReplyEntries.length}
+                                            onCopyReply={reply =>
+                                                handleCopyQuickReply(reply, process.id)
+                                            }
                                             onEditReply={reply =>
                                                 setQuickReplyModal({ reply, isNew: false })
                                             }
@@ -4468,6 +4494,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                                     isNew: true,
                                                 })
                                             }
+                                            onOpenGlobalPanel={() => setShowGlobalQuickRepliesPanel(true)}
                                         />
                                     )}
                                 </div>
@@ -6209,6 +6236,15 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                     onDelete={handleDeleteQuickReply}
                 />
             )}
+
+            <BulkQuickRepliesGlobalPanel
+                isOpen={showGlobalQuickRepliesPanel}
+                onClose={() => setShowGlobalQuickRepliesPanel(false)}
+                entries={allQuickReplyEntries}
+                currentProcessId={process?.id}
+                copyingKey={copyingQuickReplyId}
+                onCopyReply={handleCopyQuickReplyEntry}
+            />
         </div>
     );
 };

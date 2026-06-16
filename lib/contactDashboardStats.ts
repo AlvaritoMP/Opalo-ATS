@@ -313,7 +313,7 @@ function formatMonthKeyFromParts(y: number, m: number): string {
     return `${y}-${String(m).padStart(2, '0')}`;
 }
 
-function iterDateKeys(fromKey: string, toKey: string): string[] {
+export function iterDateKeys(fromKey: string, toKey: string): string[] {
     const keys: string[] = [];
     let cursor = fromKey;
     while (cursor && cursor <= toKey) {
@@ -323,7 +323,7 @@ function iterDateKeys(fromKey: string, toKey: string): string[] {
     return keys;
 }
 
-function formatDayLabelFromKey(key: string): string {
+export function formatDayLabelFromKey(key: string): string {
     const { y, m, d } = parseDateKey(key);
     const date = new Date(`${String(y).padStart(4, '0')}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}T12:00:00-05:00`);
     return date.toLocaleDateString('es-PE', { weekday: 'short', day: '2-digit', month: 'short', timeZone: LIMA_TZ });

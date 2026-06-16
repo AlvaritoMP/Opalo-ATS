@@ -890,23 +890,16 @@ export const Dashboard: React.FC = () => {
         [enrichedContactAttempts, contactConsultantPeriod, contactSummariesForStats]
     );
 
-    const schedulingStats = useMemo(() => {
+    const schedulingReconciled = useMemo(() => {
         const scopedSchedulingRows = bulkSchedulingRows.filter(r =>
             filteredCandidateIdSet.has(r.id)
         );
-        const { logs, cycles } = reconcileInterviewSchedulingFromBulkCandidates(
+        return reconcileInterviewSchedulingFromBulkCandidates(
             schedulingLogs,
             schedulingCycles,
             scopedSchedulingRows,
             processMap,
             contactConsultantPeriod
-        );
-        return computeInterviewSchedulingStats(
-            logs,
-            cycles,
-            contactConsultantPeriod,
-            statsUsers,
-            filteredCandidateIdSet
         );
     }, [
         schedulingLogs,
@@ -914,9 +907,27 @@ export const Dashboard: React.FC = () => {
         bulkSchedulingRows,
         processMap,
         contactConsultantPeriod,
-        statsUsers,
         filteredCandidateIdSet,
     ]);
+
+    const schedulingStats = useMemo(
+        () =>
+            computeInterviewSchedulingStats(
+                schedulingReconciled.logs,
+                schedulingReconciled.cycles,
+                contactConsultantPeriod,
+                statsUsers,
+                filteredCandidateIdSet,
+                dashboardHiredContext
+            ),
+        [
+            schedulingReconciled,
+            contactConsultantPeriod,
+            statsUsers,
+            filteredCandidateIdSet,
+            dashboardHiredContext,
+        ]
+    );
 
     const contactTrendOpts = useMemo(() => {
         const names = new Set<string>();
@@ -1096,7 +1107,10 @@ export const Dashboard: React.FC = () => {
         return contactologyAdvanced.weeklyFirstContact.weeklyTrend.map(w => ({
             ...w,
             name: w.isCurrent ? `${w.label}*` : w.label,
-            horas: w.avgHours ?? 0,
+            Contactados: w.contactedCount,
+            Registros: w.registrationCount,
+            tiempoHoras: w.avgHours,
+            tiempoLabel: w.avgLabel,
             Contratados: hiredByWeek.get(w.weekKey) || 0,
         }));
     }, [contactologyAdvanced, dashboardHiredContext]);
@@ -1105,7 +1119,7 @@ export const Dashboard: React.FC = () => {
         const hiredByDay = countHiredByBucket(dashboardHiredContext, e => e.hireDateKey);
         return contactologyAdvanced.weeklyFirstContact.currentWeekDailyTrend.map(d => ({
             ...d,
-            horas: d.avgHours ?? 0,
+            tiempoHoras: d.avgHours,
             Contratados: hiredByDay.get(d.dayKey) || 0,
         }));
     }, [contactologyAdvanced, dashboardHiredContext]);
@@ -1538,7 +1552,7 @@ export const Dashboard: React.FC = () => {
                             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
                                 <ChartContainer
                                     title="Evolución semana en curso"
-                                    description={`Promedio acumulado de tiempo al primer contacto. ${HIRED_CHART_HINT}`}
+                                    description={`Tiempo acumulado al primer contacto (línea azul) y contratados por día (barras verdes). ${HIRED_CHART_HINT}`}
                                     hasData={contactologyAdvanced.weeklyFirstContact.currentWeekDailyTrend.some(d => d.contactedCumulative > 0) || contactologyCurrentWeekDailyChart.some(d => d.Contratados > 0)}
                                     height={260}
                                 >
@@ -1548,8 +1562,8 @@ export const Dashboard: React.FC = () => {
                                     >
                                         <CartesianGrid strokeDasharray="3 3" />
                                         <XAxis dataKey="label" tick={{ fontSize: 10 }} />
-                                        <YAxis yAxisId="left" allowDecimals={false} unit=" h" tick={{ fontSize: 10 }} />
-                                        <YAxis yAxisId="right" orientation="right" allowDecimals={false} tick={{ fontSize: 10 }} />
+                                        <YAxis yAxisId="time" allowDecimals={false} unit=" h" tick={{ fontSize: 10 }} />
+                                        <YAxis yAxisId="count" orientation="right" allowDecimals={false} tick={{ fontSize: 10 }} />
                                         <Tooltip
                                             formatter={(value: number, name: string, item) => {
                                                 if (name === HIRED_METRIC_KEY) {
@@ -1559,46 +1573,74 @@ export const Dashboard: React.FC = () => {
                                                     item.payload.contactedCumulative > 0
                                                         ? `${item.payload.avgLabel} (${item.payload.contactedCumulative}/${item.payload.registrationsCumulative} contactados)`
                                                         : 'Sin contactos aún',
-                                                    'Promedio',
+                                                    'Tiempo al 1.er contacto',
                                                 ];
                                             }}
                                         />
                                         <Legend />
-                                        <Line yAxisId="left" type="monotone" dataKey="horas" name="Horas prom." stroke="#2563eb" strokeWidth={2} dot={{ r: 3 }} />
-                                        <Bar yAxisId="right" dataKey="Contratados" name={HIRED_METRIC_KEY} fill={HIRED_METRIC_COLOR} radius={[4, 4, 0, 0]} />
+                                        <Line
+                                            yAxisId="time"
+                                            type="monotone"
+                                            dataKey="tiempoHoras"
+                                            name="Tiempo al 1.er contacto (h)"
+                                            stroke="#2563eb"
+                                            strokeWidth={2}
+                                            dot={{ r: 3 }}
+                                            connectNulls
+                                        />
+                                        <Bar yAxisId="count" dataKey="Contratados" name={HIRED_METRIC_KEY} fill={HIRED_METRIC_COLOR} radius={[4, 4, 0, 0]} />
                                     </ComposedChart>
                                 </ChartContainer>
 
                                 <ChartContainer
-                                    title="Tiempo al 1.er contacto por semana"
-                                    description={`Promedio por cohorte semanal de registros generados. ${HIRED_CHART_HINT}`}
+                                    title="Contactados y contratados por semana de alta"
+                                    description="Cohorte semanal de registros nuevos: barras = cuántos ya fueron contactados (azul) y contratados (verde). Línea = horas promedio desde el alta hasta el primer intento de contacto. * = semana en curso."
                                     hasData={contactologyAdvanced.weeklyFirstContact.weeklyTrend.some(w => w.contactedCount > 0) || contactologyWeeklyTrendChart.some(w => w.Contratados > 0)}
-                                    height={260}
+                                    height={280}
                                 >
                                     <ComposedChart
                                         data={contactologyWeeklyTrendChart}
-                                        margin={{ top: 10, right: 20, left: 10, bottom: 5 }}
+                                        margin={{ top: 10, right: 24, left: 8, bottom: 60 }}
                                     >
                                         <CartesianGrid strokeDasharray="3 3" />
                                         <XAxis dataKey="name" tick={{ fontSize: 9 }} interval={0} angle={-25} textAnchor="end" height={60} />
-                                        <YAxis yAxisId="left" allowDecimals={false} unit=" h" tick={{ fontSize: 10 }} />
-                                        <YAxis yAxisId="right" orientation="right" allowDecimals={false} tick={{ fontSize: 10 }} />
+                                        <YAxis yAxisId="count" allowDecimals={false} tick={{ fontSize: 10 }} />
+                                        <YAxis yAxisId="time" orientation="right" allowDecimals={false} unit=" h" tick={{ fontSize: 10 }} />
                                         <Tooltip
                                             formatter={(value: number, name: string, item) => {
                                                 if (name === HIRED_METRIC_KEY) {
                                                     return [`${value} contratación${value !== 1 ? 'es' : ''} en la semana`, name];
                                                 }
-                                                return [
-                                                    item.payload.contactedCount > 0
-                                                        ? `${item.payload.avgLabel} · ${item.payload.contactedCount}/${item.payload.registrationCount} contactados`
-                                                        : `${item.payload.registrationCount} registro(s) sin contacto aún`,
-                                                    item.payload.isCurrent ? 'Semana en curso' : 'Semana cerrada',
-                                                ];
+                                                if (name === 'Registros contactados') {
+                                                    return [
+                                                        `${value} de ${item.payload.Registros} registro${item.payload.Registros !== 1 ? 's' : ''} contactado${value !== 1 ? 's' : ''}`,
+                                                        name,
+                                                    ];
+                                                }
+                                                if (name === 'Tiempo al 1.er contacto (h)') {
+                                                    return [
+                                                        item.payload.contactedCount > 0
+                                                            ? item.payload.tiempoLabel
+                                                            : 'Sin contactos en la cohorte',
+                                                        name,
+                                                    ];
+                                                }
+                                                return [value, name];
                                             }}
                                         />
-                                        <Legend />
-                                        <Bar yAxisId="left" dataKey="horas" name="Horas prom." fill="#6366f1" radius={[4, 4, 0, 0]} />
-                                        <Bar yAxisId="right" dataKey="Contratados" name={HIRED_METRIC_KEY} fill={HIRED_METRIC_COLOR} radius={[4, 4, 0, 0]} />
+                                        <Legend wrapperStyle={{ fontSize: 11 }} />
+                                        <Bar yAxisId="count" dataKey="Contactados" name="Registros contactados" fill="#6366f1" radius={[4, 4, 0, 0]} />
+                                        <Bar yAxisId="count" dataKey="Contratados" name={HIRED_METRIC_KEY} fill={HIRED_METRIC_COLOR} radius={[4, 4, 0, 0]} />
+                                        <Line
+                                            yAxisId="time"
+                                            type="monotone"
+                                            dataKey="tiempoHoras"
+                                            name="Tiempo al 1.er contacto (h)"
+                                            stroke="#2563eb"
+                                            strokeWidth={2}
+                                            dot={{ r: 3 }}
+                                            connectNulls
+                                        />
                                     </ComposedChart>
                                 </ChartContainer>
                             </div>
@@ -1752,7 +1794,8 @@ export const Dashboard: React.FC = () => {
 
                 {schedulingStatsLoading ? (
                     <p className="text-sm text-gray-500 py-6 text-center">Cargando datos de agendamiento…</p>
-                ) : schedulingStats.totalSchedulingActions === 0 ? (
+                ) : schedulingStats.totalSchedulingActions === 0 &&
+                  schedulingStats.funnel.uniqueAttended === 0 ? (
                     <p className="text-sm text-gray-500 py-6 text-center">
                         Sin agendas registradas en {schedulingStats.periodLabel.toLowerCase()}.
                         Ejecute la migración SQL de seguimiento de citas si acaba de desplegar esta función.
@@ -1797,6 +1840,156 @@ export const Dashboard: React.FC = () => {
                                 color="bg-violet-500"
                             />
                         </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+                            <StatCard
+                                icon={UserCheck}
+                                title="Tasa de asistencia"
+                                value={
+                                    schedulingStats.funnel.attendanceRatePct !== null
+                                        ? `${schedulingStats.funnel.attendanceRatePct}%`
+                                        : 'N/D'
+                                }
+                                subtitle={`${schedulingStats.funnel.uniqueAttended} asistieron de ${schedulingStats.funnel.uniqueScheduled} agendados (únicos)`}
+                                color="bg-emerald-500"
+                            />
+                            <StatCard
+                                icon={CheckCircle}
+                                title="Contratados tras asistir"
+                                value={
+                                    schedulingStats.funnel.hireRateFromAttendedPct !== null
+                                        ? `${schedulingStats.funnel.hireRateFromAttendedPct}%`
+                                        : 'N/D'
+                                }
+                                subtitle={`${schedulingStats.funnel.uniqueHiredAmongAttended} contratados de ${schedulingStats.funnel.uniqueAttended} que asistieron`}
+                                color="bg-teal-500"
+                            />
+                            <StatCard
+                                icon={Clock}
+                                title="Días agenda → asistencia"
+                                value={
+                                    schedulingStats.funnel.avgDaysScheduleToAttendance !== null
+                                        ? `${schedulingStats.funnel.avgDaysScheduleToAttendance} d`
+                                        : 'N/D'
+                                }
+                                subtitle="Promedio desde la primera agenda hasta marcar asistencia"
+                                color="bg-amber-500"
+                            />
+                            <StatCard
+                                icon={TrendingUp}
+                                title="Días agenda → contratación"
+                                value={
+                                    schedulingStats.funnel.avgDaysScheduleToHire !== null
+                                        ? `${schedulingStats.funnel.avgDaysScheduleToHire} d`
+                                        : 'N/D'
+                                }
+                                subtitle={
+                                    schedulingStats.funnel.avgDaysAttendanceToHire !== null
+                                        ? `Incl. ${schedulingStats.funnel.avgDaysAttendanceToHire} d prom. desde asistencia`
+                                        : 'Promedio hasta contratación entre agendados'
+                                }
+                                color="bg-violet-500"
+                            />
+                        </div>
+
+                        {schedulingStats.dailyTrend.some(
+                            d => d.agendas > 0 || d.asistencias > 0 || d.contratados > 0
+                        ) && (
+                            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
+                                <ChartContainer
+                                    title="Evolución diaria de agendas"
+                                    description="Cantidad de acciones de agenda y reagenda por día (fecha en que se registró la acción, hora Lima)."
+                                    hasData={schedulingStats.dailyTrend.some(d => d.agendas > 0)}
+                                    height={280}
+                                >
+                                    <BarChart
+                                        data={schedulingStats.dailyTrend}
+                                        margin={{ top: 10, right: 20, left: 10, bottom: 5 }}
+                                    >
+                                        <CartesianGrid strokeDasharray="3 3" />
+                                        <XAxis
+                                            dataKey="label"
+                                            tick={{ fontSize: 9 }}
+                                            interval={contactConsultantPeriod === 'year' ? 0 : 'preserveStartEnd'}
+                                        />
+                                        <YAxis allowDecimals={false} />
+                                        <Tooltip
+                                            formatter={(value: number) => [
+                                                `${value} acción${value !== 1 ? 'es' : ''}`,
+                                                'Agendas + reagendas',
+                                            ]}
+                                        />
+                                        <Bar dataKey="agendas" name="Agendas + reagendas" fill="#0ea5e9" radius={[4, 4, 0, 0]} />
+                                    </BarChart>
+                                </ChartContainer>
+
+                                <ChartContainer
+                                    title="Asistencias vs contratados por día"
+                                    description="Comparación diaria: citas con asistencia registrada y contrataciones (fecha del evento, hora Lima)."
+                                    hasData={schedulingStats.dailyTrend.some(
+                                        d => d.asistencias > 0 || d.contratados > 0
+                                    )}
+                                    height={280}
+                                >
+                                    <BarChart
+                                        data={schedulingStats.dailyTrend}
+                                        margin={{ top: 10, right: 20, left: 10, bottom: 5 }}
+                                    >
+                                        <CartesianGrid strokeDasharray="3 3" />
+                                        <XAxis
+                                            dataKey="label"
+                                            tick={{ fontSize: 9 }}
+                                            interval={contactConsultantPeriod === 'year' ? 0 : 'preserveStartEnd'}
+                                        />
+                                        <YAxis allowDecimals={false} />
+                                        <Tooltip />
+                                        <Legend />
+                                        <Bar dataKey="asistencias" name="Asistencias" fill="#10b981" radius={[4, 4, 0, 0]} />
+                                        <Bar dataKey="contratados" name={HIRED_METRIC_KEY} fill={HIRED_METRIC_COLOR} radius={[4, 4, 0, 0]} />
+                                    </BarChart>
+                                </ChartContainer>
+                            </div>
+                        )}
+
+                        {(schedulingStats.funnel.uniqueScheduled > 0 ||
+                            schedulingStats.funnel.uniqueAttended > 0) && (
+                            <ChartContainer
+                                title="Embudo: agendados → asistieron → contratados"
+                                description="Candidatos únicos en el periodo. Las barras muestran cuántos pasaron cada etapa; los tiempos promedio en días aparecen en las tarjetas superiores."
+                                hasData
+                                height={260}
+                                className="mb-6"
+                            >
+                                <BarChart
+                                    data={[
+                                        {
+                                            name: 'Agendados',
+                                            cantidad: schedulingStats.funnel.uniqueScheduled,
+                                        },
+                                        {
+                                            name: 'Asistieron',
+                                            cantidad: schedulingStats.funnel.uniqueAttended,
+                                        },
+                                        {
+                                            name: 'Contratados',
+                                            cantidad: schedulingStats.funnel.uniqueHiredAmongScheduled,
+                                        },
+                                    ]}
+                                    margin={{ top: 10, right: 20, left: 10, bottom: 5 }}
+                                >
+                                    <CartesianGrid strokeDasharray="3 3" />
+                                    <XAxis dataKey="name" />
+                                    <YAxis allowDecimals={false} />
+                                    <Tooltip
+                                        formatter={(value: number) => [
+                                            `${value} candidato${value !== 1 ? 's' : ''}`,
+                                            'Cantidad',
+                                        ]}
+                                    />
+                                    <Bar dataKey="cantidad" name="Candidatos únicos" fill="#6366f1" radius={[4, 4, 0, 0]} />
+                                </BarChart>
+                            </ChartContainer>
+                        )}
 
                         {schedulingStats.schedulerRankings.length > 0 && (
                             <div className="mb-6">
