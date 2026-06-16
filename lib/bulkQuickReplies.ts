@@ -237,17 +237,53 @@ export async function copyBulkQuickReplyToClipboard(
     }
 }
 
-export const COMMON_REPLY_EMOJIS = [
-    '😊',
-    '👍',
-    '🙏',
-    '✅',
-    '📞',
-    '📅',
-    '📍',
-    '💼',
-    '🎉',
-    '❗',
-    '⚠️',
-    '📝',
+export interface BulkQuickReplyEmojiGroup {
+    label: string;
+    emojis: string[];
+}
+
+/** Emojis frecuentes para respuestas rápidas, agrupados por uso */
+export const COMMON_REPLY_EMOJI_GROUPS: BulkQuickReplyEmojiGroup[] = [
+    {
+        label: 'General',
+        emojis: ['😊', '👍', '🙏', '✅', '📞', '📅', '📍', '💼', '🎉', '❗', '⚠️', '📝'],
+    },
+    {
+        label: 'Operaciones',
+        emojis: ['🧹', '⛽', '👷', '👷‍♂️', '👷‍♀️', '🧽', '🔧', '🛠️', '🚛', '🚌', '🏗️'],
+    },
+    {
+        label: 'Gestos y saludo',
+        emojis: ['🙌', '👋', '🤝', '🙋', '🙋‍♂️', '🙋‍♀️', '✋', '🤲', '🫡', '🥳', '🎅', '🧑‍🎄'],
+    },
+    {
+        label: 'Personas y roles',
+        emojis: [
+            '🧑‍🔧',
+            '🧑‍🏭',
+            '🧑‍🍳',
+            '🧑‍🌾',
+            '🧑‍💼',
+            '🧑‍🏫',
+            '🧑‍⚕️',
+            '🧑‍🚒',
+            '🧑‍✈️',
+            '👮',
+            '👮‍♂️',
+            '👮‍♀️',
+            '🧑‍🎓',
+            '🧑‍🤝‍🧑',
+            '👥',
+            '👨‍👩‍👧',
+            '👨‍👩‍👧‍👦',
+            '🧑',
+            '👨',
+            '👩',
+            '🧑‍🦽',
+            '🧑‍🦯',
+        ],
+    },
 ];
+
+/** Lista plana (compatibilidad) */
+export const COMMON_REPLY_EMOJIS = COMMON_REPLY_EMOJI_GROUPS.flatMap(g => g.emojis);

@@ -19,7 +19,7 @@ import {
     getBulkInfoPinStyle,
 } from '../lib/bulkInfoPins';
 import {
-    COMMON_REPLY_EMOJIS,
+    COMMON_REPLY_EMOJI_GROUPS,
     createBulkQuickReplyAttachment,
     getImageFileFromClipboardEvent,
     validateBulkQuickReplyAttachmentFile,
@@ -241,17 +241,26 @@ export const BulkQuickReplyModal: React.FC<BulkQuickReplyModalProps> = ({
                         <label className="block text-xs font-semibold uppercase tracking-wide opacity-70 mb-1">
                             Texto de la respuesta
                         </label>
-                        <div className="flex flex-wrap gap-1 mb-2">
-                            {COMMON_REPLY_EMOJIS.map(emoji => (
-                                <button
-                                    key={emoji}
-                                    type="button"
-                                    onClick={() => insertEmoji(emoji)}
-                                    className="w-8 h-8 text-base rounded-md border border-black/10 bg-white/80 hover:bg-white transition-colors"
-                                    title={`Insertar ${emoji}`}
-                                >
-                                    {emoji}
-                                </button>
+                        <div className="space-y-2 mb-2">
+                            {COMMON_REPLY_EMOJI_GROUPS.map(group => (
+                                <div key={group.label}>
+                                    <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-500 mb-1">
+                                        {group.label}
+                                    </p>
+                                    <div className="flex flex-wrap gap-1">
+                                        {group.emojis.map(emoji => (
+                                            <button
+                                                key={`${group.label}-${emoji}`}
+                                                type="button"
+                                                onClick={() => insertEmoji(emoji)}
+                                                className="w-8 h-8 text-base rounded-md border border-black/10 bg-white/80 hover:bg-white transition-colors"
+                                                title={`Insertar ${emoji}`}
+                                            >
+                                                {emoji}
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
                             ))}
                         </div>
                         <textarea
