@@ -733,7 +733,12 @@ const SIMPLE_TALLY_MAPPING_FIELDS: TallyMappingField[] = [
  * Masivo: solo columnas visibles del proceso (bulkConfig). Simple: campos estándar del ATS.
  */
 export function getTallyIntegrationMappingFields(process?: Process): TallyMappingField[] {
-    if (!process?.isBulkProcess) {
+    const useBulkColumns =
+        process?.isBulkProcess ||
+        !!(process?.bulkConfig?.customColumns?.length) ||
+        process?.bulkConfig?.highDensityTableEnabled;
+
+    if (!useBulkColumns) {
         return SIMPLE_TALLY_MAPPING_FIELDS;
     }
 
@@ -1569,7 +1574,12 @@ export function resolveCandidateAgeForProcess(
     process?: Process,
     columnValues: Record<string, Record<string, unknown>> = {}
 ): number | undefined {
-    if (process?.isBulkProcess) {
+    const useBulkAge =
+        process?.isBulkProcess ||
+        !!(process?.bulkConfig?.customColumns?.length) ||
+        process?.bulkConfig?.highDensityTableEnabled;
+
+    if (useBulkAge && process) {
         const customColumns = process.bulkConfig?.customColumns || [];
         const legacy = buildLegacyColumnIdToName(process.bulkConfig, customColumns);
         const localValues = loadLocalColumnValuesForProcess(process.id);

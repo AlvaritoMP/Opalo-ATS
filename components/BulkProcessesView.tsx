@@ -43,7 +43,7 @@ import {
 } from '../lib/contactLock';
 import { processesApi } from '../lib/api/processes';
 import { useDebouncedValue } from '../lib/useDebouncedValue';
-import { Check, X, Loader2, Send, Archive, Search, ChevronDown, ChevronUp, Plus, Edit, Trash2, ArrowLeft, MessageCircle, Phone, Upload, Download, Filter, Mail, Calendar, Settings, ArrowUp, ArrowDown, Pin, FileText, BookOpen, Paperclip, ClipboardList, ListPlus, RefreshCw, HardDrive, CaseSensitive, Package, History, Target, BarChart3, UserCheck, Coins, Bus, Undo2 } from 'lucide-react';
+import { Check, X, Loader2, Send, Archive, Search, ChevronDown, ChevronUp, Plus, Edit, Trash2, ArrowLeft, MessageCircle, Phone, Upload, Download, Filter, Mail, Calendar, Settings, ArrowUp, ArrowDown, Pin, FileText, BookOpen, Paperclip, ClipboardList, ListPlus, RefreshCw, HardDrive, CaseSensitive, Package, History, Target, BarChart3, UserCheck, Coins, Bus, Undo2, ArrowRightLeft, LayoutGrid } from 'lucide-react';
 import { BulkCandidateTimeline } from './BulkCandidateTimeline';
 import { Process, CustomColumn, BulkProcessConfig, Candidate, IdealProfileConfig, BulkProcessStatChart, BulkInfoPin, BulkQuickReply } from '../types';
 import { candidatesApi } from '../lib/api/candidates';
@@ -172,6 +172,7 @@ import { BulkProcessAttachmentsModal } from './BulkProcessAttachmentsModal';
 import { BulkTableExportModal } from './BulkTableExportModal';
 import { buildBulkSelectionClipboardText } from '../lib/bulkTableExport';
 import { BulkProcessActivityLog } from './BulkProcessActivityLog';
+import { BulkTransferCandidatesModal } from './BulkTransferCandidatesModal';
 import { BulkContactStatusCell } from './BulkContactStatusCell';
 import { BulkContactTemplatesModal } from './BulkContactTemplatesModal';
 import { BulkTableEditInput } from './BulkTableEditInput';
@@ -191,7 +192,12 @@ import {
     pickInterviewForCandidateDisplay,
 } from '../lib/bulkInterviewUtils';
 
-interface BulkProcessesViewProps {}
+interface BulkProcessesViewProps {
+    /** Modo embebido desde ProcessView: un solo proceso específico */
+    embeddedProcessId?: string;
+    embeddedFromSpecificProcess?: boolean;
+    onExitEmbedded?: () => void;
+}
 
 /** Estilos compactos aplicados a botones dentro de cada grupo de la barra */
 const BULK_TOOLBAR_BTN_STYLES =
@@ -517,6 +523,7 @@ const BulkActionsFAB: React.FC<{
     onWhatsApp: () => void;
     onEmail: () => void;
     onBulkSchedule: () => void;
+    onTransfer?: () => void;
     onPsychReport?: () => void;
     onPsychBulkEvaluate?: () => void;
     showPsychReport?: boolean;
@@ -532,6 +539,7 @@ const BulkActionsFAB: React.FC<{
     onWhatsApp,
     onEmail,
     onBulkSchedule,
+    onTransfer,
     onPsychReport,
     onPsychBulkEvaluate,
     showPsychReport,
@@ -556,6 +564,11 @@ const BulkActionsFAB: React.FC<{
                     <button onClick={() => { onBulkSchedule(); setIsOpen(false); }} className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg shadow-lg hover:bg-indigo-700 transition-colors">
                         <Calendar className="w-4 h-4" /> Agendar Entrevista ({selectedIds.length})
                     </button>
+                    {onTransfer && (
+                    <button onClick={() => { onTransfer(); setIsOpen(false); }} className="flex items-center gap-2 px-4 py-2 bg-violet-600 text-white rounded-lg shadow-lg hover:bg-violet-700 transition-colors">
+                        <ArrowRightLeft className="w-4 h-4" /> Trasladar ({selectedIds.length})
+                    </button>
+                    )}
                     {showPsychReport && onPsychReport && (
                     <button onClick={() => { onPsychReport(); setIsOpen(false); }} className="flex items-center gap-2 px-4 py-2 bg-teal-600 text-white rounded-lg shadow-lg hover:bg-teal-700 transition-colors">
                         <FileText className="w-4 h-4" /> Informe Psicolaboral ({selectedIds.length})
@@ -592,9 +605,18 @@ const BulkActionsFAB: React.FC<{
     );
 };
 
-export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
+export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
+    embeddedProcessId,
+    embeddedFromSpecificProcess = false,
+    onExitEmbedded,
+}) => {
     const { state, actions } = useAppState();
-    const [bulkProcesses, setBulkProcesses] = useState<Process[]>([]);
+    const isEmbedded = !!embeddedProcessId;
+    const [bulkProcesses, setBulkProcesses] = useState<Process[]>(() => {
+        if (!embeddedProcessId) return [];
+        const fromState = state.processes.find(p => p.id === embeddedProcessId);
+        return fromState ? [fromState] : [];
+    });
     const [candidates, setCandidates] = useState<BulkCandidate[]>([]);
     const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
     const [currentPage, setCurrentPage] = useState(0);
@@ -605,6 +627,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
     /** Evita destellos de layout al entrar o cambiar de proceso masivo */
     const [tableReadyProcessId, setTableReadyProcessId] = useState<string | null>(null);
     const [selectedProcess, setSelectedProcess] = useState<string>(() => {
+        if (embeddedProcessId) return embeddedProcessId;
         const fromApp = state.lastViewedBulkProcessId;
         if (fromApp) return fromApp;
         return getBulkSelectedProcessId(state.currentUser?.id) ?? '';
@@ -682,6 +705,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
     const [showStatsModal, setShowStatsModal] = useState(false);
     const [showTransportFaresModal, setShowTransportFaresModal] = useState(false);
     const [showActivityLogModal, setShowActivityLogModal] = useState(false);
+    const [showTransferModal, setShowTransferModal] = useState(false);
     const [infoPinModal, setInfoPinModal] = useState<{ pin: BulkInfoPin; isNew: boolean } | null>(null);
     const [activeInfoPinId, setActiveInfoPinId] = useState<string | null>(null);
     const [quickReplyModal, setQuickReplyModal] = useState<{ reply: BulkQuickReply; isNew: boolean } | null>(null);
@@ -1212,6 +1236,21 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
         actions.showToast('Gráficos guardados', 'success', 2500);
     }, [process, persistBulkConfig, logActivity, actions]);
 
+    useEffect(() => {
+        if (!embeddedProcessId) return;
+        const fromState = state.processes.find(p => p.id === embeddedProcessId);
+        if (fromState) {
+            setBulkProcesses(prev => {
+                const exists = prev.some(p => p.id === fromState.id);
+                return exists ? prev.map(p => (p.id === fromState.id ? fromState : p)) : [fromState];
+            });
+            return;
+        }
+        void processesApi.getById(embeddedProcessId).then(fresh => {
+            if (fresh) setBulkProcesses([fresh]);
+        });
+    }, [embeddedProcessId, state.processes]);
+
     // Cargar procesos masivos
     const loadBulkProcesses = useCallback(async () => {
         setIsLoadingProcesses(true);
@@ -1247,10 +1286,12 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
     }, [selectedProcess, actions, state.currentUser, state.lastViewedBulkProcessId]);
 
     useEffect(() => {
+        if (isEmbedded) return;
         loadBulkProcesses();
     }, []);
 
     useEffect(() => {
+        if (isEmbedded) return;
         const fromApp = state.lastViewedBulkProcessId;
         if (fromApp !== selectedProcess) {
             setSelectedProcess(fromApp);
@@ -1258,9 +1299,15 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
     }, [state.lastViewedBulkProcessId]);
 
     const selectBulkProcess = useCallback((processId: string) => {
+        if (isEmbedded && !processId) {
+            onExitEmbedded?.();
+            return;
+        }
         setSelectedProcess(processId);
-        actions.setLastViewedBulkProcessId(processId);
-    }, [actions]);
+        if (!isEmbedded) {
+            actions.setLastViewedBulkProcessId(processId);
+        }
+    }, [actions, isEmbedded, onExitEmbedded]);
 
     const legacyColumnIdToName = useMemo(
         () => buildLegacyColumnIdToName(process?.bulkConfig, customColumns),
@@ -2133,6 +2180,32 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
         }
     }, [selectedIds, candidates, state.settings, loadCandidates, currentPage, actions, logActivity]);
 
+    const handleTransferSuccess = useCallback(async (result: {
+        mode: 'move' | 'duplicate';
+        success: number;
+        targetProcessId: string;
+        targetProcessTitle: string;
+    }) => {
+        setSelectedIds(new Set());
+        setActivityLogRefreshToken(t => t + 1);
+        await loadCandidates(currentPage, true);
+
+        const verb = result.mode === 'move' ? 'movido(s)' : 'duplicado(s)';
+        actions.showToast(
+            `${result.success} candidato(s) ${verb} a «${result.targetProcessTitle}»`,
+            'success',
+            4500
+        );
+        logActivity('candidate_transfer', {
+            details: {
+                summary: `${result.success} candidato(s) ${verb} a ${result.targetProcessTitle}`,
+                count: result.success,
+                mode: result.mode,
+                targetProcessId: result.targetProcessId,
+            },
+        });
+    }, [loadCandidates, currentPage, actions, logActivity]);
+
     const CHANNEL_CANDIDATE_KEY: Record<ContactAttemptChannel, 'contactPhone' | 'contactWhatsapp' | 'contactEmail'> = {
         call: 'contactPhone',
         whatsapp: 'contactWhatsapp',
@@ -2621,7 +2694,17 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
     };
 
     const handleProcessSaved = async () => {
-        await loadBulkProcesses();
+        if (isEmbedded && embeddedProcessId) {
+            try {
+                const fresh = await processesApi.getById(embeddedProcessId);
+                if (fresh) setBulkProcesses([fresh]);
+            } catch {
+                /* ignore */
+            }
+            await actions.reloadProcesses();
+        } else {
+            await loadBulkProcesses();
+        }
         setShowProcessModal(false);
         setEditingProcess(null);
     };
@@ -4518,7 +4601,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
     return (
         <div className="min-h-0 flex-1 flex flex-col bg-white overflow-hidden">
             <div className={`border-b bg-white shrink-0 bulk-process-header ${selectedProcess ? 'px-2 py-2 space-y-2' : 'p-4 space-y-4'}`}>
-                {!selectedProcess && (
+                {!isEmbedded && !selectedProcess && (
                 <div className="flex items-center justify-between">
                     <h1 className="text-2xl font-bold text-gray-900">Procesos Masivos</h1>
                     <div className="flex items-center gap-4">
@@ -4536,7 +4619,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                 </div>
                 )}
 
-                {!selectedProcess ? (
+                {!isEmbedded && !selectedProcess ? (
                     <div className="space-y-2">
                         {isLoadingProcesses ? (
                             <div className="flex items-center justify-center py-12">
@@ -4578,15 +4661,29 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                             <div className="flex items-center gap-2 min-w-0 flex-wrap">
                                 <button
                                     onClick={() => {
+                                        if (isEmbedded) {
+                                            onExitEmbedded?.();
+                                            return;
+                                        }
                                         selectBulkProcess('');
                                         setCandidates([]);
                                         setSelectedStage('');
                                         setSearchInput('');
                                     }}
                                     className="inline-flex items-center gap-1 px-2 py-1 text-xs text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-md shrink-0"
+                                    title={isEmbedded ? 'Volver al tablero kanban' : 'Volver a la lista de procesos masivos'}
                                 >
-                                    <ArrowLeft className="w-3.5 h-3.5" />
-                                    Volver
+                                    {isEmbedded ? (
+                                        <>
+                                            <LayoutGrid className="w-3.5 h-3.5" />
+                                            Modo tablero
+                                        </>
+                                    ) : (
+                                        <>
+                                            <ArrowLeft className="w-3.5 h-3.5" />
+                                            Volver
+                                        </>
+                                    )}
                                 </button>
                                 <span
                                     className="text-sm font-semibold text-gray-900 truncate min-w-0"
@@ -4898,6 +4995,25 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                     </BulkToolbarGroup>
 
                                     <BulkToolbarGroup label="Herramientas">
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                if (selectedIds.size === 0) {
+                                                    actions.showToast('Seleccione al menos un candidato', 'error', 3000);
+                                                    return;
+                                                }
+                                                setShowTransferModal(true);
+                                            }}
+                                            disabled={selectedIds.size === 0}
+                                            className="bg-white border border-violet-300 text-violet-900 hover:bg-violet-50 transition-colors whitespace-nowrap disabled:opacity-40 disabled:cursor-not-allowed"
+                                            title="Mover o duplicar candidatos en otro proceso masivo"
+                                        >
+                                            <ArrowRightLeft className="w-4 h-4 shrink-0" />
+                                            Trasladar
+                                            {selectedIds.size > 0 && (
+                                                <span className="ml-1 text-[10px] opacity-80">({selectedIds.size})</span>
+                                            )}
+                                        </button>
                                         <button
                                             type="button"
                                             onClick={() => setShowActivityLogModal(true)}
@@ -6108,6 +6224,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                 onWhatsApp={() => setShowWhatsAppModal(true)}
                 onEmail={() => setShowEmailModal(true)}
                 onBulkSchedule={() => setShowBulkScheduleModal(true)}
+                onTransfer={() => setShowTransferModal(true)}
                 showPsychReport={psycholaboralActive}
                 onPsychReport={() =>
                     openPsychReport(candidates.filter(c => selectedIds.has(c.id)))
@@ -6145,6 +6262,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
             {showProcessModal && (
                 <BulkProcessEditorModal
                     process={editingProcess}
+                    configOnly={embeddedFromSpecificProcess}
                     onClose={() => {
                         setShowProcessModal(false);
                         setEditingProcess(null);
@@ -6230,6 +6348,20 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                     processTitle={process?.title}
                     onSend={handleBulkEmail}
                     onNotify={(msg, type) => actions.showToast(msg, type ?? 'success', 4000)}
+                />
+            )}
+
+            {showTransferModal && process && (
+                <BulkTransferCandidatesModal
+                    isOpen={showTransferModal}
+                    onClose={() => setShowTransferModal(false)}
+                    sourceProcess={process}
+                    candidates={candidates.filter(c => selectedIds.has(c.id))}
+                    bulkProcesses={isEmbedded ? state.processes : bulkProcesses}
+                    userId={state.currentUser?.id}
+                    userName={state.currentUser?.name || state.currentUser?.email}
+                    onSuccess={handleTransferSuccess}
+                    onNotify={(msg, type) => actions.showToast(msg, type, 4000)}
                 />
             )}
 

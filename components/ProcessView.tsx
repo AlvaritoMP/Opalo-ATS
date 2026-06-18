@@ -1,16 +1,24 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useAppState } from '../App';
 import { CandidateCard } from './CandidateCard';
-import { Plus, Edit, Briefcase, DollarSign, BarChart, Clock, Paperclip, X, FileText, ClipboardList, Tag, Users, ArrowLeft, CheckCircle, Mail, MessageCircle, Download, FileUp } from 'lucide-react';
+import { Plus, Edit, Briefcase, DollarSign, BarChart, Clock, Paperclip, X, FileText, ClipboardList, Tag, Users, ArrowLeft, CheckCircle, Mail, MessageCircle, Download, FileUp, Table2 } from 'lucide-react';
 import { AddCandidateModal } from './AddCandidateModal';
 import { ProcessEditorModal } from './ProcessEditorModal';
 import { BulkLetterModal } from './BulkLetterModal';
 import { CloseProcessModal } from './CloseProcessModal';
 import { ProcessCommunicationModal } from './ProcessCommunicationModal';
 import { ProcessImportModal } from './BulkImportView';
+import { BulkProcessesView } from './BulkProcessesView';
 import { Attachment, UserRole, ProcessStatus, Candidate } from '../types';
 import * as XLSX from 'xlsx';
 import { openMailCompose, getMailComposeToastMessage } from '../lib/openMailto';
+import {
+    getProcessWorkMode,
+    setProcessWorkMode,
+    supportsHighDensityTableView,
+    type ProcessWorkMode,
+} from '../lib/processViewMode';
+import { processesApi } from '../lib/api/processes';
 
 interface ProcessViewProps {
     processId: string;
@@ -95,6 +103,9 @@ const ProcessAttachmentsModal: React.FC<{
 
 export const ProcessView: React.FC<ProcessViewProps> = ({ processId }) => {
     const { state, actions } = useAppState();
+    const [workMode, setWorkMode] = useState<ProcessWorkMode>(() =>
+        getProcessWorkMode(processId, state.currentUser?.id)
+    );
     const [isAddCandidateOpen, setIsAddCandidateOpen] = useState(false);
     const [isProcessEditorOpen, setIsProcessEditorOpen] = useState(false);
     const [isAttachmentsModalOpen, setIsAttachmentsModalOpen] = useState(false);
@@ -109,6 +120,39 @@ export const ProcessView: React.FC<ProcessViewProps> = ({ processId }) => {
     const dragPayload = React.useRef<{ candidateId: string; isBulk: boolean; processing?: boolean } | null>(null);
 
     const process = state.processes.find(p => p.id === processId);
+
+    useEffect(() => {
+        setWorkMode(getProcessWorkMode(processId, state.currentUser?.id));
+    }, [processId, state.currentUser?.id]);
+
+    useEffect(() => {
+        const active = workMode === 'table' && supportsHighDensityTableView(process);
+        actions.setProcessEmbeddedTableActive(active);
+        return () => actions.setProcessEmbeddedTableActive(false);
+    }, [workMode, process, actions]);
+
+    const enterTableMode = useCallback(async () => {
+        setWorkMode('table');
+        setProcessWorkMode(processId, state.currentUser?.id, 'table');
+        if (process && !process.bulkConfig?.highDensityTableEnabled) {
+            try {
+                await processesApi.update(processId, {
+                    bulkConfig: {
+                        ...process.bulkConfig,
+                        highDensityTableEnabled: true,
+                    },
+                });
+                await actions.reloadProcesses();
+            } catch (err) {
+                console.warn('No se pudo marcar el proceso como tabla alta densidad:', err);
+            }
+        }
+    }, [processId, process, state.currentUser?.id, actions]);
+
+    const exitTableMode = useCallback(() => {
+        setWorkMode('kanban');
+        setProcessWorkMode(processId, state.currentUser?.id, 'kanban');
+    }, [processId, state.currentUser?.id]);
 
     // Cargar conteo de attachments al montar el componente (incluyendo archivos de Google Drive)
     React.useEffect(() => {
@@ -371,6 +415,16 @@ export const ProcessView: React.FC<ProcessViewProps> = ({ processId }) => {
     };
 
     if (!process) return <div className="p-8 text-center">Proceso no encontrado.</div>;
+
+    if (workMode === 'table' && supportsHighDensityTableView(process)) {
+        return (
+            <BulkProcessesView
+                embeddedProcessId={processId}
+                embeddedFromSpecificProcess
+                onExitEmbedded={exitTableMode}
+            />
+        );
+    }
     
     const statusLabels: Record<ProcessStatus, string> = {
         en_proceso: 'En Proceso',
@@ -509,6 +563,18 @@ export const ProcessView: React.FC<ProcessViewProps> = ({ processId }) => {
                             <button onClick={() => setIsProcessEditorOpen(true)} className="flex items-center px-3 md:px-4 py-2 bg-white border border-gray-300 rounded-md shadow-sm text-xs md:text-sm font-medium text-gray-700 hover:bg-gray-50 whitespace-nowrap">
                                 <Edit className="w-4 h-4 mr-1 md:mr-2"/> <span className="hidden md:inline">Editar proceso</span> <span className="md:hidden">Editar</span>
                             </button>
+                            {supportsHighDensityTableView(process) && (
+                                <button
+                                    type="button"
+                                    onClick={() => void enterTableMode()}
+                                    className="flex items-center px-3 md:px-4 py-2 bg-white border border-gray-300 rounded-md shadow-sm text-xs md:text-sm font-medium text-gray-700 hover:bg-gray-50 whitespace-nowrap"
+                                    title="Cambiar a tabla de alta densidad para gestionar muchos postulantes"
+                                >
+                                    <Table2 className="w-4 h-4 mr-1 md:mr-2" />
+                                    <span className="hidden md:inline">Modo tabla</span>
+                                    <span className="md:hidden">Tabla</span>
+                                </button>
+                            )}
                             {!process.isBulkProcess && (
                                 <button
                                     onClick={() => setIsImportOpen(true)}

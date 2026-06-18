@@ -25,9 +25,11 @@ interface BulkProcessEditorModalProps {
     process: Process | null;
     onClose: () => void;
     onSave: () => void;
+    /** Solo actualiza bulkConfig y etapas; no convierte el proceso en masivo */
+    configOnly?: boolean;
 }
 
-export const BulkProcessEditorModal: React.FC<BulkProcessEditorModalProps> = ({ process, onClose, onSave }) => {
+export const BulkProcessEditorModal: React.FC<BulkProcessEditorModalProps> = ({ process, onClose, onSave, configOnly = false }) => {
     const { state, actions } = useAppState();
     const [title, setTitle] = useState(process?.title || '');
     const [description, setDescription] = useState(process?.description || '');
@@ -319,34 +321,45 @@ export const BulkProcessEditorModal: React.FC<BulkProcessEditorModalProps> = ({ 
 
             const stageColorMaps = buildStageColorMaps(stagesPayload);
 
-            const processPayload: Omit<Process, 'id'> = {
-                title: title.trim(),
-                description: description.trim(),
-                stages: stagesPayload,
-                status,
-                vacancies,
-                startDate: startDate || undefined,
-                publishedDate: publishedDate || undefined,
-                needIdentifiedDate: needIdentifiedDate || undefined,
-                attachments,
-                flyerUrl: flyerUrl || undefined,
-                flyerPosition: flyerPosition || undefined,
-                clientId: selectedClientId || undefined,
-                isBulkProcess: true,
-                bulkConfig: {
-                    ...pickBulkTableLayoutConfig(process?.bulkConfig),
-                    ...bulkConfig,
-                    ...stageColorMaps,
-                    killerQuestions: killerQuestions,
-                },
+            const mergedBulkConfig: BulkProcessConfig = {
+                ...pickBulkTableLayoutConfig(process?.bulkConfig),
+                ...bulkConfig,
+                ...stageColorMaps,
+                killerQuestions: killerQuestions,
+                ...(configOnly ? { highDensityTableEnabled: true } : {}),
             };
 
-            if (process?.id) {
-                await processesApi.update(process.id, processPayload);
-                actions.showToast('Proceso masivo actualizado', 'success', 3000);
+            if (process?.id && configOnly) {
+                await processesApi.update(process.id, {
+                    stages: stagesPayload,
+                    bulkConfig: mergedBulkConfig,
+                });
+                actions.showToast('Configuración de tabla actualizada', 'success', 3000);
             } else {
-                await processesApi.create(processPayload);
-                actions.showToast('Proceso masivo creado', 'success', 3000);
+                const processPayload: Omit<Process, 'id'> = {
+                    title: title.trim(),
+                    description: description.trim(),
+                    stages: stagesPayload,
+                    status,
+                    vacancies,
+                    startDate: startDate || undefined,
+                    publishedDate: publishedDate || undefined,
+                    needIdentifiedDate: needIdentifiedDate || undefined,
+                    attachments,
+                    flyerUrl: flyerUrl || undefined,
+                    flyerPosition: flyerPosition || undefined,
+                    clientId: selectedClientId || undefined,
+                    isBulkProcess: true,
+                    bulkConfig: mergedBulkConfig,
+                };
+
+                if (process?.id) {
+                    await processesApi.update(process.id, processPayload);
+                    actions.showToast('Proceso masivo actualizado', 'success', 3000);
+                } else {
+                    await processesApi.create(processPayload);
+                    actions.showToast('Proceso masivo creado', 'success', 3000);
+                }
             }
 
             onSave();
@@ -364,7 +377,11 @@ export const BulkProcessEditorModal: React.FC<BulkProcessEditorModalProps> = ({ 
             <div className="bg-white rounded-lg shadow-xl w-full max-w-4xl max-h-[90vh] overflow-y-auto m-4">
                 <div className="sticky top-0 bg-white border-b px-6 py-4 flex items-center justify-between z-10">
                     <h2 className="text-xl font-semibold text-gray-900">
-                        {process ? 'Editar Proceso Masivo' : 'Nuevo Proceso Masivo'}
+                        {configOnly
+                            ? 'Configuración de tabla'
+                            : process
+                              ? 'Editar Proceso Masivo'
+                              : 'Nuevo Proceso Masivo'}
                     </h2>
                     <button
                         onClick={onClose}

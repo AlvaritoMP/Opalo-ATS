@@ -62,6 +62,8 @@ interface AppState {
     dashboardCacheLoading: boolean;
     loading: boolean;
     toasts: Array<{ id: string; message: string; type: 'success' | 'error' | 'loading' | 'info'; duration?: number }>;
+    /** Proceso específico abierto en modo tabla embebida (layout pantalla completa) */
+    processEmbeddedTableActive: boolean;
 }
 
 interface AppActions {
@@ -102,6 +104,7 @@ interface AppActions {
     loadDashboardCache: (force?: boolean) => Promise<void>;
     showToast: (message: string, type: 'success' | 'error' | 'loading' | 'info', duration?: number) => string;
     hideToast: (id: string) => void;
+    setProcessEmbeddedTableActive: (active: boolean) => void;
 }
 
 interface AppContextType {
@@ -479,6 +482,7 @@ const App: React.FC = () => {
         dashboardCacheLoading: false,
         loading: true,
         toasts: [],
+        processEmbeddedTableActive: false,
     });
 
     // Referencia para evitar mostrar el mensaje de CORS repetidamente
@@ -1806,6 +1810,9 @@ const App: React.FC = () => {
         hideToast: (id: string) => {
             hideToastHelper(id);
         },
+        setProcessEmbeddedTableActive: (active: boolean) => {
+            setState(s => (s.processEmbeddedTableActive === active ? s : { ...s, processEmbeddedTableActive: active }));
+        },
     }), [state.currentUser, state.users, state.processes, state.dashboardCache, state.dashboardCacheLoading]);
 
     // Cerrar sesión tras 1 hora sin actividad (clics, teclas, scroll)
@@ -1865,6 +1872,7 @@ const App: React.FC = () => {
     const visibleSections = state.currentUser ? getVisibleSections(state.currentUser) : [];
     const canSeeBulkProcesses = visibleSections.includes('bulk-processes');
     const isBulkProcessesView = state.view.type === 'bulk-processes';
+    const needsFixedViewport = isBulkProcessesView || state.processEmbeddedTableActive;
     
     const renderView = () => {
         // Verificar si el usuario tiene acceso a la sección actual
@@ -1940,7 +1948,7 @@ const App: React.FC = () => {
         <AppContext.Provider value={appContextValue}>
             <div className="flex h-screen bg-gray-50 font-sans text-gray-900">
                 <Sidebar />
-                <div className={`flex-1 flex flex-col min-h-0 pt-16 md:pt-0 ${isBulkProcessesView ? 'overflow-hidden' : 'overflow-y-auto'}`}>
+                <div className={`flex-1 flex flex-col min-h-0 pt-16 md:pt-0 ${needsFixedViewport ? 'overflow-hidden' : 'overflow-y-auto'}`}>
                     {canSeeBulkProcesses && (
                         <div
                             className={isBulkProcessesView ? 'flex flex-col flex-1 min-h-0' : 'hidden'}
@@ -1949,7 +1957,11 @@ const App: React.FC = () => {
                             <BulkProcessesView />
                         </div>
                     )}
-                    {!isBulkProcessesView && renderView()}
+                    {!isBulkProcessesView && (
+                        <div className={state.processEmbeddedTableActive ? 'flex flex-col flex-1 min-h-0' : undefined}>
+                            {renderView()}
+                        </div>
+                    )}
                 </div>
                 <ToastContainer toasts={state.toasts || []} onClose={(id) => hideToastHelper(id)} />
             </div>

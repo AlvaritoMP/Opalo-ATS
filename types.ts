@@ -244,6 +244,8 @@ export interface BulkProcessConfig {
     quickReplies?: BulkQuickReply[];
     /** Plantillas predefinidas de correo y WhatsApp para contactar candidatos */
     contactMessageTemplates?: BulkContactMessageTemplate[];
+    /** Proceso específico con vista de tabla alta densidad activada al menos una vez */
+    highDensityTableEnabled?: boolean;
 }
 
 export type BulkContactMessageChannel = 'email' | 'whatsapp';
