@@ -602,6 +602,8 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
     const [hasMore, setHasMore] = useState(false);
     const [isLoading, setIsLoading] = useState(false);
     const [isLoadingProcesses, setIsLoadingProcesses] = useState(false);
+    /** Evita destellos de layout al entrar o cambiar de proceso masivo */
+    const [tableReadyProcessId, setTableReadyProcessId] = useState<string | null>(null);
     const [selectedProcess, setSelectedProcess] = useState<string>(() => {
         const fromApp = state.lastViewedBulkProcessId;
         if (fromApp) return fromApp;
@@ -708,6 +710,8 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
         displayCandidates: [] as BulkCandidate[],
         visibleColumns: [] as string[],
     });
+    const bulkProcessesRef = useRef(bulkProcesses);
+    bulkProcessesRef.current = bulkProcesses;
 
     const pageSize = 50;
 
@@ -1019,87 +1023,6 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
         setUndoStackSize(0);
     }, [process?.id]);
 
-    useEffect(() => {
-        if (!process) {
-            setCustomColumns([]);
-            setHiddenColumns([]);
-            setColumnOrder(DEFAULT_COLUMN_ORDER);
-            setColumnValues({});
-            setColumnFilterDraft({});
-            return;
-        }
-
-        let cancelled = false;
-        const processId = process.id;
-
-        (async () => {
-            let config = process.bulkConfig;
-            try {
-                const fresh = await processesApi.getById(processId);
-                if (!cancelled && fresh?.bulkConfig) {
-                    setBulkProcesses(prev => prev.map(p => (p.id === fresh.id ? fresh : p)));
-                    config = fresh.bulkConfig;
-                }
-            } catch (err) {
-                console.warn('No se pudo recargar el proceso masivo desde la BD:', err);
-            }
-            if (cancelled) return;
-
-            const cols = config?.customColumns || [];
-            setCustomColumns(cols);
-            const layout = resolveBulkTableLayout(processId, config, cols);
-            setHiddenColumns(layout.hiddenColumns);
-            setPinnedColumns(layout.pinnedColumns);
-            const savedWidths = config?.columnWidths || {};
-            setColumnWidths(savedWidths);
-            columnWidthsRef.current = savedWidths;
-            setColumnOrder(layout.columnOrder);
-            setColumnFilterDraft({});
-            columnValuesMigratedRef.current = null;
-
-            if (layout.needsPersist) {
-                void persistBulkConfig({
-                    columnOrder: layout.columnOrder,
-                    hiddenColumns: layout.hiddenColumns,
-                    pinnedColumns: layout.pinnedColumns,
-                });
-            }
-
-            const idealNorm = normalizeIdealProfileConfig(config?.idealProfile, cols, config);
-            if (idealNorm.needsPersist && idealNorm.config) {
-                void persistBulkConfig({ idealProfile: idealNorm.config });
-                actions.showToast(
-                    'Criterios del perfil ideal reparados tras el cambio de columnas',
-                    'success',
-                    4500
-                );
-            }
-
-            if (layout.recoveredFrom === 'local') {
-                const src = layout.localSource === 'template' ? 'plantilla guardada' : 'respaldo del navegador';
-                actions.showToast(`Diseño de tabla recuperado desde ${src}`, 'success', 5000);
-            }
-
-            const legacy = buildLegacyColumnIdToName(config, cols);
-            const localValues = loadLocalColumnValuesForProcess(processId);
-            if (Object.keys(localValues).length > 0) {
-                const normalized = normalizeBulkColumnValueKeys(localValues, cols, legacy);
-                setColumnValues(repairDateColumnValues(normalized, cols));
-            } else {
-                setColumnValues({});
-            }
-
-            const savedMeta = localStorage.getItem(getCellMetaStorageKey(processId));
-            setCellMeta(savedMeta ? JSON.parse(savedMeta) : {});
-
-            if (config && !isScoreIaColumnVisible(config) && config.autoFilterEnabled) {
-                persistBulkConfig({ autoFilterEnabled: false });
-            }
-        })();
-
-        return () => { cancelled = true; };
-    }, [process?.id]);
-
     const visibleColumns = useMemo(
         () => buildVisibleColumnIds(columnOrder, hiddenColumns, customColumns),
         [columnOrder, hiddenColumns, customColumns]
@@ -1402,14 +1325,18 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
         setShowPsychReportModal(true);
     }, [process, customColumns, columnValues, legacyColumnIdToName]);
 
-    const syncColumnValuesFromDatabase = useCallback(async (processId: string) => {
-        const cols = process?.bulkConfig?.customColumns || [];
+    const syncColumnValuesFromDatabase = useCallback(async (
+        processId: string,
+        bulkConfigOverride?: BulkProcessConfig
+    ) => {
+        const bulkConfig = bulkConfigOverride ?? process?.bulkConfig;
+        const cols = bulkConfig?.customColumns || [];
         try {
             const fromDb = await bulkCandidatesApi.loadAllBulkColumnValues(processId);
-            let legacy = buildLegacyColumnIdToName(process?.bulkConfig, cols);
+            let legacy = buildLegacyColumnIdToName(bulkConfig, cols);
             legacy = discoverOrphanKeyAliases(fromDb, cols, legacy);
 
-            const newAliases = { ...(process?.bulkConfig?.columnKeyAliases || {}) };
+            const newAliases = { ...(bulkConfig?.columnKeyAliases || {}) };
             let aliasesChanged = false;
             for (const [id, name] of Object.entries(legacy)) {
                 if (newAliases[id] !== name) {
@@ -1417,7 +1344,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                     aliasesChanged = true;
                 }
             }
-            if (aliasesChanged && process) {
+            if (aliasesChanged && process?.id === processId) {
                 void persistBulkConfig({ columnKeyAliases: newAliases });
             }
 
@@ -1448,17 +1375,22 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
         } catch (error) {
             console.error('Error sincronizando columnas personalizadas:', error);
         }
-    }, [process?.bulkConfig, persistBulkConfig]);
+    }, [process?.id, process?.bulkConfig, persistBulkConfig]);
 
     // Cargar candidatos (paginado; no escanea todo el proceso)
-    const loadCandidates = useCallback(async (page: number = 0, reset: boolean = false) => {
+    const loadCandidates = useCallback(async (
+        page: number = 0,
+        reset: boolean = false,
+        options?: { bulkConfig?: BulkProcessConfig; manageLoading?: boolean }
+    ) => {
         if (!selectedProcess) {
             setCandidates([]);
             setTotal(0);
             return;
         }
 
-        setIsLoading(true);
+        const manageLoading = options?.manageLoading !== false;
+        if (manageLoading) setIsLoading(true);
         try {
             const result = await bulkCandidatesApi.getCandidates(
                 selectedProcess,
@@ -1472,8 +1404,9 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                 }
             );
 
-            const cols = process?.bulkConfig?.customColumns || [];
-            const legacy = buildLegacyColumnIdToName(process?.bulkConfig, cols);
+            const bulkConfig = options?.bulkConfig ?? process?.bulkConfig;
+            const cols = bulkConfig?.customColumns || [];
+            const legacy = buildLegacyColumnIdToName(bulkConfig, cols);
 
             const enriched = enrichCandidatesWithNextInterviews(
                 result.candidates,
@@ -1504,7 +1437,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
             console.error('Error cargando candidatos:', error);
             actions.showToast('Error al cargar candidatos', 'error', 3000);
         } finally {
-            setIsLoading(false);
+            if (manageLoading) setIsLoading(false);
         }
     }, [selectedProcess, selectedStage, debouncedSearch, actions, process?.bulkConfig, state.interviewEvents]);
 
@@ -1550,22 +1483,153 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
         }
     }, [selectedProcess, process, syncColumnValuesFromDatabase, loadCandidates, actions]);
 
+    // Al cambiar de proceso: limpiar estado visible de inmediato (antes del paint)
+    useLayoutEffect(() => {
+        if (!selectedProcess) {
+            setTableReadyProcessId(null);
+            setCustomColumns([]);
+            setHiddenColumns([]);
+            setColumnOrder(DEFAULT_COLUMN_ORDER);
+            setColumnValues({});
+            setCellMeta({});
+            return;
+        }
+        setTableReadyProcessId(null);
+        setCandidates([]);
+        setSelectedIds(new Set());
+        setOptimisticUpdates(new Map());
+        setTotal(0);
+        setHasMore(false);
+        setCurrentPage(0);
+    }, [selectedProcess]);
+
+    // Carga inicial coordinada: layout + columnas + candidatos en un solo paso visible
+    useEffect(() => {
+        if (!selectedProcess) return;
+
+        let cancelled = false;
+        const processId = selectedProcess;
+
+        (async () => {
+            setIsLoading(true);
+            try {
+                let proc = bulkProcessesRef.current.find(p => p.id === processId);
+                let config = proc?.bulkConfig;
+
+                try {
+                    const fresh = await processesApi.getById(processId);
+                    if (!cancelled && fresh) {
+                        proc = fresh;
+                        config = fresh.bulkConfig;
+                        setBulkProcesses(prev => {
+                            const exists = prev.some(p => p.id === fresh.id);
+                            return exists
+                                ? prev.map(p => (p.id === fresh.id ? fresh : p))
+                                : [...prev, fresh];
+                        });
+                    }
+                } catch (err) {
+                    console.warn('No se pudo recargar el proceso masivo desde la BD:', err);
+                }
+
+                if (cancelled || !proc) return;
+
+                config = config ?? proc.bulkConfig;
+                const cols = config?.customColumns || [];
+                const layout = resolveBulkTableLayout(processId, config, cols);
+
+                setCustomColumns(cols);
+                setHiddenColumns(layout.hiddenColumns);
+                setPinnedColumns(layout.pinnedColumns);
+                const savedWidths = config?.columnWidths || {};
+                setColumnWidths(savedWidths);
+                columnWidthsRef.current = savedWidths;
+                setColumnOrder(layout.columnOrder);
+                setColumnFilterDraft({});
+                columnValuesMigratedRef.current = null;
+
+                if (layout.needsPersist && config) {
+                    const repairedConfig: BulkProcessConfig = {
+                        ...config,
+                        columnOrder: layout.columnOrder,
+                        hiddenColumns: layout.hiddenColumns,
+                        pinnedColumns: layout.pinnedColumns,
+                    };
+                    void processesApi.update(processId, { bulkConfig: repairedConfig }).then(() => {
+                        setBulkProcesses(prev =>
+                            prev.map(p => (p.id === processId ? { ...p, bulkConfig: repairedConfig } : p))
+                        );
+                    });
+                }
+
+                const idealNorm = normalizeIdealProfileConfig(config?.idealProfile, cols, config);
+                if (idealNorm.needsPersist && idealNorm.config && config) {
+                    const repairedConfig: BulkProcessConfig = { ...config, idealProfile: idealNorm.config };
+                    void processesApi.update(processId, { bulkConfig: repairedConfig }).then(() => {
+                        setBulkProcesses(prev =>
+                            prev.map(p => (p.id === processId ? { ...p, bulkConfig: repairedConfig } : p))
+                        );
+                    });
+                    actions.showToast(
+                        'Criterios del perfil ideal reparados tras el cambio de columnas',
+                        'success',
+                        4500
+                    );
+                }
+
+                if (layout.recoveredFrom === 'local') {
+                    const src = layout.localSource === 'template' ? 'plantilla guardada' : 'respaldo del navegador';
+                    actions.showToast(`Diseño de tabla recuperado desde ${src}`, 'success', 5000);
+                }
+
+                const legacy = buildLegacyColumnIdToName(config, cols);
+                const localValues = loadLocalColumnValuesForProcess(processId);
+                if (Object.keys(localValues).length > 0) {
+                    const normalized = normalizeBulkColumnValueKeys(localValues, cols, legacy);
+                    setColumnValues(repairDateColumnValues(normalized, cols));
+                } else {
+                    setColumnValues({});
+                }
+
+                const savedMeta = localStorage.getItem(getCellMetaStorageKey(processId));
+                setCellMeta(savedMeta ? JSON.parse(savedMeta) : {});
+
+                if (config && !isScoreIaColumnVisible(config) && config.autoFilterEnabled) {
+                    void processesApi.update(processId, {
+                        bulkConfig: { ...config, autoFilterEnabled: false },
+                    }).then(() => {
+                        setBulkProcesses(prev =>
+                            prev.map(p =>
+                                p.id === processId
+                                    ? { ...p, bulkConfig: { ...p.bulkConfig, autoFilterEnabled: false } }
+                                    : p
+                            )
+                        );
+                    });
+                }
+
+                await actions.refreshInterviewEvents();
+                if (cancelled) return;
+
+                await syncColumnValuesFromDatabase(processId, config);
+                if (cancelled) return;
+
+                await loadCandidates(0, true, { bulkConfig: config, manageLoading: false });
+                if (cancelled) return;
+
+                setTableReadyProcessId(processId);
+            } finally {
+                if (!cancelled) setIsLoading(false);
+            }
+        })();
+
+        return () => { cancelled = true; };
+    }, [selectedProcess, actions]);
+
     const routeCostColumns = useMemo(
         () => customColumns.filter(c => c.type === 'route_cost'),
         [customColumns]
     );
-
-    // Al cambiar de proceso: sincronizar columnas completas una sola vez
-    useEffect(() => {
-        if (!selectedProcess) return;
-        let cancelled = false;
-        (async () => {
-            await actions.refreshInterviewEvents();
-            await syncColumnValuesFromDatabase(selectedProcess);
-            if (!cancelled) await loadCandidates(0, true);
-        })();
-        return () => { cancelled = true; };
-    }, [selectedProcess]);
 
     // Alinear candidate_contact_attempts con lo visible en la tabla (contact_*_* en candidates)
     useEffect(() => {
@@ -4430,6 +4494,8 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
         return () => document.removeEventListener('copy', handleBulkCopy);
     }, [selectedProcess, handleBulkCopy]);
 
+    const isTableBootstrapping = !!(selectedProcess && tableReadyProcessId !== selectedProcess);
+
     return (
         <div className="min-h-0 flex-1 flex flex-col bg-white overflow-hidden">
             <div className={`border-b bg-white shrink-0 bulk-process-header ${selectedProcess ? 'px-2 py-2 space-y-2' : 'p-4 space-y-4'}`}>
@@ -4939,6 +5005,13 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
 
             {selectedProcess && (
                 <div className="flex-1 overflow-hidden relative flex flex-col">
+                    {isTableBootstrapping ? (
+                        <div className="flex-1 flex items-center justify-center py-24">
+                            <Loader2 className="w-6 h-6 animate-spin text-primary-600" />
+                            <span className="ml-2 text-gray-600">Cargando proceso...</span>
+                        </div>
+                    ) : (
+                    <>
                     <p className="bulk-table-hint text-[10px] text-gray-500 px-2 pt-1 pb-0.5 shrink-0 line-clamp-1" title="Flechas · Shift+arrastrar selección · Ctrl+clic múltiple · Clic derecho: color/comentario · Enter/doble clic editar · Ctrl+C copiar · Ctrl+V pegar · Ctrl+Z deshacer · Doble clic en fila abre detalle · Arrastre el borde del encabezado para ajustar ancho · Desplaza horizontalmente para ver más columnas">
                         Flechas · Shift+arrastrar · Ctrl+clic · Clic derecho color/comentario · Enter editar · Ctrl+C/V · Ctrl+Z deshacer · Doble clic detalle · Arrastre borde encabezado = ancho · Scroll horizontal → más columnas
                     </p>
@@ -5979,6 +6052,8 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                             processId={process.id}
                             refreshToken={activityLogRefreshToken}
                         />
+                    )}
+                    </>
                     )}
                 </div>
             )}
