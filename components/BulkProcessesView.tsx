@@ -681,6 +681,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
     const [showIdealProfileModal, setShowIdealProfileModal] = useState(false);
     const [showStatsModal, setShowStatsModal] = useState(false);
     const [showTransportFaresModal, setShowTransportFaresModal] = useState(false);
+    const [showActivityLogModal, setShowActivityLogModal] = useState(false);
     const [infoPinModal, setInfoPinModal] = useState<{ pin: BulkInfoPin; isNew: boolean } | null>(null);
     const [activeInfoPinId, setActiveInfoPinId] = useState<string | null>(null);
     const [quickReplyModal, setQuickReplyModal] = useState<{ reply: BulkQuickReply; isNew: boolean } | null>(null);
@@ -710,6 +711,9 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
         displayCandidates: [] as BulkCandidate[],
         visibleColumns: [] as string[],
     });
+    /** Refs actualizados de forma síncrona para navegación con teclado sin saltos */
+    const activeCellNavRef = useRef<CellCoord | null>(null);
+    const selectionAnchorNavRef = useRef<CellCoord | null>(null);
     const bulkProcessesRef = useRef(bulkProcesses);
     bulkProcessesRef.current = bulkProcesses;
 
@@ -3886,6 +3890,16 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
         return map;
     }, [visibleColumns]);
 
+    const cellSelectionSummary = useMemo(() => {
+        if (selectedCells.size === 0) return null;
+        const rowIds = new Set<string>();
+        for (const key of selectedCells) {
+            const sep = key.indexOf('::');
+            rowIds.add(key.slice(0, sep));
+        }
+        return { cells: selectedCells.size, rows: rowIds.size };
+    }, [selectedCells]);
+
     const getCellIndices = useCallback((candidateId: string, colId: string) => ({
         rowIdx: displayCandidateRowIndex.get(candidateId) ?? -1,
         colIdx: visibleColumnIndex.get(colId) ?? -1,
@@ -3961,6 +3975,20 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
         applyBulkCellDomSelection(tableContainerRef.current, active, selected);
     }, []);
 
+    const clearCellSelection = useCallback(() => {
+        syncSelectionToDom(null, new Set());
+        activeCellNavRef.current = null;
+        selectionAnchorNavRef.current = null;
+        tableKeyboardRef.current = {
+            ...tableKeyboardRef.current,
+            activeCell: null,
+            selectionAnchor: null,
+        };
+        setActiveCell(null);
+        setSelectedCells(new Set());
+        setSelectionAnchor(null);
+    }, [syncSelectionToDom]);
+
     useLayoutEffect(() => {
         syncSelectionToDom(activeCell, selectedCells);
         if (activeCell) {
@@ -3975,6 +4003,13 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
     const selectSingleCell = useCallback((coord: CellCoord) => {
         const selected = new Set([toCellKey(coord)]);
         syncSelectionToDom(coord, selected);
+        activeCellNavRef.current = coord;
+        selectionAnchorNavRef.current = coord;
+        tableKeyboardRef.current = {
+            ...tableKeyboardRef.current,
+            activeCell: coord,
+            selectionAnchor: coord,
+        };
         setActiveCell(coord);
         setSelectionAnchor(coord);
         setSelectedCells(selected);
@@ -4009,9 +4044,21 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
         if (e.shiftKey && anchor) {
             const selected = buildCellRange(anchor, coord);
             syncSelectionToDom(coord, selected);
+            activeCellNavRef.current = coord;
+            tableKeyboardRef.current = {
+                ...tableKeyboardRef.current,
+                activeCell: coord,
+            };
             setActiveCell(coord);
             setSelectedCells(selected);
         } else if (e.ctrlKey || e.metaKey) {
+            activeCellNavRef.current = coord;
+            selectionAnchorNavRef.current = coord;
+            tableKeyboardRef.current = {
+                ...tableKeyboardRef.current,
+                activeCell: coord,
+                selectionAnchor: coord,
+            };
             setActiveCell(coord);
             setSelectionAnchor(coord);
             setSelectedCells(prev => {
@@ -4067,26 +4114,33 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
     ) => {
         if (displayCandidates.length === 0 || visibleColumns.length === 0) return;
 
-        let base = baseOverride ?? tableKeyboardRef.current.activeCell;
+        let base = baseOverride ?? activeCellNavRef.current;
         if (!base) {
             base = { candidateId: displayCandidates[0].id, colId: visibleColumns[0] };
         }
 
-        const { rowIdx, colIdx } = getCellIndices(base.candidateId, base.colId);
-        const next = getCellAt(rowIdx + dRow, colIdx + dCol);
-        if (!next) {
-            if (baseOverride) {
-                selectSingleCell(base);
-            }
-            return;
-        }
+        const rowIdx = displayCandidateRowIndex.get(base.candidateId) ?? -1;
+        const colIdx = visibleColumnIndex.get(base.colId) ?? -1;
+        if (rowIdx < 0 || colIdx < 0) return;
 
-        const anchor = selectionAnchor || base;
+        const next = getCellAt(rowIdx + dRow, colIdx + dCol);
+        if (!next) return;
+
+        const anchor = selectionAnchorNavRef.current ?? base;
         const nextSelected = extendSelection
             ? buildCellRange(anchor, next)
             : new Set([toCellKey(next)]);
 
         syncSelectionToDom(next, nextSelected);
+        activeCellNavRef.current = next;
+        if (!extendSelection) {
+            selectionAnchorNavRef.current = next;
+        }
+        tableKeyboardRef.current = {
+            ...tableKeyboardRef.current,
+            activeCell: next,
+            selectionAnchor: selectionAnchorNavRef.current,
+        };
         setActiveCell(next);
         if (extendSelection) {
             setSelectedCells(nextSelected);
@@ -4096,8 +4150,8 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
         }
         focusTable();
     }, [
-        selectionAnchor, displayCandidates, visibleColumns,
-        getCellIndices, getCellAt, buildCellRange, focusTable, selectSingleCell, syncSelectionToDom,
+        displayCandidateRowIndex, visibleColumnIndex, displayCandidates, visibleColumns,
+        getCellAt, buildCellRange, focusTable, syncSelectionToDom,
     ]);
 
     useEffect(() => {
@@ -4118,6 +4172,11 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
         didDragSelect.current = true;
         const selected = buildCellRange(dragAnchorCell.current, coord);
         syncSelectionToDom(coord, selected);
+        activeCellNavRef.current = coord;
+        tableKeyboardRef.current = {
+            ...tableKeyboardRef.current,
+            activeCell: coord,
+        };
         setActiveCell(coord);
         setSelectedCells(selected);
     }, [editingCell, buildCellRange, syncSelectionToDom]);
@@ -4194,16 +4253,15 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                 beginEditCell(ctx.activeCell.candidateId, ctx.activeCell.colId);
                 break;
             case 'Escape':
-                syncSelectionToDom(null, new Set());
-                setActiveCell(null);
-                setSelectedCells(new Set());
-                setSelectionAnchor(null);
+                clearCellSelection();
                 break;
             default:
                 break;
         }
-    }, [selectSingleCell, moveActiveCell, beginEditCell, clearSelectedCells, performUndo, focusTable, syncSelectionToDom]);
+    }, [selectSingleCell, moveActiveCell, beginEditCell, clearSelectedCells, performUndo, focusTable, clearCellSelection]);
 
+    activeCellNavRef.current = activeCell;
+    selectionAnchorNavRef.current = selectionAnchor;
     tableKeyboardRef.current = {
         editingCell,
         activeCell,
@@ -4225,16 +4283,12 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
         const rowVisible = displayCandidates.some(c => c.id === activeCell.candidateId);
         const colVisible = visibleColumns.includes(activeCell.colId);
         if (!rowVisible) {
-            setActiveCell(null);
-            setSelectedCells(new Set());
-            setSelectionAnchor(null);
+            clearCellSelection();
         } else if (!colVisible && visibleColumns.length > 0) {
             const next = { candidateId: activeCell.candidateId, colId: visibleColumns[0] };
-            setActiveCell(next);
-            setSelectionAnchor(next);
-            setSelectedCells(new Set([toCellKey(next)]));
+            selectSingleCell(next);
         }
-    }, [displayCandidates, visibleColumns]);
+    }, [displayCandidates, visibleColumns, activeCell, clearCellSelection, selectSingleCell]);
 
     const buildCellDisplayStyle = useCallback((candidateId: string, colId: string): React.CSSProperties => {
         const style: React.CSSProperties = { ...buildTdStyle(candidateId, colId) };
@@ -4879,6 +4933,15 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                     </BulkToolbarGroup>
 
                                     <BulkToolbarGroup label="Herramientas">
+                                        <button
+                                            type="button"
+                                            onClick={() => setShowActivityLogModal(true)}
+                                            className="bg-white border border-gray-300 text-gray-800 hover:bg-gray-50 transition-colors whitespace-nowrap"
+                                            title="Ver historial de cambios del proceso"
+                                        >
+                                            <History className="w-4 h-4 shrink-0" />
+                                            Historial
+                                        </button>
                                         <button
                                             type="button"
                                             onClick={() => setShowContactTemplatesModal(true)}
@@ -6047,11 +6110,23 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                         </div>
                     )}
 
-                    {process && (
-                        <BulkProcessActivityLog
-                            processId={process.id}
-                            refreshToken={activityLogRefreshToken}
-                        />
+                    {process && cellSelectionSummary && (
+                        <div className="border-t border-gray-200 bg-slate-50 shrink-0 flex items-center justify-between gap-3 px-4 py-2 text-sm text-gray-700">
+                            <span>
+                                <span className="font-medium text-primary-700">{cellSelectionSummary.cells}</span>
+                                {' '}{cellSelectionSummary.cells === 1 ? 'campo' : 'campos'}
+                                {' · '}
+                                <span className="font-medium text-primary-700">{cellSelectionSummary.rows}</span>
+                                {' '}{cellSelectionSummary.rows === 1 ? 'registro' : 'registros'}
+                            </span>
+                            <button
+                                type="button"
+                                onClick={clearCellSelection}
+                                className="text-xs px-2.5 py-1 border border-gray-300 rounded-md bg-white hover:bg-gray-100 text-gray-600"
+                            >
+                                Limpiar selección
+                            </button>
+                        </div>
                     )}
                     </>
                     )}
@@ -6374,6 +6449,40 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                     profileMatchSummary={profileMatchSummary}
                     profileMatchSummaryLoading={loadingProfileStats}
                 />
+            )}
+
+            {showActivityLogModal && process && (
+                <div
+                    className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40"
+                    onClick={() => setShowActivityLogModal(false)}
+                >
+                    <div
+                        className="bg-white rounded-xl shadow-xl w-full max-w-2xl max-h-[85vh] flex flex-col"
+                        onClick={e => e.stopPropagation()}
+                    >
+                        <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 shrink-0">
+                            <h2 className="flex items-center gap-2 text-base font-semibold text-gray-900">
+                                <History className="w-5 h-5 text-primary-600" />
+                                Historial de cambios
+                            </h2>
+                            <button
+                                type="button"
+                                onClick={() => setShowActivityLogModal(false)}
+                                className="p-1.5 text-gray-500 hover:text-gray-800 hover:bg-gray-100 rounded-md"
+                                aria-label="Cerrar"
+                            >
+                                <X className="w-5 h-5" />
+                            </button>
+                        </div>
+                        <div className="overflow-y-auto flex-1 min-h-0">
+                            <BulkProcessActivityLog
+                                processId={process.id}
+                                refreshToken={activityLogRefreshToken}
+                                variant="standalone"
+                            />
+                        </div>
+                    </div>
+                </div>
             )}
 
             {showStatsModal && process && (
