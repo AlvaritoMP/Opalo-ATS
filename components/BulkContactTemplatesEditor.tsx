@@ -141,8 +141,8 @@ export const BulkContactTemplatesEditor: React.FC<BulkContactTemplatesEditorProp
             )}
 
             <p className="text-xs text-gray-500">
-                Variables disponibles: {'{{nombre}}'}, {'{{email}}'}, {'{{telefono}}'}, {'{{puesto}}'}.
-                Los reclutadores verán un desplegable con estas plantillas al contactar candidatos.
+                Variables: {'{{nombre}}'}, {'{{email}}'}, {'{{telefono}}'}, {'{{puesto}}'}.
+                Los reclutadores eligen plantilla al pulsar el icono de correo o WhatsApp en la tabla.
             </p>
         </div>
     );

@@ -173,6 +173,7 @@ import { BulkTableExportModal } from './BulkTableExportModal';
 import { buildBulkSelectionClipboardText } from '../lib/bulkTableExport';
 import { BulkProcessActivityLog } from './BulkProcessActivityLog';
 import { BulkContactStatusCell } from './BulkContactStatusCell';
+import { BulkContactTemplatesModal } from './BulkContactTemplatesModal';
 import { BulkTableEditInput } from './BulkTableEditInput';
 import { applyBulkCellDomSelection } from '../lib/bulkTableCellSelection';
 import { SendToOpsFlowModal } from './SendToOpsFlowModal';
@@ -621,6 +622,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
     const [showAddRowModal, setShowAddRowModal] = useState(false);
     const [showWhatsAppModal, setShowWhatsAppModal] = useState(false);
     const [showEmailModal, setShowEmailModal] = useState(false);
+    const [showContactTemplatesModal, setShowContactTemplatesModal] = useState(false);
     const [isMobile, setIsMobile] = useState(false);
     const [showScheduleModal, setShowScheduleModal] = useState(false);
     const [schedulingCandidate, setSchedulingCandidate] = useState<{
@@ -2554,6 +2556,14 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
         setShowProcessModal(false);
         setEditingProcess(null);
     };
+
+    const handleSaveContactTemplates = useCallback(
+        async (templates: import('../types').BulkContactMessageTemplate[]) => {
+            await persistBulkConfig({ contactMessageTemplates: templates });
+            actions.showToast('Plantillas de contacto guardadas', 'success', 2500);
+        },
+        [persistBulkConfig, actions]
+    );
 
     const openAddColumnModal = useCallback(() => {
         setEditingColumn(null);
@@ -4805,6 +4815,15 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                     <BulkToolbarGroup label="Herramientas">
                                         <button
                                             type="button"
+                                            onClick={() => setShowContactTemplatesModal(true)}
+                                            className="bg-white border border-blue-300 text-blue-900 hover:bg-blue-50 transition-colors whitespace-nowrap"
+                                            title="Editar plantillas de correo y WhatsApp para contactar candidatos"
+                                        >
+                                            <Mail className="w-4 h-4 shrink-0" />
+                                            Mensajes contacto
+                                        </button>
+                                        <button
+                                            type="button"
                                             onClick={() => setShowTransportFaresModal(true)}
                                             className="bg-white border border-sky-300 text-sky-900 hover:bg-sky-50 transition-colors whitespace-nowrap"
                                             title="Editar tarifas de transporte público para estimación de costos de ruta"
@@ -6096,6 +6115,16 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                     processTitle={process?.title}
                     onSend={handleBulkEmail}
                     onNotify={(msg, type) => actions.showToast(msg, type ?? 'success', 4000)}
+                />
+            )}
+
+            {showContactTemplatesModal && process && (
+                <BulkContactTemplatesModal
+                    isOpen={showContactTemplatesModal}
+                    onClose={() => setShowContactTemplatesModal(false)}
+                    processTitle={process.title}
+                    templates={process.bulkConfig?.contactMessageTemplates ?? []}
+                    onSave={handleSaveContactTemplates}
                 />
             )}
 

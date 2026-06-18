@@ -1,6 +1,6 @@
-import React, { useState, useEffect, useRef, useCallback, useLayoutEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useLayoutEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
-import { Phone, MessageCircle, Mail, Loader2, Clock, ChevronDown, X, Undo2, Trash2, Lock } from 'lucide-react';
+import { Phone, MessageCircle, Mail, Loader2, Clock, ChevronDown, X, Undo2, Trash2, Lock, Copy, ExternalLink } from 'lucide-react';
 import {
     contactTrackingApi,
     parseUndoFromAttemptNotes,
@@ -39,7 +39,12 @@ function buildCellTooltip(
 }
 import type { ChannelContactSummary } from '../lib/contactChannelConfig';
 import type { BulkContactMessageTemplate } from '../types';
-import { ContactMessageModal } from './ContactMessageModal';
+import {
+    applyContactMessageTemplate,
+    copyContactMessageToClipboard,
+    filterContactTemplatesByChannel,
+} from '../lib/contactMessageTemplates';
+import { openMailCompose, getMailComposeToastMessage } from '../lib/openMailto';
 
 export interface BulkContactStatusCellProps {
     channel: ContactAttemptChannel;
@@ -68,9 +73,10 @@ export interface BulkContactStatusCellProps {
     onNotify?: (message: string, type?: 'success' | 'error' | 'info') => void;
 }
 
-type PopoverMode = 'status' | 'history' | null;
+type PopoverMode = 'status' | 'history' | 'templates' | null;
 
 const POPOVER_WIDTH = 288;
+const TEMPLATE_POPOVER_WIDTH = 260;
 const POPOVER_MAX_HEIGHT = 420;
 
 const ATTEMPT_OUTCOMES: Record<ContactAttemptChannel, { outcome: ContactOutcome; label: string }[]> = {
@@ -89,14 +95,14 @@ const ATTEMPT_OUTCOMES: Record<ContactAttemptChannel, { outcome: ContactOutcome;
     ],
 };
 
-function computePopoverPosition(anchorRect: DOMRect, preferHeight: number) {
+function computePopoverPosition(anchorRect: DOMRect, preferHeight: number, width = POPOVER_WIDTH) {
     const margin = 8;
     const maxH = Math.min(POPOVER_MAX_HEIGHT, window.innerHeight - margin * 2);
     const height = Math.min(preferHeight, maxH);
 
     let left = anchorRect.left;
-    if (left + POPOVER_WIDTH > window.innerWidth - margin) {
-        left = window.innerWidth - POPOVER_WIDTH - margin;
+    if (left + width > window.innerWidth - margin) {
+        left = window.innerWidth - width - margin;
     }
     left = Math.max(margin, left);
 
@@ -149,9 +155,27 @@ export const BulkContactStatusCell: React.FC<BulkContactStatusCellProps> = React
     const [canUndo, setCanUndo] = useState(false);
     const [undoPreview, setUndoPreview] = useState<string | null>(null);
     const [saving, setSaving] = useState(false);
-    const [messageModalOpen, setMessageModalOpen] = useState(false);
     const rootRef = useRef<HTMLDivElement>(null);
     const badgeRef = useRef<HTMLButtonElement>(null);
+    const quickBtnRef = useRef<HTMLButtonElement>(null);
+
+    const channelTemplates = useMemo(
+        () =>
+            channel === 'email' || channel === 'whatsapp'
+                ? filterContactTemplatesByChannel(contactTemplates, channel)
+                : [],
+        [contactTemplates, channel]
+    );
+
+    const templateVars = useMemo(
+        () => ({
+            nombre: candidateName,
+            email: channel === 'email' ? contactAddress : undefined,
+            telefono: channel === 'whatsapp' ? contactAddress : undefined,
+            puesto: processTitle,
+        }),
+        [candidateName, contactAddress, channel, processTitle]
+    );
 
     const closePopover = useCallback(() => setPopover(null), []);
 
@@ -169,7 +193,9 @@ export const BulkContactStatusCell: React.FC<BulkContactStatusCellProps> = React
 
     const openPopover = useCallback((mode: PopoverMode, el: HTMLElement) => {
         const rect = el.getBoundingClientRect();
-        setPopoverPos(computePopoverPosition(rect, mode === 'status' ? 400 : 320));
+        const preferHeight = mode === 'status' ? 400 : mode === 'templates' ? 280 : 320;
+        const width = mode === 'templates' ? TEMPLATE_POPOVER_WIDTH : POPOVER_WIDTH;
+        setPopoverPos(computePopoverPosition(rect, preferHeight, width));
         setPopover(mode);
     }, []);
 
@@ -208,13 +234,19 @@ export const BulkContactStatusCell: React.FC<BulkContactStatusCellProps> = React
     }, [popover, candidateId, channel, closePopover]);
 
     useLayoutEffect(() => {
-        if (!popover || !badgeRef.current) return;
-        const rect = badgeRef.current.getBoundingClientRect();
-        setPopoverPos(computePopoverPosition(rect, popover === 'status' ? 400 : 320));
+        if (!popover) return;
+        const el =
+            popover === 'templates'
+                ? quickBtnRef.current
+                : badgeRef.current;
+        if (!el) return;
+        const preferHeight = popover === 'status' ? 400 : popover === 'templates' ? 280 : 320;
+        const width = popover === 'templates' ? TEMPLATE_POPOVER_WIDTH : POPOVER_WIDTH;
+        setPopoverPos(computePopoverPosition(el.getBoundingClientRect(), preferHeight, width));
     }, [popover]);
 
     useEffect(() => {
-        if (!popover) return;
+        if (!popover || popover === 'templates') return;
         let cancelled = false;
         setLoadingHistory(true);
         contactTrackingApi
@@ -326,18 +358,48 @@ export const BulkContactStatusCell: React.FC<BulkContactStatusCellProps> = React
         }
     };
 
-    const handleQuickAction = async () => {
+    const handleQuickAction = (e: React.MouseEvent<HTMLButtonElement>) => {
+        e.stopPropagation();
         if (effectiveDisabled || saving || !contactAddress) return;
 
         if (channel === 'whatsapp' || channel === 'email') {
-            setMessageModalOpen(true);
+            if (popover === 'templates') {
+                closePopover();
+            } else {
+                openPopover('templates', e.currentTarget);
+            }
             return;
         }
-        await handleMarkAttempt('no_answer');
+        void handleMarkAttempt('no_answer');
     };
 
-    const handleMessageModalAfterSend = async () => {
+    const afterTemplateAction = async () => {
+        closePopover();
         await handleMarkAttempt('no_response');
+    };
+
+    const handleTemplateCopy = async (template: BulkContactMessageTemplate) => {
+        const subject = applyContactMessageTemplate(template.subject ?? '', templateVars);
+        const body = applyContactMessageTemplate(template.body, templateVars);
+        const ok = await copyContactMessageToClipboard(channel as 'email' | 'whatsapp', subject, body);
+        onNotify?.(ok ? 'Copiado al portapapeles' : 'No se pudo copiar', ok ? 'success' : 'error');
+        if (ok) await afterTemplateAction();
+    };
+
+    const handleTemplateOpen = async (template: BulkContactMessageTemplate) => {
+        if (!contactAddress) return;
+        const subject = applyContactMessageTemplate(template.subject ?? '', templateVars);
+        const body = applyContactMessageTemplate(template.body, templateVars);
+
+        if (channel === 'whatsapp') {
+            const clean = contactAddress.replace(/[^\d]/g, '');
+            window.open(`https://wa.me/${clean}?text=${encodeURIComponent(body)}`, '_blank', 'noopener,noreferrer');
+            onNotify?.('WhatsApp abierto');
+        } else {
+            const result = await openMailCompose({ to: [contactAddress], subject, body });
+            onNotify?.(getMailComposeToastMessage(result));
+        }
+        await afterTemplateAction();
     };
 
     const handleResetChannel = async () => {
@@ -389,7 +451,7 @@ export const BulkContactStatusCell: React.FC<BulkContactStatusCellProps> = React
                     style={{
                         left: popoverPos.left,
                         top: popoverPos.top,
-                        width: POPOVER_WIDTH,
+                        width: popover === 'templates' ? TEMPLATE_POPOVER_WIDTH : POPOVER_WIDTH,
                         maxHeight: popoverPos.maxHeight,
                     }}
                     onClick={(e) => e.stopPropagation()}
@@ -397,7 +459,7 @@ export const BulkContactStatusCell: React.FC<BulkContactStatusCellProps> = React
                 >
                     <div className="flex items-center justify-between shrink-0 px-2 py-1.5 border-b border-gray-100 bg-gray-50 rounded-t-lg">
                         <span className="text-[10px] uppercase tracking-wide text-gray-600 font-semibold">
-                            {channelDef.label}
+                            {popover === 'templates' ? `Mensaje · ${channelDef.label}` : channelDef.label}
                         </span>
                         <button type="button" onClick={closePopover} className="p-1 rounded hover:bg-gray-200">
                             <X className="w-4 h-4 text-gray-500" />
@@ -499,6 +561,64 @@ export const BulkContactStatusCell: React.FC<BulkContactStatusCellProps> = React
                             </>
                         )}
 
+                        {popover === 'templates' && (
+                            <>
+                                <p className="text-[10px] text-gray-500 px-1 mb-2 truncate" title={candidateName}>
+                                    {candidateName || 'Candidato'}
+                                </p>
+                                {channelTemplates.length === 0 ? (
+                                    <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-2">
+                                        Sin plantillas. Configúralas en la barra de herramientas del proceso.
+                                    </p>
+                                ) : (
+                                    <ul className="space-y-1">
+                                        {channelTemplates.map(t => (
+                                            <li
+                                                key={t.id}
+                                                className="flex items-center gap-1 rounded-lg border border-gray-200 hover:bg-gray-50 overflow-hidden"
+                                            >
+                                                <span
+                                                    className="flex-1 min-w-0 text-xs font-medium text-gray-800 px-2 py-2 truncate"
+                                                    title={t.name}
+                                                >
+                                                    {t.name}
+                                                </span>
+                                                <button
+                                                    type="button"
+                                                    disabled={saving}
+                                                    onClick={() => void handleTemplateCopy(t)}
+                                                    className="shrink-0 p-2 text-gray-600 hover:bg-gray-100 border-l border-gray-200"
+                                                    title="Copiar al portapapeles"
+                                                >
+                                                    <Copy className="w-3.5 h-3.5" />
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    disabled={saving}
+                                                    onClick={() => void handleTemplateOpen(t)}
+                                                    className={`shrink-0 p-2 border-l border-gray-200 ${
+                                                        channel === 'email'
+                                                            ? 'text-blue-600 hover:bg-blue-50'
+                                                            : 'text-green-600 hover:bg-green-50'
+                                                    }`}
+                                                    title={channel === 'email' ? 'Abrir correo' : 'Abrir WhatsApp'}
+                                                >
+                                                    <ExternalLink className="w-3.5 h-3.5" />
+                                                </button>
+                                            </li>
+                                        ))}
+                                    </ul>
+                                )}
+                                <button
+                                    type="button"
+                                    onClick={closePopover}
+                                    className="w-full mt-2 py-1.5 text-xs text-gray-600 border border-gray-200 rounded-lg hover:bg-gray-50"
+                                >
+                                    Cerrar
+                                </button>
+                            </>
+                        )}
+
                         {popover === 'history' && (
                             <>
                                 {loadingHistory ? (
@@ -591,18 +711,20 @@ export const BulkContactStatusCell: React.FC<BulkContactStatusCellProps> = React
 
             {contactAddress && (
                 <button
+                    ref={quickBtnRef}
                     type="button"
                     disabled={effectiveDisabled || saving}
-                    onClick={(e) => {
-                        e.stopPropagation();
-                        void handleQuickAction();
-                    }}
+                    onClick={handleQuickAction}
                     className={`shrink-0 inline-flex items-center justify-center min-w-[22px] h-5 rounded leading-none ${
-                        channel === 'whatsapp'
-                            ? 'text-green-600 hover:bg-green-50'
-                            : 'text-blue-600 hover:bg-blue-50'
+                        popover === 'templates'
+                            ? channel === 'whatsapp'
+                                ? 'bg-green-100 text-green-700'
+                                : 'bg-blue-100 text-blue-700'
+                            : channel === 'whatsapp'
+                              ? 'text-green-600 hover:bg-green-50'
+                              : 'text-blue-600 hover:bg-blue-50'
                     }`}
-                    title={`Registrar ${channelDef.shortLabel}`}
+                    title={`Plantillas ${channelDef.shortLabel}`}
                 >
                     {saving ? (
                         <Loader2 className="w-4 h-4 animate-spin" />
@@ -633,20 +755,6 @@ export const BulkContactStatusCell: React.FC<BulkContactStatusCellProps> = React
             ) : null}
 
             {popoverContent}
-
-            {(channel === 'email' || channel === 'whatsapp') && messageModalOpen && contactAddress && (
-                <ContactMessageModal
-                    isOpen={messageModalOpen}
-                    onClose={() => setMessageModalOpen(false)}
-                    channel={channel}
-                    candidateName={candidateName}
-                    contactAddress={contactAddress}
-                    processTitle={processTitle}
-                    templates={contactTemplates}
-                    onAfterSend={handleMessageModalAfterSend}
-                    onNotify={onNotify}
-                />
-            )}
         </div>
     );
 });

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useAppState } from '../App';
 import { Process, Stage, ProcessStatus, BulkProcessConfig, KillerQuestion, PsycholaboralInventory, Attachment, Client } from '../types';
-import { X, Plus, Trash2, GripVertical, Settings, Filter, Brain, MessageCircle, Upload, FileText, Mail } from 'lucide-react';
+import { X, Plus, Trash2, GripVertical, Settings, Filter, Brain, MessageCircle, Upload, FileText } from 'lucide-react';
 import { processesApi } from '../lib/api/processes';
 import { clientsApi } from '../lib/api/clients';
 import { isScoreIaColumnVisible, pickBulkTableLayoutConfig } from '../lib/bulkTableColumns';
@@ -12,7 +12,6 @@ import { PsycholaboralInventoryModal } from './PsycholaboralInventoryModal';
 import { googleDriveService } from '../lib/googleDrive';
 import { StageColorPicker } from './StageColorPicker';
 import { suggestStageColor, buildStageColorMaps } from '../lib/stageColors';
-import { BulkContactTemplatesEditor } from './BulkContactTemplatesEditor';
 
 const fileToBase64 = (file: File): Promise<string> =>
     new Promise((resolve, reject) => {
@@ -794,24 +793,6 @@ export const BulkProcessEditorModal: React.FC<BulkProcessEditorModalProps> = ({ 
                                         Agregar Killer Question
                                     </button>
                                 </div>
-                            </div>
-
-                            {/* Plantillas de contacto (correo y WhatsApp) */}
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-2">
-                                    <Mail className="w-4 h-4 inline mr-1" />
-                                    Plantillas de contacto
-                                </label>
-                                <p className="text-xs text-gray-500 mb-3">
-                                    Mensajes predefinidos que verán los reclutadores al contactar candidatos
-                                    por correo o WhatsApp. Pueden copiarlos o abrirlos directamente.
-                                </p>
-                                <BulkContactTemplatesEditor
-                                    templates={bulkConfig.contactMessageTemplates ?? []}
-                                    onChange={templates =>
-                                        setBulkConfig({ ...bulkConfig, contactMessageTemplates: templates })
-                                    }
-                                />
                             </div>
 
                             {/* WhatsApp */}
