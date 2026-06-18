@@ -175,7 +175,7 @@ import { BulkProcessActivityLog } from './BulkProcessActivityLog';
 import { BulkContactStatusCell } from './BulkContactStatusCell';
 import { BulkContactTemplatesModal } from './BulkContactTemplatesModal';
 import { BulkTableEditInput } from './BulkTableEditInput';
-import { applyBulkCellDomSelection } from '../lib/bulkTableCellSelection';
+import { applyBulkCellDomSelection, scrollBulkCellIntoView, clearBulkCellDomSelection } from '../lib/bulkTableCellSelection';
 import { SendToOpsFlowModal } from './SendToOpsFlowModal';
 import { BulkCandidateOpsFlowPanel } from './BulkCandidateOpsFlowPanel';
 import { BulkRouteCell } from './BulkRouteCell';
@@ -714,6 +714,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
     /** Refs actualizados de forma síncrona para navegación con teclado sin saltos */
     const activeCellNavRef = useRef<CellCoord | null>(null);
     const selectionAnchorNavRef = useRef<CellCoord | null>(null);
+    const selectedCellsNavRef = useRef<Set<string>>(new Set());
     const bulkProcessesRef = useRef(bulkProcesses);
     bulkProcessesRef.current = bulkProcesses;
 
@@ -3069,10 +3070,10 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
         if (target && ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName)) return;
 
         const cellKeys =
-            selectedCells.size > 0
-                ? Array.from(selectedCells)
-                : activeCell
-                  ? [toCellKey(activeCell)]
+            selectedCellsNavRef.current.size > 0
+                ? Array.from(selectedCellsNavRef.current)
+                : activeCellNavRef.current
+                  ? [toCellKey(activeCellNavRef.current)]
                   : [];
         if (cellKeys.length === 0) return;
 
@@ -3934,13 +3935,6 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
     const scrollCellIntoView = useCallback((coord: CellCoord) => {
         const container = tableContainerRef.current;
         if (!container) return;
-        const el = container.querySelector(
-            `[data-cell-row="${coord.candidateId}"][data-cell-col="${coord.colId}"]`
-        ) as HTMLElement | null;
-        if (!el) return;
-
-        const thead = container.querySelector('thead');
-        const headerHeight = thead?.getBoundingClientRect().height ?? 0;
 
         let stickyLeft = CHECKBOX_COL_WIDTH;
         for (const colId of visibleColumns) {
@@ -3950,35 +3944,26 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
             }
         }
 
-        const containerRect = container.getBoundingClientRect();
-        const cellRect = el.getBoundingClientRect();
-        const padding = 4;
-
-        const topBound = containerRect.top + headerHeight + padding;
-        const bottomBound = containerRect.bottom - padding;
-        if (cellRect.top < topBound) {
-            container.scrollTop -= topBound - cellRect.top;
-        } else if (cellRect.bottom > bottomBound) {
-            container.scrollTop += cellRect.bottom - bottomBound;
-        }
-
-        const leftBound = containerRect.left + stickyLeft + padding;
-        const rightBound = containerRect.right - padding;
-        if (cellRect.left < leftBound) {
-            container.scrollLeft -= leftBound - cellRect.left;
-        } else         if (cellRect.right > rightBound) {
-            container.scrollLeft += cellRect.right - rightBound;
-        }
+        const thead = container.querySelector('thead');
+        const headerHeight = thead?.getBoundingClientRect().height ?? 0;
+        scrollBulkCellIntoView(container, coord, stickyLeft, headerHeight);
     }, [visibleColumns, pinnedColumns, columnWidths]);
 
     const syncSelectionToDom = useCallback((active: CellCoord | null, selected: Set<string>) => {
         applyBulkCellDomSelection(tableContainerRef.current, active, selected);
     }, []);
 
+    const commitSelectionState = useCallback(() => {
+        setActiveCell(activeCellNavRef.current);
+        setSelectionAnchor(selectionAnchorNavRef.current);
+        setSelectedCells(new Set(selectedCellsNavRef.current));
+    }, []);
+
     const clearCellSelection = useCallback(() => {
-        syncSelectionToDom(null, new Set());
+        clearBulkCellDomSelection(tableContainerRef.current);
         activeCellNavRef.current = null;
         selectionAnchorNavRef.current = null;
+        selectedCellsNavRef.current = new Set();
         tableKeyboardRef.current = {
             ...tableKeyboardRef.current,
             activeCell: null,
@@ -3987,14 +3972,11 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
         setActiveCell(null);
         setSelectedCells(new Set());
         setSelectionAnchor(null);
-    }, [syncSelectionToDom]);
+    }, []);
 
     useLayoutEffect(() => {
         syncSelectionToDom(activeCell, selectedCells);
-        if (activeCell) {
-            scrollCellIntoView(activeCell);
-        }
-    }, [activeCell, selectedCells, syncSelectionToDom, scrollCellIntoView]);
+    }, [activeCell, selectedCells, syncSelectionToDom]);
 
     const focusTable = useCallback(() => {
         tableContainerRef.current?.focus({ preventScroll: true });
@@ -4005,6 +3987,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
         syncSelectionToDom(coord, selected);
         activeCellNavRef.current = coord;
         selectionAnchorNavRef.current = coord;
+        selectedCellsNavRef.current = selected;
         tableKeyboardRef.current = {
             ...tableKeyboardRef.current,
             activeCell: coord,
@@ -4045,6 +4028,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
             const selected = buildCellRange(anchor, coord);
             syncSelectionToDom(coord, selected);
             activeCellNavRef.current = coord;
+            selectedCellsNavRef.current = selected;
             tableKeyboardRef.current = {
                 ...tableKeyboardRef.current,
                 activeCell: coord,
@@ -4065,6 +4049,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                 const next = new Set(prev);
                 if (next.has(key)) next.delete(key);
                 else next.add(key);
+                selectedCellsNavRef.current = next;
                 syncSelectionToDom(coord, next);
                 return next;
             });
@@ -4133,6 +4118,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
 
         syncSelectionToDom(next, nextSelected);
         activeCellNavRef.current = next;
+        selectedCellsNavRef.current = nextSelected;
         if (!extendSelection) {
             selectionAnchorNavRef.current = next;
         }
@@ -4141,17 +4127,11 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
             activeCell: next,
             selectionAnchor: selectionAnchorNavRef.current,
         };
-        setActiveCell(next);
-        if (extendSelection) {
-            setSelectedCells(nextSelected);
-        } else {
-            setSelectionAnchor(next);
-            setSelectedCells(nextSelected);
-        }
+        scrollCellIntoView(next);
         focusTable();
     }, [
         displayCandidateRowIndex, visibleColumnIndex, displayCandidates, visibleColumns,
-        getCellAt, buildCellRange, focusTable, syncSelectionToDom,
+        getCellAt, buildCellRange, focusTable, syncSelectionToDom, scrollCellIntoView,
     ]);
 
     useEffect(() => {
@@ -4173,6 +4153,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
         const selected = buildCellRange(dragAnchorCell.current, coord);
         syncSelectionToDom(coord, selected);
         activeCellNavRef.current = coord;
+        selectedCellsNavRef.current = selected;
         tableKeyboardRef.current = {
             ...tableKeyboardRef.current,
             activeCell: coord,
@@ -4250,6 +4231,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                 moveActiveCell(0, e.shiftKey ? -1 : 1, false);
                 break;
             case 'Enter':
+                commitSelectionState();
                 beginEditCell(ctx.activeCell.candidateId, ctx.activeCell.colId);
                 break;
             case 'Escape':
@@ -4258,46 +4240,50 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
             default:
                 break;
         }
-    }, [selectSingleCell, moveActiveCell, beginEditCell, clearSelectedCells, performUndo, focusTable, clearCellSelection]);
+    }, [selectSingleCell, moveActiveCell, beginEditCell, clearSelectedCells, performUndo, focusTable, clearCellSelection, commitSelectionState]);
 
-    activeCellNavRef.current = activeCell;
-    selectionAnchorNavRef.current = selectionAnchor;
     tableKeyboardRef.current = {
         editingCell,
-        activeCell,
-        selectionAnchor,
+        activeCell: activeCellNavRef.current,
+        selectionAnchor: selectionAnchorNavRef.current,
         displayCandidates,
         visibleColumns,
     };
 
     useEffect(() => {
         if (!selectedProcess) return;
+        const navKeys = new Set(['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Tab']);
         const onKeyDown = (e: KeyboardEvent) => handleTableKeyDown(e);
+        const onKeyUp = (e: KeyboardEvent) => {
+            if (navKeys.has(e.key)) commitSelectionState();
+        };
         document.addEventListener('keydown', onKeyDown, true);
-        return () => document.removeEventListener('keydown', onKeyDown, true);
-    }, [selectedProcess, handleTableKeyDown]);
+        document.addEventListener('keyup', onKeyUp, true);
+        return () => {
+            document.removeEventListener('keydown', onKeyDown, true);
+            document.removeEventListener('keyup', onKeyUp, true);
+        };
+    }, [selectedProcess, handleTableKeyDown, commitSelectionState]);
 
     // Limpiar selección si la fila activa deja de estar visible (filtros/orden)
     useEffect(() => {
-        if (!activeCell) return;
-        const rowVisible = displayCandidates.some(c => c.id === activeCell.candidateId);
-        const colVisible = visibleColumns.includes(activeCell.colId);
+        const current = activeCellNavRef.current;
+        if (!current) return;
+        const rowVisible = displayCandidates.some(c => c.id === current.candidateId);
+        const colVisible = visibleColumns.includes(current.colId);
         if (!rowVisible) {
             clearCellSelection();
         } else if (!colVisible && visibleColumns.length > 0) {
-            const next = { candidateId: activeCell.candidateId, colId: visibleColumns[0] };
+            const next = { candidateId: current.candidateId, colId: visibleColumns[0] };
             selectSingleCell(next);
         }
-    }, [displayCandidates, visibleColumns, activeCell, clearCellSelection, selectSingleCell]);
+    }, [displayCandidates, visibleColumns, clearCellSelection, selectSingleCell]);
 
     const buildCellDisplayStyle = useCallback((candidateId: string, colId: string): React.CSSProperties => {
         const style: React.CSSProperties = { ...buildTdStyle(candidateId, colId) };
-        const active = activeCell?.candidateId === candidateId && activeCell?.colId === colId;
-        const selected = selectedCells.has(toCellKey({ candidateId, colId }));
-        const isPinned = pinnedColumns.includes(colId);
         const meta = getCellMetaFor(candidateId, colId);
 
-        if (!active && !selected && !meta?.bgColor && idealProfileHeatMapFields.has(colId)) {
+        if (!meta?.bgColor && idealProfileHeatMapFields.has(colId)) {
             const fieldScore = profileMatchScores.fieldScores.get(candidateId)?.get(colId);
             if (fieldScore !== undefined) {
                 const heat = getProfileMatchGradientStyle(fieldScore);
@@ -4306,29 +4292,8 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
             }
         }
 
-        const shadows: string[] = [];
-        if (style.boxShadow) shadows.push(String(style.boxShadow));
-
-        if (active) {
-            style.outline = '2px solid #2563eb';
-            style.outlineOffset = '-2px';
-            shadows.push('inset 0 0 0 1px #2563eb');
-            style.zIndex = isPinned ? 55 : 30;
-            if (!meta?.bgColor) style.backgroundColor = '#eff6ff';
-            style.color = undefined;
-        } else if (selected) {
-            style.outline = '1px solid #60a5fa';
-            style.outlineOffset = '-1px';
-            shadows.push('inset 0 0 0 1px #93c5fd');
-            style.zIndex = Math.max(typeof style.zIndex === 'number' ? style.zIndex : 0, isPinned ? 50 : 25);
-            if (!meta?.bgColor) style.backgroundColor = '#f8fafc';
-            style.color = undefined;
-        }
-
-        if (shadows.length > 0) style.boxShadow = shadows.join(', ');
-
         return style;
-    }, [buildTdStyle, activeCell, selectedCells, pinnedColumns, getCellMetaFor, idealProfileHeatMapFields, profileMatchScores.fieldScores]);
+    }, [buildTdStyle, getCellMetaFor, idealProfileHeatMapFields, profileMatchScores.fieldScores]);
 
     const renderCellCommentIndicator = (candidateId: string, colId: string) => {
         const comment = getCellMetaFor(candidateId, colId)?.comment;
@@ -4496,10 +4461,10 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
         if (['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName)) return;
 
         const cellKeys =
-            selectedCells.size > 0
-                ? Array.from(selectedCells)
-                : activeCell
-                  ? [toCellKey(activeCell)]
+            selectedCellsNavRef.current.size > 0
+                ? Array.from(selectedCellsNavRef.current)
+                : activeCellNavRef.current
+                  ? [toCellKey(activeCellNavRef.current)]
                   : [];
         if (cellKeys.length === 0) return;
 
