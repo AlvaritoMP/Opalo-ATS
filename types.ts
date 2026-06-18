@@ -242,6 +242,20 @@ export interface BulkProcessConfig {
     infoPins?: BulkInfoPin[];
     /** Respuestas rápidas copiables al portapapeles (texto + adjuntos) */
     quickReplies?: BulkQuickReply[];
+    /** Plantillas predefinidas de correo y WhatsApp para contactar candidatos */
+    contactMessageTemplates?: BulkContactMessageTemplate[];
+}
+
+export type BulkContactMessageChannel = 'email' | 'whatsapp';
+
+/** Plantilla de mensaje para contactar candidatos (correo o WhatsApp) */
+export interface BulkContactMessageTemplate {
+    id: string;
+    name: string;
+    channel: BulkContactMessageChannel;
+    /** Solo para canal email */
+    subject?: string;
+    body: string;
 }
 
 export type BulkInfoPinColor = 'yellow' | 'pink' | 'blue' | 'green' | 'purple';

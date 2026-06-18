@@ -4,7 +4,6 @@ import type { ContactAttempt, ContactOutcome, ContactStatus } from '../contactTr
 import {
     normalizeContactStatus,
     nextStatusAfterCallAttempt,
-    shouldAutoMarkUnreachable,
 } from '../contactTracking';
 import {
     type ContactAttemptChannel,
@@ -383,16 +382,8 @@ export const contactTrackingApi = {
         let newStatus = prevStatus;
         if (input.outcome === 'interested') newStatus = 'interesado';
         else if (input.outcome === 'not_interested') newStatus = 'no_interesado';
-        else if (input.outcome === 'unreachable') newStatus = 'inubicable';
         else if (increment) {
-            newStatus = nextStatusAfterCallAttempt(prevStatus, newCount, input.channel, input.outcome);
-        }
-
-        if (
-            shouldAutoMarkUnreachable(prevStatus, newCount, input.channel, input.outcome) &&
-            newStatus === 'en_intento'
-        ) {
-            newStatus = 'inubicable';
+            newStatus = nextStatusAfterCallAttempt(prevStatus, input.outcome);
         }
 
         const summary: ChannelContactSummary = {

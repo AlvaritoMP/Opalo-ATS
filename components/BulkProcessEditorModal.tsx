@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useAppState } from '../App';
 import { Process, Stage, ProcessStatus, BulkProcessConfig, KillerQuestion, PsycholaboralInventory, Attachment, Client } from '../types';
-import { X, Plus, Trash2, GripVertical, Settings, Filter, Brain, MessageCircle, Upload, FileText } from 'lucide-react';
+import { X, Plus, Trash2, GripVertical, Settings, Filter, Brain, MessageCircle, Upload, FileText, Mail } from 'lucide-react';
 import { processesApi } from '../lib/api/processes';
 import { clientsApi } from '../lib/api/clients';
 import { isScoreIaColumnVisible, pickBulkTableLayoutConfig } from '../lib/bulkTableColumns';
@@ -12,6 +12,7 @@ import { PsycholaboralInventoryModal } from './PsycholaboralInventoryModal';
 import { googleDriveService } from '../lib/googleDrive';
 import { StageColorPicker } from './StageColorPicker';
 import { suggestStageColor, buildStageColorMaps } from '../lib/stageColors';
+import { BulkContactTemplatesEditor } from './BulkContactTemplatesEditor';
 
 const fileToBase64 = (file: File): Promise<string> =>
     new Promise((resolve, reject) => {
@@ -795,11 +796,29 @@ export const BulkProcessEditorModal: React.FC<BulkProcessEditorModalProps> = ({ 
                                 </div>
                             </div>
 
+                            {/* Plantillas de contacto (correo y WhatsApp) */}
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-2">
+                                    <Mail className="w-4 h-4 inline mr-1" />
+                                    Plantillas de contacto
+                                </label>
+                                <p className="text-xs text-gray-500 mb-3">
+                                    Mensajes predefinidos que verán los reclutadores al contactar candidatos
+                                    por correo o WhatsApp. Pueden copiarlos o abrirlos directamente.
+                                </p>
+                                <BulkContactTemplatesEditor
+                                    templates={bulkConfig.contactMessageTemplates ?? []}
+                                    onChange={templates =>
+                                        setBulkConfig({ ...bulkConfig, contactMessageTemplates: templates })
+                                    }
+                                />
+                            </div>
+
                             {/* WhatsApp */}
                             <div>
                                 <label className="block text-sm font-medium text-gray-700 mb-2">
                                     <MessageCircle className="w-4 h-4 inline mr-1" />
-                                    Configuración de WhatsApp
+                                    Acceso rápido a WhatsApp
                                 </label>
                                 <div className="space-y-3">
                                     <label className="flex items-center gap-2">
@@ -809,25 +828,8 @@ export const BulkProcessEditorModal: React.FC<BulkProcessEditorModalProps> = ({ 
                                             onChange={(e) => setBulkConfig({ ...bulkConfig, whatsappEnabled: e.target.checked })}
                                             className="w-4 h-4 text-primary-600 rounded focus:ring-primary-500"
                                         />
-                                        Habilitar acceso rápido a WhatsApp
+                                        Habilitar acceso rápido a WhatsApp en la tabla
                                     </label>
-                                    {bulkConfig.whatsappEnabled && (
-                                        <div>
-                                            <label className="block text-sm font-medium text-gray-700 mb-1">
-                                                Plantilla de Mensaje
-                                            </label>
-                                            <p className="text-xs text-gray-500 mb-2">
-                                                Usa {'{nombre}'} y {'{puesto}'} como variables
-                                            </p>
-                                            <textarea
-                                                value={bulkConfig.whatsappMessageTemplate || ''}
-                                                onChange={(e) => setBulkConfig({ ...bulkConfig, whatsappMessageTemplate: e.target.value })}
-                                                placeholder="Hola {nombre}, nos interesa tu perfil para el puesto de {puesto}..."
-                                                rows={3}
-                                                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                                            />
-                                        </div>
-                                    )}
                                 </div>
                             </div>
 

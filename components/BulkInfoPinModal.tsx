@@ -8,6 +8,7 @@ import {
     getBulkInfoPinStyle,
     getImageFileFromClipboardEvent,
     validateBulkInfoPinImageFile,
+    BULK_INFO_PIN_IMAGE_MAX_MB,
 } from '../lib/bulkInfoPins';
 
 interface BulkInfoPinModalProps {
@@ -175,7 +176,8 @@ export const BulkInfoPinModal: React.FC<BulkInfoPinModalProps> = ({
                             Imagen PNG (opcional)
                         </label>
                         <p className="text-[11px] text-gray-600 mb-2">
-                            Sube un PNG, pega con <kbd className="px-1 py-0.5 rounded bg-white/80 border border-black/10 text-[10px] font-mono">Ctrl+V</kbd>{' '}
+                            Sube un PNG (hasta {BULK_INFO_PIN_IMAGE_MAX_MB} MB), pega con{' '}
+                            <kbd className="px-1 py-0.5 rounded bg-white/80 border border-black/10 text-[10px] font-mono">Ctrl+V</kbd>{' '}
                             si la imagen está en el portapapeles, o reemplázala cuando se actualice.
                         </p>
                         <input

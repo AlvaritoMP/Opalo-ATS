@@ -53,7 +53,8 @@ export function getBulkInfoPinStyle(color?: BulkInfoPinColor) {
 }
 
 /** Tamaño máximo del PNG antes de guardar en bulk_config (bytes) */
-export const BULK_INFO_PIN_IMAGE_MAX_BYTES = 2.5 * 1024 * 1024;
+export const BULK_INFO_PIN_IMAGE_MAX_MB = 3.5;
+export const BULK_INFO_PIN_IMAGE_MAX_BYTES = BULK_INFO_PIN_IMAGE_MAX_MB * 1024 * 1024;
 
 export function bulkInfoPinHasImage(pin: BulkInfoPin): boolean {
     return Boolean(pin.imageDataUrl?.startsWith('data:image/'));
@@ -72,7 +73,7 @@ export function validateBulkInfoPinImageFile(
         return 'Solo se permiten archivos PNG.';
     }
     if (file.size > BULK_INFO_PIN_IMAGE_MAX_BYTES) {
-        return `La imagen no puede superar ${Math.round(BULK_INFO_PIN_IMAGE_MAX_BYTES / (1024 * 1024))} MB.`;
+        return `La imagen no puede superar ${BULK_INFO_PIN_IMAGE_MAX_MB} MB.`;
     }
     return null;
 }

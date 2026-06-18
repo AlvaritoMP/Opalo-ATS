@@ -22,7 +22,6 @@ import {
     CONTACT_OUTCOME_LABELS,
 } from '../lib/contactTracking';
 import { formatBulkDateTime } from '../lib/bulkTableColumns';
-import { openMailCompose } from '../lib/openMailto';
 
 function buildCellTooltip(
     lastAttemptAt?: string,
@@ -39,6 +38,8 @@ function buildCellTooltip(
     return parts.length ? parts.join(' · ') : undefined;
 }
 import type { ChannelContactSummary } from '../lib/contactChannelConfig';
+import type { BulkContactMessageTemplate } from '../types';
+import { ContactMessageModal } from './ContactMessageModal';
 
 export interface BulkContactStatusCellProps {
     channel: ContactAttemptChannel;
@@ -61,6 +62,10 @@ export interface BulkContactStatusCellProps {
     contactLock?: ContactLockInfo | null;
     isContactLocked?: boolean;
     onLockBlocked?: (message: string) => void;
+    /** Plantillas de correo/WhatsApp del proceso masivo */
+    contactTemplates?: BulkContactMessageTemplate[];
+    processTitle?: string;
+    onNotify?: (message: string, type?: 'success' | 'error' | 'info') => void;
 }
 
 type PopoverMode = 'status' | 'history' | null;
@@ -105,9 +110,10 @@ function computePopoverPosition(anchorRect: DOMRect, preferHeight: number) {
     return { left, top, maxHeight: maxH };
 }
 
-export const BulkContactStatusCell: React.FC<BulkContactStatusCellProps> = ({
+export const BulkContactStatusCell: React.FC<BulkContactStatusCellProps> = React.memo(({
     channel,
     candidateId,
+    candidateName,
     processId,
     contactAddress,
     summary,
@@ -119,6 +125,9 @@ export const BulkContactStatusCell: React.FC<BulkContactStatusCellProps> = ({
     contactLock = null,
     isContactLocked = false,
     onLockBlocked,
+    contactTemplates = [],
+    processTitle,
+    onNotify,
 }) => {
     const { status, attemptCount, lastAttemptAt, lastUserName } = summary;
     const channelDef = CONTACT_CHANNELS[channel];
@@ -140,6 +149,7 @@ export const BulkContactStatusCell: React.FC<BulkContactStatusCellProps> = ({
     const [canUndo, setCanUndo] = useState(false);
     const [undoPreview, setUndoPreview] = useState<string | null>(null);
     const [saving, setSaving] = useState(false);
+    const [messageModalOpen, setMessageModalOpen] = useState(false);
     const rootRef = useRef<HTMLDivElement>(null);
     const badgeRef = useRef<HTMLButtonElement>(null);
 
@@ -319,18 +329,15 @@ export const BulkContactStatusCell: React.FC<BulkContactStatusCellProps> = ({
     const handleQuickAction = async () => {
         if (effectiveDisabled || saving || !contactAddress) return;
 
-        if (channel === 'whatsapp') {
-            const clean = contactAddress.replace(/[^\d]/g, '');
-            window.open(`https://wa.me/${clean}`, '_blank', 'noopener,noreferrer');
-            await handleMarkAttempt('no_response');
-            return;
-        }
-        if (channel === 'email') {
-            await openMailCompose({ to: [contactAddress], subject: '', body: '' });
-            await handleMarkAttempt('no_response');
+        if (channel === 'whatsapp' || channel === 'email') {
+            setMessageModalOpen(true);
             return;
         }
         await handleMarkAttempt('no_answer');
+    };
+
+    const handleMessageModalAfterSend = async () => {
+        await handleMarkAttempt('no_response');
     };
 
     const handleResetChannel = async () => {
@@ -626,6 +633,20 @@ export const BulkContactStatusCell: React.FC<BulkContactStatusCellProps> = ({
             ) : null}
 
             {popoverContent}
+
+            {(channel === 'email' || channel === 'whatsapp') && messageModalOpen && contactAddress && (
+                <ContactMessageModal
+                    isOpen={messageModalOpen}
+                    onClose={() => setMessageModalOpen(false)}
+                    channel={channel}
+                    candidateName={candidateName}
+                    contactAddress={contactAddress}
+                    processTitle={processTitle}
+                    templates={contactTemplates}
+                    onAfterSend={handleMessageModalAfterSend}
+                    onNotify={onNotify}
+                />
+            )}
         </div>
     );
-};
+});
