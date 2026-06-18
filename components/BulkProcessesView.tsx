@@ -4968,7 +4968,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                                         <span>Nombre</span>
                                                         {sortColumn === 'name' ? (sortDirection === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />) : <div className="w-3 h-3 opacity-30"><ArrowUp className="w-3 h-3" /></div>}
                                                     </button>
-                                                    <input type="text" placeholder="Filtrar..." value={columnFilterDraft.name || ''} onChange={(e) => setColumnFilterDraft(prev => ({ ...prev, name: e.target.value })} className="text-xs px-2 py-1 border border-gray-300 rounded focus:ring-1 focus:ring-primary-500 focus:border-primary-500 font-normal normal-case" onClick={(e) => e.stopPropagation()} />
+                                                    <input type="text" placeholder="Filtrar..." value={columnFilterDraft.name || ''} onChange={(e) => setColumnFilterDraft(prev => ({ ...prev, name: e.target.value }))} className="text-xs px-2 py-1 border border-gray-300 rounded focus:ring-1 focus:ring-primary-500 focus:border-primary-500 font-normal normal-case" onClick={(e) => e.stopPropagation()} />
                                                 </div>
                                             </BulkTh>
                                         );
@@ -4981,7 +4981,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                                         <span>DNI</span>
                                                         {sortColumn === 'dni' ? (sortDirection === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />) : <div className="w-3 h-3 opacity-30"><ArrowUp className="w-3 h-3" /></div>}
                                                     </button>
-                                                    <input type="text" placeholder="Filtrar..." value={columnFilterDraft.dni || ''} onChange={(e) => setColumnFilterDraft(prev => ({ ...prev, dni: e.target.value })} className="text-xs px-2 py-1 border border-gray-300 rounded focus:ring-1 focus:ring-primary-500 focus:border-primary-500 font-normal normal-case" onClick={(e) => e.stopPropagation()} />
+                                                    <input type="text" placeholder="Filtrar..." value={columnFilterDraft.dni || ''} onChange={(e) => setColumnFilterDraft(prev => ({ ...prev, dni: e.target.value }))} className="text-xs px-2 py-1 border border-gray-300 rounded focus:ring-1 focus:ring-primary-500 focus:border-primary-500 font-normal normal-case" onClick={(e) => e.stopPropagation()} />
                                                 </div>
                                             </BulkTh>
                                         );
@@ -4994,7 +4994,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                                         <span>Email</span>
                                                         {sortColumn === 'email' ? (sortDirection === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />) : <div className="w-3 h-3 opacity-30"><ArrowUp className="w-3 h-3" /></div>}
                                                     </button>
-                                                    <input type="text" placeholder="Filtrar..." value={columnFilterDraft.email || ''} onChange={(e) => setColumnFilterDraft(prev => ({ ...prev, email: e.target.value })} className="text-xs px-2 py-1 border border-gray-300 rounded focus:ring-1 focus:ring-primary-500 focus:border-primary-500 font-normal normal-case" onClick={(e) => e.stopPropagation()} />
+                                                    <input type="text" placeholder="Filtrar..." value={columnFilterDraft.email || ''} onChange={(e) => setColumnFilterDraft(prev => ({ ...prev, email: e.target.value }))} className="text-xs px-2 py-1 border border-gray-300 rounded focus:ring-1 focus:ring-primary-500 focus:border-primary-500 font-normal normal-case" onClick={(e) => e.stopPropagation()} />
                                                 </div>
                                             </BulkTh>
                                         );
@@ -5007,7 +5007,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                                         <span>Score IA</span>
                                                         {sortColumn === 'scoreIa' ? (sortDirection === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />) : <div className="w-3 h-3 opacity-30"><ArrowUp className="w-3 h-3" /></div>}
                                                     </button>
-                                                    <input type="text" placeholder="Min..." value={columnFilterDraft.scoreIa || ''} onChange={(e) => setColumnFilterDraft(prev => ({ ...prev, scoreIa: e.target.value })} className="text-xs px-2 py-1 border border-gray-300 rounded focus:ring-1 focus:ring-primary-500 focus:border-primary-500 font-normal normal-case" onClick={(e) => e.stopPropagation()} />
+                                                    <input type="text" placeholder="Min..." value={columnFilterDraft.scoreIa || ''} onChange={(e) => setColumnFilterDraft(prev => ({ ...prev, scoreIa: e.target.value }))} className="text-xs px-2 py-1 border border-gray-300 rounded focus:ring-1 focus:ring-primary-500 focus:border-primary-500 font-normal normal-case" onClick={(e) => e.stopPropagation()} />
                                                 </div>
                                             </BulkTh>
                                         );
@@ -5020,7 +5020,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                                         <span>% Perfil</span>
                                                         {sortColumn === 'profileMatch' ? (sortDirection === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />) : <div className="w-3 h-3 opacity-30"><ArrowUp className="w-3 h-3" /></div>}
                                                     </button>
-                                                    <input type="text" placeholder="Min..." value={columnFilterDraft.profileMatch || ''} onChange={(e) => setColumnFilterDraft(prev => ({ ...prev, profileMatch: e.target.value })} className="text-xs px-2 py-1 border border-gray-300 rounded focus:ring-1 focus:ring-primary-500 focus:border-primary-500 font-normal normal-case" onClick={(e) => e.stopPropagation()} />
+                                                    <input type="text" placeholder="Min..." value={columnFilterDraft.profileMatch || ''} onChange={(e) => setColumnFilterDraft(prev => ({ ...prev, profileMatch: e.target.value }))} className="text-xs px-2 py-1 border border-gray-300 rounded focus:ring-1 focus:ring-primary-500 focus:border-primary-500 font-normal normal-case" onClick={(e) => e.stopPropagation()} />
                                                 </div>
                                             </BulkTh>
                                         );
@@ -5043,7 +5043,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                                         <span>Teléfono</span>
                                                         {sortColumn === 'phone' ? (sortDirection === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />) : <div className="w-3 h-3 opacity-30"><ArrowUp className="w-3 h-3" /></div>}
                                                     </button>
-                                                    <input type="text" placeholder="Filtrar..." value={columnFilterDraft.phone || ''} onChange={(e) => setColumnFilterDraft(prev => ({ ...prev, phone: e.target.value })} className="text-xs px-2 py-1 border border-gray-300 rounded focus:ring-1 focus:ring-primary-500 focus:border-primary-500 font-normal normal-case" onClick={(e) => e.stopPropagation()} />
+                                                    <input type="text" placeholder="Filtrar..." value={columnFilterDraft.phone || ''} onChange={(e) => setColumnFilterDraft(prev => ({ ...prev, phone: e.target.value }))} className="text-xs px-2 py-1 border border-gray-300 rounded focus:ring-1 focus:ring-primary-500 focus:border-primary-500 font-normal normal-case" onClick={(e) => e.stopPropagation()} />
                                                 </div>
                                             </BulkTh>
                                         );
@@ -5118,7 +5118,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                                         <span>{getColumnLabel(colId, customColumns)}</span>
                                                         {sortColumn === 'contactLastUser' ? (sortDirection === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />) : <div className="w-3 h-3 opacity-30"><ArrowUp className="w-3 h-3" /></div>}
                                                     </button>
-                                                    <input type="text" placeholder="Filtrar..." value={columnFilterDraft.contactLastUser || ''} onChange={(e) => setColumnFilterDraft(prev => ({ ...prev, contactLastUser: e.target.value })} className="text-xs px-2 py-1 border border-gray-300 rounded focus:ring-1 focus:ring-primary-500 focus:border-primary-500 font-normal normal-case" onClick={(e) => e.stopPropagation()} />
+                                                    <input type="text" placeholder="Filtrar..." value={columnFilterDraft.contactLastUser || ''} onChange={(e) => setColumnFilterDraft(prev => ({ ...prev, contactLastUser: e.target.value }))} className="text-xs px-2 py-1 border border-gray-300 rounded focus:ring-1 focus:ring-primary-500 focus:border-primary-500 font-normal normal-case" onClick={(e) => e.stopPropagation()} />
                                                 </div>
                                             </BulkTh>
                                         );
@@ -5131,7 +5131,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                                         <span>{getColumnLabel(colId, customColumns)}</span>
                                                         {sortColumn === 'hiredStageUser' ? (sortDirection === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />) : <div className="w-3 h-3 opacity-30"><ArrowUp className="w-3 h-3" /></div>}
                                                     </button>
-                                                    <input type="text" placeholder="Filtrar..." value={columnFilterDraft.hiredStageUser || ''} onChange={(e) => setColumnFilterDraft(prev => ({ ...prev, hiredStageUser: e.target.value })} className="text-xs px-2 py-1 border border-gray-300 rounded focus:ring-1 focus:ring-primary-500 focus:border-primary-500 font-normal normal-case" onClick={(e) => e.stopPropagation()} />
+                                                    <input type="text" placeholder="Filtrar..." value={columnFilterDraft.hiredStageUser || ''} onChange={(e) => setColumnFilterDraft(prev => ({ ...prev, hiredStageUser: e.target.value }))} className="text-xs px-2 py-1 border border-gray-300 rounded focus:ring-1 focus:ring-primary-500 focus:border-primary-500 font-normal normal-case" onClick={(e) => e.stopPropagation()} />
                                                 </div>
                                             </BulkTh>
                                         );
@@ -5144,7 +5144,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                                         <span>Fuente</span>
                                                         {sortColumn === 'source' ? (sortDirection === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />) : <div className="w-3 h-3 opacity-30"><ArrowUp className="w-3 h-3" /></div>}
                                                     </button>
-                                                    <input type="text" placeholder="Filtrar..." value={columnFilterDraft.source || ''} onChange={(e) => setColumnFilterDraft(prev => ({ ...prev, source: e.target.value })} className="text-xs px-2 py-1 border border-gray-300 rounded focus:ring-1 focus:ring-primary-500 focus:border-primary-500 font-normal normal-case" onClick={(e) => e.stopPropagation()} />
+                                                    <input type="text" placeholder="Filtrar..." value={columnFilterDraft.source || ''} onChange={(e) => setColumnFilterDraft(prev => ({ ...prev, source: e.target.value }))} className="text-xs px-2 py-1 border border-gray-300 rounded focus:ring-1 focus:ring-primary-500 focus:border-primary-500 font-normal normal-case" onClick={(e) => e.stopPropagation()} />
                                                 </div>
                                             </BulkTh>
                                         );
@@ -5157,7 +5157,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                                         <span>Origen alta</span>
                                                         {sortColumn === REGISTRATION_ORIGIN_COLUMN_ID ? (sortDirection === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />) : <div className="w-3 h-3 opacity-30"><ArrowUp className="w-3 h-3" /></div>}
                                                     </button>
-                                                    <input type="text" placeholder="Filtrar..." value={columnFilterDraft[REGISTRATION_ORIGIN_COLUMN_ID] || ''} onChange={(e) => setColumnFilterDraft(prev => ({ ...prev, [REGISTRATION_ORIGIN_COLUMN_ID]: e.target.value })} className="text-xs px-2 py-1 border border-gray-300 rounded focus:ring-1 focus:ring-primary-500 focus:border-primary-500 font-normal normal-case" onClick={(e) => e.stopPropagation()} />
+                                                    <input type="text" placeholder="Filtrar..." value={columnFilterDraft[REGISTRATION_ORIGIN_COLUMN_ID] || ''} onChange={(e) => setColumnFilterDraft(prev => ({ ...prev, [REGISTRATION_ORIGIN_COLUMN_ID]: e.target.value }))} className="text-xs px-2 py-1 border border-gray-300 rounded focus:ring-1 focus:ring-primary-500 focus:border-primary-500 font-normal normal-case" onClick={(e) => e.stopPropagation()} />
                                                 </div>
                                             </BulkTh>
                                         );
@@ -5170,7 +5170,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                                         <span>Provincia</span>
                                                         {sortColumn === 'province' ? (sortDirection === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />) : <div className="w-3 h-3 opacity-30"><ArrowUp className="w-3 h-3" /></div>}
                                                     </button>
-                                                    <input type="text" placeholder="Filtrar..." value={columnFilterDraft.province || ''} onChange={(e) => setColumnFilterDraft(prev => ({ ...prev, province: e.target.value })} className="text-xs px-2 py-1 border border-gray-300 rounded focus:ring-1 focus:ring-primary-500 focus:border-primary-500 font-normal normal-case" onClick={(e) => e.stopPropagation()} />
+                                                    <input type="text" placeholder="Filtrar..." value={columnFilterDraft.province || ''} onChange={(e) => setColumnFilterDraft(prev => ({ ...prev, province: e.target.value }))} className="text-xs px-2 py-1 border border-gray-300 rounded focus:ring-1 focus:ring-primary-500 focus:border-primary-500 font-normal normal-case" onClick={(e) => e.stopPropagation()} />
                                                 </div>
                                             </BulkTh>
                                         );
@@ -5183,7 +5183,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                                         <span>Distrito</span>
                                                         {sortColumn === 'district' ? (sortDirection === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />) : <div className="w-3 h-3 opacity-30"><ArrowUp className="w-3 h-3" /></div>}
                                                     </button>
-                                                    <input type="text" placeholder="Filtrar..." value={columnFilterDraft.district || ''} onChange={(e) => setColumnFilterDraft(prev => ({ ...prev, district: e.target.value })} className="text-xs px-2 py-1 border border-gray-300 rounded focus:ring-1 focus:ring-primary-500 focus:border-primary-500 font-normal normal-case" onClick={(e) => e.stopPropagation()} />
+                                                    <input type="text" placeholder="Filtrar..." value={columnFilterDraft.district || ''} onChange={(e) => setColumnFilterDraft(prev => ({ ...prev, district: e.target.value }))} className="text-xs px-2 py-1 border border-gray-300 rounded focus:ring-1 focus:ring-primary-500 focus:border-primary-500 font-normal normal-case" onClick={(e) => e.stopPropagation()} />
                                                 </div>
                                             </BulkTh>
                                         );
@@ -5262,7 +5262,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                                     {col.type === 'select' && col.options ? (
                                                         <select
                                                             value={columnFilterDraft[filterKey] || ''}
-                                                            onChange={(e) => setColumnFilterDraft(prev => ({ ...prev, [filterKey]: e.target.value })}
+                                                            onChange={(e) => setColumnFilterDraft(prev => ({ ...prev, [filterKey]: e.target.value }))}
                                                             className="text-xs px-2 py-1 border border-gray-300 rounded focus:ring-1 focus:ring-primary-500 focus:border-primary-500 font-normal normal-case"
                                                             onClick={(e) => e.stopPropagation()}
                                                         >
@@ -5274,7 +5274,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                                     ) : col.type === 'checkbox' ? (
                                                         <select
                                                             value={columnFilterDraft[filterKey] || ''}
-                                                            onChange={(e) => setColumnFilterDraft(prev => ({ ...prev, [filterKey]: e.target.value })}
+                                                            onChange={(e) => setColumnFilterDraft(prev => ({ ...prev, [filterKey]: e.target.value }))}
                                                             className="text-xs px-2 py-1 border border-gray-300 rounded focus:ring-1 focus:ring-primary-500 focus:border-primary-500 font-normal normal-case"
                                                             onClick={(e) => e.stopPropagation()}
                                                         >
@@ -5289,7 +5289,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                                             type="text"
                                                             placeholder="Filtrar costo..."
                                                             value={columnFilterDraft[filterKey] || ''}
-                                                            onChange={(e) => setColumnFilterDraft(prev => ({ ...prev, [filterKey]: e.target.value })}
+                                                            onChange={(e) => setColumnFilterDraft(prev => ({ ...prev, [filterKey]: e.target.value }))}
                                                             className="text-xs px-2 py-1 border border-gray-300 rounded focus:ring-1 focus:ring-primary-500 focus:border-primary-500 font-normal normal-case"
                                                             onClick={(e) => e.stopPropagation()}
                                                         />
@@ -5298,7 +5298,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = () => {
                                                             type="text"
                                                             placeholder={col.type === 'number' ? 'Filtrar...' : col.type === 'date' ? 'DD/MM/AAAA' : 'Filtrar...'}
                                                             value={columnFilterDraft[filterKey] || ''}
-                                                            onChange={(e) => setColumnFilterDraft(prev => ({ ...prev, [filterKey]: e.target.value })}
+                                                            onChange={(e) => setColumnFilterDraft(prev => ({ ...prev, [filterKey]: e.target.value }))}
                                                             className="text-xs px-2 py-1 border border-gray-300 rounded focus:ring-1 focus:ring-primary-500 focus:border-primary-500 font-normal normal-case"
                                                             onClick={(e) => e.stopPropagation()}
                                                         />
