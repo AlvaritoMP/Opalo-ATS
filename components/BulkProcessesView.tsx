@@ -1288,7 +1288,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
     useEffect(() => {
         if (isEmbedded) return;
         loadBulkProcesses();
-    }, []);
+    }, [isEmbedded, loadBulkProcesses]);
 
     useEffect(() => {
         if (isEmbedded) return;

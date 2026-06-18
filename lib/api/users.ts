@@ -13,7 +13,10 @@ function dbToUser(dbUser: any): User {
         avatarUrl: dbUser.avatar_url,
         permissions: dbUser.permissions || undefined,
         visibleSections: dbUser.visible_sections || undefined,
-        allowedClientIds: dbUser.allowed_client_ids || undefined,
+        allowedClientIds:
+            Array.isArray(dbUser.allowed_client_ids) && dbUser.allowed_client_ids.length > 0
+                ? dbUser.allowed_client_ids
+                : undefined,
     };
 }
 
