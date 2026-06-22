@@ -305,7 +305,7 @@ export const candidatesApi = {
     // Obtener todos los candidatos
     // OPTIMIZADO: Carga todas las relaciones en batch en lugar de N+1 queries
     // OPTIMIZADO EGRESS: Selecciona solo campos necesarios, attachments/comments se cargan lazy
-    async getAll(includeArchived: boolean = false, includeRelations: boolean = true): Promise<Candidate[]> {
+    async getAll(includeArchived: boolean = false, includeRelations: boolean = true, abortSignal?: AbortSignal): Promise<Candidate[]> {
         const standardProcessIds = await fetchStandardProcessIds();
         if (standardProcessIds !== null && standardProcessIds.length === 0) return [];
 
@@ -318,6 +318,7 @@ export const candidatesApi = {
 
             query = applyStandardProcessFilter(query, standardProcessIds) ?? query;
 
+            if (abortSignal) query = query.abortSignal(abortSignal);
             if (!includeArchived) {
                 query = query.eq('archived', false);
             }
@@ -326,35 +327,34 @@ export const candidatesApi = {
         if (error) throw error;
         if (!data || data.length === 0) return [];
 
-        // Si no se solicitan relaciones, retornar solo datos básicos (reduce egress significativamente)
         if (!includeRelations) {
             return data.map(dbCandidate => mapListCandidate(dbCandidate));
         }
 
-        // Obtener todos los IDs de candidatos
         const candidateIds = data.map(c => c.id);
 
-        // Cargar relaciones en batch (solo campos necesarios, sin attachments pesados)
-        const [historyResult, postItsResult, commentsResult] = await Promise.all([
-            supabase
-                .from('candidate_history')
-                .select('id, candidate_id, stage_id, moved_at, moved_by')
-                .in('candidate_id', candidateIds)
-                .eq('app_name', APP_NAME) // Filtrar solo historial de esta app
-                .order('moved_at', { ascending: true }),
-            supabase
-                .from('post_its')
-                .select('id, candidate_id, text, color, created_by, created_at')
-                .in('candidate_id', candidateIds)
-                .eq('app_name', APP_NAME) // Filtrar solo post-its de esta app
-                .order('created_at', { ascending: false }),
-            supabase
-                .from('comments')
-                .select('id, candidate_id, text, user_id, created_at')
-                .in('candidate_id', candidateIds)
-                .eq('app_name', APP_NAME) // Filtrar solo comentarios de esta app
-                .order('created_at', { ascending: false }),
-        ]);
+        const historyQuery = supabase
+            .from('candidate_history')
+            .select('id, candidate_id, stage_id, moved_at, moved_by')
+            .in('candidate_id', candidateIds)
+            .eq('app_name', APP_NAME)
+            .order('moved_at', { ascending: true });
+        const postItsQuery = supabase
+            .from('post_its')
+            .select('id, candidate_id, text, color, created_by, created_at')
+            .in('candidate_id', candidateIds)
+            .eq('app_name', APP_NAME)
+            .order('created_at', { ascending: false });
+        const commentsQuery = supabase
+            .from('comments')
+            .select('id, candidate_id, text, user_id, created_at')
+            .in('candidate_id', candidateIds)
+            .eq('app_name', APP_NAME)
+            .order('created_at', { ascending: false });
+
+        const historyResult = await (abortSignal ? historyQuery.abortSignal(abortSignal) : historyQuery);
+        const postItsResult = await (abortSignal ? postItsQuery.abortSignal(abortSignal) : postItsQuery);
+        const commentsResult = await (abortSignal ? commentsQuery.abortSignal(abortSignal) : commentsQuery);
 
         // NO cargar attachments aquí - se cargan lazy cuando se necesitan (reduce egress significativamente)
         // Attachments se pueden cargar con getById() o con un método específico getAttachments()

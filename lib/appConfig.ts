@@ -1,5 +1,4 @@
-// Configuración de la aplicación para aislamiento multi-tenant
-// Este archivo define el nombre de la aplicación que se usa para filtrar datos en la base de datos
-
-export const APP_NAME = 'Opalo ATS';
+// Nombre de tenant en la BD compartida (Opalo ATS / Opalopy / ATS Pro).
+// En Easypanel: VITE_APP_NAME=Opalo ATS o VITE_APP_NAME=Opalopy según el deploy.
+export const APP_NAME = import.meta.env.VITE_APP_NAME?.trim() || 'Opalo ATS';
 

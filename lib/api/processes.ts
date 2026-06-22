@@ -1240,5 +1240,15 @@ export const processesApi = {
         ]);
         return [...regular, ...bulk];
     },
+
+    /** Carga regular y masivos en serie (menor pico de I/O en arranque). */
+    async getAllIncludingBulkSequential(includeAttachments: boolean = false): Promise<Process[]> {
+        const regular = await this.getAll(includeAttachments);
+        const bulk = await this.getAllBulkProcesses().catch(err => {
+            console.warn('⚠️ No se pudieron cargar procesos masivos:', err);
+            return [] as Process[];
+        });
+        return [...regular, ...bulk];
+    },
 };
 

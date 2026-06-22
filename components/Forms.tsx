@@ -32,6 +32,14 @@ export const Forms: React.FC = () => {
     const [bulkProcesses, setBulkProcesses] = useState<Process[]>([]);
 
     useEffect(() => {
+        if (state.formIntegrations.length === 0) {
+            void actions.loadFormIntegrations();
+        }
+    // Solo al entrar a Formularios si aún no se cargaron en segundo plano
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
+
+    useEffect(() => {
         const loadBulkProcesses = async () => {
             try {
                 const processes = await processesApi.getAllBulkProcesses();

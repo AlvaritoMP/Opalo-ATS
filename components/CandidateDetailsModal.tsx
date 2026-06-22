@@ -10,6 +10,7 @@ import { SearchableSelect } from './SearchableSelect';
 import { DiscardCandidateModal } from './DiscardCandidateModal';
 import { SendToOpsFlowModal } from './SendToOpsFlowModal';
 import { CandidateTransitRoutes } from './CandidateTransitRoutes';
+import { candidatesApi } from '../lib/api/candidates';
 import JSZip from 'jszip';
 import { saveAs } from 'file-saver';
 
@@ -59,6 +60,17 @@ export const CandidateDetailsModal: React.FC<{ candidate: Candidate, onClose: ()
     
     // Usar useRef para rastrear el último candidato procesado y evitar bucles infinitos
     const lastProcessedCandidateRef = React.useRef<string>('');
+
+    // Cargar relaciones completas al abrir (no dependen de la carga masiva inicial)
+    React.useEffect(() => {
+        let cancelled = false;
+        void candidatesApi.getById(initialCandidate.id).then(full => {
+            if (!cancelled && full) {
+                setEditableCandidate(full);
+            }
+        }).catch(() => {});
+        return () => { cancelled = true; };
+    }, [initialCandidate.id]);
     
     // Marcar como revisado cuando se abre el modal y el candidato está en etapa crítica
     // SOLO si el usuario es cliente (client), no para admin/recruiter

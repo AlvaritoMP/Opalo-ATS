@@ -16,6 +16,7 @@ import {
     touchSessionActivity,
     consumeSessionExpiredNotice,
 } from './lib/sessionActivity';
+import { runWithAbortTimeout, isAbortOrTimeoutError } from './lib/runWithAbortTimeout';
 import { getBulkSelectedProcessId, setBulkSelectedProcessId } from './lib/bulkTableColumns';
 import {
     loadDashboardFilters,
@@ -90,6 +91,7 @@ interface AppActions {
     updateInterviewEvent: (eventData: InterviewEvent) => Promise<void>;
     deleteInterviewEvent: (eventId: string) => Promise<void>;
     refreshInterviewEvents: () => Promise<void>;
+    loadFormIntegrations: () => Promise<void>;
     addPostIt: (candidateId: string, postIt: Omit<PostIt, 'id' | 'createdAt'>) => Promise<void>;
     deletePostIt: (candidateId: string, postItId: string) => Promise<void>;
     addComment: (candidateId: string, comment: Omit<Comment, 'id' | 'createdAt'>) => Promise<void>;
@@ -488,16 +490,18 @@ const App: React.FC = () => {
     // Referencia para evitar mostrar el mensaje de CORS repetidamente
     const lastCorsErrorTime = useRef<number>(0);
     const CORS_ERROR_DEBOUNCE_MS = 5 * 60 * 1000; // 5 minutos
+    const backgroundLoadStartedRef = useRef(false);
+
+    const INITIAL_LOAD_TIMEOUT_MS = 30_000;
+    const BACKGROUND_LOAD_TIMEOUT_MS = 60_000;
 
     useEffect(() => {
         const loadData = async () => {
             try {
-                // Verificar si Supabase está configurado
                 if (!isSupabaseConfigured()) {
                     console.warn('⚠️ Supabase no está configurado. La aplicación funcionará en modo limitado.');
                     console.warn('Por favor, configura VITE_SUPABASE_URL y VITE_SUPABASE_ANON_KEY en .env.local');
                     
-                    // Cargar settings desde localStorage si existen
                     const localSettings = getSettings();
                     setState(s => ({
                         ...s,
@@ -507,58 +511,60 @@ const App: React.FC = () => {
                     return;
                 }
                 
-                debugLog('Loading data from Supabase...');
-                
-                // Cargar datos de Supabase con timeouts y mejor manejo de errores
-                const loadWithEmptyFallback = async <T,>(
-                    apiCall: () => Promise<T>,
-                    emptyFallback: T,
+                debugLog('Loading data from Supabase (phased)...');
+
+                const loadStep = async <T,>(
+                    apiCall: (signal: AbortSignal) => Promise<T>,
                     name: string,
-                    useEmptyFallback: boolean = false
+                    emptyFallback: T,
+                    timeoutMs: number = INITIAL_LOAD_TIMEOUT_MS,
                 ): Promise<T> => {
                     try {
-                        const result = await Promise.race([
-                            apiCall(),
-                            new Promise<T>((_, reject) => 
-                                setTimeout(() => reject(new Error('Timeout')), 30000)
-                            )
-                        ]);
+                        const result = await runWithAbortTimeout(apiCall, timeoutMs);
                         debugLog(`Loaded ${name} from Supabase`);
                         return result;
                     } catch (error) {
                         console.error(`❌ Failed to load ${name} from Supabase:`, error);
-                        if (useEmptyFallback) {
-                            console.warn(`⚠ Using empty array for ${name} instead of fallback data`);
-                            return (Array.isArray(emptyFallback) ? [] : emptyFallback) as T;
+                        if (isAbortOrTimeoutError(error)) {
+                            console.warn(`⚠ ${name}: consulta cancelada por timeout (no queda ejecutándose en BD)`);
                         }
-                        console.warn(`⚠ Using fallback data for ${name}`);
                         return emptyFallback;
                     }
                 };
 
-                // Para procesos, candidatos y usuarios, usar arrays vacíos si falla (no datos de prueba)
-                // Solo settings puede usar fallback porque puede venir de localStorage
-                // Cargar candidatos activos y descartados (aunque estén archivados) para el Dashboard
-                const [processes, activeCandidates, users, interviewEvents, settings] = await Promise.all([
-                    loadWithEmptyFallback(() => processesApi.getAllIncludingBulk(false), initialProcesses, 'processes', true), // regulares + masivos
-                    loadWithEmptyFallback(() => candidatesApi.getAll(false, true), initialCandidates, 'candidates', true), // false = no archived, true = include relations (post-its, comments, history)
-                    loadWithEmptyFallback(() => usersApi.getAll(), initialUsers, 'users', true),
-                    loadWithEmptyFallback(() => interviewsApi.getAll(), initialInterviewEvents, 'interviewEvents', true),
-                    loadWithEmptyFallback(() => settingsApi.get(), getSettings() || initialSettings, 'settings', false),
-                ]);
-                
-                // Cargar candidatos descartados (aunque estén archivados) para el conteo del Dashboard
-                let discardedCandidates: Candidate[] = [];
-                try {
-                    discardedCandidates = await candidatesApi.getDiscardedArchived();
-                } catch (error) {
-                    console.warn('Error cargando candidatos descartados:', error);
-                }
-                
-                // Combinar candidatos activos y descartados, evitando duplicados
-                const activeIds = new Set(activeCandidates.map(c => c.id));
-                const newDiscarded = discardedCandidates.filter(c => !activeIds.has(c.id));
-                const candidates = [...activeCandidates, ...newDiscarded];
+                const filterByUserClients = (
+                    processes: Process[],
+                    candidates: Candidate[],
+                    currentUser: User | null
+                ) => {
+                    if (!currentUser?.allowedClientIds) {
+                        return { processes, candidates };
+                    }
+                    const allowed = new Set(currentUser.allowedClientIds);
+                    const filteredProcesses = processes.filter(p => p.clientId && allowed.has(p.clientId));
+                    const allowedProcessIds = new Set(filteredProcesses.map(p => p.id));
+                    const filteredCandidates = candidates.filter(c => allowedProcessIds.has(c.processId));
+                    return { processes: filteredProcesses, candidates: filteredCandidates };
+                };
+
+                // Fase 1 — una consulta a la vez (evita picos de I/O al arranque)
+                const settings = await loadStep(
+                    () => settingsApi.get(),
+                    'settings',
+                    getSettings() || initialSettings
+                );
+
+                const users = await loadStep(
+                    signal => usersApi.getAll(),
+                    'users',
+                    [] as User[]
+                );
+
+                const processes = await loadStep(
+                    () => processesApi.getAllIncludingBulkSequential(false),
+                    'processes',
+                    [] as Process[]
+                );
 
                 let sessionUserId = getStoredUserId();
                 if (sessionUserId && isSessionExpired()) {
@@ -569,7 +575,6 @@ const App: React.FC = () => {
                 }
 
                 let currentUser: User | null = null;
-                
                 if (sessionUserId) {
                     currentUser = users.find(u => u.id === sessionUserId) || null;
                     if (!currentUser) {
@@ -585,9 +590,6 @@ const App: React.FC = () => {
                     }
                 }
 
-                debugLog('Data loaded successfully');
-                
-                // Inicializar Google Drive si está configurado
                 if (settings?.googleDrive?.connected && settings.googleDrive.accessToken) {
                     googleDriveService.setTokenUpdateCallback(async (accessToken, refreshToken, expiresIn) => {
                         try {
@@ -603,42 +605,55 @@ const App: React.FC = () => {
                             console.error('Error actualizando token en settings:', error);
                         }
                     });
-                    
-                    // Inicializar (puede refrescar el token si está expirado)
                     try {
                         await googleDriveService.initialize(settings.googleDrive);
                     } catch (error: any) {
                         console.error('❌ Error inicializando Google Drive:', error);
-                        // Si falla la inicialización, mostrar mensaje pero no bloquear la app
                         if (error.message?.includes('refresh token')) {
                             console.warn('⚠️ Google Drive requiere reconexión. El usuario deberá reconectar en Settings.');
                         }
                     }
                 }
-                
-                // Filtrar procesos y candidatos según allowedClientIds del usuario
-                let filteredProcesses = processes;
-                let filteredCandidates = candidates;
-                if (currentUser && currentUser.allowedClientIds !== undefined && currentUser.allowedClientIds !== null) {
-                    const allowedClientIdsSet = new Set(currentUser.allowedClientIds);
-                    filteredProcesses = processes.filter(p => p.clientId && allowedClientIdsSet.has(p.clientId));
-                    
-                    const allowedProcessIds = new Set(filteredProcesses.map(p => p.id));
-                    filteredCandidates = candidates.filter(c => allowedProcessIds.has(c.processId));
+
+                // Fase 2 — candidatos sin relaciones (ligero)
+                const activeCandidates = await loadStep(
+                    signal => candidatesApi.getAll(false, false, signal),
+                    'candidates',
+                    [] as Candidate[]
+                );
+
+                let discardedCandidates: Candidate[] = [];
+                try {
+                    discardedCandidates = await candidatesApi.getDiscardedArchived();
+                } catch (error) {
+                    console.warn('Error cargando candidatos descartados:', error);
                 }
-                
+
+                const activeIds = new Set(activeCandidates.map(c => c.id));
+                const candidates = [
+                    ...activeCandidates,
+                    ...discardedCandidates.filter(c => !activeIds.has(c.id)),
+                ];
+
+                const { processes: filteredProcesses, candidates: filteredCandidates } = filterByUserClients(
+                    processes,
+                    candidates,
+                    currentUser
+                );
+
                 const bulkProcessId = currentUser
                     ? getBulkSelectedProcessId(currentUser.id) ?? ''
                     : '';
 
+                // UI usable con datos esenciales (sin form_integrations ni entrevistas aún)
                 setState({
                     processes: filteredProcesses,
                     candidates: filteredCandidates,
                     users,
                     applications: [],
                     settings,
-                    formIntegrations: await loadWithEmptyFallback(() => formIntegrationsApi.getAll(), initialFormIntegrations, 'formIntegrations', true),
-                    interviewEvents,
+                    formIntegrations: [],
+                    interviewEvents: [],
                     currentUser,
                     view: { type: 'dashboard' },
                     lastViewedProcessId: null,
@@ -662,6 +677,59 @@ const App: React.FC = () => {
                         console.warn('Error precargando panel de datos:', err);
                         setState(s => ({ ...s, dashboardCacheLoading: false }));
                     });
+
+                debugLog('Essential data loaded — fetching interviews in background');
+
+                // Fase 3 — entrevistas (ventana acotada, en serie tras candidatos)
+                const interviewEvents = await loadStep(
+                    signal => interviewsApi.getForAppWindow(signal),
+                    'interviewEvents',
+                    [] as InterviewEvent[]
+                );
+                setState(s => ({ ...s, interviewEvents }));
+
+                // Fase 4 — en segundo plano, sin paralelizar con el arranque
+                if (!backgroundLoadStartedRef.current) {
+                    backgroundLoadStartedRef.current = true;
+
+                    void (async () => {
+                        await new Promise(r => setTimeout(r, 600));
+                        try {
+                            const enriched = await runWithAbortTimeout(
+                                signal => candidatesApi.getAll(false, true, signal),
+                                BACKGROUND_LOAD_TIMEOUT_MS
+                            );
+                            setState(s => {
+                                const archived = s.candidates.filter(c => c.archived);
+                                const enrichedIds = new Set(enriched.map(c => c.id));
+                                const preservedArchived = archived.filter(c => !enrichedIds.has(c.id));
+                                let merged = [...enriched, ...preservedArchived];
+                                if (s.currentUser?.allowedClientIds != null) {
+                                    const allowedProcessIds = new Set(s.processes.map(p => p.id));
+                                    merged = merged.filter(c => allowedProcessIds.has(c.processId));
+                                }
+                                return { ...s, candidates: merged };
+                            });
+                            debugLog('Candidate relations loaded in background');
+                        } catch (error) {
+                            console.warn('No se pudieron cargar relaciones de candidatos en segundo plano:', error);
+                        }
+                    })();
+
+                    void (async () => {
+                        await new Promise(r => setTimeout(r, 1200));
+                        try {
+                            const integrations = await runWithAbortTimeout(
+                                signal => formIntegrationsApi.getAll(signal),
+                                INITIAL_LOAD_TIMEOUT_MS
+                            );
+                            setState(s => (s.formIntegrations.length > 0 ? s : { ...s, formIntegrations: integrations }));
+                            debugLog('Form integrations loaded in background');
+                        } catch (error) {
+                            console.warn('No se pudieron cargar integraciones de formularios:', error);
+                        }
+                    })();
+                }
             } catch (error) {
                 console.error('Error loading data:', error);
                 // NO usar datos de prueba como fallback - usar arrays vacíos
@@ -952,7 +1020,7 @@ const App: React.FC = () => {
         },
         reloadProcesses: async () => {
             try {
-                let processes = await processesApi.getAllIncludingBulk();
+                let processes = await processesApi.getAllIncludingBulkSequential();
                 const currentUser = state.currentUser;
                 if (currentUser?.allowedClientIds != null) {
                     const allowed = new Set(currentUser.allowedClientIds);
@@ -1017,76 +1085,36 @@ const App: React.FC = () => {
         },
         reloadCandidates: async () => {
             try {
-                // Cargar relaciones (post-its, comments, history) para que persistan después de recargar
-                const activeCandidates = await candidatesApi.getAll(false, true); // false = no archived, true = include relations
-                
-                // Preservar candidatos archivados existentes en el estado (incluyendo descartados)
+                const activeCandidates = await candidatesApi.getAll(false, false);
+
                 let preservedArchived: Candidate[] = [];
                 setState(s => {
                     const archivedCandidates = s.candidates.filter(c => c.archived === true);
                     const activeIds = new Set(activeCandidates.map(c => c.id));
-                    
-                    // Mantener solo candidatos archivados que no están en los activos (para evitar duplicados)
                     preservedArchived = archivedCandidates.filter(c => !activeIds.has(c.id));
-                    
-                    return { 
-                        ...s, 
-                        candidates: [...activeCandidates, ...preservedArchived]
+                    return {
+                        ...s,
+                        candidates: [...activeCandidates, ...preservedArchived],
                     };
                 });
-                
-                // Verificar y corregir carpetas de Google Drive si está conectado (en background, sin bloquear)
-                const googleDriveConfig = state.settings?.googleDrive;
-                const isGoogleDriveConnected = googleDriveConfig?.connected && googleDriveConfig?.accessToken;
-                if (isGoogleDriveConnected && googleDriveConfig) {
-                    // Ejecutar verificación en background sin bloquear la UI
-                    (async () => {
-                        try {
-                            const { googleDriveService } = await import('./lib/googleDrive');
-                            googleDriveService.initialize(googleDriveConfig);
-                            
-                            // Usar los candidatos combinados (activos + archivados preservados)
-                            const allCandidates = [...activeCandidates, ...preservedArchived];
-                            
-                            // Verificar carpetas de candidatos que tienen proceso con carpeta configurada
-                            for (const candidate of allCandidates) {
-                                if (candidate.googleDriveFolderId) continue;
-                                const process = state.processes.find(p => p.id === candidate.processId);
-                                if (!process?.googleDriveFolderId) continue;
-                                
-                                try {
-                                    const folder = await googleDriveService.getOrCreateCandidateFolder(
-                                        candidate.name,
-                                        process.googleDriveFolderId,
-                                        candidate.googleDriveFolderId
-                                    );
-                                    
-                                    if (folder.id !== candidate.googleDriveFolderId) {
-                                        await candidatesApi.update(candidate.id, {
-                                            ...candidate,
-                                            googleDriveFolderId: folder.id,
-                                            googleDriveFolderName: folder.name,
-                                        }, state.currentUser?.id);
-                                        
-                                        setState(s => ({
-                                            ...s,
-                                            candidates: s.candidates.map(c => 
-                                                c.id === candidate.id 
-                                                    ? { ...c, googleDriveFolderId: folder.id, googleDriveFolderName: folder.name }
-                                                    : c
-                                            )
-                                        }));
-                                    }
-                                } catch (error) {
-                                    console.warn(`Error verificando carpeta para candidato ${candidate.name}:`, error);
-                                }
-                            }
-                        } catch (error) {
-                            console.warn('Error verificando carpetas de Google Drive:', error);
-                            // No mostrar error al usuario, es una verificación en background
-                        }
-                    })();
-                }
+
+                // Relaciones en segundo plano (sin bloquear ni lanzar escrituras masivas a BD)
+                void (async () => {
+                    try {
+                        const enriched = await runWithAbortTimeout(
+                            signal => candidatesApi.getAll(false, true, signal),
+                            BACKGROUND_LOAD_TIMEOUT_MS
+                        );
+                        setState(s => {
+                            const archived = s.candidates.filter(c => c.archived);
+                            const enrichedIds = new Set(enriched.map(c => c.id));
+                            const preserved = archived.filter(c => !enrichedIds.has(c.id));
+                            return { ...s, candidates: [...enriched, ...preserved] };
+                        });
+                    } catch (error) {
+                        console.warn('Error cargando relaciones de candidatos:', error);
+                    }
+                })();
             } catch (error: any) {
                 console.error('Error reloading candidates:', error);
                 
@@ -1581,10 +1609,21 @@ const App: React.FC = () => {
         },
         refreshInterviewEvents: async () => {
             try {
-                const events = await interviewsApi.getAll();
+                const events = await interviewsApi.getForAppWindow();
                 setState(s => ({ ...s, interviewEvents: events }));
             } catch (error) {
                 console.error('Error refreshing interview events:', error);
+            }
+        },
+        loadFormIntegrations: async () => {
+            try {
+                const integrations = await runWithAbortTimeout(
+                    signal => formIntegrationsApi.getAll(signal),
+                    INITIAL_LOAD_TIMEOUT_MS
+                );
+                setState(s => ({ ...s, formIntegrations: integrations }));
+            } catch (error) {
+                console.error('Error loading form integrations:', error);
             }
         },
         addPostIt: async (candidateId, postItData) => {
