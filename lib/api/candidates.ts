@@ -496,26 +496,29 @@ export const candidatesApi = {
         }
 
         const candidateIds = data.map(c => c.id);
-        const [historyResult, postItsResult, commentsResult] = await Promise.all([
-            supabase
-                .from('candidate_history')
-                .select('id, candidate_id, stage_id, moved_at, moved_by')
-                .in('candidate_id', candidateIds)
-                .eq('app_name', APP_NAME)
-                .order('moved_at', { ascending: true }),
-            supabase
-                .from('post_its')
-                .select('id, candidate_id, text, color, created_by, created_at')
-                .in('candidate_id', candidateIds)
-                .eq('app_name', APP_NAME)
-                .order('created_at', { ascending: false }),
-            supabase
-                .from('comments')
-                .select('id, candidate_id, text, user_id, created_at')
-                .in('candidate_id', candidateIds)
-                .eq('app_name', APP_NAME)
-                .order('created_at', { ascending: false }),
-        ]);
+
+        const historyQuery = supabase
+            .from('candidate_history')
+            .select('id, candidate_id, stage_id, moved_at, moved_by')
+            .in('candidate_id', candidateIds)
+            .eq('app_name', APP_NAME)
+            .order('moved_at', { ascending: true });
+        const postItsQuery = supabase
+            .from('post_its')
+            .select('id, candidate_id, text, color, created_by, created_at')
+            .in('candidate_id', candidateIds)
+            .eq('app_name', APP_NAME)
+            .order('created_at', { ascending: false });
+        const commentsQuery = supabase
+            .from('comments')
+            .select('id, candidate_id, text, user_id, created_at')
+            .in('candidate_id', candidateIds)
+            .eq('app_name', APP_NAME)
+            .order('created_at', { ascending: false });
+
+        const historyResult = await (abortSignal ? historyQuery.abortSignal(abortSignal) : historyQuery);
+        const postItsResult = await (abortSignal ? postItsQuery.abortSignal(abortSignal) : postItsQuery);
+        const commentsResult = await (abortSignal ? commentsQuery.abortSignal(abortSignal) : commentsQuery);
 
         const historyByCandidateId = new Map<string, any[]>();
         const postItsByCandidateId = new Map<string, any[]>();

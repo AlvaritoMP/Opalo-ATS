@@ -393,10 +393,8 @@ const Sidebar: React.FC = () => {
                         onClick={async () => {
                             const refreshToastId = actions.showToast('Actualizando datos...', 'loading', 0);
                             try {
-                                await Promise.all([
-                                    actions.reloadProcesses(),
-                                    actions.reloadCandidates()
-                                ]);
+                                await actions.reloadProcesses();
+                                await actions.reloadCandidates();
                                 actions.hideToast(refreshToastId);
                                 actions.showToast('Datos actualizados', 'success', 2000);
                             } catch (error: any) {
@@ -660,23 +658,10 @@ const App: React.FC = () => {
                     lastViewedBulkProcessId: bulkProcessId,
                     dashboardFilters: loadDashboardFilters(currentUser?.id),
                     dashboardCache: null,
-                    dashboardCacheLoading: true,
+                    dashboardCacheLoading: false,
                     loading: false,
                     toasts: [],
                 });
-
-                void fetchDashboardData(filteredProcesses, users, currentUser)
-                    .then(cache => {
-                        setState(s => ({
-                            ...s,
-                            dashboardCache: cache,
-                            dashboardCacheLoading: false,
-                        }));
-                    })
-                    .catch(err => {
-                        console.warn('Error precargando panel de datos:', err);
-                        setState(s => ({ ...s, dashboardCacheLoading: false }));
-                    });
 
                 debugLog('Essential data loaded — fetching interviews in background');
 
