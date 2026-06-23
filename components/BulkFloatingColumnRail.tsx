@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { GripHorizontal, Plus, X } from 'lucide-react';
 import { COMPACT_TD_CLASS, COMPACT_TH_CLASS, getColumnLabel, getColumnWidth } from '../lib/bulkTableColumns';
 
@@ -82,6 +83,12 @@ export const BulkFloatingColumnRail: React.FC<BulkFloatingColumnRailProps> = ({
     const [dragX, setDragX] = useState<number | null>(null);
     const [showAddColumnMenu, setShowAddColumnMenu] = useState(false);
     const addColumnMenuRef = useRef<HTMLDivElement>(null);
+    const addColumnButtonRef = useRef<HTMLButtonElement>(null);
+    const [addColumnMenuPos, setAddColumnMenuPos] = useState<{
+        top: number;
+        left: number;
+        maxHeight: number;
+    } | null>(null);
     const dragStartRef = useRef({ x: 0, offset: 0 });
     const rafRef = useRef<number | null>(null);
     const pendingXRef = useRef<number | null>(null);
@@ -102,12 +109,33 @@ export const BulkFloatingColumnRail: React.FC<BulkFloatingColumnRailProps> = ({
     useEffect(() => {
         if (!showAddColumnMenu) return;
         const onDocClick = (e: MouseEvent) => {
-            if (addColumnMenuRef.current?.contains(e.target as Node)) return;
+            const target = e.target as Node;
+            if (addColumnMenuRef.current?.contains(target)) return;
+            if (addColumnButtonRef.current?.contains(target)) return;
             setShowAddColumnMenu(false);
         };
+        const onScrollOrResize = () => setShowAddColumnMenu(false);
         document.addEventListener('mousedown', onDocClick);
-        return () => document.removeEventListener('mousedown', onDocClick);
+        window.addEventListener('resize', onScrollOrResize);
+        window.addEventListener('scroll', onScrollOrResize, true);
+        return () => {
+            document.removeEventListener('mousedown', onDocClick);
+            window.removeEventListener('resize', onScrollOrResize);
+            window.removeEventListener('scroll', onScrollOrResize, true);
+        };
     }, [showAddColumnMenu]);
+
+    const openAddColumnMenu = useCallback(() => {
+        const btn = addColumnButtonRef.current;
+        if (!btn) return;
+        const rect = btn.getBoundingClientRect();
+        setAddColumnMenuPos({
+            top: rect.bottom + 4,
+            left: rect.left,
+            maxHeight: Math.max(120, window.innerHeight - rect.bottom - 12),
+        });
+        setShowAddColumnMenu(true);
+    }, []);
 
     const totalWidth = useMemo(
         () => columnIds.reduce((sum, id) => sum + getColumnWidth(id, columnWidths), 0),
@@ -286,7 +314,7 @@ export const BulkFloatingColumnRail: React.FC<BulkFloatingColumnRailProps> = ({
                 style={{ height: stickyHeight }}
             >
                 <div
-                    className="absolute top-0 left-0 pointer-events-auto shadow-[2px_0_8px_-2px_rgba(0,0,0,0.14)] border border-gray-200 border-t-0 bg-gray-50 overflow-hidden"
+                    className="absolute top-0 left-0 pointer-events-auto shadow-[2px_0_8px_-2px_rgba(0,0,0,0.14)] border border-gray-200 border-t-0 bg-gray-50 overflow-visible"
                     style={railTransform}
                     onClick={e => e.stopPropagation()}
                 >
@@ -306,21 +334,38 @@ export const BulkFloatingColumnRail: React.FC<BulkFloatingColumnRailProps> = ({
                             Fidelización
                         </span>
                         {onAddColumn && addableColumnIds.length > 0 && (
-                            <div className="relative shrink-0" ref={addColumnMenuRef}>
+                            <div className="relative shrink-0">
                                 <button
+                                    ref={addColumnButtonRef}
                                     type="button"
                                     data-no-drag
                                     onClick={e => {
                                         e.stopPropagation();
-                                        setShowAddColumnMenu(prev => !prev);
+                                        if (showAddColumnMenu) {
+                                            setShowAddColumnMenu(false);
+                                        } else {
+                                            openAddColumnMenu();
+                                        }
                                     }}
                                     className="p-0.5 rounded text-violet-600 hover:text-violet-800 hover:bg-white/80"
                                     title="Añadir columna al panel"
                                 >
                                     <Plus className="w-3.5 h-3.5" />
                                 </button>
-                                {showAddColumnMenu && (
-                                    <div className="absolute left-0 top-full mt-0.5 z-50 min-w-[140px] bg-white border border-gray-200 rounded-md shadow-lg py-1">
+                                {showAddColumnMenu && addColumnMenuPos && createPortal(
+                                    <div
+                                        ref={addColumnMenuRef}
+                                        className="fixed z-[200] min-w-[160px] max-w-[min(280px,calc(100vw-16px))] bg-white border border-gray-200 rounded-md shadow-xl py-1 overflow-y-auto"
+                                        style={{
+                                            top: addColumnMenuPos.top,
+                                            left: addColumnMenuPos.left,
+                                            maxHeight: addColumnMenuPos.maxHeight,
+                                        }}
+                                        onMouseDown={e => e.stopPropagation()}
+                                    >
+                                        <div className="px-2 py-1 text-[9px] font-semibold uppercase tracking-wide text-gray-400 border-b border-gray-100">
+                                            Añadir columna
+                                        </div>
                                         {addableColumnIds.map(colId => (
                                             <button
                                                 key={colId}
@@ -331,12 +376,14 @@ export const BulkFloatingColumnRail: React.FC<BulkFloatingColumnRailProps> = ({
                                                     onAddColumn(colId);
                                                     setShowAddColumnMenu(false);
                                                 }}
-                                                className="w-full text-left px-2 py-1 text-[10px] text-gray-700 hover:bg-violet-50"
+                                                className="w-full text-left px-2.5 py-1.5 text-[11px] text-gray-700 hover:bg-violet-50 truncate"
+                                                title={getColumnLabel(colId, customColumns)}
                                             >
                                                 {getColumnLabel(colId, customColumns)}
                                             </button>
                                         ))}
-                                    </div>
+                                    </div>,
+                                    document.body
                                 )}
                             </div>
                         )}
@@ -358,7 +405,7 @@ export const BulkFloatingColumnRail: React.FC<BulkFloatingColumnRailProps> = ({
 
                     {/* Encabezados de columna (también arrastrables) */}
                     <div
-                        className={`flex items-stretch border-b border-gray-200 select-none touch-none ${dragSurfaceClass}`}
+                        className={`flex items-stretch border-b border-gray-200 select-none touch-none overflow-hidden ${dragSurfaceClass}`}
                         style={{ height: columnHeaderHeight, minHeight: columnHeaderHeight }}
                         onMouseDown={handleDragMouseDown}
                         onTouchStart={e => {
@@ -421,7 +468,7 @@ export const BulkFloatingColumnRail: React.FC<BulkFloatingColumnRailProps> = ({
                         {columnIds.map(colId => (
                             <div
                                 key={`${rowKey}-${colId}`}
-                                className={`${COMPACT_TD_CLASS} shrink-0 overflow-hidden border-r border-gray-100 last:border-r-0 bg-inherit pointer-events-auto hover:bg-gray-50`}
+                                className={`${COMPACT_TD_CLASS} shrink-0 overflow-visible border-r border-gray-100 last:border-r-0 bg-inherit pointer-events-auto`}
                                 style={{
                                     width: getColumnWidth(colId, columnWidths),
                                     minWidth: getColumnWidth(colId, columnWidths),

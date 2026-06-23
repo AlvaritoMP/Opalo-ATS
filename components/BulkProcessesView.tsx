@@ -28,7 +28,6 @@ import {
 } from '../lib/trackingScopeConfig';
 import {
     DEFAULT_FLOATING_COLUMN_IDS,
-    ELIGIBLE_FLOATING_RAIL_COLUMN_IDS,
     excludeFloatingColumnsFromVisible,
     ensureFloatingColumnsHidden,
     isFloatingColumnRailEnabled,
@@ -1111,8 +1110,8 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
     }, [columnOrder, hiddenColumns, customColumns, process?.bulkConfig, floatingRailVisible, floatingRailColumnIds]);
 
     const addableFloatingColumnIds = useMemo(
-        () => ELIGIBLE_FLOATING_RAIL_COLUMN_IDS.filter(id => !floatingRailColumnIds.includes(id)),
-        [floatingRailColumnIds]
+        () => columnConfigIds.filter(id => !floatingRailColumnIds.includes(id)),
+        [columnConfigIds, floatingRailColumnIds]
     );
 
     const scoreIaColumnVisible = useMemo(
@@ -4222,64 +4221,316 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
             if (!candidate) return null;
             const optimistic = optimisticUpdates.get(candidateId);
             const displayCandidate = optimistic ? { ...candidate, ...optimistic } : candidate;
-            const scope = columnIdToTrackingScope(colId);
-            if (!scope) return <span className="text-gray-400">—</span>;
-            const channel = columnIdToScopedChannel(colId, scope) ?? columnIdToAttemptChannel(colId);
-            if (!channel) return <span className="text-gray-400">—</span>;
-            const summaryKey = summaryKeyForScope(scope, channel);
-            const summary = displayCandidate[summaryKey] ?? {
-                status: 'por_contactar' as const,
-                attemptCount: 0,
-            };
             const displayEmail = getDisplayEmail(displayCandidate.email);
-            const contactAddress =
-                channel === 'email' ? displayEmail || undefined : displayCandidate.phone;
-            const contactLock =
-                scope === 'contact' ? resolveCandidateContactLock(displayCandidate) : null;
-            const isContactLocked =
-                scope === 'contact' &&
-                isContactLockedForUser(contactLock, state.currentUser?.id);
-            const onSummary =
-                scope === 'fidelization' ? handleFidelizSummaryChange : handleContactSummaryChange;
-            const onReset = scope === 'fidelization' ? handleFidelizReset : handleContactReset;
+            const displaySource = resolveStandardFieldValue('source', candidate.id, displayCandidate, columnValues, customColumns);
+            const displayProvince = resolveStandardFieldValue('province', candidate.id, displayCandidate, columnValues, customColumns);
+            const displayDistrict = resolveStandardFieldValue('district', candidate.id, displayCandidate, columnValues, customColumns);
 
-            return (
-                <BulkContactStatusCell
-                    channel={channel}
-                    candidateId={displayCandidate.id}
-                    candidateName={displayCandidate.name}
-                    processId={process.id}
-                    contactAddress={contactAddress}
-                    summary={summary}
-                    userId={state.currentUser?.id}
-                    userName={state.currentUser?.name || state.currentUser?.email}
-                    contactLock={contactLock}
-                    isContactLocked={isContactLocked}
-                    trackingScope={scope}
-                    onLockBlocked={msg => actions.showToast(msg, 'info', 5000)}
-                    onSummaryChange={(s, actionType, ch) =>
-                        onSummary(displayCandidate.id, displayCandidate.name, s, actionType, ch)
+            const trackingScope = columnIdToTrackingScope(colId);
+            if (trackingScope) {
+                const channel = columnIdToScopedChannel(colId, trackingScope) ?? columnIdToAttemptChannel(colId);
+                if (channel) {
+                    const summaryKey = summaryKeyForScope(trackingScope, channel);
+                    const summary = displayCandidate[summaryKey] ?? {
+                        status: 'por_contactar' as const,
+                        attemptCount: 0,
+                    };
+                    const contactAddress =
+                        channel === 'email' ? displayEmail || undefined : displayCandidate.phone;
+                    const contactLock =
+                        trackingScope === 'contact' ? resolveCandidateContactLock(displayCandidate) : null;
+                    const isContactLocked =
+                        trackingScope === 'contact' &&
+                        isContactLockedForUser(contactLock, state.currentUser?.id);
+                    const onSummary =
+                        trackingScope === 'fidelization' ? handleFidelizSummaryChange : handleContactSummaryChange;
+                    const onReset =
+                        trackingScope === 'fidelization' ? handleFidelizReset : handleContactReset;
+
+                    return (
+                        <BulkContactStatusCell
+                            channel={channel}
+                            candidateId={displayCandidate.id}
+                            candidateName={displayCandidate.name}
+                            processId={process.id}
+                            contactAddress={contactAddress}
+                            summary={summary}
+                            userId={state.currentUser?.id}
+                            userName={state.currentUser?.name || state.currentUser?.email}
+                            contactLock={contactLock}
+                            isContactLocked={isContactLocked}
+                            trackingScope={trackingScope}
+                            onLockBlocked={msg => actions.showToast(msg, 'info', 5000)}
+                            onSummaryChange={(s, actionType, ch) =>
+                                onSummary(displayCandidate.id, displayCandidate.name, s, actionType, ch)
+                            }
+                            onResetChannel={result =>
+                                onReset(displayCandidate.id, displayCandidate.name, channel, result)
+                            }
+                            contactTemplates={contactMessageTemplates}
+                            processTitle={process.title}
+                            onNotify={(msg, type) => actions.showToast(msg, type ?? 'success', 4000)}
+                        />
+                    );
+                }
+            }
+
+            if (colId.startsWith('custom_')) {
+                const customColId = colId.replace('custom_', '');
+                const col = customColumns.find(c => c.id === customColId);
+                if (!col) return <span className="text-gray-400">—</span>;
+                const fieldKey = `custom_${col.id}`;
+                const value = getColumnValue(candidate.id, col.id, displayCandidate);
+                const isEditing = editingCell?.candidateId === candidate.id && editingCell?.field === fieldKey;
+
+                if (col.type === 'route') {
+                    const routeUrl = buildRouteColumnLink(displayCandidate, col, customColumns, columnValues);
+                    return (
+                        <BulkRouteCell
+                            url={routeUrl}
+                            missingDestination={!col.routeDestination?.trim()}
+                            missingOrigin={!routeUrl && !!col.routeDestination?.trim()}
+                            onCopy={(url) => {
+                                void navigator.clipboard.writeText(url);
+                                actions.showToast('Enlace copiado', 'success', 2000);
+                            }}
+                        />
+                    );
+                }
+
+                if (col.type === 'route_cost') {
+                    const cellKey = routeCostCellKey(candidate.id, col.id);
+                    const routeRequest = buildRouteCostRequest(displayCandidate, col, customColumns, columnValues);
+                    const parsed = parseRouteCostCellValue(value);
+                    const hasValue = parsed.total != null;
+                    return (
+                        <BulkRouteCostCell
+                            value={parsed.total}
+                            loading={routeCostLoadingCells.has(cellKey)}
+                            error={routeCostErrors[cellKey]}
+                            missingSourceRoute={!col.sourceRouteColumnId}
+                            missingOrigin={!routeRequest}
+                            breakdownTitle={parsed.tooltip || undefined}
+                            onCalculate={
+                                routeRequest && !hasValue
+                                    ? () => void handleCalculateRouteCost(candidate.id, col, displayCandidate)
+                                    : undefined
+                            }
+                            onRecalculate={
+                                routeRequest && hasValue
+                                    ? () => void handleCalculateRouteCost(candidate.id, col, displayCandidate, { forceRecalculate: true })
+                                    : undefined
+                            }
+                        />
+                    );
+                }
+
+                if (isEditing) {
+                    if (col.type === 'checkbox') {
+                        return (
+                            <select
+                                defaultValue={editingCell!.initialValue}
+                                autoFocus
+                                onChange={e => handleSaveEdit(candidate.id, fieldKey, e.target.value)}
+                                className="w-full px-2 py-1 text-xs border border-primary-500 rounded focus:ring-1 focus:ring-primary-500"
+                                onClick={e => e.stopPropagation()}
+                            >
+                                <option value="">-</option>
+                                <option value="true">Sí</option>
+                                <option value="false">No</option>
+                            </select>
+                        );
                     }
-                    onResetChannel={result =>
-                        onReset(displayCandidate.id, displayCandidate.name, channel, result)
+                    if (col.type === 'select' && col.options?.length) {
+                        return (
+                            <select
+                                defaultValue={editingCell!.initialValue}
+                                autoFocus
+                                onChange={e => handleSaveEdit(candidate.id, fieldKey, e.target.value)}
+                                className="w-full px-2 py-1 text-xs border border-primary-500 rounded focus:ring-1 focus:ring-primary-500"
+                                onClick={e => e.stopPropagation()}
+                            >
+                                <option value="">-</option>
+                                {col.options.map(opt => <option key={opt} value={opt}>{opt}</option>)}
+                            </select>
+                        );
                     }
-                    contactTemplates={contactMessageTemplates}
-                    processTitle={process.title}
-                    onNotify={(msg, type) => actions.showToast(msg, type ?? 'success', 4000)}
-                />
-            );
+                    return (
+                        <BulkTableEditInput
+                            type={col.type === 'number' ? 'number' : 'text'}
+                            initialValue={editingCell!.initialValue}
+                            placeholder={col.type === 'date' ? 'DD/MM/AAAA' : '-'}
+                            className="w-full px-2 py-1 text-xs border border-primary-500 rounded focus:ring-1 focus:ring-primary-500"
+                            onSave={v => handleSaveEdit(candidate.id, fieldKey, v)}
+                            onCancel={handleCancelEdit}
+                        />
+                    );
+                }
+
+                return (
+                    <span
+                        className="text-gray-700 hover:bg-gray-50 px-1 py-0.5 rounded cursor-pointer inline-block min-w-[2rem] max-w-full truncate"
+                        onDoubleClick={(e) => { e.stopPropagation(); handleStartEdit(candidate.id, fieldKey, value); }}
+                        title="Doble clic para editar"
+                    >
+                        {formatCustomCellDisplay(value, col)}
+                    </span>
+                );
+            }
+
+            if (colId === 'name') {
+                return (
+                    <span
+                        className="truncate text-primary-800"
+                        onDoubleClick={(e) => { e.stopPropagation(); handleStartEdit(candidate.id, 'name', displayCandidate.name); }}
+                        title="Doble clic para editar"
+                    >
+                        {displayCandidate.name}
+                    </span>
+                );
+            }
+            if (colId === 'dni') {
+                return (
+                    <span className="text-gray-600 truncate" onDoubleClick={() => handleStartEdit(candidate.id, 'dni', displayCandidate.dni || '')} title="Doble clic para editar">
+                        {displayCandidate.dni || '-'}
+                    </span>
+                );
+            }
+            if (colId === 'email') {
+                if (editingCell?.candidateId === candidate.id && editingCell?.field === 'email') {
+                    return (
+                        <BulkTableEditInput
+                            type="email"
+                            initialValue={editingCell.initialValue}
+                            className="w-full px-2 py-1 text-xs border border-primary-500 rounded"
+                            onSave={v => handleSaveEdit(candidate.id, 'email', v)}
+                            onCancel={handleCancelEdit}
+                        />
+                    );
+                }
+                return displayEmail ? (
+                    <a href={`mailto:${displayEmail}`} onClick={(e) => e.stopPropagation()} className="text-blue-600 hover:underline truncate block">{displayEmail}</a>
+                ) : (
+                    <span className="text-gray-400">N/A</span>
+                );
+            }
+            if (colId === 'phone') {
+                return (
+                    <span className="truncate" onDoubleClick={() => handleStartEdit(candidate.id, 'phone', displayCandidate.phone || '')} title="Doble clic para editar">
+                        {displayCandidate.phone || 'N/A'}
+                    </span>
+                );
+            }
+            if (colId === 'scoreIa') {
+                return displayCandidate.scoreIa !== undefined ? (
+                    <span className={`font-semibold ${displayCandidate.scoreIa >= 70 ? 'text-green-600' : displayCandidate.scoreIa >= 50 ? 'text-yellow-600' : 'text-red-600'}`}>
+                        {displayCandidate.scoreIa}
+                    </span>
+                ) : (
+                    <span className="text-gray-400">-</span>
+                );
+            }
+            if (colId === 'profileMatch') {
+                const matchScore = profileMatchScores.scores.get(candidate.id);
+                return matchScore !== undefined ? (
+                    <span className="inline-flex items-center justify-center min-w-[2.5rem] px-1 py-0.5 rounded font-semibold text-xs" style={getProfileMatchGradientStyle(matchScore)}>
+                        {matchScore}%
+                    </span>
+                ) : (
+                    <span className="text-gray-400">-</span>
+                );
+            }
+            if (colId === 'stage') {
+                const currentStage = process.stages.find(s => s.id === displayCandidate.stageId);
+                const stageColorClass = getStageSelectClass(currentStage?.color);
+                return (
+                    <select
+                        value={displayCandidate.stageId}
+                        onChange={(e) => updateCandidateStatus(candidate.id, { stageId: e.target.value }, candidate.stageId)}
+                        onClick={(e) => e.stopPropagation()}
+                        onMouseDown={(e) => e.stopPropagation()}
+                        className={`text-xs border rounded px-1 py-0.5 focus:ring-1 focus:ring-primary-500 min-w-[80px] max-w-full cursor-pointer font-medium ${stageColorClass}`}
+                    >
+                        {process.stages.map(s => (
+                            <option key={s.id} value={s.id}>{s.name}</option>
+                        ))}
+                    </select>
+                );
+            }
+            if (colId === 'source') {
+                return (
+                    <span className="truncate" onDoubleClick={() => handleStartEdit(candidate.id, 'source', displaySource)} title="Doble clic para editar">
+                        {displaySource || '-'}
+                    </span>
+                );
+            }
+            if (colId === 'province') {
+                return (
+                    <span className="truncate" onDoubleClick={() => handleStartEdit(candidate.id, 'province', displayProvince)} title="Doble clic para editar">
+                        {displayProvince || '-'}
+                    </span>
+                );
+            }
+            if (colId === 'district') {
+                return (
+                    <span className="truncate" onDoubleClick={() => handleStartEdit(candidate.id, 'district', displayDistrict)} title="Doble clic para editar">
+                        {displayDistrict || '-'}
+                    </span>
+                );
+            }
+            if (colId === 'createdAt') {
+                return (
+                    <span className="text-xs text-gray-700">{formatBulkDateTime(displayCandidate.createdAt)}</span>
+                );
+            }
+            if (colId === CONTACT_LAST_USER_COLUMN_ID) {
+                const latestContact = getLatestContactActorFromCandidate(displayCandidate);
+                return (
+                    <span className="truncate block max-w-full text-gray-800" title={formatLatestContactActorTooltip(latestContact)}>
+                        {formatLatestContactActorDisplay(latestContact)}
+                    </span>
+                );
+            }
+            if (colId === HIRED_STAGE_USER_COLUMN_ID) {
+                const hiredActor = hiringStageActors[candidate.id];
+                return (
+                    <span className="truncate block max-w-full text-gray-800" title={formatHiredStageActorTooltip(hiredActor)}>
+                        {formatHiredStageActorDisplay(hiredActor)}
+                    </span>
+                );
+            }
+
+            const fallback = readCandidateFieldValue(candidate.id, colId);
+            if (fallback) {
+                return <span className="truncate text-gray-700">{fallback}</span>;
+            }
+            return <span className="text-gray-400">—</span>;
         },
         [
             process,
             displayCandidates,
             optimisticUpdates,
+            columnValues,
+            customColumns,
+            editingCell,
             state.currentUser,
             contactMessageTemplates,
+            profileMatchScores,
+            hiringStageActors,
+            routeCostLoadingCells,
+            routeCostErrors,
             actions,
             handleContactSummaryChange,
             handleFidelizSummaryChange,
             handleContactReset,
             handleFidelizReset,
+            handleSaveEdit,
+            handleCancelEdit,
+            handleStartEdit,
+            handleCalculateRouteCost,
+            getColumnValue,
+            readCandidateFieldValue,
+            updateCandidateStatus,
         ]
     );
 

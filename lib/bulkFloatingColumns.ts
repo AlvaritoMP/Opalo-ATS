@@ -1,14 +1,7 @@
 import type { BulkProcessConfig } from '../types';
-import { CONTACT_COLUMN_IDS } from './contactChannelConfig';
 import { DEFAULT_FLOATING_COLUMN_IDS, FIDELIZ_COLUMN_IDS } from './trackingScopeConfig';
 
 export { DEFAULT_FLOATING_COLUMN_IDS, FIDELIZ_COLUMN_IDS };
-
-/** Columnas de contacto/fidelización que pueden añadirse al panel flotante */
-export const ELIGIBLE_FLOATING_RAIL_COLUMN_IDS = [
-    ...FIDELIZ_COLUMN_IDS,
-    ...CONTACT_COLUMN_IDS,
-];
 
 export function resolveFloatingColumnIds(bulkConfig?: BulkProcessConfig): string[] {
     const fromConfig = bulkConfig?.floatingColumnRail?.columnIds;
