@@ -1,74 +1,120 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { GripVertical, X, ChevronLeft, ChevronRight } from 'lucide-react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { COMPACT_TD_CLASS, COMPACT_TH_CLASS, getColumnLabel, getColumnWidth } from '../lib/bulkTableColumns';
 
 export interface BulkFloatingColumnRailProps {
     columnIds: string[];
     customColumns: import('../types').CustomColumn[];
     columnWidths?: Record<string, number>;
-    /** Filas visibles (mismo orden que la tabla principal) */
     rowKeys: string[];
-    rowHeight?: number;
-    headerHeight?: number;
+    selectedRowIds?: Set<string>;
     offsetX: number;
     onOffsetXChange: (offsetX: number) => void;
-    /** Persistir posición al soltar el arrastre (evita saturar la API) */
     onOffsetXCommit?: (offsetX: number) => void;
-    onClose?: () => void;
     renderCell: (colId: string, rowKey: string, rowIndex: number) => React.ReactNode;
     renderHeader?: (colId: string) => React.ReactNode;
     scrollContainerRef: React.RefObject<HTMLElement | null>;
-    title?: string;
 }
 
-const RAIL_MIN_LEFT = 40;
-const DRAG_HANDLE_WIDTH = 28;
+const GRIP_WIDTH = 6;
+const RAIL_MIN_LEFT = 0;
+
+interface RowMetric {
+    top: number;
+    height: number;
+}
+
+function measureTableLayout(
+    container: HTMLElement,
+    rowKeys: string[]
+): { headerHeight: number; rowMetrics: Map<string, RowMetric>; contentHeight: number } {
+    const thead = container.querySelector('thead');
+    const headerHeight = thead?.getBoundingClientRect().height ?? 52;
+    const containerRect = container.getBoundingClientRect();
+    const scrollTop = container.scrollTop;
+
+    const rowMetrics = new Map<string, RowMetric>();
+    for (const id of rowKeys) {
+        const tr = container.querySelector(`tr[data-bulk-candidate-row="${CSS.escape(id)}"]`);
+        if (!tr) continue;
+        const rect = tr.getBoundingClientRect();
+        rowMetrics.set(id, {
+            top: rect.top - containerRect.top + scrollTop,
+            height: rect.height,
+        });
+    }
+
+    return {
+        headerHeight,
+        rowMetrics,
+        contentHeight: container.scrollHeight,
+    };
+}
 
 export const BulkFloatingColumnRail: React.FC<BulkFloatingColumnRailProps> = ({
     columnIds,
     customColumns,
     columnWidths,
     rowKeys,
-    rowHeight = 28,
-    headerHeight = 52,
+    selectedRowIds,
     offsetX,
     onOffsetXChange,
     onOffsetXCommit,
-    onClose,
     renderCell,
     renderHeader,
     scrollContainerRef,
-    title = 'Columnas flotantes',
 }) => {
-    const railRef = useRef<HTMLDivElement>(null);
     const liveOffsetRef = useRef(offsetX);
-    const [scrollTop, setScrollTop] = useState(0);
     const [isDragging, setIsDragging] = useState(false);
     const dragStartRef = useRef({ x: 0, offset: 0 });
+    const [headerHeight, setHeaderHeight] = useState(52);
+    const [rowMetrics, setRowMetrics] = useState<Map<string, RowMetric>>(new Map());
+    const [contentHeight, setContentHeight] = useState(0);
 
     useEffect(() => {
         liveOffsetRef.current = offsetX;
     }, [offsetX]);
 
-    const totalWidth = useMemo(() => {
-        return columnIds.reduce((sum, id) => sum + getColumnWidth(id, columnWidths), 0) + DRAG_HANDLE_WIDTH;
-    }, [columnIds, columnWidths]);
+    const columnsWidth = useMemo(
+        () => columnIds.reduce((sum, id) => sum + getColumnWidth(id, columnWidths), 0),
+        [columnIds, columnWidths]
+    );
+    const totalWidth = columnsWidth + GRIP_WIDTH;
 
-    useEffect(() => {
-        const el = scrollContainerRef.current;
-        if (!el) return;
+    const remeasure = useCallback(() => {
+        const container = scrollContainerRef.current;
+        if (!container) return;
+        const layout = measureTableLayout(container, rowKeys);
+        setHeaderHeight(layout.headerHeight);
+        setRowMetrics(layout.rowMetrics);
+        setContentHeight(layout.contentHeight);
+    }, [scrollContainerRef, rowKeys]);
 
-        const onScroll = () => setScrollTop(el.scrollTop);
-        onScroll();
-        el.addEventListener('scroll', onScroll, { passive: true });
-        return () => el.removeEventListener('scroll', onScroll);
-    }, [scrollContainerRef]);
+    useLayoutEffect(() => {
+        remeasure();
+        const container = scrollContainerRef.current;
+        if (!container) return;
+
+        const ro = new ResizeObserver(() => remeasure());
+        ro.observe(container);
+        const table = container.querySelector('table');
+        if (table) ro.observe(table);
+
+        const mo = new MutationObserver(() => remeasure());
+        mo.observe(container, { childList: true, subtree: true, attributes: true, attributeFilter: ['class', 'style'] });
+
+        window.addEventListener('resize', remeasure);
+        return () => {
+            ro.disconnect();
+            mo.disconnect();
+            window.removeEventListener('resize', remeasure);
+        };
+    }, [remeasure, rowKeys.join(',')]);
 
     const clampOffset = useCallback(
         (next: number) => {
             const container = scrollContainerRef.current;
             if (!container) return Math.max(RAIL_MIN_LEFT, next);
-            const maxLeft = Math.max(RAIL_MIN_LEFT, container.clientWidth - totalWidth - 8);
+            const maxLeft = Math.max(RAIL_MIN_LEFT, container.clientWidth - totalWidth);
             return Math.min(maxLeft, Math.max(RAIL_MIN_LEFT, next));
         },
         [scrollContainerRef, totalWidth]
@@ -76,6 +122,7 @@ export const BulkFloatingColumnRail: React.FC<BulkFloatingColumnRailProps> = ({
 
     const handleDragStart = (e: React.MouseEvent) => {
         e.preventDefault();
+        e.stopPropagation();
         setIsDragging(true);
         dragStartRef.current = { x: e.clientX, offset: offsetX };
     };
@@ -92,6 +139,7 @@ export const BulkFloatingColumnRail: React.FC<BulkFloatingColumnRailProps> = ({
         const onUp = () => {
             setIsDragging(false);
             onOffsetXCommit?.(liveOffsetRef.current);
+            requestAnimationFrame(remeasure);
         };
 
         document.addEventListener('mousemove', onMove);
@@ -100,118 +148,103 @@ export const BulkFloatingColumnRail: React.FC<BulkFloatingColumnRailProps> = ({
             document.removeEventListener('mousemove', onMove);
             document.removeEventListener('mouseup', onUp);
         };
-    }, [isDragging, onOffsetXChange, onOffsetXCommit, clampOffset]);
+    }, [isDragging, onOffsetXChange, onOffsetXCommit, clampOffset, remeasure]);
 
-    const nudge = (delta: number) => {
-        const next = clampOffset(offsetX + delta);
-        onOffsetXChange(next);
-        onOffsetXCommit?.(next);
-    };
+    if (columnIds.length === 0 || rowKeys.length === 0) return null;
 
-    if (columnIds.length === 0) return null;
+    const headerCells = (
+        <>
+            <div
+                role="separator"
+                aria-orientation="vertical"
+                aria-label="Arrastrar columnas de fidelización"
+                onMouseDown={handleDragStart}
+                className={`shrink-0 border-r border-gray-200 bg-gray-100 hover:bg-primary-100 active:bg-primary-200 ${
+                    isDragging ? 'bg-primary-200 cursor-grabbing' : 'cursor-grab'
+                }`}
+                style={{ width: GRIP_WIDTH }}
+            />
+            {columnIds.map(colId => (
+                <div
+                    key={colId}
+                    className={`${COMPACT_TH_CLASS} bg-gray-50 border-r border-gray-200 last:border-r-0`}
+                    style={{
+                        width: getColumnWidth(colId, columnWidths),
+                        minWidth: getColumnWidth(colId, columnWidths),
+                    }}
+                >
+                    {renderHeader ? renderHeader(colId) : getColumnLabel(colId, customColumns)}
+                </div>
+            ))}
+        </>
+    );
 
     return (
         <div
-            ref={railRef}
-            className={`absolute z-40 flex shadow-xl border border-violet-200 rounded-lg overflow-hidden bg-white/98 backdrop-blur-sm ${
-                isDragging ? 'ring-2 ring-violet-400 cursor-grabbing' : ''
-            }`}
-            style={{
-                left: offsetX,
-                top: 0,
-                width: totalWidth,
-                maxHeight: '100%',
-                pointerEvents: 'auto',
-            }}
-            onClick={e => e.stopPropagation()}
+            className="absolute left-0 top-0 w-full pointer-events-none z-[25]"
+            style={{ height: contentHeight || '100%' }}
+            aria-hidden={false}
         >
+            {/* Encabezado sticky: tapa los encabezados de la tabla al deslizar */}
             <div
-                className="flex flex-col items-center justify-start bg-violet-50 border-r border-violet-200 shrink-0 select-none"
-                style={{ width: DRAG_HANDLE_WIDTH }}
+                className="sticky top-0 z-[30] pointer-events-none"
+                style={{ height: headerHeight }}
             >
-                <button
-                    type="button"
-                    onMouseDown={handleDragStart}
-                    className="p-1 text-violet-600 hover:bg-violet-100 cursor-grab active:cursor-grabbing"
-                    title="Arrastrar panel sobre la tabla"
+                <div
+                    className="absolute flex items-stretch border-b border-gray-200 bg-gray-50 shadow-[2px_0_6px_-2px_rgba(0,0,0,0.12)] pointer-events-auto"
+                    style={{
+                        left: offsetX,
+                        width: totalWidth,
+                        height: headerHeight,
+                        minHeight: headerHeight,
+                    }}
+                    onClick={e => e.stopPropagation()}
                 >
-                    <GripVertical className="w-4 h-4" />
-                </button>
-                <button
-                    type="button"
-                    onClick={() => nudge(-48)}
-                    className="p-0.5 text-violet-500 hover:bg-violet-100"
-                    title="Mover a la izquierda"
-                >
-                    <ChevronLeft className="w-3.5 h-3.5" />
-                </button>
-                <button
-                    type="button"
-                    onClick={() => nudge(48)}
-                    className="p-0.5 text-violet-500 hover:bg-violet-100"
-                    title="Mover a la derecha"
-                >
-                    <ChevronRight className="w-3.5 h-3.5" />
-                </button>
-                {onClose && (
-                    <button
-                        type="button"
-                        onClick={onClose}
-                        className="p-0.5 mt-1 text-gray-400 hover:text-gray-600 hover:bg-gray-100"
-                        title="Ocultar panel"
-                    >
-                        <X className="w-3.5 h-3.5" />
-                    </button>
-                )}
+                    {headerCells}
+                </div>
             </div>
 
-            <div className="flex flex-col min-w-0 overflow-hidden">
-                <div
-                    className="bg-violet-50 border-b border-violet-200 px-2 py-1 flex items-end gap-0 shrink-0"
-                    style={{ minHeight: headerHeight }}
-                >
-                    <span className="text-[10px] font-semibold text-violet-800 uppercase tracking-wide mr-1 self-center">
-                        {title}
-                    </span>
-                    {columnIds.map(colId => (
-                        <div
-                            key={colId}
-                            className={`${COMPACT_TH_CLASS} text-violet-700 font-semibold`}
-                            style={{
-                                width: getColumnWidth(colId, columnWidths),
-                                minWidth: getColumnWidth(colId, columnWidths),
-                            }}
-                        >
-                            {renderHeader ? renderHeader(colId) : getColumnLabel(colId, customColumns)}
-                        </div>
-                    ))}
-                </div>
+            {/* Filas alineadas con cada candidato de la tabla principal */}
+            {rowKeys.map((rowKey, rowIndex) => {
+                const metric = rowMetrics.get(rowKey);
+                if (!metric) return null;
+                const isSelected = selectedRowIds?.has(rowKey);
 
-                <div className="overflow-hidden flex-1">
-                    <div style={{ transform: `translateY(-${scrollTop}px)` }}>
-                        {rowKeys.map((rowKey, rowIndex) => (
+                return (
+                    <div
+                        key={rowKey}
+                        className={`absolute flex items-stretch border-b border-gray-100 pointer-events-auto ${
+                            isSelected ? 'bg-primary-50' : 'bg-white'
+                        } hover:bg-gray-50`}
+                        style={{
+                            top: metric.top,
+                            left: offsetX,
+                            width: totalWidth,
+                            height: metric.height,
+                            minHeight: metric.height,
+                            boxShadow: '2px 0 6px -2px rgba(0,0,0,0.08)',
+                        }}
+                        onClick={e => e.stopPropagation()}
+                    >
+                        <div
+                            className="shrink-0 border-r border-gray-100 bg-inherit"
+                            style={{ width: GRIP_WIDTH }}
+                        />
+                        {columnIds.map(colId => (
                             <div
-                                key={rowKey}
-                                className="flex border-b border-gray-100 bg-white/95 even:bg-violet-50/20"
-                                style={{ height: rowHeight, minHeight: rowHeight }}
+                                key={`${rowKey}-${colId}`}
+                                className={`${COMPACT_TD_CLASS} shrink-0 overflow-hidden border-r border-gray-100 last:border-r-0 bg-inherit`}
+                                style={{
+                                    width: getColumnWidth(colId, columnWidths),
+                                    minWidth: getColumnWidth(colId, columnWidths),
+                                }}
                             >
-                                {columnIds.map(colId => (
-                                    <div
-                                        key={`${rowKey}-${colId}`}
-                                        className={`${COMPACT_TD_CLASS} shrink-0 overflow-hidden`}
-                                        style={{
-                                            width: getColumnWidth(colId, columnWidths),
-                                            minWidth: getColumnWidth(colId, columnWidths),
-                                        }}
-                                    >
-                                        {renderCell(colId, rowKey, rowIndex)}
-                                    </div>
-                                ))}
+                                {renderCell(colId, rowKey, rowIndex)}
                             </div>
                         ))}
                     </div>
-                </div>
-            </div>
+                );
+            })}
         </div>
     );
 };

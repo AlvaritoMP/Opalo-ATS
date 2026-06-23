@@ -5430,7 +5430,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                     <div className="relative flex-1 min-h-0">
                     <div
                         ref={tableContainerRef}
-                        className="absolute inset-0 overflow-x-auto overflow-y-auto outline-none focus:ring-2 focus:ring-primary-300 focus:ring-inset rounded"
+                        className="absolute inset-0 overflow-x-auto overflow-y-auto outline-none focus:ring-2 focus:ring-primary-300 focus:ring-inset rounded relative"
                         tabIndex={0}
                         onMouseDown={(e) => {
                             if ((e.target as HTMLElement).closest('input, select, textarea, button, a')) return;
@@ -5833,6 +5833,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                                 return (
                                     <tr
                                         key={candidate.id}
+                                        data-bulk-candidate-row={candidate.id}
                                         className={`hover:bg-gray-50 ${isSelected ? 'bg-primary-50' : ''}`}
                                         onDoubleClick={() => openDrawer(candidate, 'details')}
                                     >
@@ -6445,7 +6446,6 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                             })}
                         </tbody>
                         </table>
-                    </div>
 
                     {floatingRailVisible && floatingColumnIds.length > 0 && process && (
                         <BulkFloatingColumnRail
@@ -6453,13 +6453,12 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                             customColumns={customColumns}
                             columnWidths={columnWidths}
                             rowKeys={displayCandidates.map(c => c.id)}
+                            selectedRowIds={selectedIds}
                             offsetX={floatingRailOffsetX}
                             onOffsetXChange={handleFloatingRailOffsetChange}
                             onOffsetXCommit={handleFloatingRailOffsetCommit}
-                            onClose={() => persistFloatingRailLayout({ enabled: false })}
                             renderCell={renderFloatingColumnCell}
                             scrollContainerRef={tableContainerRef}
-                            title="Fidelización"
                         />
                     )}
                     </div>
