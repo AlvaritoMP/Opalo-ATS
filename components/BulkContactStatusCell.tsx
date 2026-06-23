@@ -71,6 +71,8 @@ export interface BulkContactStatusCellProps {
     contactTemplates?: BulkContactMessageTemplate[];
     processTitle?: string;
     onNotify?: (message: string, type?: 'success' | 'error' | 'info') => void;
+    /** contact = contactología principal; fidelization = seguimiento de fidelización */
+    trackingScope?: 'contact' | 'fidelization';
 }
 
 type PopoverMode = 'status' | 'history' | 'templates' | null;
@@ -134,11 +136,12 @@ export const BulkContactStatusCell: React.FC<BulkContactStatusCellProps> = React
     contactTemplates = [],
     processTitle,
     onNotify,
+    trackingScope = 'contact',
 }) => {
     const { status, attemptCount, lastAttemptAt, lastUserName } = summary;
     const channelDef = CONTACT_CHANNELS[channel];
-    const effectiveDisabled = disabled || isContactLocked;
-    const lockMessage = isContactLocked && contactLock ? formatContactLockMessage(contactLock) : undefined;
+    const effectiveDisabled = disabled || (trackingScope === 'contact' && isContactLocked);
+    const lockMessage = trackingScope === 'contact' && isContactLocked && contactLock ? formatContactLockMessage(contactLock) : undefined;
 
     const handleContactError = (error: unknown) => {
         if (error instanceof ContactLockError) {
@@ -225,7 +228,7 @@ export const BulkContactStatusCell: React.FC<BulkContactStatusCellProps> = React
         const closeOnOutside = (e: MouseEvent) => {
             const target = e.target as Node;
             if (rootRef.current?.contains(target)) return;
-            const pop = document.getElementById(`contact-popover-${candidateId}-${channel}`);
+            const pop = document.getElementById(`contact-popover-${trackingScope}-${candidateId}-${channel}`);
             if (pop?.contains(target)) return;
             closePopover();
         };
@@ -250,7 +253,7 @@ export const BulkContactStatusCell: React.FC<BulkContactStatusCellProps> = React
         let cancelled = false;
         setLoadingHistory(true);
         contactTrackingApi
-            .getHistory(candidateId, channel, popover === 'history' ? 25 : 1)
+            .getHistory(candidateId, channel, popover === 'history' ? 25 : 1, trackingScope)
             .then((rows) => {
                 if (cancelled) return;
                 setHistory(rows);
@@ -283,7 +286,7 @@ export const BulkContactStatusCell: React.FC<BulkContactStatusCellProps> = React
         return () => {
             cancelled = true;
         };
-    }, [popover, candidateId, channel]);
+    }, [popover, candidateId, channel, trackingScope]);
 
     const applySummary = useCallback(
         (
@@ -307,6 +310,7 @@ export const BulkContactStatusCell: React.FC<BulkContactStatusCellProps> = React
                 outcome,
                 userId,
                 userName,
+                trackingScope,
             });
             applySummary(result, 'contact_attempt');
             closePopover();
@@ -328,6 +332,7 @@ export const BulkContactStatusCell: React.FC<BulkContactStatusCellProps> = React
                 status: newStatus,
                 userId,
                 userName,
+                trackingScope,
             });
             applySummary(result, 'contact_status');
             closePopover();
@@ -348,6 +353,7 @@ export const BulkContactStatusCell: React.FC<BulkContactStatusCellProps> = React
                 channel,
                 userId,
                 userName,
+                trackingScope,
             });
             applySummary(result, 'contact_status');
             closePopover();
@@ -417,6 +423,7 @@ export const BulkContactStatusCell: React.FC<BulkContactStatusCellProps> = React
                 channel,
                 userId,
                 userName,
+                trackingScope,
             });
             if (result) {
                 onResetChannel(result);
@@ -444,7 +451,7 @@ export const BulkContactStatusCell: React.FC<BulkContactStatusCellProps> = React
                     onClick={closePopover}
                 />
                 <div
-                    id={`contact-popover-${candidateId}-${channel}`}
+                    id={`contact-popover-${trackingScope}-${candidateId}-${channel}`}
                     role="dialog"
                     aria-modal="true"
                     className="fixed z-[110] flex flex-col bg-white border border-gray-200 rounded-lg shadow-2xl"

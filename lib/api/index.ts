@@ -4,6 +4,7 @@ export * from './processes';
 export * from './candidates';
 export * from './bulkCandidates';
 export * from './bulkProcessActivity';
+export * from './candidateContactologyHistory';
 export * from './bulkCandidateTimeline';
 export * from './postits';
 export * from './comments';

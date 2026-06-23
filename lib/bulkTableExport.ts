@@ -106,11 +106,15 @@ export function getBulkExportCellValue(
             return candidate.createdAt;
         }
     }
-    if (colId === 'contactPhone' || colId === 'contactWhatsapp' || colId === 'contactEmail') {
+    if (colId === 'contactPhone' || colId === 'contactWhatsapp' || colId === 'contactEmail' ||
+        colId === 'fidelizPhone' || colId === 'fidelizWhatsapp' || colId === 'fidelizEmail') {
         const ch =
             colId === 'contactPhone' ? candidate.contactPhone
             : colId === 'contactWhatsapp' ? candidate.contactWhatsapp
-            : candidate.contactEmail;
+            : colId === 'contactEmail' ? candidate.contactEmail
+            : colId === 'fidelizPhone' ? candidate.fidelizPhone
+            : colId === 'fidelizWhatsapp' ? candidate.fidelizWhatsapp
+            : candidate.fidelizEmail;
         if (!ch) return '';
         const label = getContactBadgeLabel(ch.status, ch.attemptCount);
         const when = ch.lastAttemptAt

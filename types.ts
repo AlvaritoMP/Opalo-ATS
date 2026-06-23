@@ -244,8 +244,23 @@ export interface BulkProcessConfig {
     quickReplies?: BulkQuickReply[];
     /** Plantillas predefinidas de correo y WhatsApp para contactar candidatos */
     contactMessageTemplates?: BulkContactMessageTemplate[];
+    /**
+     * Panel flotante de columnas deslizables sobre la tabla (sin scroll horizontal).
+     * Por defecto incluye las columnas de fidelización.
+     */
+    floatingColumnRail?: BulkFloatingColumnRailConfig;
     /** Proceso específico con vista de tabla alta densidad activada al menos una vez */
     highDensityTableEnabled?: boolean;
+}
+
+/** Configuración del riel flotante de columnas sobre la tabla masiva */
+export interface BulkFloatingColumnRailConfig {
+    /** Si el panel flotante está visible */
+    enabled?: boolean;
+    /** Posición horizontal en px desde el borde izquierdo del contenedor de tabla */
+    offsetX?: number;
+    /** IDs de columnas mostradas en el panel (p. ej. fidelizPhone, contactPhone, custom_*) */
+    columnIds?: string[];
 }
 
 export type BulkContactMessageChannel = 'email' | 'whatsapp';

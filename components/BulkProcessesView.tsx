@@ -20,6 +20,20 @@ import {
     formatLatestContactActorTooltip,
 } from '../lib/contactChannelConfig';
 import {
+    columnIdToScopedChannel,
+    columnIdToTrackingScope,
+    FIDELIZ_COLUMN_IDS,
+    readScopedChannelSummaryFromRow,
+    type TrackingScope,
+} from '../lib/trackingScopeConfig';
+import {
+    excludeFloatingColumnsFromVisible,
+    ensureFloatingColumnsHidden,
+    isFloatingColumnRailEnabled,
+    resolveFloatingColumnIds,
+    resolveFloatingRailOffsetX,
+} from '../lib/bulkFloatingColumns';
+import {
     HIRED_STAGE_USER_COLUMN_ID,
     resolveHiringStageId,
     mapRawHiringMoves,
@@ -45,6 +59,7 @@ import { processesApi } from '../lib/api/processes';
 import { useDebouncedValue } from '../lib/useDebouncedValue';
 import { Check, X, Loader2, Send, Archive, Search, ChevronDown, ChevronUp, Plus, Edit, Trash2, ArrowLeft, MessageCircle, Phone, Upload, Download, Filter, Mail, Calendar, Settings, ArrowUp, ArrowDown, Pin, FileText, BookOpen, Paperclip, ClipboardList, ListPlus, RefreshCw, HardDrive, CaseSensitive, Package, History, Target, BarChart3, UserCheck, Coins, Bus, Undo2, ArrowRightLeft, LayoutGrid } from 'lucide-react';
 import { BulkCandidateTimeline } from './BulkCandidateTimeline';
+import { BulkContactologyHistory } from './BulkContactologyHistory';
 import { Process, CustomColumn, BulkProcessConfig, Candidate, IdealProfileConfig, BulkProcessStatChart, BulkInfoPin, BulkQuickReply } from '../types';
 import { candidatesApi } from '../lib/api/candidates';
 import {
@@ -174,6 +189,7 @@ import { buildBulkSelectionClipboardText } from '../lib/bulkTableExport';
 import { BulkProcessActivityLog } from './BulkProcessActivityLog';
 import { BulkTransferCandidatesModal } from './BulkTransferCandidatesModal';
 import { BulkContactStatusCell } from './BulkContactStatusCell';
+import { BulkFloatingColumnRail } from './BulkFloatingColumnRail';
 import { BulkContactTemplatesModal } from './BulkContactTemplatesModal';
 import { BulkTableEditInput } from './BulkTableEditInput';
 import { applyBulkCellDomSelection, scrollBulkCellIntoView, clearBulkCellDomSelection } from '../lib/bulkTableCellSelection';
@@ -257,7 +273,7 @@ const BulkTh: React.FC<{
     </th>
 );
 
-type CandidateDrawerTab = 'details' | 'timeline';
+type CandidateDrawerTab = 'contactology' | 'timeline' | 'details';
 
 // Drawer lateral para mostrar detalles del candidato
 const CandidateDrawer: React.FC<{
@@ -266,6 +282,7 @@ const CandidateDrawer: React.FC<{
     onClose: () => void;
     onLoadDetails: (candidateId: string) => Promise<void>;
     process?: Process;
+    initialTab?: CandidateDrawerTab;
     onPsychReport?: (candidate: BulkCandidate) => void;
     showPsychReport?: boolean;
     showOpsFlow?: boolean;
@@ -273,10 +290,10 @@ const CandidateDrawer: React.FC<{
     opsFlowRefreshToken?: number;
     activityLogRefreshToken?: number;
     userNameById?: Map<string, string>;
-}> = ({ candidate, isOpen, onClose, onLoadDetails, process, onPsychReport, showPsychReport, showOpsFlow, onOpsFlowSend, opsFlowRefreshToken = 0, activityLogRefreshToken = 0, userNameById }) => {
+}> = ({ candidate, isOpen, onClose, onLoadDetails, process, initialTab = 'contactology', onPsychReport, showPsychReport, showOpsFlow, onOpsFlowSend, opsFlowRefreshToken = 0, activityLogRefreshToken = 0, userNameById }) => {
     const [isLoading, setIsLoading] = useState(false);
     const [fullCandidate, setFullCandidate] = useState<BulkCandidate | null>(null);
-    const [activeTab, setActiveTab] = useState<CandidateDrawerTab>('timeline');
+    const [activeTab, setActiveTab] = useState<CandidateDrawerTab>(initialTab);
 
     useEffect(() => {
         if (isOpen && candidate && !fullCandidate) {
@@ -295,11 +312,13 @@ const CandidateDrawer: React.FC<{
     }, [isOpen, candidate, fullCandidate]);
 
     useEffect(() => {
-        if (!isOpen) {
+        if (isOpen) {
+            setActiveTab(initialTab);
+        } else {
             setFullCandidate(null);
-            setActiveTab('timeline');
+            setActiveTab('contactology');
         }
-    }, [isOpen]);
+    }, [isOpen, initialTab]);
 
     if (!isOpen || !candidate) return null;
 
@@ -321,8 +340,20 @@ const CandidateDrawer: React.FC<{
                     <div className="flex border-t border-gray-100">
                         <button
                             type="button"
+                            onClick={() => setActiveTab('contactology')}
+                            className={`flex-1 flex items-center justify-center gap-2 px-3 py-2.5 text-sm font-medium border-b-2 transition-colors ${
+                                activeTab === 'contactology'
+                                    ? 'border-primary-600 text-primary-700 bg-primary-50/50'
+                                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:bg-gray-50'
+                            }`}
+                        >
+                            <Phone className="w-4 h-4" />
+                            Contactología
+                        </button>
+                        <button
+                            type="button"
                             onClick={() => setActiveTab('timeline')}
-                            className={`flex-1 flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${
+                            className={`flex-1 flex items-center justify-center gap-2 px-3 py-2.5 text-sm font-medium border-b-2 transition-colors ${
                                 activeTab === 'timeline'
                                     ? 'border-primary-600 text-primary-700 bg-primary-50/50'
                                     : 'border-transparent text-gray-500 hover:text-gray-700 hover:bg-gray-50'
@@ -334,7 +365,7 @@ const CandidateDrawer: React.FC<{
                         <button
                             type="button"
                             onClick={() => setActiveTab('details')}
-                            className={`flex-1 flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${
+                            className={`flex-1 flex items-center justify-center gap-2 px-3 py-2.5 text-sm font-medium border-b-2 transition-colors ${
                                 activeTab === 'details'
                                     ? 'border-primary-600 text-primary-700 bg-primary-50/50'
                                     : 'border-transparent text-gray-500 hover:text-gray-700 hover:bg-gray-50'
@@ -346,6 +377,13 @@ const CandidateDrawer: React.FC<{
                     </div>
                 </div>
                 <div className="p-6 space-y-6">
+                    {activeTab === 'contactology' && candidate && (
+                        <BulkContactologyHistory
+                            candidateId={candidate.id}
+                            process={process}
+                            refreshToken={activityLogRefreshToken + opsFlowRefreshToken}
+                        />
+                    )}
                     {activeTab === 'timeline' && candidate && (
                         <BulkCandidateTimeline
                             candidateId={candidate.id}
@@ -637,6 +675,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
     const debouncedSearch = useDebouncedValue(searchInput, 300);
     const [drawerCandidate, setDrawerCandidate] = useState<BulkCandidate | null>(null);
     const [isDrawerOpen, setIsDrawerOpen] = useState(false);
+    const [drawerInitialTab, setDrawerInitialTab] = useState<CandidateDrawerTab>('contactology');
     const [optimisticUpdates, setOptimisticUpdates] = useState<Map<string, Partial<BulkCandidate>>>(new Map());
     const [hiringStageActors, setHiringStageActors] = useState<Record<string, HiredStageActor>>({});
     const [showProcessModal, setShowProcessModal] = useState(false);
@@ -724,6 +763,8 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
     const [routeCostLoadingCells, setRouteCostLoadingCells] = useState<Set<string>>(new Set());
     const [routeCostErrors, setRouteCostErrors] = useState<Record<string, string>>({});
     const [activityLogRefreshToken, setActivityLogRefreshToken] = useState(0);
+    const [floatingRailOffsetX, setFloatingRailOffsetX] = useState(280);
+    const [floatingRailVisible, setFloatingRailVisible] = useState(true);
     const [showOpsFlowModal, setShowOpsFlowModal] = useState(false);
     const [opsFlowCandidates, setOpsFlowCandidates] = useState<Candidate[]>([]);
     const [opsFlowRefreshToken, setOpsFlowRefreshToken] = useState(0);
@@ -1052,10 +1093,23 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
         setUndoStackSize(0);
     }, [process?.id]);
 
-    const visibleColumns = useMemo(
-        () => buildVisibleColumnIds(columnOrder, hiddenColumns, customColumns),
-        [columnOrder, hiddenColumns, customColumns]
+    const visibleColumns = useMemo(() => {
+        const base = buildVisibleColumnIds(columnOrder, hiddenColumns, customColumns);
+        if (!isFloatingColumnRailEnabled(process?.bulkConfig) || !floatingRailVisible) {
+            return base;
+        }
+        return excludeFloatingColumnsFromVisible(base, resolveFloatingColumnIds(process?.bulkConfig));
+    }, [columnOrder, hiddenColumns, customColumns, process?.bulkConfig, floatingRailVisible]);
+
+    const floatingColumnIds = useMemo(
+        () => resolveFloatingColumnIds(process?.bulkConfig),
+        [process?.bulkConfig]
     );
+
+    useEffect(() => {
+        setFloatingRailOffsetX(resolveFloatingRailOffsetX(process?.bulkConfig));
+        setFloatingRailVisible(isFloatingColumnRailEnabled(process?.bulkConfig));
+    }, [process?.id, process?.bulkConfig?.floatingColumnRail?.offsetX, process?.bulkConfig?.floatingColumnRail?.enabled]);
 
     const scoreIaColumnVisible = useMemo(
         () => isScoreIaColumnVisible(process?.bulkConfig),
@@ -1591,7 +1645,8 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                 const layout = resolveBulkTableLayout(processId, config, cols);
 
                 setCustomColumns(cols);
-                setHiddenColumns(layout.hiddenColumns);
+                const floatingIds = resolveFloatingColumnIds(config);
+                setHiddenColumns(ensureFloatingColumnsHidden(layout.hiddenColumns, floatingIds));
                 setPinnedColumns(layout.pinnedColumns);
                 const savedWidths = config?.columnWidths || {};
                 setColumnWidths(savedWidths);
@@ -1748,6 +1803,9 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                               contactPhone: readChannelSummaryFromRow(row, 'call'),
                               contactWhatsapp: readChannelSummaryFromRow(row, 'whatsapp'),
                               contactEmail: readChannelSummaryFromRow(row, 'email'),
+                              fidelizPhone: readScopedChannelSummaryFromRow(row, 'fidelization', 'call'),
+                              fidelizWhatsapp: readScopedChannelSummaryFromRow(row, 'fidelization', 'whatsapp'),
+                              fidelizEmail: readScopedChannelSummaryFromRow(row, 'fidelization', 'email'),
                               contactLockUserId: (row.contact_lock_user_id as string) || undefined,
                               contactLockUserName: (row.contact_lock_user_name as string) || undefined,
                               contactLockUntil: (row.contact_lock_until as string) || undefined,
@@ -2212,55 +2270,70 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
         email: 'contactEmail',
     };
 
-    const handleContactSummaryChange = useCallback(
+    const FIDELIZ_CANDIDATE_KEY: Record<ContactAttemptChannel, 'fidelizPhone' | 'fidelizWhatsapp' | 'fidelizEmail'> = {
+        call: 'fidelizPhone',
+        whatsapp: 'fidelizWhatsapp',
+        email: 'fidelizEmail',
+    };
+
+    const summaryKeyForScope = (scope: TrackingScope, channel: ContactAttemptChannel) =>
+        scope === 'fidelization' ? FIDELIZ_CANDIDATE_KEY[channel] : CHANNEL_CANDIDATE_KEY[channel];
+
+    const handleTrackingSummaryChange = useCallback(
         (
             candidateId: string,
             candidateName: string | undefined,
             summary: ChannelContactSummary,
             actionType: 'contact_attempt' | 'contact_status',
-            channel: ContactAttemptChannel
+            channel: ContactAttemptChannel,
+            scope: TrackingScope
         ) => {
-            const key = CHANNEL_CANDIDATE_KEY[channel];
+            const key = summaryKeyForScope(scope, channel);
             applyOptimisticUpdate(candidateId, { [key]: summary });
+            const scopeLabel = scope === 'fidelization' ? 'Fidelización' : 'Contacto';
             const channelLabel = channel === 'call' ? 'Llamadas' : channel === 'whatsapp' ? 'WhatsApp' : 'Correo';
             logActivity(actionType, {
                 candidateId,
                 candidateName,
-                fieldName: channelLabel,
+                fieldName: `${scopeLabel} · ${channelLabel}`,
                 newValue: `${summary.status} (${summary.attemptCount} intentos)`,
+                details: { trackingScope: scope, channel },
             });
         },
         [applyOptimisticUpdate, logActivity]
     );
 
-    const handleContactReset = useCallback(
+    const handleTrackingReset = useCallback(
         (
             candidateId: string,
             candidateName: string | undefined,
             channel: ContactAttemptChannel,
-            result: ResetContactTrackingResult
+            result: ResetContactTrackingResult,
+            scope: TrackingScope
         ) => {
             const empty: ChannelContactSummary = { status: 'por_contactar', attemptCount: 0 };
-            const key = CHANNEL_CANDIDATE_KEY[channel];
+            const key = summaryKeyForScope(scope, channel);
             applyOptimisticUpdate(candidateId, { [key]: empty });
+            const scopeLabel = scope === 'fidelization' ? 'Fidelización' : 'Contacto';
             const channelLabel =
                 channel === 'call' ? 'Llamadas' : channel === 'whatsapp' ? 'WhatsApp' : 'Correo';
             const who = state.currentUser?.name || state.currentUser?.email || 'Usuario';
             logActivity('contact_reset', {
                 candidateId,
                 candidateName,
-                fieldName: channelLabel,
-                oldValue: `${result.clearedAttempts} registro(s) de contacto`,
+                fieldName: `${scopeLabel} · ${channelLabel}`,
+                oldValue: `${result.clearedAttempts} registro(s)`,
                 newValue: 'Sin seguimiento en este canal',
                 details: {
-                    summary: `${who} reinició el seguimiento de ${channelLabel}`,
+                    summary: `${who} reinició ${scopeLabel} · ${channelLabel}`,
                     clearedAttempts: result.clearedAttempts,
                     channel,
+                    trackingScope: scope,
                     performedBy: who,
                     performedByUserId: state.currentUser?.id,
                 },
             });
-            actions.showToast(`${channelLabel} reiniciado`, 'success', 2500);
+            actions.showToast(`${scopeLabel} · ${channelLabel} reiniciado`, 'success', 2500);
         },
         [
             applyOptimisticUpdate,
@@ -2270,6 +2343,56 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
             state.currentUser?.email,
             actions,
         ]
+    );
+
+    const handleContactSummaryChange = useCallback(
+        (
+            candidateId: string,
+            candidateName: string | undefined,
+            summary: ChannelContactSummary,
+            actionType: 'contact_attempt' | 'contact_status',
+            channel: ContactAttemptChannel
+        ) => {
+            handleTrackingSummaryChange(candidateId, candidateName, summary, actionType, channel, 'contact');
+        },
+        [handleTrackingSummaryChange]
+    );
+
+    const handleFidelizSummaryChange = useCallback(
+        (
+            candidateId: string,
+            candidateName: string | undefined,
+            summary: ChannelContactSummary,
+            actionType: 'contact_attempt' | 'contact_status',
+            channel: ContactAttemptChannel
+        ) => {
+            handleTrackingSummaryChange(candidateId, candidateName, summary, actionType, channel, 'fidelization');
+        },
+        [handleTrackingSummaryChange]
+    );
+
+    const handleContactReset = useCallback(
+        (
+            candidateId: string,
+            candidateName: string | undefined,
+            channel: ContactAttemptChannel,
+            result: ResetContactTrackingResult
+        ) => {
+            handleTrackingReset(candidateId, candidateName, channel, result, 'contact');
+        },
+        [handleTrackingReset]
+    );
+
+    const handleFidelizReset = useCallback(
+        (
+            candidateId: string,
+            candidateName: string | undefined,
+            channel: ContactAttemptChannel,
+            result: ResetContactTrackingResult
+        ) => {
+            handleTrackingReset(candidateId, candidateName, channel, result, 'fidelization');
+        },
+        [handleTrackingReset]
     );
 
     const handleDeleteCandidate = useCallback(async (candidateId: string, candidateName: string) => {
@@ -2655,7 +2778,8 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
         }
     }, [selectedIds, candidates]);
 
-    const openDrawer = useCallback((candidate: BulkCandidate) => {
+    const openDrawer = useCallback((candidate: BulkCandidate, tab: CandidateDrawerTab = 'contactology') => {
+        setDrawerInitialTab(tab);
         setDrawerCandidate(candidate);
         setIsDrawerOpen(true);
     }, []);
@@ -3968,6 +4092,91 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
         return map;
     }, [displayCandidates]);
 
+    const persistFloatingRailLayout = useCallback(
+        (patch: { offsetX?: number; enabled?: boolean }) => {
+            const nextOffset = patch.offsetX ?? floatingRailOffsetX;
+            const nextEnabled = patch.enabled ?? floatingRailVisible;
+            if (patch.offsetX !== undefined) setFloatingRailOffsetX(nextOffset);
+            if (patch.enabled !== undefined) setFloatingRailVisible(nextEnabled);
+            void persistBulkConfig({
+                floatingColumnRail: {
+                    enabled: nextEnabled,
+                    offsetX: nextOffset,
+                    columnIds: floatingColumnIds,
+                },
+            });
+        },
+        [floatingRailOffsetX, floatingRailVisible, floatingColumnIds, persistBulkConfig]
+    );
+
+    const renderFloatingColumnCell = useCallback(
+        (colId: string, candidateId: string) => {
+            if (!process?.id) return null;
+            const candidate = displayCandidates.find(c => c.id === candidateId);
+            if (!candidate) return null;
+            const optimistic = optimisticUpdates.get(candidateId);
+            const displayCandidate = optimistic ? { ...candidate, ...optimistic } : candidate;
+            const scope = columnIdToTrackingScope(colId);
+            if (!scope) return <span className="text-gray-400">—</span>;
+            const channel = columnIdToScopedChannel(colId, scope) ?? columnIdToAttemptChannel(colId);
+            if (!channel) return <span className="text-gray-400">—</span>;
+            const summaryKey = summaryKeyForScope(scope, channel);
+            const summary = displayCandidate[summaryKey] ?? {
+                status: 'por_contactar' as const,
+                attemptCount: 0,
+            };
+            const displayEmail = getDisplayEmail(displayCandidate.email);
+            const contactAddress =
+                channel === 'email' ? displayEmail || undefined : displayCandidate.phone;
+            const contactLock =
+                scope === 'contact' ? resolveCandidateContactLock(displayCandidate) : null;
+            const isContactLocked =
+                scope === 'contact' &&
+                isContactLockedForUser(contactLock, state.currentUser?.id);
+            const onSummary =
+                scope === 'fidelization' ? handleFidelizSummaryChange : handleContactSummaryChange;
+            const onReset = scope === 'fidelization' ? handleFidelizReset : handleContactReset;
+
+            return (
+                <BulkContactStatusCell
+                    channel={channel}
+                    candidateId={displayCandidate.id}
+                    candidateName={displayCandidate.name}
+                    processId={process.id}
+                    contactAddress={contactAddress}
+                    summary={summary}
+                    userId={state.currentUser?.id}
+                    userName={state.currentUser?.name || state.currentUser?.email}
+                    contactLock={contactLock}
+                    isContactLocked={isContactLocked}
+                    trackingScope={scope}
+                    onLockBlocked={msg => actions.showToast(msg, 'info', 5000)}
+                    onSummaryChange={(s, actionType, ch) =>
+                        onSummary(displayCandidate.id, displayCandidate.name, s, actionType, ch)
+                    }
+                    onResetChannel={result =>
+                        onReset(displayCandidate.id, displayCandidate.name, channel, result)
+                    }
+                    contactTemplates={contactMessageTemplates}
+                    processTitle={process.title}
+                    onNotify={(msg, type) => actions.showToast(msg, type ?? 'success', 4000)}
+                />
+            );
+        },
+        [
+            process,
+            displayCandidates,
+            optimisticUpdates,
+            state.currentUser,
+            contactMessageTemplates,
+            actions,
+            handleContactSummaryChange,
+            handleFidelizSummaryChange,
+            handleContactReset,
+            handleFidelizReset,
+        ]
+    );
+
     const visibleColumnIndex = useMemo(() => {
         const map = new Map<string, number>();
         visibleColumns.forEach((id, i) => map.set(id, i));
@@ -5025,6 +5234,25 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                                         </button>
                                         <button
                                             type="button"
+                                            onClick={() => {
+                                                if (floatingRailVisible) {
+                                                    persistFloatingRailLayout({ enabled: false });
+                                                } else {
+                                                    persistFloatingRailLayout({ enabled: true });
+                                                }
+                                            }}
+                                            className={`transition-colors whitespace-nowrap ${
+                                                floatingRailVisible
+                                                    ? 'bg-violet-600 text-white hover:bg-violet-700'
+                                                    : 'bg-white border border-violet-300 text-violet-900 hover:bg-violet-50'
+                                            }`}
+                                            title="Mostrar u ocultar el panel deslizable de columnas de fidelización (llamadas, WhatsApp, correo)"
+                                        >
+                                            <LayoutGrid className="w-4 h-4 shrink-0" />
+                                            Panel fidelización
+                                        </button>
+                                        <button
+                                            type="button"
                                             onClick={() => setShowContactTemplatesModal(true)}
                                             className="bg-white border border-blue-300 text-blue-900 hover:bg-blue-50 transition-colors whitespace-nowrap"
                                             title="Editar plantillas de correo y WhatsApp para contactar candidatos"
@@ -5156,13 +5384,13 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                         </div>
                     ) : (
                     <>
-                    <p className="bulk-table-hint text-[10px] text-gray-500 px-2 pt-1 pb-0.5 shrink-0 line-clamp-1" title="Flechas · Shift+arrastrar selección · Ctrl+clic múltiple · Clic derecho: color/comentario · Enter/doble clic editar · Ctrl+C copiar · Ctrl+V pegar · Ctrl+Z deshacer · Doble clic en fila abre detalle · Arrastre el borde del encabezado para ajustar ancho · Desplaza horizontalmente para ver más columnas">
-                        Flechas · Shift+arrastrar · Ctrl+clic · Clic derecho color/comentario · Enter editar · Ctrl+C/V · Ctrl+Z deshacer · Doble clic detalle · Arrastre borde encabezado = ancho · Scroll horizontal → más columnas
+                    <p className="bulk-table-hint text-[10px] text-gray-500 px-2 pt-1 pb-0.5 shrink-0 line-clamp-1" title="Flechas · Shift+arrastrar selección · Ctrl+clic múltiple · Clic derecho: color/comentario · Enter/doble clic editar · Ctrl+C copiar · Ctrl+V pegar · Ctrl+Z deshacer · Doble clic en fila abre detalle · Arrastre el borde del encabezado para ajustar ancho · Panel violeta = fidelización deslizable">
+                        Flechas · Shift+arrastrar · Ctrl+clic · Clic derecho color/comentario · Enter editar · Ctrl+C/V · Ctrl+Z · Doble clic detalle · Arrastre borde encabezado = ancho · Panel violeta = columnas de fidelización (arrastrable)
                     </p>
+                    <div className="relative flex-1 min-h-0">
                     <div
                         ref={tableContainerRef}
-                        className="flex-1 overflow-x-auto overflow-y-auto outline-none focus:ring-2 focus:ring-primary-300 focus:ring-inset rounded"
-                        style={{ minHeight: 0 }}
+                        className="absolute inset-0 overflow-x-auto overflow-y-auto outline-none focus:ring-2 focus:ring-primary-300 focus:ring-inset rounded"
                         tabIndex={0}
                         onMouseDown={(e) => {
                             if ((e.target as HTMLElement).closest('input, select, textarea, button, a')) return;
@@ -5566,7 +5794,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                                     <tr
                                         key={candidate.id}
                                         className={`hover:bg-gray-50 ${isSelected ? 'bg-primary-50' : ''}`}
-                                        onDoubleClick={() => openDrawer(candidate)}
+                                        onDoubleClick={() => openDrawer(candidate, 'details')}
                                     >
                                         <td
                                             className={`${COMPACT_TD_CLASS} bg-white`}
@@ -5595,7 +5823,12 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                                                         ) : (
                                                             <MetadataTooltip metadata={displayCandidate.metadataIa || ''} scoreIa={scoreIaColumnVisible ? displayCandidate.scoreIa : undefined}>
                                                                 <span className="inline-flex items-center gap-0.5 min-w-0">
-                                                                    <span className="cursor-help hover:underline decoration-dotted truncate" onDoubleClick={() => handleStartEdit(candidate.id, 'name', displayCandidate.name)} title="Doble clic para editar">{displayCandidate.name}</span>
+                                                                    <span
+                                                                        className="cursor-pointer hover:underline decoration-dotted truncate text-primary-800 hover:text-primary-900"
+                                                                        onClick={(e) => { e.stopPropagation(); openDrawer(candidate, 'contactology'); }}
+                                                                        onDoubleClick={(e) => { e.stopPropagation(); handleStartEdit(candidate.id, 'name', displayCandidate.name); }}
+                                                                        title="Clic: historial de contactología · Doble clic: editar nombre"
+                                                                    >{displayCandidate.name}</span>
                                                                     <ApplicationCountBadge
                                                                         applicationCount={displayCandidate.applicationCount}
                                                                         firstApplicationAt={displayCandidate.firstApplicationAt}
@@ -6134,7 +6367,14 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                                             return null;
                                         })}
                                         <td className={`${COMPACT_TD_CLASS} bg-white`} onClick={(e) => e.stopPropagation()}>
-                                            <div className="flex gap-2">
+                                            <div className="flex gap-1">
+                                                <button
+                                                    onClick={() => openDrawer(candidate, 'contactology')}
+                                                    className="p-1 text-cyan-600 hover:bg-cyan-50 rounded transition-colors"
+                                                    title="Historial de contactología"
+                                                >
+                                                    <History className="w-4 h-4" />
+                                                </button>
                                                 <button
                                                     onClick={() => updateCandidateStatus(candidate.id, {
                                                         stageId: process?.stages[process.stages.length - 1]?.id,
@@ -6165,6 +6405,22 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                             })}
                         </tbody>
                         </table>
+                    </div>
+
+                    {floatingRailVisible && floatingColumnIds.length > 0 && process && (
+                        <BulkFloatingColumnRail
+                            columnIds={floatingColumnIds}
+                            customColumns={customColumns}
+                            columnWidths={columnWidths}
+                            rowKeys={displayCandidates.map(c => c.id)}
+                            offsetX={floatingRailOffsetX}
+                            onOffsetXChange={x => persistFloatingRailLayout({ offsetX: x })}
+                            onClose={() => persistFloatingRailLayout({ enabled: false })}
+                            renderCell={renderFloatingColumnCell}
+                            scrollContainerRef={tableContainerRef}
+                            title="Fidelización"
+                        />
+                    )}
                     </div>
 
                     {isLoading && (
@@ -6239,6 +6495,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
             <CandidateDrawer
                 candidate={drawerCandidate}
                 isOpen={isDrawerOpen}
+                initialTab={drawerInitialTab}
                 onClose={() => {
                     setIsDrawerOpen(false);
                     setDrawerCandidate(null);

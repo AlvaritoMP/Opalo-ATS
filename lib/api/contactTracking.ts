@@ -13,6 +13,12 @@ import {
     buildSingleChannelResetUpdate,
 } from '../contactChannelConfig';
 import {
+    type TrackingScope,
+    getScopedDbFields,
+    readScopedChannelSummaryFromRow,
+    buildScopedSingleChannelResetUpdate,
+} from '../trackingScopeConfig';
+import {
     syncContactHistoryForCandidates,
     type SyncContactHistoryResult,
 } from '../contactHistorySync';
@@ -55,6 +61,7 @@ export interface RecordContactAttemptInput {
     userName?: string;
     notes?: string;
     incrementAttempt?: boolean;
+    trackingScope?: TrackingScope;
 }
 
 export interface SetContactStatusInput {
@@ -64,6 +71,7 @@ export interface SetContactStatusInput {
     status: ContactStatus;
     userId?: string;
     userName?: string;
+    trackingScope?: TrackingScope;
 }
 
 export interface ResetContactTrackingResult {
@@ -109,6 +117,9 @@ function isMissingContactColumnError(error: { message?: string; code?: string } 
     return (
         error.code === '42703' ||
         msg.includes('contact_phone') ||
+        msg.includes('fideliz_phone') ||
+        msg.includes('fideliz_') ||
+        msg.includes('tracking_scope') ||
         msg.includes('contact_status') ||
         msg.includes('candidate_contact_attempts') ||
         msg.includes('contact_lock')
@@ -119,11 +130,44 @@ const CHANNEL_SELECT_FIELDS = [
     'contact_phone_status', 'contact_phone_attempt_count', 'contact_phone_last_at', 'contact_phone_last_user_name',
     'contact_whatsapp_status', 'contact_whatsapp_attempt_count', 'contact_whatsapp_last_at', 'contact_whatsapp_last_user_name',
     'contact_email_status', 'contact_email_attempt_count', 'contact_email_last_at', 'contact_email_last_user_name',
+    'fideliz_phone_status', 'fideliz_phone_attempt_count', 'fideliz_phone_last_at', 'fideliz_phone_last_user_name',
+    'fideliz_whatsapp_status', 'fideliz_whatsapp_attempt_count', 'fideliz_whatsapp_last_at', 'fideliz_whatsapp_last_user_name',
+    'fideliz_email_status', 'fideliz_email_attempt_count', 'fideliz_email_last_at', 'fideliz_email_last_user_name',
     'contact_status', 'contact_attempt_count', 'contact_last_attempt_at', 'contact_last_user_name',
     'last_whatsapp_interaction_at',
     'created_by', 'created_at', 'registration_origin',
     'contact_lock_user_id', 'contact_lock_user_name', 'contact_lock_until', 'contact_lock_reason',
 ].join(', ');
+
+function resolveScope(scope?: TrackingScope): TrackingScope {
+    return scope ?? 'contact';
+}
+
+function readSummaryForScope(
+    row: Record<string, unknown>,
+    channel: ContactAttemptChannel,
+    scope: TrackingScope
+): ChannelContactSummary {
+    if (scope === 'fidelization') {
+        return readScopedChannelSummaryFromRow(row, scope, channel);
+    }
+    return readChannelSummaryFromRow(row, channel);
+}
+
+function buildScopedChannelUpdate(
+    scope: TrackingScope,
+    channel: ContactAttemptChannel,
+    summary: ChannelContactSummary,
+    userName?: string
+): Record<string, unknown> {
+    const f = scope === 'fidelization' ? getScopedDbFields(scope, channel) : getChannelDbFields(channel);
+    return {
+        [f.status]: summary.status,
+        [f.attemptCount]: summary.attemptCount,
+        [f.lastAt]: summary.lastAttemptAt ?? null,
+        [f.lastUserName]: summary.lastUserName ?? userName ?? null,
+    };
+}
 
 function assertContactEditAllowed(
     row: Record<string, unknown>,
@@ -153,15 +197,10 @@ function buildChannelUpdate(
     channel: ContactAttemptChannel,
     summary: ChannelContactSummary,
     userId?: string,
-    userName?: string
+    userName?: string,
+    scope: TrackingScope = 'contact'
 ): Record<string, unknown> {
-    const f = getChannelDbFields(channel);
-    return {
-        [f.status]: summary.status,
-        [f.attemptCount]: summary.attemptCount,
-        [f.lastAt]: summary.lastAttemptAt ?? null,
-        [f.lastUserName]: summary.lastUserName ?? userName ?? null,
-    };
+    return buildScopedChannelUpdate(scope, channel, summary, userName);
 }
 
 export const contactTrackingApi = {
@@ -263,13 +302,15 @@ export const contactTrackingApi = {
     async getHistory(
         candidateId: string,
         channel: ContactAttemptChannel,
-        limit = 25
+        limit = 25,
+        trackingScope: TrackingScope = 'contact'
     ): Promise<ContactAttempt[]> {
         const { data, error } = await supabase
             .from('candidate_contact_attempts')
             .select('*')
             .eq('candidate_id', candidateId)
             .eq('channel', channel)
+            .eq('tracking_scope', trackingScope)
             .eq('app_name', APP_NAME)
             .order('created_at', { ascending: false })
             .limit(limit);
@@ -286,6 +327,7 @@ export const contactTrackingApi = {
     },
 
     async setStatus(input: SetContactStatusInput): Promise<ChannelContactSummary | null> {
+        const scope = resolveScope(input.trackingScope);
         const now = new Date().toISOString();
         const { data: current, error: readErr } = await supabase
             .from('candidates')
@@ -302,9 +344,11 @@ export const contactTrackingApi = {
             throw readErr;
         }
 
-        assertContactEditAllowed(current as Record<string, unknown>, input.userId);
+        if (scope === 'contact') {
+            assertContactEditAllowed(current as Record<string, unknown>, input.userId);
+        }
 
-        const prev = readChannelSummaryFromRow(current as Record<string, unknown>, input.channel);
+        const prev = readSummaryForScope(current as Record<string, unknown>, input.channel, scope);
         if (prev.status === input.status) return { ...prev };
 
         const summary: ChannelContactSummary = {
@@ -315,14 +359,16 @@ export const contactTrackingApi = {
         };
 
         const statusUpdate: Record<string, unknown> = {
-            ...buildChannelUpdate(input.channel, summary, input.userId, input.userName),
-            ...successLockPatch(
-                current as Record<string, unknown>,
-                input.userId,
-                input.userName,
-                input.status,
-                'status_change'
-            ),
+            ...buildChannelUpdate(input.channel, summary, input.userId, input.userName, scope),
+            ...(scope === 'contact'
+                ? successLockPatch(
+                      current as Record<string, unknown>,
+                      input.userId,
+                      input.userName,
+                      input.status,
+                      'status_change'
+                  )
+                : {}),
         };
 
         const { error: updErr } = await supabase
@@ -346,6 +392,7 @@ export const contactTrackingApi = {
                 { statusBefore: prev.status, attemptCountBefore: prev.attemptCount },
                 `${prev.status} → ${input.status}`
             ),
+            tracking_scope: scope,
             app_name: APP_NAME,
         });
 
@@ -354,6 +401,7 @@ export const contactTrackingApi = {
     },
 
     async recordAttempt(input: RecordContactAttemptInput): Promise<ChannelContactSummary | null> {
+        const scope = resolveScope(input.trackingScope);
         const increment = input.incrementAttempt !== false;
         const now = new Date().toISOString();
 
@@ -372,9 +420,11 @@ export const contactTrackingApi = {
             throw readErr;
         }
 
-        assertContactEditAllowed(current as Record<string, unknown>, input.userId);
+        if (scope === 'contact') {
+            assertContactEditAllowed(current as Record<string, unknown>, input.userId);
+        }
 
-        const prev = readChannelSummaryFromRow(current as Record<string, unknown>, input.channel);
+        const prev = readSummaryForScope(current as Record<string, unknown>, input.channel, scope);
         const prevStatus = prev.status;
         const prevCount = prev.attemptCount;
         const newCount = increment ? prevCount + 1 : prevCount;
@@ -394,16 +444,18 @@ export const contactTrackingApi = {
         };
 
         const updatePayload: Record<string, unknown> = {
-            ...buildChannelUpdate(input.channel, summary, input.userId, input.userName),
-            ...successLockPatch(
-                current as Record<string, unknown>,
-                input.userId,
-                input.userName,
-                newStatus,
-                input.outcome
-            ),
+            ...buildChannelUpdate(input.channel, summary, input.userId, input.userName, scope),
+            ...(scope === 'contact'
+                ? successLockPatch(
+                      current as Record<string, unknown>,
+                      input.userId,
+                      input.userName,
+                      newStatus,
+                      input.outcome
+                  )
+                : {}),
         };
-        if (input.channel === 'whatsapp') {
+        if (scope === 'contact' && input.channel === 'whatsapp') {
             updatePayload.last_whatsapp_interaction_at = now;
         }
 
@@ -422,7 +474,7 @@ export const contactTrackingApi = {
                 `${input.channel}:${input.outcome}`
             );
 
-        const { error: insErr } = await supabase.from('candidate_contact_attempts').insert({
+        const attemptRow = {
             candidate_id: input.candidateId,
             process_id: input.processId,
             user_id: input.userId || null,
@@ -432,23 +484,15 @@ export const contactTrackingApi = {
             attempt_number: increment ? newCount : prevCount,
             status_after: newStatus,
             notes: undoNotes,
+            tracking_scope: scope,
             app_name: APP_NAME,
-        });
+        };
+
+        const { error: insErr } = await supabase.from('candidate_contact_attempts').insert(attemptRow);
 
         if (insErr && !isMissingContactColumnError(insErr)) {
             console.error('Historial de contacto no guardado; reintentando:', insErr.message);
-            const { error: retryErr } = await supabase.from('candidate_contact_attempts').insert({
-                candidate_id: input.candidateId,
-                process_id: input.processId,
-                user_id: input.userId || null,
-                user_name: input.userName || null,
-                channel: input.channel,
-                outcome: input.outcome,
-                attempt_number: increment ? newCount : prevCount,
-                status_after: newStatus,
-                notes: undoNotes,
-                app_name: APP_NAME,
-            });
+            const { error: retryErr } = await supabase.from('candidate_contact_attempts').insert(attemptRow);
             if (retryErr && !isMissingContactColumnError(retryErr)) {
                 console.error('Historial de contacto falló tras reintento:', retryErr.message);
             }
@@ -466,7 +510,9 @@ export const contactTrackingApi = {
         channel: ContactAttemptChannel;
         userId?: string;
         userName?: string;
+        trackingScope?: TrackingScope;
     }): Promise<ChannelContactSummary | null> {
+        const scope = resolveScope(input.trackingScope);
         const { data: current, error: readErr } = await supabase
             .from('candidates')
             .select(CHANNEL_SELECT_FIELDS)
@@ -482,15 +528,17 @@ export const contactTrackingApi = {
             throw readErr;
         }
 
-        assertContactEditAllowed(current as Record<string, unknown>, input.userId);
+        if (scope === 'contact') {
+            assertContactEditAllowed(current as Record<string, unknown>, input.userId);
+        }
 
-        const history = await this.getHistory(input.candidateId, input.channel, 1);
+        const history = await this.getHistory(input.candidateId, input.channel, 1, scope);
         const latest = history[0];
         if (!latest) return null;
 
         let snapshot = parseUndoFromAttemptNotes(latest.notes, latest.attemptNumber);
         if (!snapshot) {
-            const older = await this.getHistory(input.candidateId, input.channel, 2);
+            const older = await this.getHistory(input.candidateId, input.channel, 2, scope);
             if (older.length < 2) {
                 snapshot = { statusBefore: 'por_contactar', attemptCountBefore: 0 };
             } else {
@@ -512,7 +560,7 @@ export const contactTrackingApi = {
 
         const { error: updErr } = await supabase
             .from('candidates')
-            .update(buildChannelUpdate(input.channel, summary, input.userId, input.userName))
+            .update(buildChannelUpdate(input.channel, summary, input.userId, input.userName, scope))
             .eq('id', input.candidateId)
             .eq('app_name', APP_NAME);
 
@@ -534,6 +582,7 @@ export const contactTrackingApi = {
                 },
                 `Deshacer: ${latest.statusAfter ?? 'actual'} → ${snapshot.statusBefore}`
             ),
+            tracking_scope: scope,
             app_name: APP_NAME,
         });
 
@@ -547,7 +596,9 @@ export const contactTrackingApi = {
         channel: ContactAttemptChannel;
         userId?: string;
         userName?: string;
+        trackingScope?: TrackingScope;
     }): Promise<ResetContactTrackingResult | null> {
+        const scope = resolveScope(input.trackingScope);
         const { data: current, error: lockReadErr } = await supabase
             .from('candidates')
             .select(CHANNEL_SELECT_FIELDS)
@@ -563,13 +614,16 @@ export const contactTrackingApi = {
             throw lockReadErr;
         }
 
-        assertContactEditAllowed(current as Record<string, unknown>, input.userId);
+        if (scope === 'contact') {
+            assertContactEditAllowed(current as Record<string, unknown>, input.userId);
+        }
 
         const { count, error: countErr } = await supabase
             .from('candidate_contact_attempts')
             .select('id', { count: 'exact', head: true })
             .eq('candidate_id', input.candidateId)
             .eq('channel', input.channel)
+            .eq('tracking_scope', scope)
             .eq('app_name', APP_NAME);
 
         if (countErr && !isMissingContactColumnError(countErr)) throw countErr;
@@ -580,13 +634,19 @@ export const contactTrackingApi = {
             .delete()
             .eq('candidate_id', input.candidateId)
             .eq('channel', input.channel)
+            .eq('tracking_scope', scope)
             .eq('app_name', APP_NAME);
 
         if (delErr && !isMissingContactColumnError(delErr)) throw delErr;
 
+        const resetUpdate =
+            scope === 'fidelization'
+                ? buildScopedSingleChannelResetUpdate(scope, input.channel)
+                : buildSingleChannelResetUpdate(input.channel);
+
         const { error: updErr } = await supabase
             .from('candidates')
-            .update(buildSingleChannelResetUpdate(input.channel))
+            .update(resetUpdate)
             .eq('id', input.candidateId)
             .eq('app_name', APP_NAME);
 

@@ -12,6 +12,7 @@ import {
 } from '../bulkTableColumns';
 import type { BulkProcessConfig, CandidateHistory } from '../../types';
 import { readChannelSummaryFromRow } from '../contactChannelConfig';
+import { readScopedChannelSummaryFromRow } from '../trackingScopeConfig';
 import type { ChannelContactSummary } from '../contactChannelConfig';
 import { buildInterviewMapFromRows } from '../bulkInterviewUtils';
 import { isMissingColumnError } from '../supabaseColumnErrors';
@@ -23,7 +24,10 @@ const BULK_SELECT_BASE =
 const BULK_SELECT_WITH_CONTACT = `${BULK_SELECT_BASE}, contact_status, contact_attempt_count, contact_last_attempt_at, contact_last_user_name,
     contact_phone_status, contact_phone_attempt_count, contact_phone_last_at, contact_phone_last_user_name,
     contact_whatsapp_status, contact_whatsapp_attempt_count, contact_whatsapp_last_at, contact_whatsapp_last_user_name,
-    contact_email_status, contact_email_attempt_count, contact_email_last_at, contact_email_last_user_name`;
+    contact_email_status, contact_email_attempt_count, contact_email_last_at, contact_email_last_user_name,
+    fideliz_phone_status, fideliz_phone_attempt_count, fideliz_phone_last_at, fideliz_phone_last_user_name,
+    fideliz_whatsapp_status, fideliz_whatsapp_attempt_count, fideliz_whatsapp_last_at, fideliz_whatsapp_last_user_name,
+    fideliz_email_status, fideliz_email_attempt_count, fideliz_email_last_at, fideliz_email_last_user_name`;
 
 const BULK_SELECT_WITH_CREATED = `${BULK_SELECT_WITH_CONTACT}, created_at`;
 const BULK_SELECT_WITH_APPLICATION = `${BULK_SELECT_WITH_CREATED}, application_count, first_application_at`;
@@ -94,6 +98,9 @@ function mapBulkCandidateRow(
         contactPhone: readChannelSummaryFromRow(c, 'call'),
         contactWhatsapp: readChannelSummaryFromRow(c, 'whatsapp'),
         contactEmail: readChannelSummaryFromRow(c, 'email'),
+        fidelizPhone: readScopedChannelSummaryFromRow(c, 'fidelization', 'call'),
+        fidelizWhatsapp: readScopedChannelSummaryFromRow(c, 'fidelization', 'whatsapp'),
+        fidelizEmail: readScopedChannelSummaryFromRow(c, 'fidelization', 'email'),
         createdAt: (c.created_at as string) || undefined,
         applicationCount: c.application_count != null ? Number(c.application_count) : undefined,
         firstApplicationAt: (c.first_application_at as string) || undefined,
@@ -140,6 +147,9 @@ export interface BulkCandidate {
     contactPhone?: ChannelContactSummary;
     contactWhatsapp?: ChannelContactSummary;
     contactEmail?: ChannelContactSummary;
+    fidelizPhone?: ChannelContactSummary;
+    fidelizWhatsapp?: ChannelContactSummary;
+    fidelizEmail?: ChannelContactSummary;
     createdAt?: string;
     /** Origen de incorporación: formulario, manual o carga masiva */
     registrationOrigin?: 'formulario' | 'manual' | 'masivo';
