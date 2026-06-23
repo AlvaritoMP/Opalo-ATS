@@ -771,6 +771,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
     const floatingRailVisibleRef = useRef(false);
     const floatingRailColumnIdsRef = useRef<string[]>([...DEFAULT_FLOATING_COLUMN_IDS]);
     const floatingRailPersistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const addColumnTargetRef = useRef<'table' | 'floatingRail'>('table');
     const [showOpsFlowModal, setShowOpsFlowModal] = useState(false);
     const [opsFlowCandidates, setOpsFlowCandidates] = useState<Candidate[]>([]);
     const [opsFlowRefreshToken, setOpsFlowRefreshToken] = useState(0);
@@ -1108,11 +1109,6 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
         }
         return excludeFloatingColumnsFromVisible(base, floatingRailColumnIds);
     }, [columnOrder, hiddenColumns, customColumns, process?.bulkConfig, floatingRailVisible, floatingRailColumnIds]);
-
-    const addableFloatingColumnIds = useMemo(
-        () => columnConfigIds.filter(id => !floatingRailColumnIds.includes(id)),
-        [columnConfigIds, floatingRailColumnIds]
-    );
 
     const scoreIaColumnVisible = useMemo(
         () => isScoreIaColumnVisible(process?.bulkConfig),
@@ -2852,12 +2848,20 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
     );
 
     const openAddColumnModal = useCallback(() => {
+        addColumnTargetRef.current = 'table';
         setEditingColumn(null);
         setShowManageColumnsModal(false);
         setShowAddColumnModal(true);
     }, []);
 
+    const openAddColumnModalForFloatingRail = useCallback(() => {
+        addColumnTargetRef.current = 'floatingRail';
+        setEditingColumn(null);
+        setShowAddColumnModal(true);
+    }, []);
+
     const openEditColumnModal = useCallback((column: CustomColumn) => {
+        addColumnTargetRef.current = 'table';
         setEditingColumn(column);
         setShowManageColumnsModal(false);
         setShowColumnConfig(false);
@@ -2865,12 +2869,36 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
     }, []);
 
     const handleAddColumn = async (column: CustomColumn) => {
+        const colKey = `custom_${column.id}`;
         const newColumns = [...customColumns, column];
-        const newOrder = [...columnOrder, `custom_${column.id}`];
+        const newOrder = [...columnOrder, colKey];
         setCustomColumns(newColumns);
         setColumnOrder(newOrder);
-        await persistBulkConfig({ customColumns: newColumns, columnOrder: newOrder });
-        actions.showToast('Columna agregada', 'success', 2000);
+
+        const addToFloatingRail = addColumnTargetRef.current === 'floatingRail' && floatingRailVisibleRef.current;
+        if (addToFloatingRail) {
+            const nextFloatingIds = floatingRailColumnIdsRef.current.includes(colKey)
+                ? floatingRailColumnIdsRef.current
+                : [...floatingRailColumnIdsRef.current, colKey];
+            setHiddenColumns(prev => ensureFloatingColumnsHidden(prev, [colKey]));
+            floatingRailColumnIdsRef.current = nextFloatingIds;
+            setFloatingRailColumnIds(nextFloatingIds);
+            await persistBulkConfig({
+                customColumns: newColumns,
+                columnOrder: newOrder,
+                floatingColumnRail: {
+                    enabled: true,
+                    offsetX: floatingRailOffsetRef.current,
+                    columnIds: nextFloatingIds,
+                },
+            });
+            actions.showToast('Columna creada en el panel de fidelización', 'success', 2500);
+        } else {
+            await persistBulkConfig({ customColumns: newColumns, columnOrder: newOrder });
+            actions.showToast('Columna agregada', 'success', 2000);
+        }
+
+        addColumnTargetRef.current = 'table';
     };
 
     const handleEditColumn = async (column: CustomColumn) => {
@@ -4194,15 +4222,6 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
             commitFloatingRailLayout(patch);
         },
         [commitFloatingRailLayout]
-    );
-
-    const handleAddFloatingColumn = useCallback(
-        (colId: string) => {
-            if (floatingRailColumnIds.includes(colId)) return;
-            const next = [...floatingRailColumnIds, colId];
-            persistFloatingRailLayout({ columnIds: next, persistImmediately: true });
-        },
-        [floatingRailColumnIds, persistFloatingRailLayout]
     );
 
     const handleRemoveFloatingColumn = useCallback(
@@ -6775,8 +6794,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                             onOffsetXChange={handleFloatingRailOffsetChange}
                             onOffsetXCommit={handleFloatingRailOffsetCommit}
                             onClose={() => persistFloatingRailLayout({ enabled: false, persistImmediately: true })}
-                            addableColumnIds={addableFloatingColumnIds}
-                            onAddColumn={handleAddFloatingColumn}
+                            onCreateColumn={openAddColumnModalForFloatingRail}
                             onRemoveColumn={handleRemoveFloatingColumn}
                             renderCell={renderFloatingColumnCell}
                             scrollContainerRef={tableContainerRef}
@@ -7059,6 +7077,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                     onClose={() => {
                         setShowAddColumnModal(false);
                         setEditingColumn(null);
+                        addColumnTargetRef.current = 'table';
                     }}
                     onAdd={handleAddColumn}
                     editingColumn={editingColumn}
