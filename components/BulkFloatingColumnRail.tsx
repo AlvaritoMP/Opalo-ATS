@@ -12,6 +12,8 @@ export interface BulkFloatingColumnRailProps {
     headerHeight?: number;
     offsetX: number;
     onOffsetXChange: (offsetX: number) => void;
+    /** Persistir posición al soltar el arrastre (evita saturar la API) */
+    onOffsetXCommit?: (offsetX: number) => void;
     onClose?: () => void;
     renderCell: (colId: string, rowKey: string, rowIndex: number) => React.ReactNode;
     renderHeader?: (colId: string) => React.ReactNode;
@@ -31,6 +33,7 @@ export const BulkFloatingColumnRail: React.FC<BulkFloatingColumnRailProps> = ({
     headerHeight = 52,
     offsetX,
     onOffsetXChange,
+    onOffsetXCommit,
     onClose,
     renderCell,
     renderHeader,
@@ -38,9 +41,14 @@ export const BulkFloatingColumnRail: React.FC<BulkFloatingColumnRailProps> = ({
     title = 'Columnas flotantes',
 }) => {
     const railRef = useRef<HTMLDivElement>(null);
+    const liveOffsetRef = useRef(offsetX);
     const [scrollTop, setScrollTop] = useState(0);
     const [isDragging, setIsDragging] = useState(false);
     const dragStartRef = useRef({ x: 0, offset: 0 });
+
+    useEffect(() => {
+        liveOffsetRef.current = offsetX;
+    }, [offsetX]);
 
     const totalWidth = useMemo(() => {
         return columnIds.reduce((sum, id) => sum + getColumnWidth(id, columnWidths), 0) + DRAG_HANDLE_WIDTH;
@@ -77,9 +85,14 @@ export const BulkFloatingColumnRail: React.FC<BulkFloatingColumnRailProps> = ({
 
         const onMove = (e: MouseEvent) => {
             const delta = e.clientX - dragStartRef.current.x;
-            onOffsetXChange(clampOffset(dragStartRef.current.offset + delta));
+            const next = clampOffset(dragStartRef.current.offset + delta);
+            liveOffsetRef.current = next;
+            onOffsetXChange(next);
         };
-        const onUp = () => setIsDragging(false);
+        const onUp = () => {
+            setIsDragging(false);
+            onOffsetXCommit?.(liveOffsetRef.current);
+        };
 
         document.addEventListener('mousemove', onMove);
         document.addEventListener('mouseup', onUp);
@@ -87,10 +100,12 @@ export const BulkFloatingColumnRail: React.FC<BulkFloatingColumnRailProps> = ({
             document.removeEventListener('mousemove', onMove);
             document.removeEventListener('mouseup', onUp);
         };
-    }, [isDragging, onOffsetXChange, clampOffset]);
+    }, [isDragging, onOffsetXChange, onOffsetXCommit, clampOffset]);
 
     const nudge = (delta: number) => {
-        onOffsetXChange(clampOffset(offsetX + delta));
+        const next = clampOffset(offsetX + delta);
+        onOffsetXChange(next);
+        onOffsetXCommit?.(next);
     };
 
     if (columnIds.length === 0) return null;

@@ -765,6 +765,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
     const [activityLogRefreshToken, setActivityLogRefreshToken] = useState(0);
     const [floatingRailOffsetX, setFloatingRailOffsetX] = useState(280);
     const [floatingRailVisible, setFloatingRailVisible] = useState(true);
+    const floatingRailOffsetRef = useRef(280);
     const [showOpsFlowModal, setShowOpsFlowModal] = useState(false);
     const [opsFlowCandidates, setOpsFlowCandidates] = useState<Candidate[]>([]);
     const [opsFlowRefreshToken, setOpsFlowRefreshToken] = useState(0);
@@ -974,7 +975,9 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
             setBulkProcesses(prev => prev.map(p =>
                 p.id === process.id ? { ...p, bulkConfig: newBulkConfig } : p
             ));
-            const configKeys = Object.keys(mergedUpdates);
+            const configKeys = Object.keys(mergedUpdates).filter(
+                key => key !== 'floatingColumnRail'
+            );
             if (configKeys.length > 0) {
                 logActivity('config_change', {
                     details: { summary: `Configuración: ${configKeys.join(', ')}` },
@@ -1107,7 +1110,9 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
     );
 
     useEffect(() => {
-        setFloatingRailOffsetX(resolveFloatingRailOffsetX(process?.bulkConfig));
+        const offset = resolveFloatingRailOffsetX(process?.bulkConfig);
+        setFloatingRailOffsetX(offset);
+        floatingRailOffsetRef.current = offset;
         setFloatingRailVisible(isFloatingColumnRailEnabled(process?.bulkConfig));
     }, [process?.id, process?.bulkConfig?.floatingColumnRail?.offsetX, process?.bulkConfig?.floatingColumnRail?.enabled]);
 
@@ -4092,12 +4097,19 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
         return map;
     }, [displayCandidates]);
 
-    const persistFloatingRailLayout = useCallback(
+    const commitFloatingRailLayout = useCallback(
         (patch: { offsetX?: number; enabled?: boolean }) => {
-            const nextOffset = patch.offsetX ?? floatingRailOffsetX;
+            if (!process) return;
+            const nextOffset = patch.offsetX ?? floatingRailOffsetRef.current;
             const nextEnabled = patch.enabled ?? floatingRailVisible;
-            if (patch.offsetX !== undefined) setFloatingRailOffsetX(nextOffset);
-            if (patch.enabled !== undefined) setFloatingRailVisible(nextEnabled);
+            const current = process.bulkConfig?.floatingColumnRail;
+            if (
+                current?.offsetX === nextOffset &&
+                (current?.enabled ?? true) === nextEnabled &&
+                JSON.stringify(current?.columnIds ?? floatingColumnIds) === JSON.stringify(floatingColumnIds)
+            ) {
+                return;
+            }
             void persistBulkConfig({
                 floatingColumnRail: {
                     enabled: nextEnabled,
@@ -4106,7 +4118,35 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                 },
             });
         },
-        [floatingRailOffsetX, floatingRailVisible, floatingColumnIds, persistBulkConfig]
+        [process, floatingRailVisible, floatingColumnIds, persistBulkConfig]
+    );
+
+    const handleFloatingRailOffsetChange = useCallback((x: number) => {
+        floatingRailOffsetRef.current = x;
+        setFloatingRailOffsetX(x);
+    }, []);
+
+    const handleFloatingRailOffsetCommit = useCallback(
+        (x: number) => {
+            floatingRailOffsetRef.current = x;
+            setFloatingRailOffsetX(x);
+            commitFloatingRailLayout({ offsetX: x });
+        },
+        [commitFloatingRailLayout]
+    );
+
+    const persistFloatingRailLayout = useCallback(
+        (patch: { offsetX?: number; enabled?: boolean }) => {
+            if (patch.offsetX !== undefined) {
+                floatingRailOffsetRef.current = patch.offsetX;
+                setFloatingRailOffsetX(patch.offsetX);
+            }
+            if (patch.enabled !== undefined) {
+                setFloatingRailVisible(patch.enabled);
+            }
+            commitFloatingRailLayout(patch);
+        },
+        [commitFloatingRailLayout]
     );
 
     const renderFloatingColumnCell = useCallback(
@@ -6414,7 +6454,8 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                             columnWidths={columnWidths}
                             rowKeys={displayCandidates.map(c => c.id)}
                             offsetX={floatingRailOffsetX}
-                            onOffsetXChange={x => persistFloatingRailLayout({ offsetX: x })}
+                            onOffsetXChange={handleFloatingRailOffsetChange}
+                            onOffsetXCommit={handleFloatingRailOffsetCommit}
                             onClose={() => persistFloatingRailLayout({ enabled: false })}
                             renderCell={renderFloatingColumnCell}
                             scrollContainerRef={tableContainerRef}

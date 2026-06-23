@@ -24,12 +24,14 @@ const BULK_SELECT_BASE =
 const BULK_SELECT_WITH_CONTACT = `${BULK_SELECT_BASE}, contact_status, contact_attempt_count, contact_last_attempt_at, contact_last_user_name,
     contact_phone_status, contact_phone_attempt_count, contact_phone_last_at, contact_phone_last_user_name,
     contact_whatsapp_status, contact_whatsapp_attempt_count, contact_whatsapp_last_at, contact_whatsapp_last_user_name,
-    contact_email_status, contact_email_attempt_count, contact_email_last_at, contact_email_last_user_name,
+    contact_email_status, contact_email_attempt_count, contact_email_last_at, contact_email_last_user_name`;
+
+const BULK_SELECT_WITH_FIDELIZ = `${BULK_SELECT_WITH_CONTACT},
     fideliz_phone_status, fideliz_phone_attempt_count, fideliz_phone_last_at, fideliz_phone_last_user_name,
     fideliz_whatsapp_status, fideliz_whatsapp_attempt_count, fideliz_whatsapp_last_at, fideliz_whatsapp_last_user_name,
     fideliz_email_status, fideliz_email_attempt_count, fideliz_email_last_at, fideliz_email_last_user_name`;
 
-const BULK_SELECT_WITH_CREATED = `${BULK_SELECT_WITH_CONTACT}, created_at`;
+const BULK_SELECT_WITH_CREATED = `${BULK_SELECT_WITH_FIDELIZ}, created_at`;
 const BULK_SELECT_WITH_APPLICATION = `${BULK_SELECT_WITH_CREATED}, application_count, first_application_at`;
 const BULK_SELECT_WITH_REGISTRATION = `${BULK_SELECT_WITH_APPLICATION}, registration_origin, created_by, contact_lock_user_id, contact_lock_user_name, contact_lock_until, contact_lock_reason`;
 const BULK_SELECT_FULL = `${BULK_SELECT_WITH_REGISTRATION}, bulk_column_values`;
@@ -39,6 +41,7 @@ const BULK_SELECT_FULL_EFFICIENCY = `${BULK_SELECT_FULL}, ${BULK_EFFICIENCY_FIEL
 const BULK_SELECT_WITH_REGISTRATION_EFFICIENCY = `${BULK_SELECT_WITH_REGISTRATION}, ${BULK_EFFICIENCY_FIELDS}`;
 const BULK_SELECT_WITH_APPLICATION_EFFICIENCY = `${BULK_SELECT_WITH_APPLICATION}, ${BULK_EFFICIENCY_FIELDS}`;
 const BULK_SELECT_WITH_CREATED_EFFICIENCY = `${BULK_SELECT_WITH_CREATED}, ${BULK_EFFICIENCY_FIELDS}`;
+const BULK_SELECT_WITH_FIDELIZ_EFFICIENCY = `${BULK_SELECT_WITH_FIDELIZ}, ${BULK_EFFICIENCY_FIELDS}`;
 const BULK_SELECT_WITH_CONTACT_EFFICIENCY = `${BULK_SELECT_WITH_CONTACT}, ${BULK_EFFICIENCY_FIELDS}`;
 const BULK_SELECT_BASE_EFFICIENCY = `${BULK_SELECT_BASE}, ${BULK_EFFICIENCY_FIELDS}`;
 
@@ -61,6 +64,8 @@ function getBulkSelectCandidates(): string[] {
         BULK_SELECT_WITH_APPLICATION,
         BULK_SELECT_WITH_CREATED_EFFICIENCY,
         BULK_SELECT_WITH_CREATED,
+        BULK_SELECT_WITH_FIDELIZ_EFFICIENCY,
+        BULK_SELECT_WITH_FIDELIZ,
         BULK_SELECT_WITH_CONTACT_EFFICIENCY,
         BULK_SELECT_WITH_CONTACT,
         BULK_SELECT_BASE_EFFICIENCY,

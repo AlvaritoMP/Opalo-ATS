@@ -11,6 +11,8 @@ export function isMissingColumnError(error: { message?: string; code?: string; s
         msg.includes('application_count') ||
         msg.includes('first_application_at') ||
         msg.includes('bulk_column_values') ||
+        msg.includes('fideliz_') ||
+        msg.includes('tracking_scope') ||
         (msg.includes('column') && (msg.includes('candidates') || msg.includes('does not exist')))
     );
 }

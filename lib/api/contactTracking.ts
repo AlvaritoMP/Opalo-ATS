@@ -126,18 +126,58 @@ function isMissingContactColumnError(error: { message?: string; code?: string } 
     );
 }
 
-const CHANNEL_SELECT_FIELDS = [
+const CHANNEL_SELECT_CONTACT = [
     'contact_phone_status', 'contact_phone_attempt_count', 'contact_phone_last_at', 'contact_phone_last_user_name',
     'contact_whatsapp_status', 'contact_whatsapp_attempt_count', 'contact_whatsapp_last_at', 'contact_whatsapp_last_user_name',
     'contact_email_status', 'contact_email_attempt_count', 'contact_email_last_at', 'contact_email_last_user_name',
-    'fideliz_phone_status', 'fideliz_phone_attempt_count', 'fideliz_phone_last_at', 'fideliz_phone_last_user_name',
-    'fideliz_whatsapp_status', 'fideliz_whatsapp_attempt_count', 'fideliz_whatsapp_last_at', 'fideliz_whatsapp_last_user_name',
-    'fideliz_email_status', 'fideliz_email_attempt_count', 'fideliz_email_last_at', 'fideliz_email_last_user_name',
     'contact_status', 'contact_attempt_count', 'contact_last_attempt_at', 'contact_last_user_name',
     'last_whatsapp_interaction_at',
     'created_by', 'created_at', 'registration_origin',
     'contact_lock_user_id', 'contact_lock_user_name', 'contact_lock_until', 'contact_lock_reason',
 ].join(', ');
+
+const CHANNEL_SELECT_FIDELIZ = [
+    'fideliz_phone_status', 'fideliz_phone_attempt_count', 'fideliz_phone_last_at', 'fideliz_phone_last_user_name',
+    'fideliz_whatsapp_status', 'fideliz_whatsapp_attempt_count', 'fideliz_whatsapp_last_at', 'fideliz_whatsapp_last_user_name',
+    'fideliz_email_status', 'fideliz_email_attempt_count', 'fideliz_email_last_at', 'fideliz_email_last_user_name',
+].join(', ');
+
+function channelSelectForScope(scope: TrackingScope): string {
+    return scope === 'fidelization'
+        ? `${CHANNEL_SELECT_CONTACT}, ${CHANNEL_SELECT_FIDELIZ}`
+        : CHANNEL_SELECT_CONTACT;
+}
+
+async function fetchCandidateForTracking(
+    candidateId: string,
+    scope: TrackingScope
+): Promise<{ data: Record<string, unknown> | null; error: { message?: string; code?: string } | null }> {
+    const select = channelSelectForScope(scope);
+    let result = await supabase
+        .from('candidates')
+        .select(select)
+        .eq('id', candidateId)
+        .eq('app_name', APP_NAME)
+        .single();
+
+    if (
+        result.error &&
+        scope === 'fidelization' &&
+        isMissingContactColumnError(result.error)
+    ) {
+        result = await supabase
+            .from('candidates')
+            .select(CHANNEL_SELECT_CONTACT)
+            .eq('id', candidateId)
+            .eq('app_name', APP_NAME)
+            .single();
+    }
+
+    return {
+        data: result.data as Record<string, unknown> | null,
+        error: result.error,
+    };
+}
 
 function resolveScope(scope?: TrackingScope): TrackingScope {
     return scope ?? 'contact';
@@ -305,15 +345,31 @@ export const contactTrackingApi = {
         limit = 25,
         trackingScope: TrackingScope = 'contact'
     ): Promise<ContactAttempt[]> {
-        const { data, error } = await supabase
-            .from('candidate_contact_attempts')
-            .select('*')
-            .eq('candidate_id', candidateId)
-            .eq('channel', channel)
-            .eq('tracking_scope', trackingScope)
-            .eq('app_name', APP_NAME)
-            .order('created_at', { ascending: false })
-            .limit(limit);
+        const baseQuery = () =>
+            supabase
+                .from('candidate_contact_attempts')
+                .select('*')
+                .eq('candidate_id', candidateId)
+                .eq('channel', channel)
+                .eq('app_name', APP_NAME)
+                .order('created_at', { ascending: false })
+                .limit(limit);
+
+        let { data, error } = await baseQuery().eq('tracking_scope', trackingScope);
+
+        if (error && isMissingContactColumnError(error)) {
+            const fallback = await baseQuery();
+            data = fallback.data;
+            error = fallback.error;
+            if (!error && data) {
+                data = data.filter(row => {
+                    const scope =
+                        ((row as Record<string, unknown>).tracking_scope as string | undefined) ??
+                        'contact';
+                    return scope === trackingScope;
+                });
+            }
+        }
 
         if (error) {
             if (isMissingContactColumnError(error)) {
@@ -329,12 +385,10 @@ export const contactTrackingApi = {
     async setStatus(input: SetContactStatusInput): Promise<ChannelContactSummary | null> {
         const scope = resolveScope(input.trackingScope);
         const now = new Date().toISOString();
-        const { data: current, error: readErr } = await supabase
-            .from('candidates')
-            .select(CHANNEL_SELECT_FIELDS)
-            .eq('id', input.candidateId)
-            .eq('app_name', APP_NAME)
-            .single();
+        const { data: current, error: readErr } = await fetchCandidateForTracking(
+            input.candidateId,
+            scope
+        );
 
         if (readErr) {
             if (isMissingContactColumnError(readErr)) {
@@ -405,12 +459,10 @@ export const contactTrackingApi = {
         const increment = input.incrementAttempt !== false;
         const now = new Date().toISOString();
 
-        const { data: current, error: readErr } = await supabase
-            .from('candidates')
-            .select(CHANNEL_SELECT_FIELDS)
-            .eq('id', input.candidateId)
-            .eq('app_name', APP_NAME)
-            .single();
+        const { data: current, error: readErr } = await fetchCandidateForTracking(
+            input.candidateId,
+            scope
+        );
 
         if (readErr) {
             if (isMissingContactColumnError(readErr)) {
@@ -513,12 +565,10 @@ export const contactTrackingApi = {
         trackingScope?: TrackingScope;
     }): Promise<ChannelContactSummary | null> {
         const scope = resolveScope(input.trackingScope);
-        const { data: current, error: readErr } = await supabase
-            .from('candidates')
-            .select(CHANNEL_SELECT_FIELDS)
-            .eq('id', input.candidateId)
-            .eq('app_name', APP_NAME)
-            .single();
+        const { data: current, error: readErr } = await fetchCandidateForTracking(
+            input.candidateId,
+            scope
+        );
 
         if (readErr) {
             if (isMissingContactColumnError(readErr)) {
@@ -599,12 +649,10 @@ export const contactTrackingApi = {
         trackingScope?: TrackingScope;
     }): Promise<ResetContactTrackingResult | null> {
         const scope = resolveScope(input.trackingScope);
-        const { data: current, error: lockReadErr } = await supabase
-            .from('candidates')
-            .select(CHANNEL_SELECT_FIELDS)
-            .eq('id', input.candidateId)
-            .eq('app_name', APP_NAME)
-            .single();
+        const { data: current, error: lockReadErr } = await fetchCandidateForTracking(
+            input.candidateId,
+            scope
+        );
 
         if (lockReadErr) {
             if (isMissingContactColumnError(lockReadErr)) {
