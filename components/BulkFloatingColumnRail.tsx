@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { GripHorizontal, X } from 'lucide-react';
+import { GripHorizontal, Plus, X } from 'lucide-react';
 import { COMPACT_TD_CLASS, COMPACT_TH_CLASS, getColumnLabel, getColumnWidth } from '../lib/bulkTableColumns';
 
 export interface BulkFloatingColumnRailProps {
@@ -12,6 +12,9 @@ export interface BulkFloatingColumnRailProps {
     onOffsetXChange: (offsetX: number) => void;
     onOffsetXCommit?: (offsetX: number) => void;
     onClose?: () => void;
+    addableColumnIds?: string[];
+    onAddColumn?: (colId: string) => void;
+    onRemoveColumn?: (colId: string) => void;
     renderCell: (colId: string, rowKey: string, rowIndex: number) => React.ReactNode;
     renderHeader?: (colId: string) => React.ReactNode;
     scrollContainerRef: React.RefObject<HTMLElement | null>;
@@ -67,6 +70,9 @@ export const BulkFloatingColumnRail: React.FC<BulkFloatingColumnRailProps> = ({
     onOffsetXChange,
     onOffsetXCommit,
     onClose,
+    addableColumnIds = [],
+    onAddColumn,
+    onRemoveColumn,
     renderCell,
     renderHeader,
     scrollContainerRef,
@@ -74,6 +80,8 @@ export const BulkFloatingColumnRail: React.FC<BulkFloatingColumnRailProps> = ({
     const [isDragging, setIsDragging] = useState(false);
     const isDraggingRef = useRef(false);
     const [dragX, setDragX] = useState<number | null>(null);
+    const [showAddColumnMenu, setShowAddColumnMenu] = useState(false);
+    const addColumnMenuRef = useRef<HTMLDivElement>(null);
     const dragStartRef = useRef({ x: 0, offset: 0 });
     const rafRef = useRef<number | null>(null);
     const pendingXRef = useRef<number | null>(null);
@@ -82,6 +90,24 @@ export const BulkFloatingColumnRail: React.FC<BulkFloatingColumnRailProps> = ({
     const [contentHeight, setContentHeight] = useState(0);
 
     const displayX = dragX ?? offsetX;
+    const offsetXRef = useRef(offsetX);
+    offsetXRef.current = offsetX;
+
+    useEffect(() => {
+        if (dragX != null && !isDragging && dragX === offsetX) {
+            setDragX(null);
+        }
+    }, [offsetX, dragX, isDragging]);
+
+    useEffect(() => {
+        if (!showAddColumnMenu) return;
+        const onDocClick = (e: MouseEvent) => {
+            if (addColumnMenuRef.current?.contains(e.target as Node)) return;
+            setShowAddColumnMenu(false);
+        };
+        document.addEventListener('mousedown', onDocClick);
+        return () => document.removeEventListener('mousedown', onDocClick);
+    }, [showAddColumnMenu]);
 
     const totalWidth = useMemo(
         () => columnIds.reduce((sum, id) => sum + getColumnWidth(id, columnWidths), 0),
@@ -159,14 +185,15 @@ export const BulkFloatingColumnRail: React.FC<BulkFloatingColumnRailProps> = ({
 
     const beginDrag = useCallback(
         (clientX: number) => {
+            const startOffset = dragX ?? offsetXRef.current;
             isDraggingRef.current = true;
             setIsDragging(true);
-            setDragX(offsetX);
-            dragStartRef.current = { x: clientX, offset: offsetX };
+            setDragX(startOffset);
+            dragStartRef.current = { x: clientX, offset: startOffset };
             document.body.style.cursor = 'grabbing';
             document.body.style.userSelect = 'none';
         },
-        [offsetX]
+        [dragX]
     );
 
     const moveDrag = useCallback(
@@ -187,13 +214,13 @@ export const BulkFloatingColumnRail: React.FC<BulkFloatingColumnRailProps> = ({
             cancelAnimationFrame(rafRef.current);
             rafRef.current = null;
         }
-        const finalX = pendingXRef.current ?? dragX ?? offsetX;
+        const finalX = pendingXRef.current ?? dragX ?? offsetXRef.current;
         pendingXRef.current = null;
-        setDragX(null);
+        setDragX(finalX);
         onOffsetXChange(finalX);
         onOffsetXCommit?.(finalX);
         requestAnimationFrame(remeasure);
-    }, [dragX, offsetX, onOffsetXChange, onOffsetXCommit, remeasure]);
+    }, [dragX, onOffsetXChange, onOffsetXCommit, remeasure]);
 
     const handleDragMouseDown = (e: React.MouseEvent) => {
         if (e.button !== 0 || isInteractiveDragTarget(e.target)) return;
@@ -278,6 +305,41 @@ export const BulkFloatingColumnRail: React.FC<BulkFloatingColumnRailProps> = ({
                         <span className="flex-1 text-[10px] font-semibold uppercase tracking-wide text-violet-900 truncate">
                             Fidelización
                         </span>
+                        {onAddColumn && addableColumnIds.length > 0 && (
+                            <div className="relative shrink-0" ref={addColumnMenuRef}>
+                                <button
+                                    type="button"
+                                    data-no-drag
+                                    onClick={e => {
+                                        e.stopPropagation();
+                                        setShowAddColumnMenu(prev => !prev);
+                                    }}
+                                    className="p-0.5 rounded text-violet-600 hover:text-violet-800 hover:bg-white/80"
+                                    title="Añadir columna al panel"
+                                >
+                                    <Plus className="w-3.5 h-3.5" />
+                                </button>
+                                {showAddColumnMenu && (
+                                    <div className="absolute left-0 top-full mt-0.5 z-50 min-w-[140px] bg-white border border-gray-200 rounded-md shadow-lg py-1">
+                                        {addableColumnIds.map(colId => (
+                                            <button
+                                                key={colId}
+                                                type="button"
+                                                data-no-drag
+                                                onClick={e => {
+                                                    e.stopPropagation();
+                                                    onAddColumn(colId);
+                                                    setShowAddColumnMenu(false);
+                                                }}
+                                                className="w-full text-left px-2 py-1 text-[10px] text-gray-700 hover:bg-violet-50"
+                                            >
+                                                {getColumnLabel(colId, customColumns)}
+                                            </button>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+                        )}
                         {onClose && (
                             <button
                                 type="button"
@@ -308,13 +370,29 @@ export const BulkFloatingColumnRail: React.FC<BulkFloatingColumnRailProps> = ({
                         {columnIds.map(colId => (
                             <div
                                 key={colId}
-                                className={`${COMPACT_TH_CLASS} bg-gray-50 border-r border-gray-200 last:border-r-0 flex items-center`}
+                                className={`${COMPACT_TH_CLASS} bg-gray-50 border-r border-gray-200 last:border-r-0 flex items-center gap-0.5 group/col`}
                                 style={{
                                     width: getColumnWidth(colId, columnWidths),
                                     minWidth: getColumnWidth(colId, columnWidths),
                                 }}
                             >
-                                {renderHeader ? renderHeader(colId) : getColumnLabel(colId, customColumns)}
+                                <span className="truncate flex-1 min-w-0">
+                                    {renderHeader ? renderHeader(colId) : getColumnLabel(colId, customColumns)}
+                                </span>
+                                {onRemoveColumn && columnIds.length > 1 && (
+                                    <button
+                                        type="button"
+                                        data-no-drag
+                                        onClick={e => {
+                                            e.stopPropagation();
+                                            onRemoveColumn(colId);
+                                        }}
+                                        className="shrink-0 p-0.5 rounded opacity-0 group-hover/col:opacity-100 text-gray-400 hover:text-red-600 hover:bg-white/80"
+                                        title="Quitar columna del panel"
+                                    >
+                                        <X className="w-3 h-3" />
+                                    </button>
+                                )}
                             </div>
                         ))}
                     </div>
