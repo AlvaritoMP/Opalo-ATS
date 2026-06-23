@@ -5430,7 +5430,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                     <div className="relative flex-1 min-h-0">
                     <div
                         ref={tableContainerRef}
-                        className="absolute inset-0 overflow-x-auto overflow-y-auto outline-none focus:ring-2 focus:ring-primary-300 focus:ring-inset rounded relative"
+                        className="absolute inset-0 overflow-x-auto overflow-y-auto outline-none focus:ring-2 focus:ring-primary-300 focus:ring-inset rounded min-h-0"
                         tabIndex={0}
                         onMouseDown={(e) => {
                             if ((e.target as HTMLElement).closest('input, select, textarea, button, a')) return;
@@ -6457,6 +6457,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                             offsetX={floatingRailOffsetX}
                             onOffsetXChange={handleFloatingRailOffsetChange}
                             onOffsetXCommit={handleFloatingRailOffsetCommit}
+                            onClose={() => persistFloatingRailLayout({ enabled: false })}
                             renderCell={renderFloatingColumnCell}
                             scrollContainerRef={tableContainerRef}
                         />
