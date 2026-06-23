@@ -6462,6 +6462,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                         />
                     )}
                     </div>
+                    </div>
 
                     {isLoading && (
                         <div className="flex items-center justify-center py-12">
