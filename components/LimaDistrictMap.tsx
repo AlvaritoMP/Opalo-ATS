@@ -123,18 +123,26 @@ const MapCanvas: React.FC<{
 }) => {
     const svgRef = useRef<SVGSVGElement>(null);
     const panRef = useRef<{ x: number; y: number; tx: number; ty: number } | null>(null);
+    const viewRef = useRef(view);
+    viewRef.current = view;
+    const onViewChangeRef = useRef(onViewChange);
+    onViewChangeRef.current = onViewChange;
 
-    const handleWheel = useCallback(
-        (e: React.WheelEvent<SVGSVGElement>) => {
+    // React registra onWheel como pasivo; zoom requiere listener nativo { passive: false }.
+    useEffect(() => {
+        const svg = svgRef.current;
+        if (!svg) return;
+
+        const onWheel = (e: WheelEvent) => {
             e.preventDefault();
-            const svg = svgRef.current;
-            if (!svg) return;
             const [px, py] = clientToSvgPoint(svg, e.clientX, e.clientY);
             const factor = e.deltaY < 0 ? ZOOM_STEP : 1 / ZOOM_STEP;
-            onViewChange(zoomAtPoint(view, factor, px, py));
-        },
-        [view, onViewChange]
-    );
+            onViewChangeRef.current(zoomAtPoint(viewRef.current, factor, px, py));
+        };
+
+        svg.addEventListener('wheel', onWheel, { passive: false });
+        return () => svg.removeEventListener('wheel', onWheel);
+    }, []);
 
     const handlePointerDown = useCallback(
         (e: React.PointerEvent<SVGSVGElement>) => {
@@ -229,7 +237,6 @@ const MapCanvas: React.FC<{
                 style={{ minHeight: viewHeight, cursor: view.scale > 1 ? 'grab' : 'default' }}
                 role="img"
                 aria-label="Mapa de candidatos por distrito en Lima y Callao"
-                onWheel={handleWheel}
                 onPointerDown={handlePointerDown}
                 onPointerMove={handlePointerMove}
                 onPointerUp={handlePointerUp}

@@ -258,7 +258,7 @@ const BulkTh: React.FC<{
     colId: string;
     style?: React.CSSProperties;
     headerProps: React.ThHTMLAttributes<HTMLTableCellElement>;
-    onResizeStart: (e: React.MouseEvent, colId: string) => void;
+    onResizeStart: (e: React.PointerEvent, colId: string) => void;
     children: React.ReactNode;
 }> = ({ colId, style, headerProps, onResizeStart, children }) => (
     <th {...headerProps} style={style} className={`${headerProps.className ?? ''} relative`.trim()}>
@@ -268,7 +268,7 @@ const BulkTh: React.FC<{
             aria-orientation="vertical"
             aria-label="Redimensionar columna"
             className="absolute top-0 right-0 w-1.5 h-full cursor-col-resize hover:bg-primary-400/80 active:bg-primary-500 z-30 touch-none"
-            onMouseDown={(e) => onResizeStart(e, colId)}
+            onPointerDown={(e) => onResizeStart(e, colId)}
             onClick={(e) => e.stopPropagation()}
             onDragStart={(e) => e.preventDefault()}
         />
@@ -3610,13 +3610,14 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
         columnWidthsRef.current = columnWidths;
     }, [columnWidths]);
 
-    const handleColumnResizeStart = useCallback((e: React.MouseEvent, colId: string) => {
+    const handleColumnResizeStart = useCallback((e: React.PointerEvent, colId: string) => {
+        if (e.button !== 0) return;
         e.preventDefault();
         e.stopPropagation();
         const startWidth = getColumnWidth(colId, columnWidthsRef.current);
         resizeSessionRef.current = { colId, startX: e.clientX, startWidth };
 
-        const onMove = (ev: MouseEvent) => {
+        const onMove = (ev: PointerEvent) => {
             const session = resizeSessionRef.current;
             if (!session) return;
             const delta = ev.clientX - session.startX;
@@ -3632,8 +3633,9 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
 
         const onUp = () => {
             resizeSessionRef.current = null;
-            document.removeEventListener('mousemove', onMove);
-            document.removeEventListener('mouseup', onUp);
+            document.removeEventListener('pointermove', onMove);
+            document.removeEventListener('pointerup', onUp);
+            document.removeEventListener('pointercancel', onUp);
             document.body.style.cursor = '';
             document.body.style.userSelect = '';
             void persistBulkConfig({ columnWidths: columnWidthsRef.current });
@@ -3641,8 +3643,9 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
 
         document.body.style.cursor = 'col-resize';
         document.body.style.userSelect = 'none';
-        document.addEventListener('mousemove', onMove);
-        document.addEventListener('mouseup', onUp);
+        document.addEventListener('pointermove', onMove);
+        document.addEventListener('pointerup', onUp);
+        document.addEventListener('pointercancel', onUp);
     }, [persistBulkConfig]);
 
     const handleDragStart = (e: React.DragEvent, colId: string) => {
@@ -3651,9 +3654,23 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
     };
 
     const handleDragOver = (e: React.DragEvent) => {
-        e.preventDefault();
+        if (!draggedColumn) return;
         e.dataTransfer.dropEffect = 'move';
     };
+
+    useEffect(() => {
+        if (!draggedColumn) return;
+        const table = tableContainerRef.current;
+        if (!table) return;
+
+        const onDragOver = (e: DragEvent) => {
+            e.preventDefault();
+            if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+        };
+
+        table.addEventListener('dragover', onDragOver, { passive: false });
+        return () => table.removeEventListener('dragover', onDragOver);
+    }, [draggedColumn]);
 
     const handleDragLeave = () => {};
 

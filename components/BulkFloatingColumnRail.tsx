@@ -208,37 +208,27 @@ export const BulkFloatingColumnRail: React.FC<BulkFloatingColumnRailProps> = ({
         requestAnimationFrame(remeasure);
     }, [dragX, onOffsetXChange, onOffsetXCommit, remeasure]);
 
-    const handleDragMouseDown = (e: React.MouseEvent) => {
+    const handleDragPointerDown = (e: React.PointerEvent) => {
         if (e.button !== 0 || isInteractiveDragTarget(e.target)) return;
         e.preventDefault();
         e.stopPropagation();
+        e.currentTarget.setPointerCapture(e.pointerId);
         beginDrag(e.clientX);
     };
 
     useEffect(() => {
         if (!isDragging) return;
 
-        const onMouseMove = (e: MouseEvent) => moveDrag(e.clientX);
-        const onMouseUp = () => endDrag();
-        const onTouchMove = (e: TouchEvent) => {
-            if (e.touches.length === 1) {
-                e.preventDefault();
-                moveDrag(e.touches[0].clientX);
-            }
-        };
-        const onTouchEnd = () => endDrag();
+        const onPointerMove = (e: PointerEvent) => moveDrag(e.clientX);
+        const onPointerUp = () => endDrag();
 
-        document.addEventListener('mousemove', onMouseMove);
-        document.addEventListener('mouseup', onMouseUp);
-        document.addEventListener('touchmove', onTouchMove, { passive: false });
-        document.addEventListener('touchend', onTouchEnd);
-        document.addEventListener('touchcancel', onTouchEnd);
+        document.addEventListener('pointermove', onPointerMove);
+        document.addEventListener('pointerup', onPointerUp);
+        document.addEventListener('pointercancel', onPointerUp);
         return () => {
-            document.removeEventListener('mousemove', onMouseMove);
-            document.removeEventListener('mouseup', onMouseUp);
-            document.removeEventListener('touchmove', onTouchMove);
-            document.removeEventListener('touchend', onTouchEnd);
-            document.removeEventListener('touchcancel', onTouchEnd);
+            document.removeEventListener('pointermove', onPointerMove);
+            document.removeEventListener('pointerup', onPointerUp);
+            document.removeEventListener('pointercancel', onPointerUp);
         };
     }, [isDragging, moveDrag, endDrag]);
 
@@ -280,11 +270,7 @@ export const BulkFloatingColumnRail: React.FC<BulkFloatingColumnRailProps> = ({
                     <div
                         className={`flex items-center gap-1 px-1.5 border-b border-violet-200/80 select-none touch-none ${dragSurfaceClass}`}
                         style={{ height: DRAG_BAR_HEIGHT }}
-                        onMouseDown={handleDragMouseDown}
-                        onTouchStart={e => {
-                            if (isInteractiveDragTarget(e.target)) return;
-                            beginDrag(e.touches[0].clientX);
-                        }}
+                        onPointerDown={handleDragPointerDown}
                         title="Arrastrar para deslizar las columnas de fidelización"
                     >
                         <GripHorizontal className="w-3.5 h-3.5 text-violet-600 shrink-0 opacity-70" aria-hidden />
@@ -325,11 +311,7 @@ export const BulkFloatingColumnRail: React.FC<BulkFloatingColumnRailProps> = ({
                     <div
                         className={`flex items-stretch border-b border-gray-200 select-none touch-none overflow-hidden ${dragSurfaceClass}`}
                         style={{ height: columnHeaderHeight, minHeight: columnHeaderHeight }}
-                        onMouseDown={handleDragMouseDown}
-                        onTouchStart={e => {
-                            if (isInteractiveDragTarget(e.target)) return;
-                            beginDrag(e.touches[0].clientX);
-                        }}
+                        onPointerDown={handleDragPointerDown}
                         title="Arrastrar columnas de fidelización"
                     >
                         {columnIds.map(colId => (
