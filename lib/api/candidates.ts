@@ -5,6 +5,10 @@ import { convertirSalarioALetras } from '../numberToWords';
 import { APP_NAME } from '../appConfig';
 import { isMissingColumnError } from '../supabaseColumnErrors';
 import { buildUploadContactLockUpdate } from '../contactLock';
+import { fetchWithRetry } from '../fetchWithRetry';
+
+const CANDIDATE_PAGE_SIZE = 250;
+const CANDIDATE_MAX_ROWS = 2000;
 
 const CANDIDATE_LIST_SELECT_CORE =
     'id, name, email, phone, phone2, process_id, stage_id, description, avatar_url, source, salary_expectation, agreed_salary, agreed_salary_in_words, age, dni, linkedin_url, address, province, district, archived, archived_at, discarded, discard_reason, discarded_at, hire_date, google_drive_folder_id, google_drive_folder_name, visible_to_clients, offer_accepted_date, application_started_date, application_completed_date, critical_stage_reviewed_at, created_at';
@@ -421,30 +425,85 @@ export const candidatesApi = {
             : await fetchStandardProcessIds();
         if (processIds !== null && processIds.length === 0) return [];
 
-        const { data, error } = await fetchCandidatesWithSelectFallback((selectFields) => {
-            let query = supabase
-                .from('candidates')
-                .select(selectFields)
-                .eq('app_name', APP_NAME)
-                .order('created_at', { ascending: false });
+        const allData: any[] = [];
+        for (let from = 0; from < CANDIDATE_MAX_ROWS; from += CANDIDATE_PAGE_SIZE) {
+            const to = Math.min(from + CANDIDATE_PAGE_SIZE - 1, CANDIDATE_MAX_ROWS - 1);
+            const { data, error } = await fetchWithRetry(async () => {
+                const response = await fetchCandidatesWithSelectFallback((selectFields) => {
+                    let query = supabase
+                        .from('candidates')
+                        .select(selectFields)
+                        .eq('app_name', APP_NAME)
+                        .order('created_at', { ascending: false });
 
-            query = applyStandardProcessFilter(query, processIds) ?? query;
+                    query = applyStandardProcessFilter(query, processIds) ?? query;
 
-            if (abortSignal) query = query.abortSignal(abortSignal);
-            if (!includeArchived) {
-                query = query.eq('archived', false);
-            }
-            return query.limit(2000);
-        });
-        if (error) throw error;
-        if (!data || data.length === 0) return [];
+                    if (abortSignal) query = query.abortSignal(abortSignal);
+                    if (!includeArchived) {
+                        query = query.eq('archived', false);
+                    }
+                    return query.range(from, to);
+                });
+                if (response.error) throw response.error;
+                return response;
+            });
 
-        if (!includeRelations) {
-            return data.map(dbCandidate => mapListCandidate(dbCandidate));
+            if (error) throw error;
+            const page = data || [];
+            allData.push(...page);
+            if (page.length < CANDIDATE_PAGE_SIZE) break;
         }
 
-        const maps = await fetchRelationsMaps(data.map(c => c.id), abortSignal);
-        return mapCandidatesWithRelations(data, maps);
+        if (allData.length === 0) return [];
+
+        if (!includeRelations) {
+            return allData.map(dbCandidate => mapListCandidate(dbCandidate));
+        }
+
+        const maps = await fetchRelationsMaps(allData.map(c => c.id), abortSignal);
+        return mapCandidatesWithRelations(allData, maps);
+    },
+
+    /** Carga candidatos activos en páginas (para merge progresivo en arranque). */
+    async getAllPages(
+        includeArchived: boolean = false,
+        standardProcessIds?: string[] | null,
+        abortSignal?: AbortSignal,
+        onPage?: (batch: Candidate[]) => void,
+    ): Promise<Candidate[]> {
+        const processIds = standardProcessIds !== undefined
+            ? standardProcessIds
+            : await fetchStandardProcessIds();
+        if (processIds !== null && processIds.length === 0) return [];
+
+        const merged: Candidate[] = [];
+        for (let from = 0; from < CANDIDATE_MAX_ROWS; from += CANDIDATE_PAGE_SIZE) {
+            const to = Math.min(from + CANDIDATE_PAGE_SIZE - 1, CANDIDATE_MAX_ROWS - 1);
+            const { data, error } = await fetchWithRetry(async () => {
+                const response = await fetchCandidatesWithSelectFallback((selectFields) => {
+                    let query = supabase
+                        .from('candidates')
+                        .select(selectFields)
+                        .eq('app_name', APP_NAME)
+                        .order('created_at', { ascending: false });
+
+                    query = applyStandardProcessFilter(query, processIds) ?? query;
+                    if (abortSignal) query = query.abortSignal(abortSignal);
+                    if (!includeArchived) query = query.eq('archived', false);
+                    return query.range(from, to);
+                });
+                if (response.error) throw response.error;
+                return response;
+            });
+
+            if (error) throw error;
+            const page = (data || []).map(dbCandidate => mapListCandidate(dbCandidate));
+            if (page.length === 0) break;
+            merged.push(...page);
+            onPage?.(page);
+            if (page.length < CANDIDATE_PAGE_SIZE) break;
+        }
+        return merged;
     },
 
     /** Añade history/post-its/comments sin volver a descargar la lista de candidatos */

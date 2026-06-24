@@ -127,6 +127,14 @@ export interface SyncContactHistoryResult {
     patched: number;
 }
 
+function isDuplicateContactAttemptError(error: { code?: string; status?: number; message?: string } | null): boolean {
+    if (!error) return false;
+    if (error.status === 409) return true;
+    if (error.code === '23505') return true;
+    const msg = (error.message || '').toLowerCase();
+    return msg.includes('duplicate') || msg.includes('unique');
+}
+
 /**
  * Escribe en candidate_contact_attempts los intentos que ya figuran en candidates.contact_*_*
  * (y opcionalmente en bulk_process_activity_log) pero faltan en el historial.
@@ -215,6 +223,9 @@ export async function syncContactHistoryForCandidates(
                     });
 
                     if (!error) inserted += 1;
+                    else if (!isDuplicateContactAttemptError(error)) {
+                        console.warn('syncContactHistory insert:', error.message);
+                    }
                 }
             }
 
@@ -249,6 +260,9 @@ export async function syncContactHistoryForCandidates(
                 });
 
                 if (!error) inserted += 1;
+                else if (!isDuplicateContactAttemptError(error)) {
+                    console.warn('syncContactHistory interesado insert:', error.message);
+                }
             }
         }
     }

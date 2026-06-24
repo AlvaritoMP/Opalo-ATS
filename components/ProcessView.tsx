@@ -122,6 +122,11 @@ export const ProcessView: React.FC<ProcessViewProps> = ({ processId }) => {
     const process = state.processes.find(p => p.id === processId);
 
     useEffect(() => {
+        if (!processId || process?.isBulkProcess) return;
+        void actions.ensureProcessCandidatesLoaded(processId);
+    }, [processId, process?.isBulkProcess, actions]);
+
+    useEffect(() => {
         setWorkMode(getProcessWorkMode(processId, state.currentUser?.id));
     }, [processId, state.currentUser?.id]);
 

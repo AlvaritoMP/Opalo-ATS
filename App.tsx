@@ -75,6 +75,7 @@ interface AppActions {
     deleteProcess: (processId: string) => Promise<void>;
     reloadProcesses: () => Promise<void>;
     reloadCandidates: () => Promise<void>;
+    ensureProcessCandidatesLoaded: (processId: string) => Promise<void>;
     addCandidate: (candidateData: Omit<Candidate, 'id' | 'history'>, options?: { skipGoogleDrive?: boolean; silent?: boolean }) => Promise<Candidate>;
     updateCandidate: (candidateData: Candidate, movedBy?: string) => Promise<void>;
     deleteCandidate: (candidateId: string) => Promise<void>;
@@ -490,7 +491,7 @@ const App: React.FC = () => {
     const CORS_ERROR_DEBOUNCE_MS = 5 * 60 * 1000; // 5 minutos
     const backgroundLoadStartedRef = useRef(false);
 
-    const INITIAL_LOAD_TIMEOUT_MS = 45_000;
+    const INITIAL_LOAD_TIMEOUT_MS = 60_000;
     const BACKGROUND_LOAD_TIMEOUT_MS = 120_000;
 
     useEffect(() => {
@@ -619,36 +620,9 @@ const App: React.FC = () => {
                     .filter(p => !p.isBulkProcess)
                     .map(p => p.id);
 
-                // Fase 3 — candidatos (lista) + entrevistas en paralelo
-                const [activeCandidates, interviewEvents] = await Promise.all([
-                    loadStep(
-                        signal => candidatesApi.getAll(false, false, signal, standardProcessIds),
-                        'candidates',
-                        [] as Candidate[]
-                    ),
-                    loadStep(
-                        signal => interviewsApi.getForAppWindow(signal),
-                        'interviewEvents',
-                        [] as InterviewEvent[]
-                    ),
-                ]);
-
-                let discardedCandidates: Candidate[] = [];
-                try {
-                    discardedCandidates = await candidatesApi.getDiscardedArchived();
-                } catch (error) {
-                    console.warn('Error cargando candidatos descartados:', error);
-                }
-
-                const activeIds = new Set(activeCandidates.map(c => c.id));
-                const candidates = [
-                    ...activeCandidates,
-                    ...discardedCandidates.filter(c => !activeIds.has(c.id)),
-                ];
-
-                const { processes: filteredProcesses, candidates: filteredCandidates } = filterByUserClients(
+                const { processes: filteredProcesses } = filterByUserClients(
                     processes,
-                    candidates,
+                    [],
                     currentUser
                 );
 
@@ -656,15 +630,15 @@ const App: React.FC = () => {
                     ? getBulkSelectedProcessId(currentUser.id) ?? ''
                     : '';
 
-                // UI usable con datos esenciales (form_integrations en segundo plano)
+                // UI inmediata: candidatos y entrevistas en segundo plano (Nano no aguanta 2000 filas bloqueando)
                 setState({
                     processes: filteredProcesses,
-                    candidates: filteredCandidates,
+                    candidates: [],
                     users,
                     applications: [],
                     settings,
                     formIntegrations: [],
-                    interviewEvents,
+                    interviewEvents: [],
                     currentUser,
                     view: { type: 'dashboard' },
                     lastViewedProcessId: null,
@@ -676,18 +650,91 @@ const App: React.FC = () => {
                     toasts: [],
                 });
 
-                debugLog('Essential data loaded — enriching candidates in background');
+                debugLog('Shell ready — loading candidates and interviews in background');
 
-                // Fase 4 — relaciones en segundo plano (sin re-descargar candidatos)
                 if (!backgroundLoadStartedRef.current) {
                     backgroundLoadStartedRef.current = true;
-                    const candidatesForRelations = filteredCandidates;
+                    const capturedUser = currentUser;
+                    const capturedProcessIds = standardProcessIds;
 
                     void (async () => {
-                        await new Promise(r => setTimeout(r, 600));
+                        const accumulated: Candidate[] = [];
+
+                        const loadCandidatesBg = runWithAbortTimeout(
+                            signal =>
+                                candidatesApi.getAllPages(
+                                    false,
+                                    capturedProcessIds,
+                                    signal,
+                                    page => {
+                                        accumulated.push(...page);
+                                        setState(s => {
+                                            const { candidates } = filterByUserClients(
+                                                s.processes,
+                                                [...accumulated],
+                                                s.currentUser
+                                            );
+                                            return { ...s, candidates };
+                                        });
+                                    }
+                                ),
+                            BACKGROUND_LOAD_TIMEOUT_MS
+                        );
+
+                        const loadInterviewsBg = loadStep(
+                            signal => interviewsApi.getForAppWindow(signal),
+                            'interviewEvents',
+                            [] as InterviewEvent[],
+                            BACKGROUND_LOAD_TIMEOUT_MS
+                        );
+
+                        const [candidatesResult, interviewsResult] = await Promise.allSettled([
+                            loadCandidatesBg,
+                            loadInterviewsBg,
+                        ]);
+
+                        let activeCandidates: Candidate[] = [];
+                        let interviewEvents: InterviewEvent[] = [];
+
+                        if (candidatesResult.status === 'fulfilled') {
+                            activeCandidates = candidatesResult.value;
+                        } else {
+                            console.warn('No se pudieron cargar candidatos en segundo plano:', candidatesResult.reason);
+                        }
+
+                        if (interviewsResult.status === 'fulfilled') {
+                            interviewEvents = interviewsResult.value;
+                        } else {
+                            console.warn('No se pudieron cargar entrevistas en segundo plano:', interviewsResult.reason);
+                        }
+
+                        let discardedCandidates: Candidate[] = [];
+                        try {
+                            discardedCandidates = await candidatesApi.getDiscardedArchived();
+                        } catch (error) {
+                            console.warn('Error cargando candidatos descartados:', error);
+                        }
+
+                        const activeIds = new Set(activeCandidates.map(c => c.id));
+                        const mergedList = [
+                            ...activeCandidates,
+                            ...discardedCandidates.filter(c => !activeIds.has(c.id)),
+                        ];
+                        const { candidates: filteredCandidates } = filterByUserClients(
+                            filteredProcesses,
+                            mergedList,
+                            capturedUser
+                        );
+
+                        setState(s => ({
+                            ...s,
+                            candidates: filteredCandidates,
+                            interviewEvents,
+                        }));
+
                         try {
                             const enriched = await runWithAbortTimeout(
-                                signal => candidatesApi.enrichWithRelations(candidatesForRelations, signal),
+                                signal => candidatesApi.enrichWithRelations(filteredCandidates, signal),
                                 BACKGROUND_LOAD_TIMEOUT_MS
                             );
                             setState(s => {
@@ -783,6 +830,9 @@ const App: React.FC = () => {
         }));
     };
 
+    const stateRef = useRef(state);
+    stateRef.current = state;
+
     const actions: AppActions = useMemo(() => ({
         login: async (email, password) => {
             try {
@@ -846,21 +896,22 @@ const App: React.FC = () => {
             });
         },
         loadDashboardCache: async (force = false) => {
-            if (!force && state.dashboardCache) return;
-            if (state.dashboardCacheLoading) return;
+            const s = stateRef.current;
+            if (!force && s.dashboardCache) return;
+            if (s.dashboardCacheLoading) return;
 
-            setState(s => ({ ...s, dashboardCacheLoading: true }));
+            setState(prev => ({ ...prev, dashboardCacheLoading: true }));
             const toastId = force
                 ? showToastHelper('Actualizando panel de datos...', 'loading', 0)
                 : null;
             try {
                 const cache = await fetchDashboardData(
-                    state.processes,
-                    state.users,
-                    state.currentUser
+                    s.processes,
+                    s.users,
+                    s.currentUser
                 );
-                setState(s => ({
-                    ...s,
+                setState(prev => ({
+                    ...prev,
                     dashboardCache: cache,
                     dashboardCacheLoading: false,
                 }));
@@ -1161,6 +1212,33 @@ const App: React.FC = () => {
                         );
                     }
                 }
+            }
+        },
+        ensureProcessCandidatesLoaded: async (processId: string) => {
+            const process = state.processes.find(p => p.id === processId);
+            if (process?.isBulkProcess) return;
+
+            const existing = state.candidates.filter(c => c.processId === processId && !c.archived);
+            const needsLoad = existing.length === 0;
+            const needsRelations = existing.some(
+                c =>
+                    (c.history?.length ?? 0) === 0 &&
+                    (c.postIts?.length ?? 0) === 0 &&
+                    (c.comments?.length ?? 0) === 0
+            );
+            if (!needsLoad && !needsRelations) return;
+
+            try {
+                const loaded = needsLoad
+                    ? await candidatesApi.getByProcess(processId, false, true)
+                    : await candidatesApi.enrichWithRelations(existing);
+                setState(s => {
+                    const others = s.candidates.filter(c => c.processId !== processId);
+                    const archived = s.candidates.filter(c => c.processId === processId && c.archived);
+                    return { ...s, candidates: [...others, ...loaded, ...archived] };
+                });
+            } catch (error) {
+                console.warn(`No se pudieron cargar candidatos del proceso ${processId}:`, error);
             }
         },
         deleteProcess: async (processId) => {
@@ -1844,7 +1922,7 @@ const App: React.FC = () => {
         setProcessEmbeddedTableActive: (active: boolean) => {
             setState(s => (s.processEmbeddedTableActive === active ? s : { ...s, processEmbeddedTableActive: active }));
         },
-    }), [state.currentUser, state.users, state.processes, state.dashboardCache, state.dashboardCacheLoading]);
+    }), [state.currentUser, state.users, state.processes]);
 
     // Cerrar sesión tras 1 hora sin actividad (clics, teclas, scroll)
     useEffect(() => {

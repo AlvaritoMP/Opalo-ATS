@@ -2,6 +2,7 @@ import { supabase } from '../supabase';
 import { Process, Stage, DocumentCategory, Attachment } from '../../types';
 import { APP_NAME } from '../appConfig';
 import { applyStageColorsFromBulkConfig } from '../stageColors';
+import { fetchWithRetry } from '../fetchWithRetry';
 
 const STAGE_LIST_FIELDS = 'id, process_id, name, order_index, required_documents, is_critical, color';
 
@@ -258,6 +259,11 @@ function processToDb(process: Partial<Process>): any {
     return dbProcess;
 }
 
+const BULK_PROCESS_LIST_FIELDS =
+    'id, title, description, salary_range, experience_level, seniority, flyer_url, flyer_position, service_order_code, start_date, end_date, status, vacancies, google_drive_folder_id, google_drive_folder_name, published_date, need_identified_date, client_id, is_bulk_process, hired_candidate_ids, closed_at, created_at';
+
+const BULK_PROCESS_FULL_FIELDS = `${BULK_PROCESS_LIST_FIELDS}, bulk_config`;
+
 export const processesApi = {
     /** Conteo rápido solo desde Supabase (sin Google Drive) */
     async getAttachmentsCountDb(processId: string): Promise<number> {
@@ -502,14 +508,19 @@ export const processesApi = {
     },
 
     // Obtener un proceso por ID
-    async getById(id: string): Promise<Process | null> {
-        const { data: process, error } = await supabase
-            .from('processes')
-            .select('*')
-            .eq('id', id)
-            .eq('app_name', APP_NAME) // Filtrar solo procesos de esta app
-            .single();
-        
+    async getById(id: string, options?: { includeAttachments?: boolean }): Promise<Process | null> {
+        const includeAttachments = options?.includeAttachments ?? false;
+        const { data: process, error } = await fetchWithRetry(async () => {
+            const result = await supabase
+                .from('processes')
+                .select(BULK_PROCESS_FULL_FIELDS)
+                .eq('id', id)
+                .eq('app_name', APP_NAME)
+                .single();
+            if (result.error && result.error.code !== 'PGRST116') throw result.error;
+            return result;
+        });
+
         if (error) {
             if (error.code === 'PGRST116') return null;
             throw error;
@@ -519,8 +530,10 @@ export const processesApi = {
 
         const [stages, categories, attachments] = await Promise.all([
             fetchStagesByProcessId(id),
-            supabase.from('document_categories').select('*').eq('process_id', id).eq('app_name', APP_NAME),
-            supabase.from('attachments').select('*').eq('process_id', id).is('candidate_id', null).eq('app_name', APP_NAME),
+            supabase.from('document_categories').select('id, process_id, name, description, required').eq('process_id', id).eq('app_name', APP_NAME),
+            includeAttachments
+                ? supabase.from('attachments').select('id, process_id, name, url, type, size, category, uploaded_at').eq('process_id', id).is('candidate_id', null).eq('app_name', APP_NAME)
+                : Promise.resolve({ data: [] as any[], error: null }),
         ]);
 
         return dbToProcess(process, stages, categories.data || [], attachments.data || []);
@@ -1149,17 +1162,22 @@ export const processesApi = {
     },
 
     // Obtener todos los procesos masivos (solo procesos masivos)
-    async getAllBulkProcesses(): Promise<Process[]> {
+    async getAllBulkProcesses(includeBulkConfig: boolean = false): Promise<Process[]> {
+        const selectFields = includeBulkConfig ? BULK_PROCESS_FULL_FIELDS : BULK_PROCESS_LIST_FIELDS;
         let processes: any[] = [];
         let error: any = null;
         
         try {
-            const result = await supabase
-                .from('processes')
-                .select('id, title, description, salary_range, experience_level, seniority, flyer_url, flyer_position, service_order_code, start_date, end_date, status, vacancies, google_drive_folder_id, google_drive_folder_name, published_date, need_identified_date, client_id, is_bulk_process, bulk_config, hired_candidate_ids, closed_at, created_at')
-                .eq('app_name', APP_NAME)
-                .eq('is_bulk_process', true) // Solo procesos masivos
-                .order('created_at', { ascending: false });
+            const result = await fetchWithRetry(async () => {
+                const response = await supabase
+                    .from('processes')
+                    .select(selectFields)
+                    .eq('app_name', APP_NAME)
+                    .eq('is_bulk_process', true)
+                    .order('created_at', { ascending: false });
+                if (response.error) throw response.error;
+                return response;
+            });
             
             // Verificar si hubo error de columna faltante directamente aquí
             if (result.error && (result.error.message?.includes('client_id') || result.error.message?.includes('is_bulk_process') || result.error.message?.includes('column') || result.error.code === 'PGRST116')) {
@@ -1233,7 +1251,7 @@ export const processesApi = {
     async getAllIncludingBulk(includeAttachments: boolean = false): Promise<Process[]> {
         const [regular, bulk] = await Promise.all([
             this.getAll(includeAttachments),
-            this.getAllBulkProcesses().catch(err => {
+            this.getAllBulkProcesses(false).catch(err => {
                 console.warn('⚠️ No se pudieron cargar procesos masivos:', err);
                 return [] as Process[];
             }),
@@ -1244,7 +1262,7 @@ export const processesApi = {
     /** Carga regular y masivos en serie (menor pico de I/O en arranque). */
     async getAllIncludingBulkSequential(includeAttachments: boolean = false): Promise<Process[]> {
         const regular = await this.getAll(includeAttachments);
-        const bulk = await this.getAllBulkProcesses().catch(err => {
+        const bulk = await this.getAllBulkProcesses(false).catch(err => {
             console.warn('⚠️ No se pudieron cargar procesos masivos:', err);
             return [] as Process[];
         });

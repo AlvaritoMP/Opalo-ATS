@@ -728,6 +728,12 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
     const [selectionAnchor, setSelectionAnchor] = useState<CellCoord | null>(null);
     const tableContainerRef = useRef<HTMLDivElement>(null);
     const columnValuesMigratedRef = useRef<string | null>(null);
+    const columnMigrationInFlightRef = useRef<string | null>(null);
+    const ageSyncDoneRef = useRef<Set<string>>(new Set());
+    const contactSyncDoneRef = useRef<Set<string>>(new Set());
+    const registrationBackfillDoneRef = useRef<Set<string>>(new Set());
+    const actionsRef = useRef(actions);
+    actionsRef.current = actions;
     const isDraggingCells = useRef(false);
     const dragAnchorCell = useRef<CellCoord | null>(null);
     const didDragSelect = useRef(false);
@@ -788,6 +794,8 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
     const selectionAnchorNavRef = useRef<CellCoord | null>(null);
     const selectedCellsNavRef = useRef<Set<string>>(new Set());
     const bulkProcessesRef = useRef(bulkProcesses);
+    const candidatesRef = useRef(candidates);
+    candidatesRef.current = candidates;
     bulkProcessesRef.current = bulkProcesses;
 
     const pageSize = 50;
@@ -1306,9 +1314,14 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
 
     // Cargar procesos masivos
     const loadBulkProcesses = useCallback(async () => {
+        const fromAppState = state.processes.filter(p => p.isBulkProcess);
+        if (fromAppState.length > 0) {
+            setBulkProcesses(fromAppState);
+        }
+
         setIsLoadingProcesses(true);
         try {
-            const processes = await processesApi.getAllBulkProcesses();
+            const processes = await processesApi.getAllBulkProcesses(false);
             let filteredProcesses = processes;
             const currentUser = state.currentUser;
             if (currentUser && currentUser.allowedClientIds !== undefined && currentUser.allowedClientIds !== null) {
@@ -1336,7 +1349,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
         } finally {
             setIsLoadingProcesses(false);
         }
-    }, [selectedProcess, actions, state.currentUser, state.lastViewedBulkProcessId]);
+    }, [selectedProcess, actions, state.currentUser, state.lastViewedBulkProcessId, state.processes]);
 
     useEffect(() => {
         if (isEmbedded) return;
@@ -1599,6 +1612,11 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
             setCellMeta({});
             return;
         }
+        columnValuesMigratedRef.current = null;
+        columnMigrationInFlightRef.current = null;
+        ageSyncDoneRef.current.delete(selectedProcess);
+        contactSyncDoneRef.current.delete(selectedProcess);
+        registrationBackfillDoneRef.current.delete(selectedProcess);
         setTableReadyProcessId(null);
         setCandidates([]);
         setSelectedIds(new Set());
@@ -1618,23 +1636,38 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
         (async () => {
             setIsLoading(true);
             try {
-                let proc = bulkProcessesRef.current.find(p => p.id === processId);
+                let proc = bulkProcessesRef.current.find(p => p.id === processId)
+                    ?? state.processes.find(p => p.id === processId);
                 let config = proc?.bulkConfig;
 
-                try {
-                    const fresh = await processesApi.getById(processId);
-                    if (!cancelled && fresh) {
-                        proc = fresh;
-                        config = fresh.bulkConfig;
+                if (!config) {
+                    try {
+                        const fresh = await processesApi.getById(processId);
+                        if (!cancelled && fresh) {
+                            proc = fresh;
+                            config = fresh.bulkConfig;
+                            setBulkProcesses(prev => {
+                                const exists = prev.some(p => p.id === fresh.id);
+                                return exists
+                                    ? prev.map(p => (p.id === fresh.id ? fresh : p))
+                                    : [...prev, fresh];
+                            });
+                        }
+                    } catch (err) {
+                        console.warn('No se pudo recargar el proceso masivo desde la BD:', err);
+                    }
+                } else {
+                    void processesApi.getById(processId).then(fresh => {
+                        if (cancelled || !fresh) return;
                         setBulkProcesses(prev => {
                             const exists = prev.some(p => p.id === fresh.id);
                             return exists
                                 ? prev.map(p => (p.id === fresh.id ? fresh : p))
                                 : [...prev, fresh];
                         });
-                    }
-                } catch (err) {
-                    console.warn('No se pudo recargar el proceso masivo desde la BD:', err);
+                    }).catch(err => {
+                        console.warn('No se pudo actualizar el proceso masivo en segundo plano:', err);
+                    });
                 }
 
                 if (cancelled || !proc) return;
@@ -1659,7 +1692,6 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                 columnWidthsRef.current = savedWidths;
                 setColumnOrder(layout.columnOrder);
                 setColumnFilterDraft({});
-                columnValuesMigratedRef.current = null;
 
                 if (layout.needsPersist && config) {
                     const repairedConfig: BulkProcessConfig = {
@@ -1683,7 +1715,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                             prev.map(p => (p.id === processId ? { ...p, bulkConfig: repairedConfig } : p))
                         );
                     });
-                    actions.showToast(
+                    actionsRef.current.showToast(
                         'Criterios del perfil ideal reparados tras el cambio de columnas',
                         'success',
                         4500
@@ -1692,7 +1724,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
 
                 if (layout.recoveredFrom === 'local') {
                     const src = layout.localSource === 'template' ? 'plantilla guardada' : 'respaldo del navegador';
-                    actions.showToast(`Diseño de tabla recuperado desde ${src}`, 'success', 5000);
+                    actionsRef.current.showToast(`Diseño de tabla recuperado desde ${src}`, 'success', 5000);
                 }
 
                 const legacy = buildLegacyColumnIdToName(config, cols);
@@ -1737,42 +1769,49 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
         })();
 
         return () => { cancelled = true; };
-    }, [selectedProcess, actions]);
+    }, [selectedProcess]);
 
     const routeCostColumns = useMemo(
         () => customColumns.filter(c => c.type === 'route_cost'),
         [customColumns]
     );
 
-    // Alinear candidate_contact_attempts con lo visible en la tabla (contact_*_* en candidates)
+    // Alinear candidate_contact_attempts — una vez por proceso, solo filas visibles
     useEffect(() => {
         if (!selectedProcess) return;
+        if (contactSyncDoneRef.current.has(selectedProcess)) return;
+        if (tableReadyProcessId !== selectedProcess) return;
+
+        contactSyncDoneRef.current.add(selectedProcess);
 
         let cancelled = false;
-        (async () => {
-            try {
-                const all = await bulkCandidatesApi.getAllCandidates(selectedProcess);
-                if (cancelled || all.length === 0) return;
+        const timer = window.setTimeout(() => {
+            void (async () => {
+                try {
+                    const visible = candidatesRef.current;
+                    if (cancelled || visible.length === 0) return;
 
-                await contactTrackingApi.syncSummariesToHistory(
-                    all.map(c => ({
-                        id: c.id,
-                        processId: c.processId,
-                        contactPhone: c.contactPhone,
-                        contactWhatsapp: c.contactWhatsapp,
-                        contactEmail: c.contactEmail,
-                    })),
-                    [selectedProcess]
-                );
-            } catch (error) {
-                console.warn('No se pudo sincronizar historial de contacto:', error);
-            }
-        })();
+                    await contactTrackingApi.syncSummariesToHistory(
+                        visible.map(c => ({
+                            id: c.id,
+                            processId: c.processId,
+                            contactPhone: c.contactPhone,
+                            contactWhatsapp: c.contactWhatsapp,
+                            contactEmail: c.contactEmail,
+                        })),
+                        [selectedProcess]
+                    );
+                } catch (error) {
+                    console.warn('No se pudo sincronizar historial de contacto:', error);
+                }
+            })();
+        }, 8000);
 
         return () => {
             cancelled = true;
+            window.clearTimeout(timer);
         };
-    }, [selectedProcess]);
+    }, [selectedProcess, tableReadyProcessId]);
 
     useEffect(() => {
         const intervalId = window.setInterval(() => {
@@ -1846,15 +1885,18 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
         };
     }, [selectedProcess]);
 
-    // Rellenar registration_origin NULL en BD (registros anteriores al campo)
+    // Rellenar registration_origin NULL — una sola vez por proceso
     useEffect(() => {
         if (!selectedProcess) return;
+        if (registrationBackfillDoneRef.current.has(selectedProcess)) return;
+        registrationBackfillDoneRef.current.add(selectedProcess);
+
         let cancelled = false;
-        (async () => {
+        void (async () => {
             try {
                 const { updated } = await backfillRegistrationOriginsForProcess(selectedProcess);
                 if (!cancelled && updated > 0) {
-                    loadCandidates(currentPage, true);
+                    loadCandidates(0, true);
                 }
             } catch (error) {
                 console.warn('No se pudo completar origen de alta histórico:', error);
@@ -1863,7 +1905,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
         return () => {
             cancelled = true;
         };
-    }, [selectedProcess]);
+    }, [selectedProcess, loadCandidates]);
 
     const prevProcessForFilterRef = useRef<string | null>(null);
 
@@ -1877,16 +1919,23 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
         loadCandidates(0, true);
     }, [selectedStage, debouncedSearch, selectedProcess]);
 
-    // Migrar valores que quedaron en localStorage hacia Supabase (sin borrar el respaldo local)
+    // Migrar valores localStorage → Supabase (una sola vez por proceso)
     useEffect(() => {
-        if (!process?.id || candidates.length === 0) return;
+        if (!process?.id || tableReadyProcessId !== process.id) return;
         if (columnValuesMigratedRef.current === process.id) return;
+        if (columnMigrationInFlightRef.current === process.id) return;
+
+        const snapshot = candidatesRef.current;
+        if (snapshot.length === 0) return;
+
+        columnMigrationInFlightRef.current = process.id;
 
         const storageKey = getColumnValuesStorageKey(process.id);
         const backupKey = getColumnValuesBackupStorageKey(process.id);
         const saved = localStorage.getItem(storageKey);
         if (!saved) {
             columnValuesMigratedRef.current = process.id;
+            columnMigrationInFlightRef.current = null;
             return;
         }
 
@@ -1897,16 +1946,17 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
             localValues = JSON.parse(saved);
         } catch {
             columnValuesMigratedRef.current = process.id;
+            columnMigrationInFlightRef.current = null;
             return;
         }
 
         const legacy = buildLegacyColumnIdToName(process.bulkConfig, customColumns);
-        const validCandidateIds = new Set(candidates.map(c => c.id));
+        const validCandidateIds = new Set(snapshot.map(c => c.id));
         const toMigrate: Record<string, Record<string, unknown>> = {};
         for (const [candidateId, values] of Object.entries(localValues)) {
             if (!values) continue;
             if (!validCandidateIds.has(candidateId)) continue;
-            const candidate = candidates.find(c => c.id === candidateId);
+            const candidate = snapshot.find(c => c.id === candidateId);
             if (!candidate) continue;
             const dbValues = (candidate?.bulkColumnValues || {}) as Record<string, unknown>;
             const patch: Record<string, unknown> = {};
@@ -1946,6 +1996,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                 localStorage.setItem(storageKey, JSON.stringify(pruned));
             }
             columnValuesMigratedRef.current = process.id;
+            columnMigrationInFlightRef.current = null;
             return;
         }
 
@@ -1953,27 +2004,45 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
             .then(async () => {
                 columnValuesMigratedRef.current = process.id;
                 await syncColumnValuesFromDatabase(process.id);
-                actions.showToast('Datos de columnas sincronizados a la nube', 'success', 3000);
+                actionsRef.current.showToast('Datos de columnas sincronizados a la nube', 'success', 3000);
             })
             .catch(err => {
                 console.error('Error migrando columnValues a Supabase:', err);
-                actions.showToast('No se pudieron migrar algunos datos de columnas. Ejecute MIGRATION_ADD_BULK_COLUMN_VALUES.sql en Supabase.', 'error', 6000);
+                actionsRef.current.showToast(
+                    'No se pudieron migrar algunos datos de columnas. Ejecute MIGRATION_ADD_BULK_COLUMN_VALUES.sql en Supabase.',
+                    'error',
+                    6000
+                );
+            })
+            .finally(() => {
+                columnMigrationInFlightRef.current = null;
             });
-    }, [process?.id, process?.bulkConfig, candidates, customColumns, syncColumnValuesFromDatabase, actions]);
+    }, [process?.id, tableReadyProcessId, customColumns, syncColumnValuesFromDatabase]);
 
-    // Sincronizar edades importadas al campo age de BD hacia columnas personalizadas "Edad"
+    // Sincronizar edades importadas — una sola vez por proceso
     useEffect(() => {
-        if (!process || candidates.length === 0 || customColumns.length === 0) return;
+        if (!process?.id || tableReadyProcessId !== process.id) return;
+        if (ageSyncDoneRef.current.has(process.id)) return;
+        if (customColumns.length === 0) return;
+
+        const snapshot = candidatesRef.current;
+        if (snapshot.length === 0) return;
+
         const ageColumns = customColumns.filter(
             c => mapImportHeader(c.name.toLowerCase()) === 'age'
         );
-        if (ageColumns.length === 0) return;
+        if (ageColumns.length === 0) {
+            ageSyncDoneRef.current.add(process.id);
+            return;
+        }
+
+        ageSyncDoneRef.current.add(process.id);
 
         setColumnValues(prev => {
             const newValues = { ...prev };
             let updated = false;
             const dbPatches: Record<string, Record<string, unknown>> = {};
-            candidates.forEach(candidate => {
+            snapshot.forEach(candidate => {
                 if (candidate.age == null) return;
                 ageColumns.forEach(col => {
                     const current = newValues[candidate.id]?.[col.id];
@@ -2000,7 +2069,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
             }
             return prev;
         });
-    }, [candidates, customColumns, process?.id]);
+    }, [process?.id, tableReadyProcessId, customColumns]);
 
     const applyOptimisticUpdate = useCallback((candidateId: string, updates: Partial<BulkCandidate>) => {
         setOptimisticUpdates(prev => {
