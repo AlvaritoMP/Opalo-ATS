@@ -9,6 +9,7 @@ import {
 import { APP_NAME } from './appConfig';
 import { readBulkTableTemplatesCache } from './bulkTableTemplates';
 import { extractRouteCostTotal } from './routeCostStorage';
+import { ensureFloatingColumnsHidden, resolveFloatingColumnIds } from './bulkFloatingColumns';
 
 const BULK_NAME_KEY_PREFIX = '__name__';
 
@@ -389,9 +390,19 @@ export function reconcileCustomColumns(
         if (name) addColumn(bare, name);
     }
 
+    const layoutColumnIds = new Set<string>([
+        ...(bulkConfig?.columnOrder || []),
+        ...(bulkConfig?.hiddenColumns || []),
+        ...(bulkConfig?.pinnedColumns || []),
+    ]);
     for (const [id, name] of Object.entries(bulkConfig?.columnKeyAliases || {})) {
         if (byId.has(id)) continue;
         if (DEFAULT_COLUMN_ORDER.includes(id)) continue;
+        const inLayout =
+            layoutColumnIds.has(id) ||
+            layoutColumnIds.has(`custom_${id}`) ||
+            [...valueKeys].some(k => k === id || k === `custom_${id}`);
+        if (!inLayout) continue;
         addColumn(id, name);
     }
 
@@ -1100,6 +1111,13 @@ function storedLayoutUsesLegacyCustomIds(
     return false;
 }
 
+/** Solo incluir columnas estándar opcionales si el proceso ya las tenía en orden u ocultas (evita columnas nuevas visibles). */
+function storedStandardColumnInLayout(colId: string, bulkConfig?: BulkProcessConfig): boolean {
+    const stored = bulkConfig?.columnOrder ?? [];
+    const hidden = bulkConfig?.hiddenColumns ?? [];
+    return stored.includes(colId) || hidden.includes(colId);
+}
+
 export function resolveColumnOrder(
     bulkConfig?: BulkProcessConfig,
     customColumns: CustomColumn[] = []
@@ -1111,8 +1129,13 @@ export function resolveColumnOrder(
         ordered = migrateBulkColumnOrder(ordered).filter(
             id => allIds.includes(id) || id === HIRED_STAGE_USER_COLUMN_ID
         );
-        ordered = ensureRegistrationOriginColumnInOrder(ordered);
-        ordered = ensureHiredStageUserColumnInOrder(ordered).filter(
+        if (storedStandardColumnInLayout(REGISTRATION_ORIGIN_COLUMN_ID, bulkConfig)) {
+            ordered = ensureRegistrationOriginColumnInOrder(ordered);
+        }
+        if (storedStandardColumnInLayout(HIRED_STAGE_USER_COLUMN_ID, bulkConfig)) {
+            ordered = ensureHiredStageUserColumnInOrder(ordered);
+        }
+        ordered = ordered.filter(
             id => allIds.includes(id) || id === HIRED_STAGE_USER_COLUMN_ID
         );
 
@@ -1125,6 +1148,49 @@ export function resolveColumnOrder(
     }
 
     return allIds;
+}
+
+/** Orden inicial: columnas custom justo después de "name" (típico en procesos masivos). */
+export function buildInitialBulkColumnOrder(customColumns: CustomColumn[] = []): string[] {
+    const customIds = getCustomColumnIds(customColumns);
+    const nameIdx = DEFAULT_COLUMN_ORDER.indexOf('name');
+    if (nameIdx < 0) return [...DEFAULT_COLUMN_ORDER, ...customIds];
+    const before = DEFAULT_COLUMN_ORDER.slice(0, nameIdx + 1);
+    const after = DEFAULT_COLUMN_ORDER.slice(nameIdx + 1);
+    return [...before, ...customIds, ...after];
+}
+
+/** Repara columnOrder / hiddenColumns / pinnedColumns cuando se perdieron en bulk_config. */
+export function ensureBulkTableLayoutConfig(
+    bulkConfig: BulkProcessConfig | undefined,
+    customColumns: CustomColumn[] = []
+): { config: BulkProcessConfig; needsPersist: boolean } {
+    const config: BulkProcessConfig = { ...(bulkConfig || {}) };
+    let needsPersist = false;
+
+    if (!config.columnOrder?.length) {
+        config.columnOrder = buildInitialBulkColumnOrder(customColumns);
+        needsPersist = true;
+    }
+    // No persistir hiddenColumns vacío: borraría la config guardada y mostraría todas las columnas.
+    if (config.hiddenColumns == null) {
+        config.hiddenColumns = [];
+    }
+    if (!config.pinnedColumns?.length) {
+        config.pinnedColumns = ['name'];
+        needsPersist = true;
+    }
+
+    const floatingIds = resolveFloatingColumnIds(config);
+    if (floatingIds.length > 0) {
+        const hidden = ensureFloatingColumnsHidden(config.hiddenColumns, floatingIds);
+        if (JSON.stringify(hidden) !== JSON.stringify(config.hiddenColumns)) {
+            config.hiddenColumns = hidden;
+            needsPersist = true;
+        }
+    }
+
+    return { config, needsPersist };
 }
 
 /** Reordena columnas visibles tras drag & drop preservando posiciones de columnas ocultas. */

@@ -57,7 +57,13 @@ import {
     isContactLockedForUser,
 } from '../lib/contactLock';
 import { processesApi } from '../lib/api/processes';
-import { fetchWithRetry } from '../lib/fetchWithRetry';
+import {
+    findBestLocalBulkConfigBackup,
+    mergeBulkConfigPreferRicher,
+    saveBulkConfigSnapshot,
+    scoreBulkConfigRichness,
+    loadBulkConfigSnapshot,
+} from '../lib/bulkConfigBackup';
 import { useDebouncedValue } from '../lib/useDebouncedValue';
 import { Check, X, Loader2, Send, Archive, Search, ChevronDown, ChevronUp, Plus, Edit, Trash2, ArrowLeft, MessageCircle, Phone, Upload, Download, Filter, Mail, Calendar, Settings, ArrowUp, ArrowDown, Pin, FileText, BookOpen, Paperclip, ClipboardList, ListPlus, RefreshCw, HardDrive, CaseSensitive, Package, History, Target, BarChart3, UserCheck, Coins, Bus, Undo2, ArrowRightLeft, LayoutGrid } from 'lucide-react';
 import { BulkCandidateTimeline } from './BulkCandidateTimeline';
@@ -123,6 +129,7 @@ import {
     ensureProfileMatchInColumnOrder,
     reconcileCustomColumns,
     collectBulkValueKeys,
+    ensureBulkTableLayoutConfig,
 } from '../lib/bulkTableColumns';
 import { getStageSelectClass } from '../lib/stageColors';
 import { getCellMetaStorageKey, BulkCellMeta, BulkCellMetaStore } from '../lib/bulkCellMeta';
@@ -1024,6 +1031,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
         };
         try {
             await processesApi.update(process.id, { bulkConfig: newBulkConfig });
+            saveBulkConfigSnapshot(process.id, newBulkConfig, 'persist');
             setBulkProcesses(prev => prev.map(p =>
                 p.id === process.id ? { ...p, bulkConfig: newBulkConfig } : p
             ));
@@ -1705,6 +1713,35 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
 
                 let config: BulkProcessConfig = proc.bulkConfig ? { ...proc.bulkConfig } : {};
 
+                const localBackup = findBestLocalBulkConfigBackup(processId);
+                if (localBackup?.bulkConfig) {
+                    const merged = mergeBulkConfigPreferRicher(config, localBackup.bulkConfig);
+                    if (merged.restoredFields.length > 0) {
+                        config = merged.config;
+                        proc = { ...proc, bulkConfig: config };
+                        setBulkProcesses(prev =>
+                            prev.map(p => (p.id === processId ? { ...p, bulkConfig: config } : p))
+                        );
+                        try {
+                            await processesApi.update(processId, { bulkConfig: config });
+                            saveBulkConfigSnapshot(processId, config, `merge:${localBackup.source ?? 'local'}`);
+                            actionsRef.current.showToast(
+                                `Configuración recuperada (${merged.restoredFields.join(', ')})`,
+                                'success',
+                                7000
+                            );
+                        } catch (err) {
+                            console.error('Error guardando configuración recuperada:', err);
+                        }
+                    }
+                } else {
+                    const existingSnap = loadBulkConfigSnapshot(processId);
+                    const score = scoreBulkConfigRichness(config);
+                    if (score >= 50 && score > scoreBulkConfigRichness(existingSnap?.bulkConfig)) {
+                        saveBulkConfigSnapshot(processId, config, 'load');
+                    }
+                }
+
                 let dbValues: Record<string, Record<string, unknown>> = {};
                 try {
                     dbValues = await bulkCandidatesApi.loadAllBulkColumnValues(processId);
@@ -1715,9 +1752,28 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                 const localValuesForReconcile = loadLocalColumnValuesForProcess(processId);
                 const valueKeys = collectBulkValueKeys(dbValues, localValuesForReconcile);
                 const reconciled = reconcileCustomColumns(config, valueKeys);
+                const addedWithData = reconciled.addedColumnIds.filter(colId =>
+                    [...valueKeys].some(
+                        key =>
+                            key === colId ||
+                            key === `custom_${colId}` ||
+                            (key.startsWith('__name__') &&
+                                normalizeColumnNameKey(
+                                    reconciled.columns.find(c => c.id === colId)?.name || ''
+                                ) === key.slice('__name__'.length))
+                    )
+                );
 
-                if (reconciled.needsPersist) {
-                    config = { ...config, customColumns: reconciled.columns };
+                if (reconciled.needsPersist && addedWithData.length > 0) {
+                    const hiddenSet = new Set(config.hiddenColumns || []);
+                    for (const colId of addedWithData) {
+                        hiddenSet.add(`custom_${colId}`);
+                    }
+                    config = {
+                        ...config,
+                        customColumns: reconciled.columns,
+                        hiddenColumns: [...hiddenSet],
+                    };
                     proc = { ...proc, bulkConfig: config };
                     setBulkProcesses(prev =>
                         prev.map(p => (p.id === processId ? { ...p, bulkConfig: config } : p))
@@ -1725,7 +1781,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                     try {
                         await processesApi.update(processId, { bulkConfig: config });
                         actionsRef.current.showToast(
-                            `Se restauraron ${reconciled.addedColumnIds.length} columna(s) desde datos guardados`,
+                            `Se restauraron ${addedWithData.length} columna(s) desde datos guardados`,
                             'success',
                             6000
                         );
@@ -1735,6 +1791,31 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                 }
 
                 const cols = config.customColumns || [];
+                const hadColumnOrderInDb = Boolean(proc.bulkConfig?.columnOrder?.length);
+
+                const layoutRepair = ensureBulkTableLayoutConfig(config, cols);
+                if (layoutRepair.needsPersist) {
+                    config = layoutRepair.config;
+                    proc = { ...proc, bulkConfig: config };
+                    setBulkProcesses(prev =>
+                        prev.map(p => (p.id === processId ? { ...p, bulkConfig: config } : p))
+                    );
+                    // Solo persistir si faltaba por completo el orden; nunca pisar hiddenColumns al abrir.
+                    if (!hadColumnOrderInDb) {
+                        try {
+                            await processesApi.update(processId, { bulkConfig: config });
+                            saveBulkConfigSnapshot(processId, config, 'layout_repair');
+                            actionsRef.current.showToast(
+                                'Orden de columnas reparado en la nube',
+                                'success',
+                                5000
+                            );
+                        } catch (err) {
+                            console.error('Error guardando layout reparado:', err);
+                        }
+                    }
+                }
+
                 const layout = resolveBulkTableLayout(processId, config, cols);
 
                 setCustomColumns(cols);
@@ -1754,19 +1835,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                 setColumnOrder(layout.columnOrder);
                 setColumnFilterDraft({});
 
-                if (layout.needsPersist && config && cols.length > 0) {
-                    const repairedConfig: BulkProcessConfig = {
-                        ...config,
-                        columnOrder: layout.columnOrder,
-                        hiddenColumns: layout.hiddenColumns,
-                        pinnedColumns: layout.pinnedColumns,
-                    };
-                    void processesApi.update(processId, { bulkConfig: repairedConfig }).then(() => {
-                        setBulkProcesses(prev =>
-                            prev.map(p => (p.id === processId ? { ...p, bulkConfig: repairedConfig } : p))
-                        );
-                    });
-                }
+                // No guardar layout automáticamente al abrir: ocultas/orden solo cambian con acción del usuario.
 
                 const idealNorm = normalizeIdealProfileConfig(config?.idealProfile, cols, config);
                 if (idealNorm.needsPersist && idealNorm.config && config && cols.length > 0) {
@@ -3479,6 +3548,57 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
             });
         }
     }, [editingCell, selectedCells, activeCell, customColumns, setCellValue, actions, logActivity, captureCellSnapshot, pushUndo]);
+
+    const handleRestoreFullConfiguration = useCallback(async (overrideConfig?: BulkProcessConfig) => {
+        if (!process) return;
+
+        const backup = overrideConfig
+            ? { bulkConfig: overrideConfig, savedAt: new Date().toISOString(), source: 'json' }
+            : findBestLocalBulkConfigBackup(process.id);
+
+        if (!backup?.bulkConfig) {
+            actions.showToast(
+                'No hay respaldo de configuración en este navegador. Si tienes un JSON de bulk_config, impórtalo aquí o restaura desde backup de Supabase.',
+                'error',
+                8000
+            );
+            return false;
+        }
+
+        const merged = mergeBulkConfigPreferRicher(process.bulkConfig, backup.bulkConfig);
+        const config = merged.config;
+
+        try {
+            await processesApi.update(process.id, { bulkConfig: config });
+            saveBulkConfigSnapshot(process.id, config, overrideConfig ? 'json_import' : 'full_restore');
+            setBulkProcesses(prev =>
+                prev.map(p => (p.id === process.id ? { ...p, bulkConfig: config } : p))
+            );
+
+            const cols = config.customColumns || [];
+            const layout = resolveBulkTableLayout(process.id, config, cols);
+            setCustomColumns(cols);
+            setColumnOrder(layout.columnOrder);
+            setHiddenColumns(layout.hiddenColumns);
+            setPinnedColumns(layout.pinnedColumns);
+            if (config.columnWidths) {
+                setColumnWidths(config.columnWidths);
+                columnWidthsRef.current = config.columnWidths;
+            }
+
+            const fields = merged.restoredFields.length > 0
+                ? merged.restoredFields.join(', ')
+                : 'configuración completa';
+            actions.showToast(`Proceso restaurado: ${fields}`, 'success', 7000);
+            await syncColumnValuesFromDatabase(process.id, config);
+            await loadCandidates(0, true, { bulkConfig: config, manageLoading: false });
+            return true;
+        } catch (err) {
+            console.error('Error restaurando configuración completa:', err);
+            actions.showToast('No se pudo guardar la configuración restaurada', 'error', 5000);
+            return false;
+        }
+    }, [process, actions, syncColumnValuesFromDatabase, loadCandidates]);
 
     const handleRestoreTableLayout = async () => {
         if (!process) return;
@@ -7113,7 +7233,9 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                     process={process}
                     customColumns={customColumns}
                     candidateIds={new Set(candidates.map(c => c.id))}
+                    configSnapshot={loadBulkConfigSnapshot(process.id)}
                     onClose={() => setShowRecoveryModal(false)}
+                    onRestoreFullConfig={handleRestoreFullConfiguration}
                     onRecovered={() => {
                         setShowRecoveryModal(false);
                         void syncColumnValuesFromDatabase(process.id, process.bulkConfig);
