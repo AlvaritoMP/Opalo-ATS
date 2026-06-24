@@ -490,8 +490,8 @@ const App: React.FC = () => {
     const CORS_ERROR_DEBOUNCE_MS = 5 * 60 * 1000; // 5 minutos
     const backgroundLoadStartedRef = useRef(false);
 
-    const INITIAL_LOAD_TIMEOUT_MS = 30_000;
-    const BACKGROUND_LOAD_TIMEOUT_MS = 60_000;
+    const INITIAL_LOAD_TIMEOUT_MS = 45_000;
+    const BACKGROUND_LOAD_TIMEOUT_MS = 120_000;
 
     useEffect(() => {
         const loadData = async () => {
@@ -545,24 +545,26 @@ const App: React.FC = () => {
                     return { processes: filteredProcesses, candidates: filteredCandidates };
                 };
 
-                // Fase 1 — una consulta a la vez (evita picos de I/O al arranque)
+                // Fase 1 — settings (rápido, necesario para Google Drive)
                 const settings = await loadStep(
                     () => settingsApi.get(),
                     'settings',
                     getSettings() || initialSettings
                 );
 
-                const users = await loadStep(
-                    signal => usersApi.getAll(),
-                    'users',
-                    [] as User[]
-                );
-
-                const processes = await loadStep(
-                    () => processesApi.getAllIncludingBulkSequential(false),
-                    'processes',
-                    [] as Process[]
-                );
+                // Fase 2 — usuarios y procesos en paralelo (2 consultas, no 5)
+                const [users, processes] = await Promise.all([
+                    loadStep(
+                        () => usersApi.getAll(),
+                        'users',
+                        [] as User[]
+                    ),
+                    loadStep(
+                        () => processesApi.getAllIncludingBulkSequential(false),
+                        'processes',
+                        [] as Process[]
+                    ),
+                ]);
 
                 let sessionUserId = getStoredUserId();
                 if (sessionUserId && isSessionExpired()) {
@@ -613,12 +615,23 @@ const App: React.FC = () => {
                     }
                 }
 
-                // Fase 2 — candidatos sin relaciones (ligero)
-                const activeCandidates = await loadStep(
-                    signal => candidatesApi.getAll(false, false, signal),
-                    'candidates',
-                    [] as Candidate[]
-                );
+                const standardProcessIds = processes
+                    .filter(p => !p.isBulkProcess)
+                    .map(p => p.id);
+
+                // Fase 3 — candidatos (lista) + entrevistas en paralelo
+                const [activeCandidates, interviewEvents] = await Promise.all([
+                    loadStep(
+                        signal => candidatesApi.getAll(false, false, signal, standardProcessIds),
+                        'candidates',
+                        [] as Candidate[]
+                    ),
+                    loadStep(
+                        signal => interviewsApi.getForAppWindow(signal),
+                        'interviewEvents',
+                        [] as InterviewEvent[]
+                    ),
+                ]);
 
                 let discardedCandidates: Candidate[] = [];
                 try {
@@ -643,7 +656,7 @@ const App: React.FC = () => {
                     ? getBulkSelectedProcessId(currentUser.id) ?? ''
                     : '';
 
-                // UI usable con datos esenciales (sin form_integrations ni entrevistas aún)
+                // UI usable con datos esenciales (form_integrations en segundo plano)
                 setState({
                     processes: filteredProcesses,
                     candidates: filteredCandidates,
@@ -651,7 +664,7 @@ const App: React.FC = () => {
                     applications: [],
                     settings,
                     formIntegrations: [],
-                    interviewEvents: [],
+                    interviewEvents,
                     currentUser,
                     view: { type: 'dashboard' },
                     lastViewedProcessId: null,
@@ -663,32 +676,22 @@ const App: React.FC = () => {
                     toasts: [],
                 });
 
-                debugLog('Essential data loaded — fetching interviews in background');
+                debugLog('Essential data loaded — enriching candidates in background');
 
-                // Fase 3 — entrevistas (ventana acotada, en serie tras candidatos)
-                const interviewEvents = await loadStep(
-                    signal => interviewsApi.getForAppWindow(signal),
-                    'interviewEvents',
-                    [] as InterviewEvent[]
-                );
-                setState(s => ({ ...s, interviewEvents }));
-
-                // Fase 4 — en segundo plano, sin paralelizar con el arranque
+                // Fase 4 — relaciones en segundo plano (sin re-descargar candidatos)
                 if (!backgroundLoadStartedRef.current) {
                     backgroundLoadStartedRef.current = true;
+                    const candidatesForRelations = filteredCandidates;
 
                     void (async () => {
                         await new Promise(r => setTimeout(r, 600));
                         try {
                             const enriched = await runWithAbortTimeout(
-                                signal => candidatesApi.getAll(false, true, signal),
+                                signal => candidatesApi.enrichWithRelations(candidatesForRelations, signal),
                                 BACKGROUND_LOAD_TIMEOUT_MS
                             );
                             setState(s => {
-                                const archived = s.candidates.filter(c => c.archived);
-                                const enrichedIds = new Set(enriched.map(c => c.id));
-                                const preservedArchived = archived.filter(c => !enrichedIds.has(c.id));
-                                let merged = [...enriched, ...preservedArchived];
+                                let merged = enriched;
                                 if (s.currentUser?.allowedClientIds != null) {
                                     const allowedProcessIds = new Set(s.processes.map(p => p.id));
                                     merged = merged.filter(c => allowedProcessIds.has(c.processId));
@@ -1070,32 +1073,36 @@ const App: React.FC = () => {
         },
         reloadCandidates: async () => {
             try {
-                const activeCandidates = await candidatesApi.getAll(false, false);
+                const standardProcessIds = state.processes
+                    .filter(p => !p.isBulkProcess)
+                    .map(p => p.id);
+                const activeCandidates = await candidatesApi.getAll(
+                    false,
+                    false,
+                    undefined,
+                    standardProcessIds.length > 0 ? standardProcessIds : undefined
+                );
 
                 let preservedArchived: Candidate[] = [];
+                let candidatesForRelations: Candidate[] = [];
                 setState(s => {
                     const archivedCandidates = s.candidates.filter(c => c.archived === true);
                     const activeIds = new Set(activeCandidates.map(c => c.id));
                     preservedArchived = archivedCandidates.filter(c => !activeIds.has(c.id));
+                    candidatesForRelations = [...activeCandidates, ...preservedArchived];
                     return {
                         ...s,
-                        candidates: [...activeCandidates, ...preservedArchived],
+                        candidates: candidatesForRelations,
                     };
                 });
 
-                // Relaciones en segundo plano (sin bloquear ni lanzar escrituras masivas a BD)
                 void (async () => {
                     try {
                         const enriched = await runWithAbortTimeout(
-                            signal => candidatesApi.getAll(false, true, signal),
+                            signal => candidatesApi.enrichWithRelations(candidatesForRelations, signal),
                             BACKGROUND_LOAD_TIMEOUT_MS
                         );
-                        setState(s => {
-                            const archived = s.candidates.filter(c => c.archived);
-                            const enrichedIds = new Set(enriched.map(c => c.id));
-                            const preserved = archived.filter(c => !enrichedIds.has(c.id));
-                            return { ...s, candidates: [...enriched, ...preserved] };
-                        });
+                        setState(s => ({ ...s, candidates: enriched }));
                     } catch (error) {
                         console.warn('Error cargando relaciones de candidatos:', error);
                     }

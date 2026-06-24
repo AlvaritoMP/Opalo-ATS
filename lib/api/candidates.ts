@@ -64,6 +64,111 @@ function applyStandardProcessFilter<T extends { in: (col: string, vals: string[]
     return query.in('process_id', standardProcessIds);
 }
 
+const RELATION_CHUNK_SIZE = 200;
+
+type RelationMaps = {
+    historyByCandidateId: Map<string, any[]>;
+    postItsByCandidateId: Map<string, any[]>;
+    commentsByCandidateId: Map<string, any[]>;
+};
+
+async function fetchRelationsMaps(
+    candidateIds: string[],
+    abortSignal?: AbortSignal
+): Promise<RelationMaps> {
+    const historyByCandidateId = new Map<string, any[]>();
+    const postItsByCandidateId = new Map<string, any[]>();
+    const commentsByCandidateId = new Map<string, any[]>();
+
+    const mergeRows = (
+        map: Map<string, any[]>,
+        rows: any[],
+        key: string
+    ) => {
+        rows.forEach(row => {
+            const id = row[key] as string;
+            if (!map.has(id)) map.set(id, []);
+            map.get(id)!.push(row);
+        });
+    };
+
+    for (let i = 0; i < candidateIds.length; i += RELATION_CHUNK_SIZE) {
+        const chunk = candidateIds.slice(i, i + RELATION_CHUNK_SIZE);
+        if (chunk.length === 0) continue;
+
+        const historyQuery = supabase
+            .from('candidate_history')
+            .select('id, candidate_id, stage_id, moved_at, moved_by')
+            .in('candidate_id', chunk)
+            .eq('app_name', APP_NAME)
+            .order('moved_at', { ascending: true });
+        const postItsQuery = supabase
+            .from('post_its')
+            .select('id, candidate_id, text, color, created_by, created_at')
+            .in('candidate_id', chunk)
+            .eq('app_name', APP_NAME)
+            .order('created_at', { ascending: false });
+        const commentsQuery = supabase
+            .from('comments')
+            .select('id, candidate_id, text, user_id, created_at')
+            .in('candidate_id', chunk)
+            .eq('app_name', APP_NAME)
+            .order('created_at', { ascending: false });
+
+        const historyResult = await (abortSignal ? historyQuery.abortSignal(abortSignal) : historyQuery);
+        const postItsResult = await (abortSignal ? postItsQuery.abortSignal(abortSignal) : postItsQuery);
+        const commentsResult = await (abortSignal ? commentsQuery.abortSignal(abortSignal) : commentsQuery);
+
+        if (historyResult.error) throw historyResult.error;
+        if (postItsResult.error) throw postItsResult.error;
+        if (commentsResult.error) throw commentsResult.error;
+
+        mergeRows(historyByCandidateId, historyResult.data || [], 'candidate_id');
+        mergeRows(postItsByCandidateId, postItsResult.data || [], 'candidate_id');
+        mergeRows(commentsByCandidateId, commentsResult.data || [], 'candidate_id');
+    }
+
+    historyByCandidateId.forEach(history => {
+        history.sort((a, b) => new Date(a.moved_at).getTime() - new Date(b.moved_at).getTime());
+    });
+
+    return { historyByCandidateId, postItsByCandidateId, commentsByCandidateId };
+}
+
+function relationExtrasFromMaps(candidateId: string, maps: RelationMaps): Partial<Candidate> {
+    const history = maps.historyByCandidateId.get(candidateId) || [];
+    const postIts = maps.postItsByCandidateId.get(candidateId) || [];
+    const comments = maps.commentsByCandidateId.get(candidateId) || [];
+
+    return {
+        history: history.map(h => ({
+            stageId: h.stage_id,
+            movedAt: h.moved_at,
+            movedBy: h.moved_by || 'System',
+        })),
+        postIts: postIts.map(p => ({
+            id: p.id,
+            text: p.text,
+            color: p.color,
+            createdBy: p.created_by,
+            createdAt: p.created_at,
+        })),
+        comments: comments.map(comment => ({
+            id: comment.id,
+            text: comment.text,
+            userId: comment.user_id,
+            createdAt: comment.created_at,
+            attachments: [],
+        })),
+    };
+}
+
+function mapCandidatesWithRelations(data: any[], maps: RelationMaps): Candidate[] {
+    return data.map(dbCandidate =>
+        mapListCandidate(dbCandidate, relationExtrasFromMaps(dbCandidate.id, maps))
+    );
+}
+
 function mapListCandidate(dbCandidate: any, extras: Partial<Candidate> = {}): Candidate {
     return {
         id: dbCandidate.id,
@@ -305,9 +410,16 @@ export const candidatesApi = {
     // Obtener todos los candidatos
     // OPTIMIZADO: Carga todas las relaciones en batch en lugar de N+1 queries
     // OPTIMIZADO EGRESS: Selecciona solo campos necesarios, attachments/comments se cargan lazy
-    async getAll(includeArchived: boolean = false, includeRelations: boolean = true, abortSignal?: AbortSignal): Promise<Candidate[]> {
-        const standardProcessIds = await fetchStandardProcessIds();
-        if (standardProcessIds !== null && standardProcessIds.length === 0) return [];
+    async getAll(
+        includeArchived: boolean = false,
+        includeRelations: boolean = true,
+        abortSignal?: AbortSignal,
+        standardProcessIds?: string[] | null,
+    ): Promise<Candidate[]> {
+        const processIds = standardProcessIds !== undefined
+            ? standardProcessIds
+            : await fetchStandardProcessIds();
+        if (processIds !== null && processIds.length === 0) return [];
 
         const { data, error } = await fetchCandidatesWithSelectFallback((selectFields) => {
             let query = supabase
@@ -316,7 +428,7 @@ export const candidatesApi = {
                 .eq('app_name', APP_NAME)
                 .order('created_at', { ascending: false });
 
-            query = applyStandardProcessFilter(query, standardProcessIds) ?? query;
+            query = applyStandardProcessFilter(query, processIds) ?? query;
 
             if (abortSignal) query = query.abortSignal(abortSignal);
             if (!includeArchived) {
@@ -331,123 +443,18 @@ export const candidatesApi = {
             return data.map(dbCandidate => mapListCandidate(dbCandidate));
         }
 
-        const candidateIds = data.map(c => c.id);
+        const maps = await fetchRelationsMaps(data.map(c => c.id), abortSignal);
+        return mapCandidatesWithRelations(data, maps);
+    },
 
-        const historyQuery = supabase
-            .from('candidate_history')
-            .select('id, candidate_id, stage_id, moved_at, moved_by')
-            .in('candidate_id', candidateIds)
-            .eq('app_name', APP_NAME)
-            .order('moved_at', { ascending: true });
-        const postItsQuery = supabase
-            .from('post_its')
-            .select('id, candidate_id, text, color, created_by, created_at')
-            .in('candidate_id', candidateIds)
-            .eq('app_name', APP_NAME)
-            .order('created_at', { ascending: false });
-        const commentsQuery = supabase
-            .from('comments')
-            .select('id, candidate_id, text, user_id, created_at')
-            .in('candidate_id', candidateIds)
-            .eq('app_name', APP_NAME)
-            .order('created_at', { ascending: false });
-
-        const historyResult = await (abortSignal ? historyQuery.abortSignal(abortSignal) : historyQuery);
-        const postItsResult = await (abortSignal ? postItsQuery.abortSignal(abortSignal) : postItsQuery);
-        const commentsResult = await (abortSignal ? commentsQuery.abortSignal(abortSignal) : commentsQuery);
-
-        // NO cargar attachments aquí - se cargan lazy cuando se necesitan (reduce egress significativamente)
-        // Attachments se pueden cargar con getById() o con un método específico getAttachments()
-        const attachmentsResult = { data: [] };
-        const commentAttachmentsResult = { data: [] };
-
-        // Agrupar relaciones por candidate_id en memoria
-        const historyByCandidateId = new Map<string, any[]>();
-        const postItsByCandidateId = new Map<string, any[]>();
-        const commentsByCandidateId = new Map<string, any[]>();
-        const attachmentsByCandidateId = new Map<string, any[]>();
-        const commentAttachmentsByCommentId = new Map<string, any[]>();
-
-        (historyResult.data || []).forEach(history => {
-            if (!historyByCandidateId.has(history.candidate_id)) {
-                historyByCandidateId.set(history.candidate_id, []);
-            }
-            historyByCandidateId.get(history.candidate_id)!.push(history);
-        });
-
-        // Ordenar historial por moved_at dentro de cada candidato
-        historyByCandidateId.forEach((history, candidateId) => {
-            history.sort((a, b) => new Date(a.moved_at).getTime() - new Date(b.moved_at).getTime());
-        });
-
-        (postItsResult.data || []).forEach(postIt => {
-            if (!postItsByCandidateId.has(postIt.candidate_id)) {
-                postItsByCandidateId.set(postIt.candidate_id, []);
-            }
-            postItsByCandidateId.get(postIt.candidate_id)!.push(postIt);
-        });
-
-        (commentsResult.data || []).forEach(comment => {
-            if (!commentsByCandidateId.has(comment.candidate_id)) {
-                commentsByCandidateId.set(comment.candidate_id, []);
-            }
-            commentsByCandidateId.get(comment.candidate_id)!.push(comment);
-        });
-
-        (attachmentsResult.data || []).forEach(attachment => {
-            if (!attachmentsByCandidateId.has(attachment.candidate_id)) {
-                attachmentsByCandidateId.set(attachment.candidate_id, []);
-            }
-            attachmentsByCandidateId.get(attachment.candidate_id)!.push(attachment);
-        });
-
-        (commentAttachmentsResult.data || []).forEach(attachment => {
-            if (!commentAttachmentsByCommentId.has(attachment.comment_id)) {
-                commentAttachmentsByCommentId.set(attachment.comment_id, []);
-            }
-            commentAttachmentsByCommentId.get(attachment.comment_id)!.push(attachment);
-        });
-
-        // Mapear candidatos con sus relaciones
-        return data.map(dbCandidate => {
-            const history = historyByCandidateId.get(dbCandidate.id) || [];
-            const postIts = postItsByCandidateId.get(dbCandidate.id) || [];
-            const comments = commentsByCandidateId.get(dbCandidate.id) || [];
-            const attachments = attachmentsByCandidateId.get(dbCandidate.id) || [];
-
-            // Mapear comentarios con sus adjuntos
-            const commentsWithAttachments = comments.map(comment => ({
-                id: comment.id,
-                text: comment.text,
-                userId: comment.user_id,
-                createdAt: comment.created_at,
-                attachments: (commentAttachmentsByCommentId.get(comment.id) || []).map(att => ({
-                    id: att.id,
-                    name: att.name,
-                    url: att.url,
-                    type: att.type,
-                    size: att.size,
-                    category: att.category,
-                    uploadedAt: att.uploaded_at,
-                })),
-            }));
-
-            return mapListCandidate(dbCandidate, {
-                history: history.map(h => ({
-                    stageId: h.stage_id,
-                    movedAt: h.moved_at,
-                    movedBy: h.moved_by || 'System',
-                })),
-                postIts: postIts.map(p => ({
-                    id: p.id,
-                    text: p.text,
-                    color: p.color,
-                    createdBy: p.created_by,
-                    createdAt: p.created_at,
-                })),
-                comments: commentsWithAttachments,
-            });
-        });
+    /** Añade history/post-its/comments sin volver a descargar la lista de candidatos */
+    async enrichWithRelations(candidates: Candidate[], abortSignal?: AbortSignal): Promise<Candidate[]> {
+        if (candidates.length === 0) return [];
+        const maps = await fetchRelationsMaps(candidates.map(c => c.id), abortSignal);
+        return candidates.map(candidate => ({
+            ...candidate,
+            ...relationExtrasFromMaps(candidate.id, maps),
+        }));
     },
 
     /** Candidatos descartados y archivados (dashboard) — sin relaciones */

@@ -38,15 +38,35 @@ function layoutPayload(layout: BulkTableTemplateLayout): LayoutRow {
     };
 }
 
-let remoteSupported: boolean | null = null;
+const REMOTE_DISABLED_KEY = 'bulk_table_templates_remote_disabled';
 
-function isMissingTableError(error: { code?: string; message?: string }): boolean {
+function readRemoteDisabledFlag(): boolean {
+    try {
+        return localStorage.getItem(REMOTE_DISABLED_KEY) === '1';
+    } catch {
+        return false;
+    }
+}
+
+function writeRemoteDisabledFlag(disabled: boolean): void {
+    try {
+        localStorage.setItem(REMOTE_DISABLED_KEY, disabled ? '1' : '0');
+    } catch {
+        /* ignore */
+    }
+}
+
+let remoteSupported: boolean | null = readRemoteDisabledFlag() ? false : null;
+
+function isMissingTableError(error: { code?: string; message?: string; status?: number }): boolean {
     const msg = (error.message || '').toLowerCase();
     return (
+        error.status === 404 ||
         error.code === '42P01' ||
         error.code === 'PGRST205' ||
         msg.includes('bulk_table_templates') ||
-        msg.includes('does not exist')
+        msg.includes('does not exist') ||
+        msg.includes('not found')
     );
 }
 
@@ -69,6 +89,7 @@ export const bulkTableTemplatesApi = {
         if (error) {
             if (isMissingTableError(error)) {
                 remoteSupported = false;
+                writeRemoteDisabledFlag(true);
                 return readBulkTableTemplatesCache();
             }
             throw error;
@@ -112,6 +133,7 @@ export const bulkTableTemplatesApi = {
         if (error) {
             if (isMissingTableError(error)) {
                 remoteSupported = false;
+                writeRemoteDisabledFlag(true);
                 return this.create(name, layout, actor);
             }
             throw error;
@@ -135,6 +157,7 @@ export const bulkTableTemplatesApi = {
         if (error) {
             if (isMissingTableError(error)) {
                 remoteSupported = false;
+                writeRemoteDisabledFlag(true);
                 writeBulkTableTemplatesCache(readBulkTableTemplatesCache().filter(t => t.id !== id));
                 return;
             }
