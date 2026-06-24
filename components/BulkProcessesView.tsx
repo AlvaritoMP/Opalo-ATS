@@ -61,7 +61,6 @@ import {
     findBestLocalBulkConfigBackup,
     mergeBulkConfigPreferRicher,
     saveBulkConfigSnapshot,
-    scoreBulkConfigRichness,
     loadBulkConfigSnapshot,
 } from '../lib/bulkConfigBackup';
 import { useDebouncedValue } from '../lib/useDebouncedValue';
@@ -129,7 +128,6 @@ import {
     remapPinnedColumnIds,
     ensureProfileMatchInColumnOrder,
     reconcileCustomColumns,
-    collectBulkValueKeys,
     ensureBulkTableLayoutConfig,
 } from '../lib/bulkTableColumns';
 import { getStageSelectClass } from '../lib/stageColors';
@@ -1714,80 +1712,21 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
 
                 let config: BulkProcessConfig = proc.bulkConfig ? { ...proc.bulkConfig } : {};
 
-                const localBackup = findBestLocalBulkConfigBackup(processId);
-                if (localBackup?.bulkConfig) {
-                    const merged = mergeBulkConfigPreferRicher(config, localBackup.bulkConfig);
-                    if (merged.restoredFields.length > 0) {
-                        config = merged.config;
-                        proc = { ...proc, bulkConfig: config };
-                        setBulkProcesses(prev =>
-                            prev.map(p => (p.id === processId ? { ...p, bulkConfig: config } : p))
-                        );
-                        try {
-                            await processesApi.update(processId, { bulkConfig: config });
-                            saveBulkConfigSnapshot(processId, config, `merge:${localBackup.source ?? 'local'}`);
-                            actionsRef.current.showToast(
-                                `Configuración recuperada (${merged.restoredFields.join(', ')})`,
-                                'success',
-                                7000
-                            );
-                        } catch (err) {
-                            console.error('Error guardando configuración recuperada:', err);
-                        }
-                    }
-                } else {
-                    const existingSnap = loadBulkConfigSnapshot(processId);
-                    const score = scoreBulkConfigRichness(config);
-                    if (score >= 50 && score > scoreBulkConfigRichness(existingSnap?.bulkConfig)) {
-                        saveBulkConfigSnapshot(processId, config, 'load');
-                    }
-                }
+                // La BD es la fuente de verdad al abrir. Respaldo local solo con "Recuperar datos".
+                saveBulkConfigSnapshot(processId, config, 'load');
 
-                let dbValues: Record<string, Record<string, unknown>> = {};
-                try {
-                    dbValues = await bulkCandidatesApi.loadAllBulkColumnValues(processId);
-                } catch (err) {
-                    console.warn('No se pudieron leer bulk_column_values para reconciliar columnas:', err);
-                }
-
-                const localValuesForReconcile = loadLocalColumnValuesForProcess(processId);
-                const valueKeys = collectBulkValueKeys(dbValues, localValuesForReconcile);
-                const reconciled = reconcileCustomColumns(config, valueKeys);
-                const addedWithData = reconciled.addedColumnIds.filter(colId =>
-                    [...valueKeys].some(
-                        key =>
-                            key === colId ||
-                            key === `custom_${colId}` ||
-                            (key.startsWith('__name__') &&
-                                normalizeColumnNameKey(
-                                    reconciled.columns.find(c => c.id === colId)?.name || ''
-                                ) === key.slice('__name__'.length))
-                    )
-                );
-
-                if (reconciled.needsPersist && addedWithData.length > 0) {
-                    const hiddenSet = new Set(config.hiddenColumns || []);
-                    for (const colId of addedWithData) {
-                        hiddenSet.add(`custom_${colId}`);
-                    }
-                    config = {
-                        ...config,
-                        customColumns: reconciled.columns,
-                        hiddenColumns: [...hiddenSet],
-                    };
+                const reconciled = reconcileCustomColumns(config, [], { recoverOrphanValues: false });
+                if (reconciled.needsPersist) {
+                    config = { ...config, customColumns: reconciled.columns };
                     proc = { ...proc, bulkConfig: config };
                     setBulkProcesses(prev =>
                         prev.map(p => (p.id === processId ? { ...p, bulkConfig: config } : p))
                     );
                     try {
                         await processesApi.update(processId, { bulkConfig: config });
-                        actionsRef.current.showToast(
-                            `Se restauraron ${addedWithData.length} columna(s) desde datos guardados`,
-                            'success',
-                            6000
-                        );
+                        saveBulkConfigSnapshot(processId, config, 'reconcile_layout_slots');
                     } catch (err) {
-                        console.error('Error guardando columnas reconciliadas:', err);
+                        console.error('Error guardando definiciones de columnas en orden:', err);
                     }
                 }
 
@@ -1817,7 +1756,9 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                     }
                 }
 
-                const layout = resolveBulkTableLayout(processId, config, cols);
+                const layout = resolveBulkTableLayout(processId, config, cols, {
+                    allowLocalRecovery: false,
+                });
 
                 setCustomColumns(cols);
                 const floatingIds = resolveFloatingColumnIds(config);
@@ -3577,7 +3518,9 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
             );
 
             const cols = config.customColumns || [];
-            const layout = resolveBulkTableLayout(process.id, config, cols);
+            const layout = resolveBulkTableLayout(process.id, config, cols, {
+                allowLocalRecovery: true,
+            });
             setCustomColumns(cols);
             setColumnOrder(layout.columnOrder);
             setHiddenColumns(layout.hiddenColumns);

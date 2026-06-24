@@ -349,12 +349,15 @@ export function collectBulkValueKeys(
 
 /**
  * Reconstruye definiciones de columnas custom faltantes en bulk_config
- * a partir de columnKeyAliases, columnOrder, plantillas y claves en bulk_column_values.
+ * a partir de columnOrder y aliases en el layout guardado.
+ * Con recoverOrphanValues=true también usa datos huérfanos (solo recuperación manual).
  */
 export function reconcileCustomColumns(
     bulkConfig: BulkProcessConfig | undefined,
-    valueKeys: Iterable<string> = []
+    valueKeys: Iterable<string> = [],
+    options: { recoverOrphanValues?: boolean } = {}
 ): { columns: CustomColumn[]; needsPersist: boolean; addedColumnIds: string[] } {
+    const recoverOrphanValues = options.recoverOrphanValues === true;
     const columns = [...(bulkConfig?.customColumns || [])];
     const byId = new Map(columns.map(c => [c.id, c]));
     const byName = new Map(columns.map(c => [normalizeColumnNameKey(c.name), c]));
@@ -395,28 +398,33 @@ export function reconcileCustomColumns(
         ...(bulkConfig?.hiddenColumns || []),
         ...(bulkConfig?.pinnedColumns || []),
     ]);
-    for (const [id, name] of Object.entries(bulkConfig?.columnKeyAliases || {})) {
-        if (byId.has(id)) continue;
-        if (DEFAULT_COLUMN_ORDER.includes(id)) continue;
-        const inLayout =
-            layoutColumnIds.has(id) ||
-            layoutColumnIds.has(`custom_${id}`) ||
-            [...valueKeys].some(k => k === id || k === `custom_${id}`);
-        if (!inLayout) continue;
-        addColumn(id, name);
-    }
+    const isInLayout = (id: string) =>
+        layoutColumnIds.has(id) || layoutColumnIds.has(`custom_${id}`);
 
-    for (const key of valueKeys) {
-        if (key.startsWith(BULK_NAME_KEY_PREFIX)) {
-            const norm = key.slice(BULK_NAME_KEY_PREFIX.length);
-            if (byName.has(norm)) continue;
-            const id = findIdForNormalizedName(norm, aliases, byId) ?? crypto.randomUUID();
-            addColumn(id, labelFromNormalizedNameKey(norm));
-            continue;
+    if (recoverOrphanValues) {
+        for (const [id, name] of Object.entries(bulkConfig?.columnKeyAliases || {})) {
+            if (byId.has(id)) continue;
+            if (DEFAULT_COLUMN_ORDER.includes(id)) continue;
+            const inLayout =
+                isInLayout(id) ||
+                [...valueKeys].some(k => k === id || k === `custom_${id}`);
+            if (!inLayout) continue;
+            addColumn(id, name);
         }
-        if (byId.has(key) || key.startsWith('__')) continue;
-        const name = aliases[key];
-        if (name) addColumn(key, name);
+
+        for (const key of valueKeys) {
+            if (key.startsWith(BULK_NAME_KEY_PREFIX)) {
+                const norm = key.slice(BULK_NAME_KEY_PREFIX.length);
+                if (byName.has(norm)) continue;
+                const id = findIdForNormalizedName(norm, aliases, byId) ?? crypto.randomUUID();
+                addColumn(id, labelFromNormalizedNameKey(norm));
+                continue;
+            }
+            if (byId.has(key) || key.startsWith('__')) continue;
+            if (!isInLayout(key)) continue;
+            const name = aliases[key];
+            if (name) addColumn(key, name);
+        }
     }
 
     const template = findBestTableTemplate(columns);
@@ -1332,7 +1340,8 @@ function applyIdealProfileLayoutRules(
 export function resolveBulkTableLayout(
     processId: string,
     bulkConfig: BulkProcessConfig | undefined,
-    customColumns: CustomColumn[] = []
+    customColumns: CustomColumn[] = [],
+    options: { allowLocalRecovery?: boolean } = {}
 ): {
     columnOrder: string[];
     hiddenColumns: string[];
@@ -1352,7 +1361,7 @@ export function resolveBulkTableLayout(
     let localSource: 'backup' | 'template' | undefined;
 
     const dbScore = scoreColumnLayoutInterleaving(columnOrder, customColumns);
-    if (processId && isBulkTableLayoutLikelyCorrupted(columnOrder, customColumns)) {
+    if (options.allowLocalRecovery && processId && isBulkTableLayoutLikelyCorrupted(columnOrder, customColumns)) {
         const local = recoverLayoutFromLocalSources(processId, bulkConfig, customColumns);
         if (local && local.score > dbScore + 5) {
             columnOrder = local.columnOrder;
