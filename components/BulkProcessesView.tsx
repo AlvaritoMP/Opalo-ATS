@@ -121,6 +121,8 @@ import {
     remapHiddenColumnIds,
     remapPinnedColumnIds,
     ensureProfileMatchInColumnOrder,
+    reconcileCustomColumns,
+    collectBulkValueKeys,
 } from '../lib/bulkTableColumns';
 import { getStageSelectClass } from '../lib/stageColors';
 import { getCellMetaStorageKey, BulkCellMeta, BulkCellMetaStore } from '../lib/bulkCellMeta';
@@ -981,14 +983,34 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
         saveBulkTableLayoutBackup(processId, layout);
     }, []);
 
-    const persistBulkConfig = useCallback(async (updates: Partial<BulkProcessConfig>) => {
+    const persistBulkConfig = useCallback(async (
+        updates: Partial<BulkProcessConfig>,
+        options?: { baseConfig?: BulkProcessConfig }
+    ) => {
         if (!process) return;
+
+        const base =
+            options?.baseConfig ??
+            process.bulkConfig ??
+            bulkProcessesRef.current.find(p => p.id === process.id)?.bulkConfig;
+
+        if (!base) {
+            console.warn('[bulk] persistBulkConfig omitido: bulk_config no cargado aún');
+            return;
+        }
+
+        const baseCustomCount = base.customColumns?.length ?? 0;
+        if (baseCustomCount === 0 && !updates.customColumns?.length) {
+            console.warn('[bulk] persistBulkConfig omitido: evitar borrar columnas custom');
+            return;
+        }
+
         let mergedUpdates = { ...updates };
         if (updates.customColumns) {
             const aliases: Record<string, string> = {
-                ...(process.bulkConfig?.columnKeyAliases || {}),
+                ...(base.columnKeyAliases || {}),
             };
-            for (const col of process.bulkConfig?.customColumns || []) {
+            for (const col of base.customColumns || []) {
                 aliases[col.id] = col.name;
             }
             for (const col of updates.customColumns) {
@@ -997,7 +1019,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
             mergedUpdates = { ...mergedUpdates, columnKeyAliases: aliases };
         }
         const newBulkConfig: BulkProcessConfig = {
-            ...process.bulkConfig,
+            ...base,
             ...mergedUpdates,
         };
         try {
@@ -1480,7 +1502,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                 }
             }
             if (aliasesChanged && process?.id === processId) {
-                void persistBulkConfig({ columnKeyAliases: newAliases });
+                void persistBulkConfig({ columnKeyAliases: newAliases }, { baseConfig: bulkConfig });
             }
 
             const localValues = loadLocalColumnValuesForProcess(processId);
@@ -1681,8 +1703,38 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                         : [...prev, proc!];
                 });
 
-                const config = proc.bulkConfig;
-                const cols = config?.customColumns || [];
+                let config: BulkProcessConfig = proc.bulkConfig ? { ...proc.bulkConfig } : {};
+
+                let dbValues: Record<string, Record<string, unknown>> = {};
+                try {
+                    dbValues = await bulkCandidatesApi.loadAllBulkColumnValues(processId);
+                } catch (err) {
+                    console.warn('No se pudieron leer bulk_column_values para reconciliar columnas:', err);
+                }
+
+                const localValuesForReconcile = loadLocalColumnValuesForProcess(processId);
+                const valueKeys = collectBulkValueKeys(dbValues, localValuesForReconcile);
+                const reconciled = reconcileCustomColumns(config, valueKeys);
+
+                if (reconciled.needsPersist) {
+                    config = { ...config, customColumns: reconciled.columns };
+                    proc = { ...proc, bulkConfig: config };
+                    setBulkProcesses(prev =>
+                        prev.map(p => (p.id === processId ? { ...p, bulkConfig: config } : p))
+                    );
+                    try {
+                        await processesApi.update(processId, { bulkConfig: config });
+                        actionsRef.current.showToast(
+                            `Se restauraron ${reconciled.addedColumnIds.length} columna(s) desde datos guardados`,
+                            'success',
+                            6000
+                        );
+                    } catch (err) {
+                        console.error('Error guardando columnas reconciliadas:', err);
+                    }
+                }
+
+                const cols = config.customColumns || [];
                 const layout = resolveBulkTableLayout(processId, config, cols);
 
                 setCustomColumns(cols);
@@ -5498,6 +5550,15 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                                             <RefreshCw className="w-4 h-4" />
                                             Restaurar diseño
                                         </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => setShowRecoveryModal(true)}
+                                            className="bg-orange-50 text-orange-950 border border-orange-300 hover:bg-orange-100 transition-colors"
+                                            title="Recuperar valores de columnas desde este navegador o archivo JSON"
+                                        >
+                                            <HardDrive className="w-4 h-4" />
+                                            Recuperar datos
+                                        </button>
                                         <div className="relative">
                                             <button
                                                 onClick={() => setShowColumnConfig(!showColumnConfig)}
@@ -7054,6 +7115,8 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                     candidateIds={new Set(candidates.map(c => c.id))}
                     onClose={() => setShowRecoveryModal(false)}
                     onRecovered={() => {
+                        setShowRecoveryModal(false);
+                        void syncColumnValuesFromDatabase(process.id, process.bulkConfig);
                         loadCandidates(0, true);
                     }}
                 />

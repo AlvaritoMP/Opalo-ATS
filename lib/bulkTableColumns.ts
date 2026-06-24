@@ -310,6 +310,121 @@ export function discoverOrphanKeyAliases(
     return aliases;
 }
 
+function labelFromNormalizedNameKey(nameKey: string): string {
+    return nameKey
+        .split(' ')
+        .filter(Boolean)
+        .map(part => part.charAt(0).toUpperCase() + part.slice(1))
+        .join(' ');
+}
+
+function findIdForNormalizedName(
+    norm: string,
+    aliases: Record<string, string>,
+    byId: Map<string, CustomColumn>
+): string | null {
+    for (const [id, name] of Object.entries(aliases)) {
+        if (normalizeColumnNameKey(name) === norm) return id;
+    }
+    for (const col of byId.values()) {
+        if (normalizeColumnNameKey(col.name) === norm) return col.id;
+    }
+    return null;
+}
+
+/** Recoge todas las claves presentes en valores de columnas (BD y/o localStorage). */
+export function collectBulkValueKeys(
+    ...sources: Record<string, Record<string, unknown>>[]
+): Set<string> {
+    const keys = new Set<string>();
+    for (const source of sources) {
+        for (const row of Object.values(source)) {
+            if (!row) continue;
+            for (const k of Object.keys(row)) keys.add(k);
+        }
+    }
+    return keys;
+}
+
+/**
+ * Reconstruye definiciones de columnas custom faltantes en bulk_config
+ * a partir de columnKeyAliases, columnOrder, plantillas y claves en bulk_column_values.
+ */
+export function reconcileCustomColumns(
+    bulkConfig: BulkProcessConfig | undefined,
+    valueKeys: Iterable<string> = []
+): { columns: CustomColumn[]; needsPersist: boolean; addedColumnIds: string[] } {
+    const columns = [...(bulkConfig?.customColumns || [])];
+    const byId = new Map(columns.map(c => [c.id, c]));
+    const byName = new Map(columns.map(c => [normalizeColumnNameKey(c.name), c]));
+    const addedColumnIds: string[] = [];
+
+    const addColumn = (id: string, name: string, type: CustomColumn['type'] = 'text') => {
+        const trimmed = name.trim();
+        if (!id || !trimmed) return;
+        const norm = normalizeColumnNameKey(trimmed);
+        if (byId.has(id) || byName.has(norm)) return;
+        const col: CustomColumn = { id, name: trimmed, type };
+        columns.push(col);
+        byId.set(id, col);
+        byName.set(norm, col);
+        addedColumnIds.push(id);
+    };
+
+    const aliases: Record<string, string> = {
+        ...loadTemplateColumnIdToName(),
+        ...(bulkConfig?.columnKeyAliases || {}),
+        ...loadGlobalCustomColumnIdToName(),
+    };
+    for (const c of bulkConfig?.customColumns || []) {
+        aliases[c.id] = c.name;
+    }
+    Object.assign(aliases, buildLegacyFromColumnOrder(bulkConfig, columns));
+
+    for (const colId of bulkConfig?.columnOrder || []) {
+        if (!colId.startsWith('custom_')) continue;
+        const bare = colId.slice('custom_'.length);
+        if (byId.has(bare)) continue;
+        const name = aliases[bare];
+        if (name) addColumn(bare, name);
+    }
+
+    for (const [id, name] of Object.entries(bulkConfig?.columnKeyAliases || {})) {
+        if (byId.has(id)) continue;
+        if (DEFAULT_COLUMN_ORDER.includes(id)) continue;
+        addColumn(id, name);
+    }
+
+    for (const key of valueKeys) {
+        if (key.startsWith(BULK_NAME_KEY_PREFIX)) {
+            const norm = key.slice(BULK_NAME_KEY_PREFIX.length);
+            if (byName.has(norm)) continue;
+            const id = findIdForNormalizedName(norm, aliases, byId) ?? crypto.randomUUID();
+            addColumn(id, labelFromNormalizedNameKey(norm));
+            continue;
+        }
+        if (byId.has(key) || key.startsWith('__')) continue;
+        const name = aliases[key];
+        if (name) addColumn(key, name);
+    }
+
+    const template = findBestTableTemplate(columns);
+    if (template?.columns?.length) {
+        for (const tCol of template.columns) {
+            const existing = byName.get(normalizeColumnNameKey(tCol.name));
+            if (!existing) continue;
+            if (existing.type === 'text' && tCol.type !== 'text') {
+                existing.type = tCol.type;
+                if (tCol.options) existing.options = tCol.options;
+                if (tCol.routeDestination) existing.routeDestination = tCol.routeDestination;
+            }
+        }
+    }
+
+    const needsPersist = addedColumnIds.length > 0;
+    return { columns, needsPersist, addedColumnIds };
+}
+
 export function getColumnValuesBackupStorageKey(processId: string): string {
     return `${getColumnValuesStorageKey(processId)}_backup`;
 }
