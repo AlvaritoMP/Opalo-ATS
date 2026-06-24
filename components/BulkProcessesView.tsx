@@ -57,6 +57,7 @@ import {
     isContactLockedForUser,
 } from '../lib/contactLock';
 import { processesApi } from '../lib/api/processes';
+import { fetchWithRetry } from '../lib/fetchWithRetry';
 import { useDebouncedValue } from '../lib/useDebouncedValue';
 import { Check, X, Loader2, Send, Archive, Search, ChevronDown, ChevronUp, Plus, Edit, Trash2, ArrowLeft, MessageCircle, Phone, Upload, Download, Filter, Mail, Calendar, Settings, ArrowUp, ArrowDown, Pin, FileText, BookOpen, Paperclip, ClipboardList, ListPlus, RefreshCw, HardDrive, CaseSensitive, Package, History, Target, BarChart3, UserCheck, Coins, Bus, Undo2, ArrowRightLeft, LayoutGrid } from 'lucide-react';
 import { BulkCandidateTimeline } from './BulkCandidateTimeline';
@@ -643,6 +644,21 @@ const BulkActionsFAB: React.FC<{
         </div>
     );
 };
+
+/** Conserva bulk_config ya cargado cuando la lista ligera (sin bulk_config) vuelve a sincronizarse. */
+function mergePreservingBulkConfig(prev: Process[], incoming: Process[]): Process[] {
+    const configById = new Map<string, Process['bulkConfig']>();
+    for (const p of prev) {
+        if (p.bulkConfig) configById.set(p.id, p.bulkConfig);
+    }
+    for (const p of incoming) {
+        if (p.bulkConfig) configById.set(p.id, p.bulkConfig);
+    }
+    return incoming.map(p => {
+        const bulkConfig = p.bulkConfig ?? configById.get(p.id);
+        return bulkConfig && !p.bulkConfig ? { ...p, bulkConfig } : p;
+    });
+}
 
 export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
     embeddedProcessId,
@@ -1299,26 +1315,27 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
 
     useEffect(() => {
         if (!embeddedProcessId) return;
+
+        const applyProcess = (proc: Process) => {
+            setBulkProcesses(prev => mergePreservingBulkConfig(prev, [proc]));
+        };
+
         const fromState = state.processes.find(p => p.id === embeddedProcessId);
-        if (fromState) {
-            setBulkProcesses(prev => {
-                const exists = prev.some(p => p.id === fromState.id);
-                return exists ? prev.map(p => (p.id === fromState.id ? fromState : p)) : [fromState];
-            });
-            return;
+        if (fromState?.bulkConfig) {
+            applyProcess(fromState);
         }
-        void processesApi.getById(embeddedProcessId).then(fresh => {
-            if (fresh) setBulkProcesses([fresh]);
-        });
+
+        void fetchWithRetry(() => processesApi.getById(embeddedProcessId), { attempts: 4, delayMs: 1000 })
+            .then(fresh => {
+                if (fresh) applyProcess(fresh);
+            })
+            .catch(err => {
+                console.warn('No se pudo cargar el proceso embebido:', err);
+            });
     }, [embeddedProcessId, state.processes]);
 
     // Cargar procesos masivos
     const loadBulkProcesses = useCallback(async () => {
-        const fromAppState = state.processes.filter(p => p.isBulkProcess);
-        if (fromAppState.length > 0) {
-            setBulkProcesses(fromAppState);
-        }
-
         setIsLoadingProcesses(true);
         try {
             const processes = await processesApi.getAllBulkProcesses(false);
@@ -1328,7 +1345,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                 const allowedClientIdsSet = new Set(currentUser.allowedClientIds);
                 filteredProcesses = processes.filter(p => p.clientId && allowedClientIdsSet.has(p.clientId));
             }
-            setBulkProcesses(filteredProcesses);
+            setBulkProcesses(prev => mergePreservingBulkConfig(prev, filteredProcesses));
             if (filteredProcesses.length === 0) return;
 
             const activeId =
@@ -1349,7 +1366,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
         } finally {
             setIsLoadingProcesses(false);
         }
-    }, [selectedProcess, actions, state.currentUser, state.lastViewedBulkProcessId, state.processes]);
+    }, [selectedProcess, actions, state.currentUser, state.lastViewedBulkProcessId]);
 
     useEffect(() => {
         if (isEmbedded) return;
@@ -1636,43 +1653,35 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
         (async () => {
             setIsLoading(true);
             try {
-                let proc = bulkProcessesRef.current.find(p => p.id === processId)
-                    ?? state.processes.find(p => p.id === processId);
-                let config = proc?.bulkConfig;
-
-                if (!config) {
-                    try {
-                        const fresh = await processesApi.getById(processId);
-                        if (!cancelled && fresh) {
-                            proc = fresh;
-                            config = fresh.bulkConfig;
-                            setBulkProcesses(prev => {
-                                const exists = prev.some(p => p.id === fresh.id);
-                                return exists
-                                    ? prev.map(p => (p.id === fresh.id ? fresh : p))
-                                    : [...prev, fresh];
-                            });
-                        }
-                    } catch (err) {
-                        console.warn('No se pudo recargar el proceso masivo desde la BD:', err);
-                    }
-                } else {
-                    void processesApi.getById(processId).then(fresh => {
-                        if (cancelled || !fresh) return;
-                        setBulkProcesses(prev => {
-                            const exists = prev.some(p => p.id === fresh.id);
-                            return exists
-                                ? prev.map(p => (p.id === fresh.id ? fresh : p))
-                                : [...prev, fresh];
-                        });
-                    }).catch(err => {
-                        console.warn('No se pudo actualizar el proceso masivo en segundo plano:', err);
-                    });
+                let proc: Process | null = null;
+                try {
+                    proc = await fetchWithRetry(
+                        () => processesApi.getById(processId),
+                        { attempts: 4, delayMs: 1000 }
+                    );
+                } catch (err) {
+                    console.warn('No se pudo cargar el proceso masivo desde la BD:', err);
                 }
 
-                if (cancelled || !proc) return;
+                if (cancelled) return;
 
-                config = config ?? proc.bulkConfig;
+                if (!proc) {
+                    actionsRef.current.showToast(
+                        'No se pudo cargar la configuración del proceso. Verifique su conexión e intente de nuevo.',
+                        'error',
+                        6000
+                    );
+                    return;
+                }
+
+                setBulkProcesses(prev => {
+                    const exists = prev.some(p => p.id === proc!.id);
+                    return exists
+                        ? prev.map(p => (p.id === proc!.id ? proc! : p))
+                        : [...prev, proc!];
+                });
+
+                const config = proc.bulkConfig;
                 const cols = config?.customColumns || [];
                 const layout = resolveBulkTableLayout(processId, config, cols);
 
@@ -1693,7 +1702,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                 setColumnOrder(layout.columnOrder);
                 setColumnFilterDraft({});
 
-                if (layout.needsPersist && config) {
+                if (layout.needsPersist && config && cols.length > 0) {
                     const repairedConfig: BulkProcessConfig = {
                         ...config,
                         columnOrder: layout.columnOrder,
@@ -1708,7 +1717,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                 }
 
                 const idealNorm = normalizeIdealProfileConfig(config?.idealProfile, cols, config);
-                if (idealNorm.needsPersist && idealNorm.config && config) {
+                if (idealNorm.needsPersist && idealNorm.config && config && cols.length > 0) {
                     const repairedConfig: BulkProcessConfig = { ...config, idealProfile: idealNorm.config };
                     void processesApi.update(processId, { bulkConfig: repairedConfig }).then(() => {
                         setBulkProcesses(prev =>
