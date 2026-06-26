@@ -78,8 +78,9 @@ export const BulkDocumentTemplatesEditor: React.FC<BulkDocumentTemplatesEditorPr
                 <p className="text-amber-800">
                     En cada documento use marcadores con doble llave, por ejemplo{' '}
                     <code className="bg-amber-100 px-1 rounded">{'{{Nombre}}'}</code> o{' '}
-                    <code className="bg-amber-100 px-1 rounded">{'{{DNI}}'}</code>.
-                    Al subir el archivo se detectan los campos y puede asignar de dónde tomar cada dato del ATS.
+                    <code className="bg-amber-100 px-1 rounded">{'{{Ap Paterno}}'}</code>.
+                    Si un campo no tiene dato en el ATS, el valor y su etiqueta (p. ej.{' '}
+                    <em>Ap Paterno:</em>) se omiten del Word para no dejar espacio en blanco.
                 </p>
             </div>
 

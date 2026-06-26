@@ -1,13 +1,13 @@
 import type { BulkDocumentTemplate, CustomColumn, Process } from '../types';
 import type { BulkCandidate } from './api/bulkCandidates';
 import { obtenerFechaEmision } from './dateFormatter';
-import { formatCustomCellDisplay } from './bulkTableColumns';
+import { formatCustomCellDisplay, findCustomColumnByHeader, CUSTOM_COLUMN_HEADER_ALIASES, normalizeColumnNameKey } from './bulkTableColumns';
 import {
     arrayBufferToBase64,
     base64ToArrayBuffer,
     detectTemplateKeysFromBuffer,
     renderDocxTemplate,
-    safeDocxFileName,
+    buildBulkDocumentFileName,
 } from './docxTemplateUtils';
 
 export const BULK_DOCUMENTS_COLUMN_ID = 'bulkDocuments';
@@ -86,6 +86,10 @@ const PLACEHOLDER_ALIASES: Record<string, string> = {
     fecha: 'system.fechaActual',
     etapa: 'stage.name',
     stage: 'stage.name',
+    appaterno: 'custom.apPaterno',
+    apellidopaterno: 'custom.apPaterno',
+    apmaterno: 'custom.apMaterno',
+    apellidomaterno: 'custom.apMaterno',
 };
 
 function normalizeKey(key: string): string {
@@ -126,7 +130,18 @@ export function suggestFieldMapping(
     customColumns: CustomColumn[] = []
 ): string {
     const norm = normalizeKey(templateKey);
-    if (PLACEHOLDER_ALIASES[norm]) return PLACEHOLDER_ALIASES[norm];
+    if (PLACEHOLDER_ALIASES[norm]) {
+        const alias = PLACEHOLDER_ALIASES[norm];
+        if (alias === 'custom.apPaterno') {
+            const col = findCustomColumnByHeader('Ap Paterno', customColumns);
+            return col ? `custom.${col.id}` : '';
+        }
+        if (alias === 'custom.apMaterno') {
+            const col = findCustomColumnByHeader('Ap Materno', customColumns);
+            return col ? `custom.${col.id}` : '';
+        }
+        return alias;
+    }
 
     for (const col of customColumns) {
         if (normalizeKey(col.name) === norm) return `custom.${col.id}`;
@@ -152,6 +167,52 @@ export interface BulkDocumentContext {
     companyName: string;
     customColumns?: CustomColumn[];
     getColumnValue?: (candidateId: string, columnId: string, candidate?: BulkCandidate) => unknown;
+}
+
+function resolveCustomColumnValue(
+    header: string,
+    ctx: BulkDocumentContext
+): string {
+    const { candidate, customColumns = [], getColumnValue } = ctx;
+    const col = findCustomColumnByHeader(header, customColumns);
+    if (!col || !getColumnValue) return '';
+    const raw = getColumnValue(candidate.id, col.id, candidate);
+    return sanitizeDocumentFieldValue(formatCustomCellDisplay(raw, col as CustomColumn));
+}
+
+/** Apellidos desde columnas personalizadas del proceso masivo */
+export function resolveCandidateApellidos(ctx: BulkDocumentContext): { apPaterno: string; apMaterno: string } {
+    return {
+        apPaterno: resolveCustomColumnValue('Ap Paterno', ctx),
+        apMaterno: resolveCustomColumnValue('Ap Materno', ctx),
+    };
+}
+
+/** Etiquetas literales a retirar del Word cuando el campo quedó vacío */
+function buildOrphanLabelTexts(
+    emptyKeys: string[],
+    template: BulkDocumentTemplate,
+    customColumns: CustomColumn[] = []
+): string[] {
+    const labels = new Set<string>();
+    for (const key of emptyKeys) {
+        if (key.trim()) labels.add(key.trim());
+        const mapped = template.fieldMappings?.[key] || suggestFieldMapping(key, customColumns);
+        if (mapped?.startsWith('custom.')) {
+            const colId = mapped.slice('custom.'.length);
+            const col = customColumns.find(c => c.id === colId);
+            if (col?.name) labels.add(col.name);
+        }
+        const norm = normalizeColumnNameKey(key);
+        for (const [canonical, aliases] of Object.entries(CUSTOM_COLUMN_HEADER_ALIASES)) {
+            const canonNorm = normalizeColumnNameKey(canonical);
+            if (norm === canonNorm || aliases.some(a => normalizeColumnNameKey(a) === norm)) {
+                labels.add(canonical);
+                aliases.forEach(a => labels.add(a));
+            }
+        }
+    }
+    return [...labels];
 }
 
 function resolveSourceValue(sourceId: string, ctx: BulkDocumentContext): string {
@@ -194,7 +255,7 @@ function resolveSourceValue(sourceId: string, ctx: BulkDocumentContext): string 
 export function buildDocumentData(
     template: BulkDocumentTemplate,
     ctx: BulkDocumentContext
-): Record<string, string> {
+): { data: Record<string, string>; emptyKeys: string[] } {
     const keys = template.detectedKeys?.length
         ? template.detectedKeys
         : detectTemplateKeysFromBuffer(base64ToArrayBuffer(template.docxBase64));
@@ -212,7 +273,6 @@ export function buildDocumentData(
         data[key] = '';
     }
 
-    // Variaciones comunes que docxtemplater podría esperar
     const extras: Record<string, string> = {
         Nombre: sanitizeDocumentFieldValue(data.Nombre ?? ctx.candidate.name),
         nombre: sanitizeDocumentFieldValue(data.nombre ?? ctx.candidate.name),
@@ -226,7 +286,9 @@ export function buildDocumentData(
     for (const key of Object.keys(merged)) {
         merged[key] = sanitizeDocumentFieldValue(merged[key]);
     }
-    return merged;
+
+    const emptyKeys = [...keys, ...Object.keys(extras)].filter(key => !merged[key]);
+    return { data: merged, emptyKeys: [...new Set(emptyKeys)] };
 }
 
 export function generateBulkDocument(
@@ -234,9 +296,11 @@ export function generateBulkDocument(
     ctx: BulkDocumentContext
 ): { blob: Blob; fileName: string } {
     const buf = base64ToArrayBuffer(template.docxBase64);
-    const data = buildDocumentData(template, ctx);
-    const blob = renderDocxTemplate(buf, data);
-    const fileName = safeDocxFileName(template.name, ctx.candidate.name);
+    const { data, emptyKeys } = buildDocumentData(template, ctx);
+    const orphanLabelTexts = buildOrphanLabelTexts(emptyKeys, template, ctx.customColumns);
+    const blob = renderDocxTemplate(buf, data, { orphanLabelTexts });
+    const { apPaterno, apMaterno } = resolveCandidateApellidos(ctx);
+    const fileName = buildBulkDocumentFileName(template.name, ctx.candidate.name, apPaterno, apMaterno);
     return { blob, fileName };
 }
 
