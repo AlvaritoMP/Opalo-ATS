@@ -904,6 +904,18 @@ export function getTallyIntegrationMappingFields(process?: Process): TallyMappin
         });
     }
 
+    // Incluir columnas custom del proceso aunque aún no estén en columnOrder o estén ocultas
+    for (const col of customColumns) {
+        const key = `custom_${col.id}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        fields.push({
+            key,
+            label: col.name,
+            placeholder: col.name.toLowerCase(),
+        });
+    }
+
     return fields;
 }
 

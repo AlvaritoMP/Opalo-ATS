@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { useAppState } from '../App';
 import { FormIntegration, Process, FieldMapping } from '../types';
 import {
@@ -6,7 +6,8 @@ import {
     getTallyIntegrationMappingFields,
     normalizeTallyFieldMapping,
 } from '../lib/bulkTableColumns';
-import { X, Copy, ChevronDown, ChevronUp, Settings } from 'lucide-react';
+import { processesApi } from '../lib/api/processes';
+import { X, Copy, ChevronDown, ChevronUp, Settings, RefreshCw } from 'lucide-react';
 
 interface FormIntegrationModalProps {
     integration: FormIntegration | null; // null = crear nueva, objeto = editar existente
@@ -34,11 +35,38 @@ export const FormEditorModal: React.FC<FormIntegrationModalProps> = ({ integrati
     const [fieldMapping, setFieldMapping] = useState<FieldMapping>(() =>
         normalizeTallyFieldMapping(integration?.fieldMapping || {})
     );
+    const [linkedProcess, setLinkedProcess] = useState<Process | null>(null);
+    const [isLoadingProcess, setIsLoadingProcess] = useState(false);
 
-    // Proceso seleccionado
-    const selectedProcessDetails = useMemo(() => {
+    const refreshLinkedProcess = useCallback(async (id: string) => {
+        if (!id) {
+            setLinkedProcess(null);
+            return;
+        }
+        setIsLoadingProcess(true);
+        try {
+            const fresh = await processesApi.getById(id);
+            setLinkedProcess(fresh);
+        } catch (err) {
+            console.error('Error cargando proceso para mapeo Tally:', err);
+            setLinkedProcess(processesList.find(p => p.id === id) ?? null);
+        } finally {
+            setIsLoadingProcess(false);
+        }
+    }, [processesList]);
+
+    // Proceso seleccionado (lista local como respaldo)
+    const selectedProcessFromList = useMemo(() => {
         return processesList.find(p => p.id === processId);
     }, [processId, processesList]);
+
+    // Proceso con bulk_config actualizado desde BD (fuente de verdad para columnas)
+    const selectedProcessDetails = linkedProcess ?? selectedProcessFromList;
+
+    useEffect(() => {
+        if (!processId) return;
+        void refreshLinkedProcess(processId);
+    }, [processId, refreshLinkedProcess]);
 
     // Campos del proceso (simple o masivo según bulkConfig del proceso vinculado)
     const candidateFields = useMemo(
@@ -49,6 +77,16 @@ export const FormEditorModal: React.FC<FormIntegrationModalProps> = ({ integrati
     const allowedFieldKeys = useMemo(
         () => new Set(candidateFields.map(f => f.key)),
         [candidateFields]
+    );
+
+    const unmappedFieldCount = useMemo(
+        () => candidateFields.filter(f => !(fieldMapping[f.key] ?? '').trim()).length,
+        [candidateFields, fieldMapping]
+    );
+
+    const mappedFieldCount = useMemo(
+        () => Object.values(fieldMapping).filter(v => typeof v === 'string' && v.trim()).length,
+        [fieldMapping]
     );
 
     // Al cambiar de proceso, quitar mapeos de campos que ya no aplican
@@ -299,6 +337,28 @@ export const FormEditorModal: React.FC<FormIntegrationModalProps> = ({ integrati
                                         <p className="text-xs text-blue-700 font-medium pt-1">
                                             {candidateFields.length} campos del proceso — desplázate para ver todos
                                         </p>
+                                        <div className="flex flex-wrap items-center gap-2 pt-1">
+                                            <button
+                                                type="button"
+                                                onClick={() => void refreshLinkedProcess(processId)}
+                                                disabled={isLoadingProcess || !processId}
+                                                className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium text-blue-800 bg-white border border-blue-200 rounded-md hover:bg-blue-100 disabled:opacity-50"
+                                            >
+                                                <RefreshCw className={`w-3.5 h-3.5 ${isLoadingProcess ? 'animate-spin' : ''}`} />
+                                                Actualizar campos del proceso
+                                            </button>
+                                            {selectedProcessDetails?.isBulkProcess && (
+                                                <span className="text-xs text-blue-700">
+                                                    Proceso masivo: se cargan columnas nuevas desde la configuración actual
+                                                </span>
+                                            )}
+                                        </div>
+                                        {unmappedFieldCount > 0 && (
+                                            <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded px-2 py-1.5">
+                                                Hay <strong>{unmappedFieldCount}</strong> campo(s) del proceso sin mapear a Tally.
+                                                Si agregó columnas nuevas, pulse <em>Actualizar campos del proceso</em> y complete el label de cada pregunta.
+                                            </p>
+                                        )}
                                     </div>
                                     <div
                                         className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-4 pb-4"
@@ -341,7 +401,7 @@ export const FormEditorModal: React.FC<FormIntegrationModalProps> = ({ integrati
                                         <div className="flex-shrink-0 px-4 py-3 border-t border-blue-200 bg-blue-50">
                                             <div className="flex items-center justify-between">
                                                 <span className="text-xs text-blue-800">
-                                                    <strong>{Object.keys(fieldMapping).length}</strong> campo(s) mapeado(s) personalmente
+                                                    <strong>{mappedFieldCount}</strong> campo(s) mapeado(s) personalmente
                                                 </span>
                                                 <button
                                                     type="button"

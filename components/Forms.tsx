@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useAppState } from '../App';
 import { Plus, Trash2, Link as LinkIcon, ExternalLink, Edit2 } from 'lucide-react';
 import { FormEditorModal } from './FormEditorModal'; // This is now the FormIntegrationModal
@@ -42,7 +42,7 @@ export const Forms: React.FC = () => {
     useEffect(() => {
         const loadBulkProcesses = async () => {
             try {
-                const processes = await processesApi.getAllBulkProcesses();
+                const processes = await processesApi.getAllBulkProcesses(true);
                 let filteredProcesses = processes;
                 const currentUser = state.currentUser;
                 if (currentUser && currentUser.allowedClientIds !== undefined && currentUser.allowedClientIds !== null) {
@@ -57,7 +57,12 @@ export const Forms: React.FC = () => {
         loadBulkProcesses();
     }, [state.currentUser]);
 
-    const allProcesses = [...state.processes, ...bulkProcesses];
+    const allProcesses = useMemo(() => {
+        const byId = new Map<string, Process>();
+        for (const p of state.processes) byId.set(p.id, p);
+        for (const p of bulkProcesses) byId.set(p.id, p);
+        return [...byId.values()];
+    }, [state.processes, bulkProcesses]);
     
     const handleDelete = (formId: string) => {
         if (window.confirm('¿Seguro que quieres eliminar esta integración? Esto no eliminará el formulario en la plataforma original.')) {
