@@ -101,15 +101,12 @@ export function scrubOrphanLabels(text: string, labelTexts: string[]): string {
  */
 const PARAGRAPH_STRUCTURAL_GUARD = /<w:sectPr|<w:drawing|<w:pict|<w:object|<wp:|<a:|<pic:|w:fldChar|w:instrText|<m:|<w:hyperlink/;
 
-/** ¿El párrafo solo contiene una etiqueta sin valor (p. ej. "Ap Paterno:")? */
-function isOrphanLabelOnly(text: string): boolean {
-    return /^[^:\n]{1,120}:$/.test(text.trim());
-}
-
 /**
  * Elimina, de forma segura, los párrafos que quedaron como "Etiqueta:" sin valor
- * tras reemplazar campos vacíos. No toca párrafos con estructura (secciones,
- * imágenes, campos) y repara celdas de tabla que pudieran quedar sin párrafo.
+ * tras reemplazar campos vacíos. SOLO actúa sobre párrafos cuya etiqueta huérfana
+ * se eliminó realmente: el texto estático del documento (p. ej. "Tipo de vivienda:")
+ * nunca se toca porque no figura en orphanLabelTexts. No toca párrafos con estructura
+ * (secciones, imágenes, campos) y repara celdas de tabla que queden sin párrafo.
  */
 export function cleanupDocxXml(xml: string, orphanLabelTexts: string[] = []): string {
     if (orphanLabelTexts.length === 0) return xml;
@@ -119,8 +116,11 @@ export function cleanupDocxXml(xml: string, orphanLabelTexts: string[] = []): st
         const original = extractParagraphText(paragraphXml).trim();
         if (!original) return paragraphXml; // párrafo ya vacío: no tocar (puede ser espaciado)
         const scrubbed = scrubOrphanLabels(original, orphanLabelTexts);
-        // Solo se elimina si tras quitar la etiqueta huérfana el párrafo queda vacío
-        if (scrubbed === '' || isOrphanLabelOnly(scrubbed)) return '';
+        // Si la limpieza no cambió nada, es texto estático del documento: conservar intacto.
+        if (scrubbed === original) return paragraphXml;
+        // La etiqueta huérfana se eliminó y el párrafo quedó vacío: eliminarlo.
+        if (scrubbed === '') return '';
+        // Cambio parcial: conservar el párrafo original para no corromper el formato.
         return paragraphXml;
     });
 
