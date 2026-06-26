@@ -6,6 +6,11 @@ import {
     createDocumentTemplateId,
     readDocxFileAsTemplate,
 } from '../lib/bulkDocumentData';
+import {
+    DECOMPOSED_FIELD_HELP,
+    getDecomposedBaseKey,
+    isDecomposedTemplateKey,
+} from '../lib/bulkDocumentDecomposition';
 
 interface BulkDocumentTemplatesEditorProps {
     templates: BulkDocumentTemplate[];
@@ -56,20 +61,35 @@ export const BulkDocumentTemplatesEditor: React.FC<BulkDocumentTemplatesEditorPr
         e.target.value = '';
     };
 
-    const updateFieldMapping = (tplId: string, key: string, sourceId: string) => {
-        const tpl = templates.find(t => t.id === tplId);
-        if (!tpl) return;
-        const mappings = { ...(tpl.fieldMappings || {}) };
-        if (sourceId) mappings[key] = sourceId;
-        else delete mappings[key];
-        updateTemplate(tplId, { fieldMappings: mappings });
-    };
-
     const groupedSources = fieldSources.reduce<Record<string, typeof fieldSources>>((acc, src) => {
         if (!acc[src.group]) acc[src.group] = [];
         acc[src.group].push(src);
         return acc;
     }, {});
+
+    /** Agrupa campos descompuestos bajo su campo base para un solo mapeo */
+    const groupKeysForMapping = (keys: string[]) => {
+        const groups: { baseKey: string; keys: string[]; decomposed: boolean }[] = [];
+        const byBase = new Map<string, string[]>();
+
+        for (const key of keys) {
+            const base = getDecomposedBaseKey(key);
+            const list = byBase.get(base) || [];
+            list.push(key);
+            byBase.set(base, list);
+        }
+
+        for (const [baseKey, groupKeys] of byBase) {
+            const decomposed = groupKeys.some(k => isDecomposedTemplateKey(k));
+            groups.push({
+                baseKey,
+                keys: groupKeys.sort((a, b) => a.localeCompare(b, 'es')),
+                decomposed,
+            });
+        }
+
+        return groups.sort((a, b) => a.baseKey.localeCompare(b.baseKey, 'es'));
+    };
 
     return (
         <div className="space-y-4">
@@ -83,6 +103,24 @@ export const BulkDocumentTemplatesEditor: React.FC<BulkDocumentTemplatesEditorPr
                     <em>Ap Paterno:</em>) se omiten del Word para no dejar espacio en blanco.
                 </p>
             </div>
+
+            <details className="rounded-lg border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-900">
+                <summary className="font-medium cursor-pointer select-none">
+                    Campos descompuestos (letra por letra y fechas)
+                </summary>
+                <ul className="mt-2 space-y-1.5 text-sky-800">
+                    {DECOMPOSED_FIELD_HELP.map(item => (
+                        <li key={item.syntax}>
+                            <code className="bg-sky-100 px-1 rounded text-xs">{item.syntax}</code>
+                            {' — '}{item.desc}
+                        </li>
+                    ))}
+                </ul>
+                <p className="mt-2 text-xs text-sky-700">
+                    Solo asigne el campo base una vez (p. ej. <em>Ap Paterno</em> o <em>F Nac</em>);
+                    las variantes <code className="bg-sky-100 px-1 rounded">#1</code>, <code className="bg-sky-100 px-1 rounded">.dia</code>, etc. heredan ese mapeo.
+                </p>
+            </details>
 
             <div className="flex flex-wrap gap-2">
                 <input
@@ -150,31 +188,72 @@ export const BulkDocumentTemplatesEditor: React.FC<BulkDocumentTemplatesEditorPr
                                                 No se detectaron campos {'{{...}}'} en este documento.
                                             </p>
                                         ) : (
-                                            <div className="space-y-2">
+                                            <div className="space-y-3">
                                                 <p className="text-xs font-medium text-gray-600 uppercase tracking-wide">
                                                     Mapeo de campos
                                                 </p>
-                                                {keys.map(key => (
-                                                    <div key={key} className="grid grid-cols-1 sm:grid-cols-2 gap-2 items-center">
-                                                        <label className="text-sm text-gray-700 font-mono truncate" title={key}>
-                                                            {'{{'}{key}{'}}'}
-                                                        </label>
-                                                        <select
-                                                            value={tpl.fieldMappings?.[key] || ''}
-                                                            onChange={e => updateFieldMapping(tpl.id, key, e.target.value)}
-                                                            className="text-sm border border-gray-300 rounded-md px-2 py-1.5"
-                                                        >
-                                                            <option value="">— Sin asignar —</option>
-                                                            {Object.entries(groupedSources).map(([group, sources]) => (
-                                                                <optgroup key={group} label={group}>
-                                                                    {sources.map(src => (
-                                                                        <option key={src.id} value={src.id}>
-                                                                            {src.label}
-                                                                        </option>
-                                                                    ))}
-                                                                </optgroup>
-                                                            ))}
-                                                        </select>
+                                                {groupKeysForMapping(keys).map(group => (
+                                                    <div key={group.baseKey} className="border border-gray-100 rounded-md p-3 space-y-2">
+                                                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 items-center">
+                                                            <div>
+                                                                <label className="text-sm text-gray-800 font-medium block">
+                                                                    {group.baseKey}
+                                                                </label>
+                                                                {group.decomposed ? (
+                                                                    <p className="text-xs text-gray-500 mt-0.5">
+                                                                        {group.keys.length} marcador(es): letra/fecha descompuesta
+                                                                    </p>
+                                                                ) : (
+                                                                    <p className="text-xs font-mono text-gray-500 mt-0.5">
+                                                                        {'{{'}{group.baseKey}{'}}'}
+                                                                    </p>
+                                                                )}
+                                                            </div>
+                                                            <select
+                                                                value={
+                                                                    tpl.fieldMappings?.[group.baseKey]
+                                                                    || tpl.fieldMappings?.[group.keys[0]]
+                                                                    || ''
+                                                                }
+                                                                onChange={e => {
+                                                                    const val = e.target.value;
+                                                                    const mappings = { ...(tpl.fieldMappings || {}) };
+                                                                    if (val) {
+                                                                        mappings[group.baseKey] = val;
+                                                                        group.keys.forEach(k => { mappings[k] = val; });
+                                                                    } else {
+                                                                        delete mappings[group.baseKey];
+                                                                        group.keys.forEach(k => { delete mappings[k]; });
+                                                                    }
+                                                                    updateTemplate(tpl.id, { fieldMappings: mappings });
+                                                                }}
+                                                                className="text-sm border border-gray-300 rounded-md px-2 py-1.5"
+                                                            >
+                                                                <option value="">— Sin asignar —</option>
+                                                                {Object.entries(groupedSources).map(([g, sources]) => (
+                                                                    <optgroup key={g} label={g}>
+                                                                        {sources.map(src => (
+                                                                            <option key={src.id} value={src.id}>
+                                                                                {src.label}
+                                                                            </option>
+                                                                        ))}
+                                                                    </optgroup>
+                                                                ))}
+                                                            </select>
+                                                        </div>
+                                                        {group.decomposed && group.keys.length <= 12 && (
+                                                            <p className="text-[10px] font-mono text-gray-400 truncate" title={group.keys.join(', ')}>
+                                                                {group.keys.map(k => `{{${k}}}`).join(' ')}
+                                                            </p>
+                                                        )}
+                                                        {group.decomposed && group.keys.length > 12 && (
+                                                            <p className="text-[10px] text-gray-400">
+                                                                {group.keys.slice(0, 6).map(k => `{{${k}}}`).join(' ')}
+                                                                {' … '}
+                                                                {group.keys.slice(-2).map(k => `{{${k}}}`).join(' ')}
+                                                                {' '}({group.keys.length} casillas)
+                                                            </p>
+                                                        )}
                                                     </div>
                                                 ))}
                                             </div>

@@ -9,6 +9,12 @@ import {
     renderDocxTemplate,
     buildBulkDocumentFileName,
 } from './docxTemplateUtils';
+import {
+    parseDecomposedTemplateKey,
+    getDecomposedBaseKey,
+    resolveDecomposedValue,
+    isDecomposedTemplateKey,
+} from './bulkDocumentDecomposition';
 
 export const BULK_DOCUMENTS_COLUMN_ID = 'bulkDocuments';
 
@@ -90,6 +96,9 @@ const PLACEHOLDER_ALIASES: Record<string, string> = {
     apellidopaterno: 'custom.apPaterno',
     apmaterno: 'custom.apMaterno',
     apellidomaterno: 'custom.apMaterno',
+    fnac: 'custom.fNac',
+    fechanacimiento: 'custom.fNac',
+    fechadenacimiento: 'custom.fNac',
 };
 
 function normalizeKey(key: string): string {
@@ -124,12 +133,13 @@ export function sanitizeDocumentFieldValue(value: unknown): string {
     return str;
 }
 
-/** Sugiere mapeo automático para un campo de plantilla */
+/** Sugiere mapeo automático para un campo de plantilla (incluye campos descompuestos) */
 export function suggestFieldMapping(
     templateKey: string,
     customColumns: CustomColumn[] = []
 ): string {
-    const norm = normalizeKey(templateKey);
+    const baseKey = getDecomposedBaseKey(templateKey);
+    const norm = normalizeKey(baseKey);
     if (PLACEHOLDER_ALIASES[norm]) {
         const alias = PLACEHOLDER_ALIASES[norm];
         if (alias === 'custom.apPaterno') {
@@ -138,6 +148,11 @@ export function suggestFieldMapping(
         }
         if (alias === 'custom.apMaterno') {
             const col = findCustomColumnByHeader('Ap Materno', customColumns);
+            return col ? `custom.${col.id}` : '';
+        }
+        if (alias === 'custom.fNac') {
+            const col = findCustomColumnByHeader('F Nac', customColumns)
+                || findCustomColumnByHeader('F. Nac', customColumns);
             return col ? `custom.${col.id}` : '';
         }
         return alias;
@@ -155,7 +170,8 @@ export function suggestFieldMappings(
 ): Record<string, string> {
     const out: Record<string, string> = {};
     for (const key of keys) {
-        const suggested = suggestFieldMapping(key, customColumns);
+        const baseKey = getDecomposedBaseKey(key);
+        const suggested = suggestFieldMapping(baseKey, customColumns);
         if (suggested) out[key] = suggested;
     }
     return out;
@@ -251,6 +267,19 @@ function resolveSourceValue(sourceId: string, ctx: BulkDocumentContext): string 
     }
 }
 
+function resolveMappingForKey(
+    key: string,
+    template: BulkDocumentTemplate,
+    customColumns: CustomColumn[]
+): string {
+    const baseKey = getDecomposedBaseKey(key);
+    return (
+        template.fieldMappings?.[key]
+        || template.fieldMappings?.[baseKey]
+        || suggestFieldMapping(baseKey, customColumns)
+    );
+}
+
 /** Construye datos para docxtemplater a partir del mapeo configurado */
 export function buildDocumentData(
     template: BulkDocumentTemplate,
@@ -260,17 +289,29 @@ export function buildDocumentData(
         ? template.detectedKeys
         : detectTemplateKeysFromBuffer(base64ToArrayBuffer(template.docxBase64));
 
-    const mappings = template.fieldMappings || {};
     const customColumns = ctx.customColumns || [];
     const data: Record<string, string> = {};
+    const baseValueCache = new Map<string, string>();
+
+    const getBaseValue = (baseKey: string): string => {
+        if (baseValueCache.has(baseKey)) return baseValueCache.get(baseKey)!;
+        const mapped = resolveMappingForKey(baseKey, template, customColumns);
+        const value = mapped ? resolveSourceValue(mapped, ctx) : '';
+        const sanitized = sanitizeDocumentFieldValue(value);
+        baseValueCache.set(baseKey, sanitized);
+        return sanitized;
+    };
 
     for (const key of keys) {
-        const mapped = mappings[key] || suggestFieldMapping(key, customColumns);
-        if (mapped) {
-            data[key] = resolveSourceValue(mapped, ctx);
+        const decomposed = parseDecomposedTemplateKey(key);
+        if (decomposed) {
+            const baseValue = getBaseValue(decomposed.baseKey);
+            data[key] = resolveDecomposedValue(baseValue, decomposed);
             continue;
         }
-        data[key] = '';
+
+        const mapped = resolveMappingForKey(key, template, customColumns);
+        data[key] = mapped ? getBaseValue(key) : '';
     }
 
     const extras: Record<string, string> = {
@@ -287,7 +328,9 @@ export function buildDocumentData(
         merged[key] = sanitizeDocumentFieldValue(merged[key]);
     }
 
-    const emptyKeys = [...keys, ...Object.keys(extras)].filter(key => !merged[key]);
+    const emptyKeys = [...keys, ...Object.keys(extras)].filter(
+        key => !isDecomposedTemplateKey(key) && !merged[key]
+    );
     return { data: merged, emptyKeys: [...new Set(emptyKeys)] };
 }
 
