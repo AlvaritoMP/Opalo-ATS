@@ -130,6 +130,7 @@ import {
     reconcileCustomColumns,
     ensureBulkTableLayoutConfig,
 } from '../lib/bulkTableColumns';
+import { BULK_DOCUMENTS_COLUMN_ID } from '../lib/bulkDocumentData';
 import { getStageSelectClass } from '../lib/stageColors';
 import { getCellMetaStorageKey, BulkCellMeta, BulkCellMetaStore } from '../lib/bulkCellMeta';
 import { BulkCellContextMenu } from './BulkCellContextMenu';
@@ -201,6 +202,8 @@ import { BulkTransferCandidatesModal } from './BulkTransferCandidatesModal';
 import { BulkContactStatusCell } from './BulkContactStatusCell';
 import { BulkFloatingColumnRail } from './BulkFloatingColumnRail';
 import { BulkContactTemplatesModal } from './BulkContactTemplatesModal';
+import { BulkDocumentTemplatesModal } from './BulkDocumentTemplatesModal';
+import { BulkDocumentsCell } from './BulkDocumentsCell';
 import { BulkTableEditInput } from './BulkTableEditInput';
 import { applyBulkCellDomSelection, scrollBulkCellIntoView, clearBulkCellDomSelection } from '../lib/bulkTableCellSelection';
 import { SendToOpsFlowModal } from './SendToOpsFlowModal';
@@ -712,6 +715,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
     const [showWhatsAppModal, setShowWhatsAppModal] = useState(false);
     const [showEmailModal, setShowEmailModal] = useState(false);
     const [showContactTemplatesModal, setShowContactTemplatesModal] = useState(false);
+    const [showDocumentTemplatesModal, setShowDocumentTemplatesModal] = useState(false);
     const [isMobile, setIsMobile] = useState(false);
     const [showScheduleModal, setShowScheduleModal] = useState(false);
     const [schedulingCandidate, setSchedulingCandidate] = useState<{
@@ -3028,6 +3032,38 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
         },
         [persistBulkConfig, actions]
     );
+
+    const handleSaveDocumentTemplates = useCallback(
+        async (templates: import('../types').BulkDocumentTemplate[]) => {
+            const colKey = BULK_DOCUMENTS_COLUMN_ID;
+            let columnOrderUpdate = columnOrder;
+            let hiddenColumnsUpdate = hiddenColumns;
+
+            if (templates.length > 0) {
+                if (!columnOrderUpdate.includes(colKey)) {
+                    columnOrderUpdate = [...columnOrderUpdate, colKey];
+                }
+                hiddenColumnsUpdate = hiddenColumnsUpdate.filter(id => id !== colKey);
+            } else {
+                if (!hiddenColumnsUpdate.includes(colKey)) {
+                    hiddenColumnsUpdate = [...hiddenColumnsUpdate, colKey];
+                }
+            }
+
+            setColumnOrder(columnOrderUpdate);
+            setHiddenColumns(hiddenColumnsUpdate);
+
+            await persistBulkConfig({
+                documentTemplates: templates,
+                columnOrder: columnOrderUpdate,
+                hiddenColumns: hiddenColumnsUpdate,
+            });
+            actions.showToast('Documentación automática guardada', 'success', 2500);
+        },
+        [persistBulkConfig, actions, columnOrder, hiddenColumns]
+    );
+
+    const documentTemplates = process?.bulkConfig?.documentTemplates ?? [];
 
     const openAddColumnModal = useCallback(() => {
         addColumnTargetRef.current = 'table';
@@ -5899,6 +5935,19 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                                         </button>
                                         <button
                                             type="button"
+                                            onClick={() => setShowDocumentTemplatesModal(true)}
+                                            className={`transition-colors whitespace-nowrap ${
+                                                documentTemplates.length > 0
+                                                    ? 'bg-emerald-600 text-white hover:bg-emerald-700'
+                                                    : 'bg-white border border-emerald-300 text-emerald-900 hover:bg-emerald-50'
+                                            }`}
+                                            title="Configurar plantillas Word y mapeo de campos para generar documentos por candidato"
+                                        >
+                                            <FileText className="w-4 h-4 shrink-0" />
+                                            Documentación
+                                        </button>
+                                        <button
+                                            type="button"
                                             onClick={() => setShowTransportFaresModal(true)}
                                             className="bg-white border border-sky-300 text-sky-900 hover:bg-sky-50 transition-colors whitespace-nowrap"
                                             title="Editar tarifas de transporte público para estimación de costos de ruta"
@@ -6312,6 +6361,13 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                                     if (colId === 'schedule') {
                                         return (
                                             <BulkTh colId={colId} headerProps={commonProps} style={thStyle()} onResizeStart={handleColumnResizeStart}>Agendar</BulkTh>
+                                        );
+                                    }
+                                    if (colId === BULK_DOCUMENTS_COLUMN_ID) {
+                                        return (
+                                            <BulkTh colId={colId} headerProps={commonProps} style={thStyle()} onResizeStart={handleColumnResizeStart}>
+                                                Documentos
+                                            </BulkTh>
                                         );
                                     }
                                     if (colId === 'stage') {
@@ -6842,6 +6898,21 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                                                     </td>
                                                 );
                                             }
+                                            if (colId === BULK_DOCUMENTS_COLUMN_ID) {
+                                                return (
+                                                    <td key={BULK_DOCUMENTS_COLUMN_ID} {...tdProps(candidate.id, BULK_DOCUMENTS_COLUMN_ID)}>
+                                                        <BulkDocumentsCell
+                                                            templates={documentTemplates}
+                                                            candidate={displayCandidate}
+                                                            process={process}
+                                                            companyName={state.settings?.appName || 'Opalo ATS'}
+                                                            customColumns={customColumns}
+                                                            getColumnValue={getColumnValue}
+                                                            onError={msg => actions.showToast(msg, 'error', 4000)}
+                                                        />
+                                                    </td>
+                                                );
+                                            }
                                             if (colId === 'stage') {
                                                 const currentStage = process?.stages.find(s => s.id === displayCandidate.stageId);
                                                 const stageColorClass = getStageSelectClass(currentStage?.color);
@@ -7274,6 +7345,17 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                     processTitle={process.title}
                     templates={process.bulkConfig?.contactMessageTemplates ?? []}
                     onSave={handleSaveContactTemplates}
+                />
+            )}
+
+            {showDocumentTemplatesModal && process && (
+                <BulkDocumentTemplatesModal
+                    isOpen={showDocumentTemplatesModal}
+                    onClose={() => setShowDocumentTemplatesModal(false)}
+                    processTitle={process.title}
+                    templates={process.bulkConfig?.documentTemplates ?? []}
+                    customColumns={customColumns}
+                    onSave={handleSaveDocumentTemplates}
                 />
             )}
 

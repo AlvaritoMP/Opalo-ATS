@@ -244,6 +244,8 @@ export interface BulkProcessConfig {
     quickReplies?: BulkQuickReply[];
     /** Plantillas predefinidas de correo y WhatsApp para contactar candidatos */
     contactMessageTemplates?: BulkContactMessageTemplate[];
+    /** Plantillas Word (.docx) para generar documentos por candidato en la tabla masiva */
+    documentTemplates?: BulkDocumentTemplate[];
     /**
      * Panel flotante de columnas deslizables sobre la tabla (sin scroll horizontal).
      * Por defecto incluye las columnas de fidelización.
@@ -273,6 +275,18 @@ export interface BulkContactMessageTemplate {
     /** Solo para canal email */
     subject?: string;
     body: string;
+}
+
+/** Plantilla Word para autogenerar documentos en procesos masivos */
+export interface BulkDocumentTemplate {
+    id: string;
+    name: string;
+    /** Archivo .docx codificado en base64 */
+    docxBase64: string;
+    /** Campos {{...}} detectados en la plantilla */
+    detectedKeys?: string[];
+    /** Mapeo campo de plantilla → fuente de datos ATS (ver lib/bulkDocumentData) */
+    fieldMappings?: Record<string, string>;
 }
 
 export type BulkInfoPinColor = 'yellow' | 'pink' | 'blue' | 'green' | 'purple';

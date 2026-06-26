@@ -10,6 +10,7 @@ import { APP_NAME } from './appConfig';
 import { readBulkTableTemplatesCache } from './bulkTableTemplates';
 import { extractRouteCostTotal } from './routeCostStorage';
 import { ensureFloatingColumnsHidden, resolveFloatingColumnIds } from './bulkFloatingColumns';
+import { BULK_DOCUMENTS_COLUMN_ID } from './bulkDocumentData';
 
 const BULK_NAME_KEY_PREFIX = '__name__';
 
@@ -698,6 +699,7 @@ export const BASE_COLUMNS: BaseColumn[] = [
     { id: 'createdAt', label: 'Fecha creación' },
     { id: 'nextInterview', label: 'Próxima Entrevista' },
     { id: 'schedule', label: 'Agendar' },
+    { id: BULK_DOCUMENTS_COLUMN_ID, label: 'Documentos' },
     { id: 'stage', label: 'Etapa' },
     { id: 'hiredStageUser', label: 'Ingreso por' },
 ];
@@ -729,6 +731,7 @@ export const COLUMN_WIDTHS: Record<string, number> = {
     createdAt: 120,
     nextInterview: 100,
     schedule: 56,
+    [BULK_DOCUMENTS_COLUMN_ID]: 72,
     stage: 120,
     hiredStageUser: 112,
 };
@@ -1196,6 +1199,24 @@ export function ensureBulkTableLayoutConfig(
             config.hiddenColumns = hidden;
             needsPersist = true;
         }
+    }
+
+    const hasDocTemplates = (config.documentTemplates?.length ?? 0) > 0;
+    const hiddenSet = new Set(config.hiddenColumns || []);
+    const hasDocColumn = config.columnOrder?.includes(BULK_DOCUMENTS_COLUMN_ID);
+
+    if (hasDocTemplates) {
+        if (hiddenSet.has(BULK_DOCUMENTS_COLUMN_ID)) {
+            config.hiddenColumns = (config.hiddenColumns || []).filter(id => id !== BULK_DOCUMENTS_COLUMN_ID);
+            needsPersist = true;
+        }
+        if (!hasDocColumn) {
+            config.columnOrder = [...(config.columnOrder || []), BULK_DOCUMENTS_COLUMN_ID];
+            needsPersist = true;
+        }
+    } else if (hasDocColumn && !hiddenSet.has(BULK_DOCUMENTS_COLUMN_ID)) {
+        config.hiddenColumns = [...(config.hiddenColumns || []), BULK_DOCUMENTS_COLUMN_ID];
+        needsPersist = true;
     }
 
     return { config, needsPersist };
