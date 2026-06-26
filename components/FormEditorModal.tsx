@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect, useCallback } from 'react';
+import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import { useAppState } from '../App';
 import { FormIntegration, Process, FieldMapping } from '../types';
 import {
@@ -89,15 +89,26 @@ export const FormEditorModal: React.FC<FormIntegrationModalProps> = ({ integrati
         [fieldMapping]
     );
 
-    // Al cambiar de proceso, quitar mapeos de campos que ya no aplican
+    // ¿La config del proceso actual ya cargó desde BD? Solo entonces los campos son fiables.
+    const isLinkedProcessLoaded = linkedProcess?.id === processId;
+
+    // Solo purgar mapeos cuando el USUARIO cambia a otro proceso (no en la carga inicial ni
+    // durante la recarga asíncrona), y únicamente con la config ya cargada para evitar borrar
+    // claves custom_* que todavía no aparecen porque el bulk_config no terminó de cargar.
+    const previousProcessIdRef = useRef(processId);
     useEffect(() => {
+        if (previousProcessIdRef.current === processId) return;
+        if (!isLinkedProcessLoaded) return;
+        previousProcessIdRef.current = processId;
         setFieldMapping(prev => filterTallyFieldMapping(prev, allowedFieldKeys));
-    }, [allowedFieldKeys]);
+    }, [processId, isLinkedProcessLoaded, allowedFieldKeys]);
 
     const buildFieldMappingPayload = (): FieldMapping | undefined => {
         const trimmed: FieldMapping = {};
         for (const [key, val] of Object.entries(fieldMapping)) {
-            if (!allowedFieldKeys.has(key)) continue;
+            // Conservar la clave si el proceso aún no cargó (no podemos validar todavía) o si
+            // pertenece a los campos válidos del proceso. Así no se pierden mapeos existentes.
+            if (isLinkedProcessLoaded && !allowedFieldKeys.has(key)) continue;
             const t = typeof val === 'string' ? val.trim() : '';
             if (t) trimmed[key] = t;
         }
