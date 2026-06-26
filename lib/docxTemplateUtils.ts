@@ -70,6 +70,7 @@ export function renderDocxTemplate(buf: ArrayBuffer, data: Record<string, string
         paragraphLoop: true,
         linebreaks: true,
         delimiters: { start: '{{', end: '}}' },
+        nullGetter: () => '',
     });
     doc.setData(data);
     doc.render();

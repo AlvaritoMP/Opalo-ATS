@@ -92,6 +92,34 @@ function normalizeKey(key: string): string {
     return key.toLowerCase().replace(/[_\s-]/g, '');
 }
 
+/** Valores de UI sin dato (guión, pendiente, etc.) → vacío en el documento Word */
+const DOCUMENT_EMPTY_DISPLAY_VALUES = new Set([
+    '-',
+    '—',
+    '–',
+    '−',
+    'n/a',
+    'na',
+    's/n',
+    'sin dato',
+    'sin datos',
+    'pendiente',
+    'null',
+    'undefined',
+]);
+
+/**
+ * Convierte a texto para Word: sin guiones de tabla, sin espacios residuales.
+ * Un campo vacío en el ATS debe dejar el marcador {{...}} sin ocupar espacio visible.
+ */
+export function sanitizeDocumentFieldValue(value: unknown): string {
+    if (value === undefined || value === null) return '';
+    const str = String(value).replace(/\u00a0/g, ' ').trim();
+    if (!str) return '';
+    if (DOCUMENT_EMPTY_DISPLAY_VALUES.has(str.toLowerCase())) return '';
+    return str;
+}
+
 /** Sugiere mapeo automático para un campo de plantilla */
 export function suggestFieldMapping(
     templateKey: string,
@@ -134,28 +162,28 @@ function resolveSourceValue(sourceId: string, ctx: BulkDocumentContext): string 
         const col = customColumns.find(c => c.id === colId);
         if (!col || !getColumnValue) return '';
         const raw = getColumnValue(candidate.id, colId, candidate);
-        return formatCustomCellDisplay(raw, col);
+        return sanitizeDocumentFieldValue(formatCustomCellDisplay(raw, col));
     }
 
     switch (sourceId) {
-        case 'candidate.name': return candidate.name || '';
-        case 'candidate.dni': return candidate.dni || '';
-        case 'candidate.email': return candidate.email || '';
-        case 'candidate.phone': return candidate.phone || '';
-        case 'candidate.source': return candidate.source || '';
-        case 'candidate.province': return candidate.province || '';
-        case 'candidate.district': return candidate.district || '';
-        case 'candidate.age': return candidate.age != null ? String(candidate.age) : '';
-        case 'candidate.hireDate': return candidate.hireDate || '';
-        case 'candidate.offerAcceptedDate': return candidate.offerAcceptedDate || '';
-        case 'candidate.scoreIa': return candidate.scoreIa != null ? String(candidate.scoreIa) : '';
-        case 'process.title': return process?.title || '';
-        case 'process.description': return process?.description || '';
+        case 'candidate.name': return sanitizeDocumentFieldValue(candidate.name);
+        case 'candidate.dni': return sanitizeDocumentFieldValue(candidate.dni);
+        case 'candidate.email': return sanitizeDocumentFieldValue(candidate.email);
+        case 'candidate.phone': return sanitizeDocumentFieldValue(candidate.phone);
+        case 'candidate.source': return sanitizeDocumentFieldValue(candidate.source);
+        case 'candidate.province': return sanitizeDocumentFieldValue(candidate.province);
+        case 'candidate.district': return sanitizeDocumentFieldValue(candidate.district);
+        case 'candidate.age': return candidate.age != null ? sanitizeDocumentFieldValue(candidate.age) : '';
+        case 'candidate.hireDate': return sanitizeDocumentFieldValue(candidate.hireDate);
+        case 'candidate.offerAcceptedDate': return sanitizeDocumentFieldValue(candidate.offerAcceptedDate);
+        case 'candidate.scoreIa': return candidate.scoreIa != null ? sanitizeDocumentFieldValue(candidate.scoreIa) : '';
+        case 'process.title': return sanitizeDocumentFieldValue(process?.title);
+        case 'process.description': return sanitizeDocumentFieldValue(process?.description);
         case 'stage.name': {
             const stage = process?.stages?.find(s => s.id === candidate.stageId);
-            return stage?.name || '';
+            return sanitizeDocumentFieldValue(stage?.name);
         }
-        case 'company.name': return companyName;
+        case 'company.name': return sanitizeDocumentFieldValue(companyName);
         case 'system.fechaEmision': return obtenerFechaEmision();
         case 'system.fechaActual': return new Date().toLocaleDateString('es-PE');
         default: return '';
@@ -186,14 +214,19 @@ export function buildDocumentData(
 
     // Variaciones comunes que docxtemplater podría esperar
     const extras: Record<string, string> = {
-        Nombre: data.Nombre ?? ctx.candidate.name ?? '',
-        nombre: data.nombre ?? ctx.candidate.name ?? '',
-        DNI: data.DNI ?? ctx.candidate.dni ?? '',
-        dni: data.dni ?? ctx.candidate.dni ?? '',
+        Nombre: sanitizeDocumentFieldValue(data.Nombre ?? ctx.candidate.name),
+        nombre: sanitizeDocumentFieldValue(data.nombre ?? ctx.candidate.name),
+        DNI: sanitizeDocumentFieldValue(data.DNI ?? ctx.candidate.dni),
+        dni: sanitizeDocumentFieldValue(data.dni ?? ctx.candidate.dni),
         Fechaemision: obtenerFechaEmision(),
         fechaEmision: obtenerFechaEmision(),
     };
-    return { ...extras, ...data };
+
+    const merged = { ...extras, ...data };
+    for (const key of Object.keys(merged)) {
+        merged[key] = sanitizeDocumentFieldValue(merged[key]);
+    }
+    return merged;
 }
 
 export function generateBulkDocument(
