@@ -1247,6 +1247,36 @@ export const processesApi = {
         ));
     },
 
+    /**
+     * Trae solo las respuestas rápidas de todos los procesos masivos (sin el resto
+     * del bulk_config pesado), para poder mostrarlas en el panel "Todas" sin tener
+     * que entrar a cada proceso. Minimiza el egress proyectando solo bulk_config->quickReplies.
+     */
+    async getAllBulkQuickReplies(): Promise<Array<{ id: string; title: string; quickReplies: any[] }>> {
+        try {
+            const result = await fetchWithRetry(async () => {
+                const response = await supabase
+                    .from('processes')
+                    .select('id, title, quickReplies:bulk_config->quickReplies')
+                    .eq('app_name', APP_NAME)
+                    .eq('is_bulk_process', true)
+                    .order('title', { ascending: true });
+                if (response.error) throw response.error;
+                return response;
+            });
+
+            const rows = (result.data || []) as any[];
+            return rows.map(row => ({
+                id: row.id,
+                title: row.title,
+                quickReplies: Array.isArray(row.quickReplies) ? row.quickReplies : [],
+            }));
+        } catch (err) {
+            console.warn('⚠️ Error cargando respuestas rápidas globales:', err);
+            return [];
+        }
+    },
+
     /** Procesos regulares + masivos (para estado global: panel, candidatos, reportes). */
     async getAllIncludingBulk(includeAttachments: boolean = false): Promise<Process[]> {
         const [regular, bulk] = await Promise.all([

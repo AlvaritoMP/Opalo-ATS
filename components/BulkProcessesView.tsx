@@ -782,6 +782,10 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
     const [isSavingQuickReply, setIsSavingQuickReply] = useState(false);
     const [copyingQuickReplyId, setCopyingQuickReplyId] = useState<string | null>(null);
     const [showGlobalQuickRepliesPanel, setShowGlobalQuickRepliesPanel] = useState(false);
+    /** Respuestas rápidas de TODOS los procesos masivos (carga ligera, sin entrar a cada uno). */
+    const [globalQuickReplies, setGlobalQuickReplies] = useState<
+        Array<{ id: string; title: string; quickReplies: BulkQuickReply[] }>
+    >([]);
     const undoStackRef = useRef<BulkUndoEntry[]>([]);
     const [undoStackSize, setUndoStackSize] = useState(0);
     const isUndoingRef = useRef(false);
@@ -853,10 +857,30 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
         [process?.bulkConfig]
     );
 
-    const allQuickReplyEntries = useMemo(
-        () => collectQuickRepliesFromProcesses(bulkProcesses, { currentProcessId: process?.id }),
-        [bulkProcesses, process?.id]
-    );
+    const allQuickReplyEntries = useMemo(() => {
+        // Solo mostramos procesos que el usuario tiene permitido ver (lista ya filtrada).
+        const allowedIds = new Set(bulkProcesses.map(p => p.id));
+        // Base: respuestas rápidas de todos los procesos (carga ligera global).
+        const sources = new Map<string, { id: string; title: string; quickReplies: BulkQuickReply[] }>();
+        for (const item of globalQuickReplies) {
+            if (allowedIds.size > 0 && !allowedIds.has(item.id)) continue;
+            sources.set(item.id, { id: item.id, title: item.title, quickReplies: item.quickReplies });
+        }
+        // Sobrescribe con la versión "viva" de cualquier proceso ya cargado en memoria
+        // (incluye el proceso actual con sus ediciones/altas recientes sin recargar).
+        for (const p of bulkProcesses) {
+            const replies = p.bulkConfig?.quickReplies;
+            if (replies) {
+                sources.set(p.id, { id: p.id, title: p.title, quickReplies: replies });
+            }
+        }
+        const merged: Process[] = Array.from(sources.values()).map(s => ({
+            id: s.id,
+            title: s.title,
+            bulkConfig: { quickReplies: s.quickReplies },
+        } as unknown as Process));
+        return collectQuickRepliesFromProcesses(merged, { currentProcessId: process?.id });
+    }, [globalQuickReplies, bulkProcesses, process?.id]);
 
     const activeInfoPin = useMemo(
         () => infoPins.find(p => p.id === activeInfoPinId) ?? null,
@@ -1401,6 +1425,23 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
         if (isEmbedded) return;
         loadBulkProcesses();
     }, [isEmbedded, loadBulkProcesses]);
+
+    // Carga ligera de las respuestas rápidas de TODOS los procesos masivos, para que el
+    // panel "Todas" las muestre desde el inicio sin tener que entrar a cada proceso.
+    useEffect(() => {
+        if (isEmbedded) return;
+        let cancelled = false;
+        void processesApi.getAllBulkQuickReplies()
+            .then(rows => {
+                if (!cancelled) setGlobalQuickReplies(rows);
+            })
+            .catch(err => {
+                console.warn('No se pudieron cargar las respuestas rápidas globales:', err);
+            });
+        return () => {
+            cancelled = true;
+        };
+    }, [isEmbedded]);
 
     useEffect(() => {
         if (isEmbedded) return;
