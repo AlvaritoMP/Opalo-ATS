@@ -185,15 +185,16 @@ export function buildBulkDocumentFileName(
     templateName: string,
     candidateName: string,
     apPaterno?: string,
-    apMaterno?: string
+    apMaterno?: string,
+    extension: 'docx' | 'pdf' = 'docx'
 ): string {
     const parts = [
-        safeFileNamePart(templateName.replace(/\.docx?$/i, '') || 'documento'),
+        safeFileNamePart(templateName.replace(/\.(docx?|pdf)$/i, '') || 'documento'),
         safeFileNamePart(candidateName),
         safeFileNamePart(apPaterno),
         safeFileNamePart(apMaterno),
     ].filter(p => p.length > 0);
-    return `${parts.join('_')}.docx`;
+    return `${parts.join('_')}.${extension}`;
 }
 
 /** @deprecated Use buildBulkDocumentFileName */

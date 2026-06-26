@@ -46,7 +46,7 @@ export const BulkDocumentsCell: React.FC<BulkDocumentsCellProps> = ({
     const handleDownload = async (tpl: BulkDocumentTemplate) => {
         setGeneratingId(tpl.id);
         try {
-            const { blob, fileName } = generateBulkDocument(tpl, {
+            const { blob, fileName } = await generateBulkDocument(tpl, {
                 candidate,
                 process,
                 companyName,

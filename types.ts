@@ -277,16 +277,25 @@ export interface BulkContactMessageTemplate {
     body: string;
 }
 
-/** Plantilla Word para autogenerar documentos en procesos masivos */
+/** Formato de plantilla de documentación automática */
+export type BulkDocumentTemplateFormat = 'docx' | 'pdf';
+
+/** Plantilla Word o PDF para autogenerar documentos en procesos masivos */
 export interface BulkDocumentTemplate {
     id: string;
     name: string;
+    /** Por defecto 'docx' (plantillas existentes sin este campo) */
+    format?: BulkDocumentTemplateFormat;
     /** Archivo .docx codificado en base64 */
-    docxBase64: string;
-    /** Campos {{...}} detectados en la plantilla */
+    docxBase64?: string;
+    /** Archivo PDF rellenable (AcroForm) codificado en base64 */
+    pdfBase64?: string;
+    /** Campos detectados: marcadores {{...}} en Word o nombres AcroForm en PDF */
     detectedKeys?: string[];
     /** Mapeo campo de plantilla → fuente de datos ATS (ver lib/bulkDocumentData) */
     fieldMappings?: Record<string, string>;
+    /** Solo PDF: tipo de cada campo detectado */
+    pdfFieldTypes?: Record<string, 'text' | 'checkbox' | 'radio' | 'dropdown' | 'other'>;
 }
 
 export type BulkInfoPinColor = 'yellow' | 'pink' | 'blue' | 'green' | 'purple';

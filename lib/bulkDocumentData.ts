@@ -15,8 +15,36 @@ import {
     resolveDecomposedValue,
     isDecomposedTemplateKey,
 } from './bulkDocumentDecomposition';
+import {
+    detectPdfFormFields,
+    fillPdfFormTemplate,
+    getPdfTemplateBuffer,
+    parsePdfCheckboxFieldName,
+    matchesPdfCheckboxExpected,
+    readPdfFileAsBase64,
+    type PdfFormFieldType,
+} from './pdfTemplateUtils';
 
 export const BULK_DOCUMENTS_COLUMN_ID = 'bulkDocuments';
+
+export function getBulkDocumentFormat(template: BulkDocumentTemplate): 'docx' | 'pdf' {
+    if (template.format) return template.format;
+    if (template.pdfBase64 && !template.docxBase64) return 'pdf';
+    return 'docx';
+}
+
+/** Clave base para mapeo: descompuesto, checkbox PDF o el nombre tal cual */
+export function getTemplateFieldBaseKey(key: string, format?: 'docx' | 'pdf'): string {
+    if (format === 'pdf') {
+        const checkbox = parsePdfCheckboxFieldName(key);
+        if (checkbox) return checkbox.baseKey;
+    }
+    return getDecomposedBaseKey(key);
+}
+
+export function isPdfCheckboxTemplateKey(key: string): boolean {
+    return parsePdfCheckboxFieldName(key) !== null;
+}
 
 export interface BulkDocumentFieldSource {
     id: string;
@@ -166,11 +194,12 @@ export function suggestFieldMapping(
 
 export function suggestFieldMappings(
     keys: string[],
-    customColumns: CustomColumn[] = []
+    customColumns: CustomColumn[] = [],
+    format?: 'docx' | 'pdf'
 ): Record<string, string> {
     const out: Record<string, string> = {};
     for (const key of keys) {
-        const baseKey = getDecomposedBaseKey(key);
+        const baseKey = getTemplateFieldBaseKey(key, format);
         const suggested = suggestFieldMapping(baseKey, customColumns);
         if (suggested) out[key] = suggested;
     }
@@ -272,7 +301,8 @@ function resolveMappingForKey(
     template: BulkDocumentTemplate,
     customColumns: CustomColumn[]
 ): string {
-    const baseKey = getDecomposedBaseKey(key);
+    const format = getBulkDocumentFormat(template);
+    const baseKey = getTemplateFieldBaseKey(key, format);
     return (
         template.fieldMappings?.[key]
         || template.fieldMappings?.[baseKey]
@@ -287,7 +317,7 @@ export function buildDocumentData(
 ): { data: Record<string, string>; emptyKeys: string[] } {
     const keys = template.detectedKeys?.length
         ? template.detectedKeys
-        : detectTemplateKeysFromBuffer(base64ToArrayBuffer(template.docxBase64));
+        : detectTemplateKeysFromBuffer(base64ToArrayBuffer(template.docxBase64!));
 
     const customColumns = ctx.customColumns || [];
     const data: Record<string, string> = {};
@@ -334,16 +364,75 @@ export function buildDocumentData(
     return { data: merged, emptyKeys: [...new Set(emptyKeys)] };
 }
 
-export function generateBulkDocument(
+/** Construye valores para campos AcroForm de un PDF */
+export function buildPdfDocumentData(
     template: BulkDocumentTemplate,
     ctx: BulkDocumentContext
-): { blob: Blob; fileName: string } {
+): Record<string, string> {
+    const keys = template.detectedKeys || [];
+    const customColumns = ctx.customColumns || [];
+    const data: Record<string, string> = {};
+    const baseValueCache = new Map<string, string>();
+
+    const getBaseValue = (baseKey: string): string => {
+        if (baseValueCache.has(baseKey)) return baseValueCache.get(baseKey)!;
+        const mapped = resolveMappingForKey(baseKey, template, customColumns);
+        const value = mapped ? resolveSourceValue(mapped, ctx) : '';
+        const sanitized = sanitizeDocumentFieldValue(value);
+        baseValueCache.set(baseKey, sanitized);
+        return sanitized;
+    };
+
+    for (const key of keys) {
+        const checkboxSpec = parsePdfCheckboxFieldName(key);
+        if (checkboxSpec) {
+            const baseValue = getBaseValue(checkboxSpec.baseKey);
+            data[key] = matchesPdfCheckboxExpected(baseValue, checkboxSpec.expectedValues) ? 'true' : 'false';
+            continue;
+        }
+
+        const decomposed = parseDecomposedTemplateKey(key);
+        if (decomposed) {
+            const baseValue = getBaseValue(decomposed.baseKey);
+            data[key] = resolveDecomposedValue(baseValue, decomposed);
+            continue;
+        }
+
+        const mapped = resolveMappingForKey(key, template, customColumns);
+        data[key] = mapped ? getBaseValue(key) : '';
+    }
+
+    return data;
+}
+
+export async function generateBulkDocument(
+    template: BulkDocumentTemplate,
+    ctx: BulkDocumentContext
+): Promise<{ blob: Blob; fileName: string }> {
+    const format = getBulkDocumentFormat(template);
+    const { apPaterno, apMaterno } = resolveCandidateApellidos(ctx);
+    const fileName = buildBulkDocumentFileName(
+        template.name,
+        ctx.candidate.name,
+        apPaterno,
+        apMaterno,
+        format === 'pdf' ? 'pdf' : 'docx'
+    );
+
+    if (format === 'pdf') {
+        const buf = getPdfTemplateBuffer(template);
+        const fieldValues = buildPdfDocumentData(template, ctx);
+        const blob = await fillPdfFormTemplate(buf, fieldValues, template.pdfFieldTypes || {});
+        return { blob, fileName };
+    }
+
+    if (!template.docxBase64) {
+        throw new Error('La plantilla Word no tiene archivo cargado.');
+    }
     const buf = base64ToArrayBuffer(template.docxBase64);
     const { data, emptyKeys } = buildDocumentData(template, ctx);
     const orphanLabelTexts = buildOrphanLabelTexts(emptyKeys, template, ctx.customColumns);
     const blob = renderDocxTemplate(buf, data, { orphanLabelTexts });
-    const { apPaterno, apMaterno } = resolveCandidateApellidos(ctx);
-    const fileName = buildBulkDocumentFileName(template.name, ctx.candidate.name, apPaterno, apMaterno);
     return { blob, fileName };
 }
 
@@ -354,12 +443,31 @@ export function createDocumentTemplateId(): string {
 export async function readDocxFileAsTemplate(
     file: File,
     customColumns: CustomColumn[] = []
-): Promise<Pick<BulkDocumentTemplate, 'docxBase64' | 'detectedKeys' | 'fieldMappings'>> {
+): Promise<Pick<BulkDocumentTemplate, 'format' | 'docxBase64' | 'detectedKeys' | 'fieldMappings'>> {
     const buf = await file.arrayBuffer();
     const detectedKeys = detectTemplateKeysFromBuffer(buf);
     return {
+        format: 'docx',
         docxBase64: arrayBufferToBase64(buf),
         detectedKeys,
-        fieldMappings: suggestFieldMappings(detectedKeys, customColumns),
+        fieldMappings: suggestFieldMappings(detectedKeys, customColumns, 'docx'),
+    };
+}
+
+export async function readPdfFileAsTemplate(
+    file: File,
+    customColumns: CustomColumn[] = []
+): Promise<Pick<BulkDocumentTemplate, 'format' | 'pdfBase64' | 'detectedKeys' | 'fieldMappings' | 'pdfFieldTypes'>> {
+    const { pdfBase64, buf } = await readPdfFileAsBase64(file);
+    const fields = await detectPdfFormFields(buf);
+    const detectedKeys = fields.map(f => f.name);
+    const pdfFieldTypes: Record<string, PdfFormFieldType> = {};
+    for (const f of fields) pdfFieldTypes[f.name] = f.type;
+    return {
+        format: 'pdf',
+        pdfBase64,
+        detectedKeys,
+        fieldMappings: suggestFieldMappings(detectedKeys, customColumns, 'pdf'),
+        pdfFieldTypes,
     };
 }
