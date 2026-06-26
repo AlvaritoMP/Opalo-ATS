@@ -64,13 +64,6 @@ export function detectTemplateKeysFromBuffer(buf: ArrayBuffer): string[] {
     return Array.from(unique.values()).sort();
 }
 
-function escapeXmlText(text: string): string {
-    return text
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;');
-}
-
 function extractParagraphText(paragraphXml: string): string {
     const matches = paragraphXml.match(/<w:t[^>]*>[^<]*<\/w:t>/g) || [];
     return matches
@@ -79,19 +72,6 @@ function extractParagraphText(paragraphXml: string): string {
         .replace(/&lt;/g, '<')
         .replace(/&gt;/g, '>')
         .replace(/&amp;/g, '&');
-}
-
-function setParagraphText(paragraphXml: string, newText: string): string {
-    const escaped = escapeXmlText(newText);
-    let first = true;
-    const updated = paragraphXml.replace(/<w:t([^>]*)>[^<]*<\/w:t>/g, (_m, attrs: string) => {
-        if (first) {
-            first = false;
-            return `<w:t${attrs}>${escaped}</w:t>`;
-        }
-        return `<w:t${attrs}></w:t>`;
-    });
-    return updated;
 }
 
 function escapeRegExp(text: string): string {
@@ -115,26 +95,43 @@ export function scrubOrphanLabels(text: string, labelTexts: string[]): string {
         .trim();
 }
 
-function isRemovableParagraphText(text: string): boolean {
-    const t = text.trim();
-    if (!t) return true;
-    if (/^[^:\n]{1,120}:\s*$/.test(t)) return true;
-    return false;
+/**
+ * Elementos que NUNCA deben borrarse junto con su párrafo: propiedades de sección,
+ * imágenes, dibujos, campos, fórmulas. Borrarlos corrompe el .docx.
+ */
+const PARAGRAPH_STRUCTURAL_GUARD = /<w:sectPr|<w:drawing|<w:pict|<w:object|<wp:|<a:|<pic:|w:fldChar|w:instrText|<m:|<w:hyperlink/;
+
+/** ¿El párrafo solo contiene una etiqueta sin valor (p. ej. "Ap Paterno:")? */
+function isOrphanLabelOnly(text: string): boolean {
+    return /^[^:\n]{1,120}:$/.test(text.trim());
 }
 
-/** Elimina párrafos vacíos y etiquetas huérfanas tras reemplazar campos sin valor */
+/**
+ * Elimina, de forma segura, los párrafos que quedaron como "Etiqueta:" sin valor
+ * tras reemplazar campos vacíos. No toca párrafos con estructura (secciones,
+ * imágenes, campos) y repara celdas de tabla que pudieran quedar sin párrafo.
+ */
 export function cleanupDocxXml(xml: string, orphanLabelTexts: string[] = []): string {
-    return xml.replace(/<w:p\b[^>]*>[\s\S]*?<\/w:p>/g, paragraphXml => {
-        let text = extractParagraphText(paragraphXml);
-        if (orphanLabelTexts.length > 0) {
-            text = scrubOrphanLabels(text, orphanLabelTexts);
-        }
-        if (isRemovableParagraphText(text)) return '';
+    if (orphanLabelTexts.length === 0) return xml;
+
+    const withoutOrphans = xml.replace(/<w:p\b[^>]*>[\s\S]*?<\/w:p>/g, paragraphXml => {
+        if (PARAGRAPH_STRUCTURAL_GUARD.test(paragraphXml)) return paragraphXml;
         const original = extractParagraphText(paragraphXml).trim();
-        if (text !== original) {
-            return setParagraphText(paragraphXml, text);
-        }
+        if (!original) return paragraphXml; // párrafo ya vacío: no tocar (puede ser espaciado)
+        const scrubbed = scrubOrphanLabels(original, orphanLabelTexts);
+        // Solo se elimina si tras quitar la etiqueta huérfana el párrafo queda vacío
+        if (scrubbed === '' || isOrphanLabelOnly(scrubbed)) return '';
         return paragraphXml;
+    });
+
+    return repairEmptyTableCells(withoutOrphans);
+}
+
+/** Garantiza que toda celda de tabla conserve al menos un párrafo (docx válido). */
+function repairEmptyTableCells(xml: string): string {
+    return xml.replace(/<w:tc\b[^>]*>[\s\S]*?<\/w:tc>/g, cell => {
+        if (/<w:p[ \/>]/.test(cell)) return cell;
+        return cell.replace(/<\/w:tc>$/, '<w:p/></w:tc>');
     });
 }
 
