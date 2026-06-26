@@ -13,8 +13,9 @@ export type DecomposedKeySpec =
     | { kind: 'dateDigit'; baseKey: string; part: DateDigitPart };
 
 const CHAR_KEY_RE = /^(.+?)[#_](\d{1,2})$/;
-const DATE_PART_RE = /^(.+?)\.(dia|mes|anio|año)$/i;
-const DATE_DIGIT_RE = /^(.+?)\.(dd|mm|aa|aaaa|yy)([1-4])$/i;
+// Permite separadores . _ - (AcroForm no admite puntos en nombres de campo)
+const DATE_PART_RE = /^(.+?)[._-](dia|mes|anio|año)$/i;
+const DATE_DIGIT_RE = /^(.+?)[._-](dd|mm|aa|aaaa|yy)([1-4])$/i;
 
 /** Detecta si un marcador descompone un campo base (letra, fecha, dígito). */
 export function parseDecomposedTemplateKey(key: string): DecomposedKeySpec | null {
@@ -68,13 +69,13 @@ function parseBulkDateParts(value: string): { dia: string; mes: string; anio: st
     return { dia: match[1], mes: match[2], anio: match[3] };
 }
 
-/** Una letra del valor (índice 1 = primer carácter). Sin espacios; mayúsculas para formularios. */
-export function extractCharAt(value: string, index: number, uppercase = true): string {
-    const compact = value.replace(/\s+/g, '');
-    if (!compact || index < 1) return '';
-    const ch = compact[index - 1] ?? '';
+/** Una letra del valor (índice 1 = primer carácter). Conserva espacios internos; mayúsculas para formularios. */
+export function extractCharAt(value: string, index: number): string {
+    const normalized = value.replace(/\s+/g, ' ');
+    if (!normalized || index < 1) return '';
+    const ch = normalized[index - 1] ?? '';
     if (!ch) return '';
-    return uppercase ? ch.toUpperCase() : ch;
+    return ch.toUpperCase();
 }
 
 export function resolveDatePartValue(value: string, part: DatePartName): string {

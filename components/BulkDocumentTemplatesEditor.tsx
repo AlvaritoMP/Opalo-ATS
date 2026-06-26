@@ -143,7 +143,8 @@ export const BulkDocumentTemplatesEditor: React.FC<BulkDocumentTemplatesEditorPr
                 <p className="mt-2 text-xs text-sky-700">
                     Solo asigne el campo base una vez (p. ej. <em>Ap Paterno</em> o <em>F Nac</em>);
                     las variantes <code className="bg-sky-100 px-1 rounded">#1</code>, <code className="bg-sky-100 px-1 rounded">.dia</code>, etc. heredan ese mapeo.
-                    En PDF use los mismos sufijos como nombre del campo AcroForm (sin llaves).
+                    En PDF, como AcroForm no admite puntos en el nombre del campo, use guion bajo o guion en su lugar:{' '}
+                    <code className="bg-sky-100 px-1 rounded">F Nac_dd1</code>, <code className="bg-sky-100 px-1 rounded">F Nac_mm2</code>, <code className="bg-sky-100 px-1 rounded">F Nac_aa4</code>.
                 </p>
             </details>
 
