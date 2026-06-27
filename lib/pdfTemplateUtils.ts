@@ -69,7 +69,7 @@ export async function readPdfFileAsBase64(file: File): Promise<{ pdfBase64: stri
 
 /**
  * Rellena un PDF AcroForm. fieldValues: nombre de campo → texto o 'true'/'false' para checkboxes.
- * flatten: deja el PDF sin campos editables (recomendado para entrega final).
+ * flatten: deja el PDF sin campos editables; usar false para permitir edición manual posterior.
  */
 export async function fillPdfFormTemplate(
     buf: ArrayBuffer,

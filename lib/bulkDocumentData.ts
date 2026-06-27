@@ -422,7 +422,7 @@ export async function generateBulkDocument(
     if (format === 'pdf') {
         const buf = getPdfTemplateBuffer(template);
         const fieldValues = buildPdfDocumentData(template, ctx);
-        const blob = await fillPdfFormTemplate(buf, fieldValues, template.pdfFieldTypes || {});
+        const blob = await fillPdfFormTemplate(buf, fieldValues, template.pdfFieldTypes || {}, { flatten: false });
         return { blob, fileName };
     }
 
