@@ -1,4 +1,12 @@
-import { PDFDocument, PDFCheckBox, PDFTextField, PDFDropdown, PDFRadioGroup } from 'pdf-lib';
+import {
+    PDFDocument,
+    PDFCheckBox,
+    PDFTextField,
+    PDFDropdown,
+    PDFRadioGroup,
+    PDFName,
+    PDFBool,
+} from 'pdf-lib';
 import { arrayBufferToBase64, base64ToArrayBuffer } from './docxTemplateUtils';
 
 export type PdfFormFieldType = 'text' | 'checkbox' | 'radio' | 'dropdown' | 'other';
@@ -32,7 +40,34 @@ function normalizeComparable(value: string): string {
 export function matchesPdfCheckboxExpected(actualValue: string, expectedValues: string[]): boolean {
     const actual = normalizeComparable(actualValue);
     if (!actual) return false;
-    return expectedValues.some(exp => actual === normalizeComparable(exp));
+    return expectedValues.some(exp => {
+        const expected = normalizeComparable(exp);
+        if (actual === expected) return true;
+        // Alias tallas: "Small" ↔ "S", etc.
+        const sizeAliases: Record<string, string[]> = {
+            s: ['s', 'small', 'chica', 'pequena', 'pequeña'],
+            m: ['m', 'medium', 'mediana'],
+            l: ['l', 'large', 'grande'],
+            xl: ['xl', 'xlarge', 'extra large', 'extra grande'],
+            xxl: ['xxl', 'xxlarge', '2xl', 'extra extra large'],
+        };
+        for (const aliases of Object.values(sizeAliases)) {
+            if (aliases.includes(actual) && aliases.includes(expected)) return true;
+        }
+        return false;
+    });
+}
+
+function isTruthyMarkValue(value: string): boolean {
+    return value === 'true' || value === '1' || value.toUpperCase() === 'X';
+}
+
+function setNeedAppearancesFlag(form: ReturnType<PDFDocument['getForm']>): void {
+    try {
+        form.acroForm.dict.set(PDFName.of('NeedAppearances'), PDFBool.True);
+    } catch {
+        /* algunos PDF no exponen el diccionario AcroForm */
+    }
 }
 
 function classifyField(field: { constructor: { name: string } }): PdfFormFieldType {
@@ -89,12 +124,45 @@ export async function fillPdfFormTemplate(
             continue;
         }
 
+        const conditionalMark = parsePdfCheckboxFieldName(name);
+        const isConditionalMark = conditionalMark !== null;
+        const shouldMark = isTruthyMarkValue(value);
+
+        // marcar:Columna=Valor → checkbox o casilla de texto con "X"
+        if (isConditionalMark) {
+            if (field instanceof PDFCheckBox) {
+                if (shouldMark) {
+                    field.check();
+                    try {
+                        field.defaultUpdateAppearances();
+                    } catch {
+                        /* PDF sin apariencias estándar */
+                    }
+                } else {
+                    field.uncheck();
+                }
+                continue;
+            }
+
+            if (field instanceof PDFTextField) {
+                field.setText(shouldMark ? 'X' : '');
+                continue;
+            }
+        }
+
         const type = fieldTypes[name] ?? classifyField(field);
 
         if (type === 'checkbox' && field instanceof PDFCheckBox) {
-            const shouldCheck = value === 'true' || value === '1' || value.toUpperCase() === 'X';
-            if (shouldCheck) field.check();
-            else field.uncheck();
+            if (shouldMark) {
+                field.check();
+                try {
+                    field.defaultUpdateAppearances();
+                } catch {
+                    /* PDF sin apariencias estándar */
+                }
+            } else {
+                field.uncheck();
+            }
             continue;
         }
 
@@ -131,9 +199,16 @@ export async function fillPdfFormTemplate(
         } catch {
             /* algunos PDF no permiten flatten */
         }
+    } else {
+        setNeedAppearancesFlag(form);
+        try {
+            form.updateFieldAppearances();
+        } catch {
+            /* formularios con apariencias personalizadas */
+        }
     }
 
-    const bytes = await pdfDoc.save();
+    const bytes = await pdfDoc.save({ updateFieldAppearances: true });
     return new Blob([bytes], { type: 'application/pdf' });
 }
 

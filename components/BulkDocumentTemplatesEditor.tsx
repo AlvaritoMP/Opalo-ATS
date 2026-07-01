@@ -123,8 +123,9 @@ export const BulkDocumentTemplatesEditor: React.FC<BulkDocumentTemplatesEditorPr
                     <code className="bg-violet-100 px-1 rounded">DNI#3</code>,{' '}
                     <code className="bg-violet-100 px-1 rounded">F Nac.dd1</code>).
                     Para marcar una casilla según un valor use{' '}
-                    <code className="bg-violet-100 px-1 rounded">marcar:Distrito=Lima</code>{' '}
-                    o varias opciones con <code className="bg-violet-100 px-1 rounded">|</code>.
+                    <code className="bg-violet-100 px-1 rounded">marcar:Talla Uniforme=S</code>{' '}
+                    (funciona con checkbox o casilla de texto; se escribe <strong>X</strong> si coincide).
+                    Varias opciones con <code className="bg-violet-100 px-1 rounded">|</code>.
                 </p>
             </div>
 
