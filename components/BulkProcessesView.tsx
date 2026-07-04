@@ -6083,7 +6083,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                             focusTable();
                         }}
                     >
-                        <table className="w-full border-collapse" style={{ tableLayout: 'fixed', width: 'max-content', minWidth: '100%' }}>
+                        <table className="w-full border-collapse notranslate" translate="no" style={{ tableLayout: 'fixed', width: 'max-content', minWidth: '100%' }}>
                             <thead className="bg-gray-50 sticky top-0 z-20">
                             <tr>
                                 <th
