@@ -95,9 +95,17 @@ export const EndProcessModal: React.FC<EndProcessModalProps> = ({
             onClose();
         } catch (error) {
             console.error('Error finalizando proceso:', error);
+            const err = error as { code?: string; message?: string };
+            if (err?.code === '23514' && err?.message?.includes('processes_status_check')) {
+                alert(
+                    'La base de datos aún no permite los estados Cancelado o Trunco.\n\n' +
+                    'Ejecuta en Supabase el script MIGRATION_ADD_PROCESS_STATUS_CANCELADO_TRUNCO.sql y vuelve a intentarlo.'
+                );
+                return;
+            }
             const message = error instanceof Error
                 ? error.message
-                : (error as { message?: string })?.message || 'Error desconocido';
+                : err?.message || 'Error desconocido';
             alert(`Error al finalizar el proceso: ${message}`);
         } finally {
             setIsSubmitting(false);
