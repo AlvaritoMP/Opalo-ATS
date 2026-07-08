@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useMemo, useRef } from 'react';
 import { initialProcesses, initialCandidates, initialUsers, initialSettings, initialFormIntegrations, initialInterviewEvents } from './lib/data';
-import { Process, Candidate, User, AppSettings, FormIntegration, InterviewEvent, CandidateHistory, Application, PostIt, Comment, Section, UserRole, UserAlert } from './types';
+import { Process, Candidate, User, AppSettings, FormIntegration, InterviewEvent, CandidateHistory, Application, PostIt, Comment, Section, UserRole } from './types';
 import { getSettings, saveSettings as saveSettingsToStorage } from './lib/settings';
 import { usersApi, processesApi, candidatesApi, postItsApi, commentsApi, interviewsApi, settingsApi, formIntegrationsApi, setCurrentUser } from './lib/api/index';
 import { isCorsError, getErrorMessage, isSupabaseConfigured } from './lib/supabase';
@@ -440,9 +440,6 @@ const Sidebar: React.FC = () => {
                                         } else {
                                             actions.setView('process-view', processId);
                                         }
-                                    }}
-                                    onSporadicAlert={(alert: UserAlert) => {
-                                        actions.showToast(alert.message, alert.severity === 'urgent' ? 'error' : 'info', 8000);
                                     }}
                                 />
                             </div>

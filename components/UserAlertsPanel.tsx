@@ -52,20 +52,19 @@ interface UserAlertsPanelProps {
     currentUser: User;
     processes: Process[];
     onNavigateToProcess?: (processId: string) => void;
-    onSporadicAlert?: (alert: UserAlert) => void;
 }
 
 export const UserAlertsPanel: React.FC<UserAlertsPanelProps> = ({
     currentUser,
     processes,
     onNavigateToProcess,
-    onSporadicAlert,
 }) => {
     const [alerts, setAlerts] = useState<UserAlert[]>([]);
     const [loading, setLoading] = useState(true);
     const [showModal, setShowModal] = useState(false);
-    const [showBellList, setShowBellList] = useState(false);
     const sporadicSeenRef = useRef<Set<string>>(new Set());
+
+    const closeModal = () => setShowModal(false);
 
     const loadAlerts = useCallback(async () => {
         try {
@@ -112,16 +111,18 @@ export const UserAlertsPanel: React.FC<UserAlertsPanelProps> = ({
         const interval = setInterval(() => {
             void loadAlerts().then(computed => {
                 const sporadic = getSporadicAlerts(computed);
+                let hasNew = false;
                 for (const alert of sporadic) {
                     if (sporadicSeenRef.current.has(alert.id)) continue;
                     sporadicSeenRef.current.add(alert.id);
-                    onSporadicAlert?.(alert);
+                    hasNew = true;
                 }
+                if (hasNew) setShowModal(true);
             });
         }, 5 * 60 * 1000);
 
         return () => clearInterval(interval);
-    }, [loadAlerts, onSporadicAlert]);
+    }, [loadAlerts]);
 
     useEffect(() => {
         try {
@@ -145,20 +146,13 @@ export const UserAlertsPanel: React.FC<UserAlertsPanelProps> = ({
 
     const urgentCount = alerts.filter(a => a.severity === 'urgent' || a.severity === 'warning').length;
 
-    const AlertCard: React.FC<{ alert: UserAlert; compact?: boolean }> = ({
-        alert,
-        compact,
-    }) => {
+    const AlertCard: React.FC<{ alert: UserAlert }> = ({ alert }) => {
         const style = SEVERITY_STYLES[alert.severity];
         const TypeIcon = TYPE_ICONS[alert.type];
         const Icon = style.icon;
 
         return (
-            <div
-                className={`rounded-lg border p-3 ${style.border} ${style.bg} ${
-                    compact ? '' : 'mb-2'
-                }`}
-            >
+            <div className={`rounded-lg border p-3 mb-2 ${style.border} ${style.bg}`}>
                 <div className="flex items-start gap-2.5">
                     <div className={`mt-0.5 ${style.iconClass}`}>
                         <TypeIcon className="w-4 h-4" />
@@ -188,8 +182,7 @@ export const UserAlertsPanel: React.FC<UserAlertsPanelProps> = ({
                             <button
                                 onClick={() => {
                                     onNavigateToProcess(alert.processId!);
-                                    setShowModal(false);
-                                    setShowBellList(false);
+                                    closeModal();
                                 }}
                                 className="mt-2 text-xs text-primary-600 hover:text-primary-800 font-medium flex items-center gap-0.5"
                             >
@@ -197,7 +190,7 @@ export const UserAlertsPanel: React.FC<UserAlertsPanelProps> = ({
                             </button>
                         )}
                     </div>
-                    {!compact && <Icon className={`w-4 h-4 shrink-0 ${style.iconClass}`} />}
+                    <Icon className={`w-4 h-4 shrink-0 ${style.iconClass}`} />
                 </div>
             </div>
         );
@@ -209,8 +202,7 @@ export const UserAlertsPanel: React.FC<UserAlertsPanelProps> = ({
         <>
             <button
                 onClick={() => {
-                    setShowBellList(v => !v);
-                    void loadAlerts();
+                    void loadAlerts().then(() => setShowModal(true));
                 }}
                 className="relative p-2 rounded-lg hover:bg-gray-100 text-gray-600 transition-colors"
                 title="Avisos"
@@ -223,62 +215,39 @@ export const UserAlertsPanel: React.FC<UserAlertsPanelProps> = ({
                 )}
             </button>
 
-            {showBellList && (
-                <>
-                    <div
-                        className="fixed inset-0 z-[48]"
-                        onClick={() => setShowBellList(false)}
-                    />
-                    <div className="absolute bottom-full right-0 mb-2 w-80 sm:w-96 max-h-[min(400px,60vh)] overflow-y-auto bg-white border border-gray-200 rounded-xl shadow-xl z-[49] p-3">
-                        <div className="flex items-center justify-between mb-2">
-                            <h3 className="text-sm font-semibold text-gray-900">Avisos</h3>
-                            <button
-                                onClick={() => setShowBellList(false)}
-                                className="p-1 hover:bg-gray-100 rounded"
-                            >
-                                <X className="w-4 h-4 text-gray-400" />
-                            </button>
-                        </div>
-                        {alerts.length === 0 ? (
-                            <p className="text-sm text-gray-500 text-center py-4">
-                                Sin avisos pendientes
-                            </p>
-                        ) : (
-                            alerts.map(alert => (
-                                <AlertCard key={alert.id} alert={alert} compact />
-                            ))
-                        )}
-                    </div>
-                </>
-            )}
-
-            {showModal && alerts.length > 0 && (
+            {showModal && (
                 <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/40">
                     <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg max-h-[80vh] flex flex-col">
                         <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
                             <div>
                                 <h2 className="text-lg font-semibold text-gray-900">
-                                    Resumen de avisos
+                                    Avisos
                                 </h2>
                                 <p className="text-sm text-gray-500">
                                     Hola {currentUser.name.split(' ')[0]}, esto requiere tu atención
                                 </p>
                             </div>
                             <button
-                                onClick={() => setShowModal(false)}
+                                onClick={closeModal}
                                 className="p-1.5 hover:bg-gray-100 rounded-lg"
                             >
                                 <X className="w-5 h-5 text-gray-400" />
                             </button>
                         </div>
                         <div className="flex-1 overflow-y-auto px-5 py-4">
-                            {alerts.map(alert => (
-                                <AlertCard key={alert.id} alert={alert} />
-                            ))}
+                            {alerts.length === 0 ? (
+                                <p className="text-sm text-gray-500 text-center py-8">
+                                    Sin avisos pendientes
+                                </p>
+                            ) : (
+                                alerts.map(alert => (
+                                    <AlertCard key={alert.id} alert={alert} />
+                                ))
+                            )}
                         </div>
                         <div className="px-5 py-3 border-t border-gray-100 flex justify-end">
                             <button
-                                onClick={() => setShowModal(false)}
+                                onClick={closeModal}
                                 className="px-4 py-2 bg-primary-600 text-white text-sm font-medium rounded-lg hover:bg-primary-700"
                             >
                                 Entendido
