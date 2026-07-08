@@ -176,7 +176,7 @@ DECLARE
 
         'interview_events', 'form_integrations', 'app_settings', 'clients',
 
-        'bulk_process_activity_log'
+        'bulk_process_activity_log', 'user_messages'
 
     ];
 
@@ -282,7 +282,7 @@ WHERE t.schemaname = 'public'
 
     'interview_events', 'form_integrations', 'app_settings', 'clients',
 
-    'bulk_process_activity_log'
+    'bulk_process_activity_log', 'user_messages'
 
   )
 

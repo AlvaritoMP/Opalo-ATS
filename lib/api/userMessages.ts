@@ -2,6 +2,7 @@ import { supabase } from '../supabase';
 import { APP_NAME } from '../appConfig';
 import type { UserMessage } from '../../types';
 import { isMissingColumnError } from '../supabaseColumnErrors';
+import { getErrorMessage } from '../supabase';
 
 function dbToMessage(row: Record<string, unknown>): UserMessage {
     return {
@@ -12,6 +13,10 @@ function dbToMessage(row: Record<string, unknown>): UserMessage {
         readAt: (row.read_at as string) || undefined,
         createdAt: row.created_at as string,
     };
+}
+
+function userInvolvedFilter(userId: string): string {
+    return `sender_id.eq.${userId},recipient_id.eq.${userId}`;
 }
 
 export const userMessagesApi = {
@@ -25,11 +30,12 @@ export const userMessagesApi = {
         return !error;
     },
 
-    async getRecent(limit = 100): Promise<UserMessage[]> {
+    async getRecent(userId: string, limit = 100): Promise<UserMessage[]> {
         const { data, error } = await supabase
             .from('user_messages')
             .select('*')
             .eq('app_name', APP_NAME)
+            .or(userInvolvedFilter(userId))
             .order('created_at', { ascending: false })
             .limit(limit);
 
@@ -73,11 +79,13 @@ export const userMessagesApi = {
             .select()
             .single();
 
-        if (error) throw error;
+        if (error) {
+            throw new Error(getErrorMessage(error));
+        }
         return dbToMessage(data);
     },
 
-    async markAsRead(messageIds: string[]): Promise<void> {
+    async markAsRead(messageIds: string[], recipientId: string): Promise<void> {
         if (messageIds.length === 0) return;
         const now = new Date().toISOString();
         const { error } = await supabase
@@ -85,6 +93,7 @@ export const userMessagesApi = {
             .update({ read_at: now })
             .in('id', messageIds)
             .eq('app_name', APP_NAME)
+            .eq('recipient_id', recipientId)
             .is('read_at', null);
 
         if (error && !isMissingColumnError(error)) throw error;

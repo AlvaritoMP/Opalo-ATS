@@ -2098,6 +2098,9 @@ const App: React.FC = () => {
                     onNewMessage={(fromName) => {
                         showToastHelper(`Nuevo mensaje de ${fromName}`, 'info', 5000);
                     }}
+                    onSendError={(message) => {
+                        showToastHelper(message, 'error', 6000);
+                    }}
                 />
             </div>
         </AppContext.Provider>

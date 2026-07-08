@@ -1,36 +1,10 @@
 -- ============================================
--- MIGRACIÓN: Mensajería instantánea entre usuarios
+-- RLS + Realtime para user_messages (si la tabla ya existe)
 -- ============================================
--- INSTRUCCIONES:
--- 1. Supabase → SQL Editor
--- 2. Ejecutar este script completo
--- 3. Luego ejecutar RLS_MULTIAPP_DEFINITIVO.sql (incluye user_messages)
---    O ejecutar MIGRATION_ADD_USER_MESSAGES_RLS.sql si solo falta RLS
+-- Ejecutar si ya creaste user_messages pero los mensajes no llegan
+-- a otros usuarios (falta RLS o Realtime).
 -- ============================================
 
-CREATE TABLE IF NOT EXISTS user_messages (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    sender_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    recipient_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    text TEXT NOT NULL,
-    read_at TIMESTAMPTZ,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    app_name TEXT NOT NULL DEFAULT 'Opalo ATS'
-);
-
-COMMENT ON TABLE user_messages IS
-'Mensajes directos entre usuarios del ATS (mensajería instantánea interna).';
-
-CREATE INDEX IF NOT EXISTS idx_user_messages_recipient_created
-ON user_messages (recipient_id, created_at DESC);
-
-CREATE INDEX IF NOT EXISTS idx_user_messages_sender_created
-ON user_messages (sender_id, created_at DESC);
-
-CREATE INDEX IF NOT EXISTS idx_user_messages_app_name
-ON user_messages (app_name);
-
--- RLS multi-tenant (mismo patrón que comments, post_its, etc.)
 DO $$
 BEGIN
     IF EXISTS (
@@ -63,7 +37,6 @@ BEGIN
     END IF;
 END $$;
 
--- Realtime para mensajes entrantes
 DO $$
 BEGIN
     IF NOT EXISTS (
@@ -77,8 +50,4 @@ BEGIN
     END IF;
 END $$;
 
-SELECT column_name, data_type, is_nullable
-FROM information_schema.columns
-WHERE table_schema = 'public'
-  AND table_name = 'user_messages'
-ORDER BY ordinal_position;
+NOTIFY pgrst, 'reload schema';

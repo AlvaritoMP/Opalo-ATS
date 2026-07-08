@@ -3,9 +3,9 @@ import { MessageCircle, X, ChevronUp, ChevronDown, Send, Minimize2 } from 'lucid
 import { supabase } from '../lib/supabase';
 import { userMessagesApi } from '../lib/api/userMessages';
 import type { User, UserMessage } from '../types';
-import { APP_NAME } from '../lib/appConfig';
 
 const STORAGE_KEY_PREFIX = 'ats_messaging_hidden_';
+const POLL_INTERVAL_MS = 15_000;
 
 function formatTime(iso: string): string {
     const d = new Date(iso);
@@ -34,12 +34,14 @@ interface MessagingBarProps {
     currentUser: User;
     users: User[];
     onNewMessage?: (fromName: string) => void;
+    onSendError?: (message: string) => void;
 }
 
 export const MessagingBar: React.FC<MessagingBarProps> = ({
     currentUser,
     users,
     onNewMessage,
+    onSendError,
 }) => {
     const [messages, setMessages] = useState<UserMessage[]>([]);
     const [expanded, setExpanded] = useState(false);
@@ -56,7 +58,9 @@ export const MessagingBar: React.FC<MessagingBarProps> = ({
     const [available, setAvailable] = useState(true);
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const onNewMessageRef = useRef(onNewMessage);
+    const onSendErrorRef = useRef(onSendError);
     onNewMessageRef.current = onNewMessage;
+    onSendErrorRef.current = onSendError;
 
     const otherUsers = useMemo(
         () => users.filter(u => u.id !== currentUser.id),
@@ -68,6 +72,28 @@ export const MessagingBar: React.FC<MessagingBarProps> = ({
         for (const u of users) map.set(u.id, u.name);
         return map;
     }, [users]);
+
+    const mergeIncomingMessage = useCallback((msg: UserMessage) => {
+        setMessages(prev => {
+            if (prev.some(m => m.id === msg.id)) return prev;
+            return [...prev, msg];
+        });
+
+        if (msg.recipientId === currentUser.id) {
+            const fromName = userNameById.get(msg.senderId) || 'Un usuario';
+            setHidden(prevHidden => {
+                if (prevHidden) {
+                    try {
+                        localStorage.removeItem(`${STORAGE_KEY_PREFIX}${currentUser.id}`);
+                    } catch { /* ignore */ }
+                }
+                return false;
+            });
+            setExpanded(true);
+            setActivePartnerId(msg.senderId);
+            onNewMessageRef.current?.(fromName);
+        }
+    }, [currentUser.id, userNameById]);
 
     const threads = useMemo((): ThreadPreview[] => {
         const map = new Map<string, ThreadPreview>();
@@ -116,13 +142,13 @@ export const MessagingBar: React.FC<MessagingBarProps> = ({
             const ok = await userMessagesApi.isAvailable();
             setAvailable(ok);
             if (!ok) return;
-            const recent = await userMessagesApi.getRecent(150);
+            const recent = await userMessagesApi.getRecent(currentUser.id, 150);
             setMessages(recent);
         } catch (err) {
             console.warn('No se pudo cargar mensajería:', err);
             setAvailable(false);
         }
-    }, []);
+    }, [currentUser.id]);
 
     useEffect(() => {
         void loadMessages();
@@ -131,56 +157,54 @@ export const MessagingBar: React.FC<MessagingBarProps> = ({
     useEffect(() => {
         if (!available) return;
 
+        const rowToMessage = (row: Record<string, unknown>): UserMessage => ({
+            id: row.id as string,
+            senderId: row.sender_id as string,
+            recipientId: row.recipient_id as string,
+            text: row.text as string,
+            readAt: (row.read_at as string) || undefined,
+            createdAt: row.created_at as string,
+        });
+
         const channel = supabase
-            .channel(`user-messages-${currentUser.id}`)
+            .channel(`user-messages-in-${currentUser.id}`)
             .on(
                 'postgres_changes',
                 {
                     event: 'INSERT',
                     schema: 'public',
                     table: 'user_messages',
-                    filter: `app_name=eq.${APP_NAME}`,
+                    filter: `recipient_id=eq.${currentUser.id}`,
                 },
                 payload => {
-                    const row = payload.new as Record<string, unknown>;
-                    const msg: UserMessage = {
-                        id: row.id as string,
-                        senderId: row.sender_id as string,
-                        recipientId: row.recipient_id as string,
-                        text: row.text as string,
-                        readAt: (row.read_at as string) || undefined,
-                        createdAt: row.created_at as string,
-                    };
-
-                    const involvesMe =
-                        msg.senderId === currentUser.id || msg.recipientId === currentUser.id;
-                    if (!involvesMe) return;
-
-                    setMessages(prev => {
-                        if (prev.some(m => m.id === msg.id)) return prev;
-                        return [...prev, msg];
-                    });
-
-                    if (msg.recipientId === currentUser.id) {
-                        const fromName = userNameById.get(msg.senderId) || 'Un usuario';
-                        if (hidden) {
-                            setHidden(false);
-                            try {
-                                localStorage.removeItem(`${STORAGE_KEY_PREFIX}${currentUser.id}`);
-                            } catch { /* ignore */ }
-                        }
-                        setExpanded(true);
-                        setActivePartnerId(msg.senderId);
-                        onNewMessageRef.current?.(fromName);
-                    }
+                    if (!payload.new) return;
+                    mergeIncomingMessage(rowToMessage(payload.new as Record<string, unknown>));
                 }
             )
             .subscribe();
 
+        const pollId = window.setInterval(() => {
+            void userMessagesApi.getRecent(currentUser.id, 150).then(recent => {
+                setMessages(prev => {
+                    const known = new Set(prev.map(m => m.id));
+                    const merged = [...prev];
+                    for (const msg of recent) {
+                        if (!known.has(msg.id)) merged.push(msg);
+                    }
+                    merged.sort(
+                        (a, b) =>
+                            new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+                    );
+                    return merged;
+                });
+            });
+        }, POLL_INTERVAL_MS);
+
         return () => {
             void supabase.removeChannel(channel);
+            window.clearInterval(pollId);
         };
-    }, [available, currentUser.id, hidden, userNameById]);
+    }, [available, currentUser.id, mergeIncomingMessage]);
 
     useEffect(() => {
         if (!expanded || !activePartnerId) return;
@@ -188,7 +212,7 @@ export const MessagingBar: React.FC<MessagingBarProps> = ({
             .filter(m => m.recipientId === currentUser.id && !m.readAt)
             .map(m => m.id);
         if (unreadIds.length > 0) {
-            void userMessagesApi.markAsRead(unreadIds).then(() => {
+            void userMessagesApi.markAsRead(unreadIds, currentUser.id).then(() => {
                 setMessages(prev =>
                     prev.map(m =>
                         unreadIds.includes(m.id)
@@ -198,7 +222,7 @@ export const MessagingBar: React.FC<MessagingBarProps> = ({
                 );
             });
         }
-    }, [expanded, activePartnerId, conversationMessages]);
+    }, [expanded, activePartnerId, conversationMessages, currentUser.id]);
 
     useEffect(() => {
         if (expanded && activePartnerId) {
@@ -218,7 +242,10 @@ export const MessagingBar: React.FC<MessagingBarProps> = ({
             setMessages(prev => [...prev, sent]);
             setDraft('');
         } catch (err) {
+            const message =
+                err instanceof Error ? err.message : 'No se pudo enviar el mensaje';
             console.error('Error enviando mensaje:', err);
+            onSendErrorRef.current?.(message);
         } finally {
             setSending(false);
         }
