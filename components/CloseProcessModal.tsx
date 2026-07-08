@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X, Check, Users, AlertCircle } from 'lucide-react';
+import { X, Check, Users, AlertCircle, ArrowLeft } from 'lucide-react';
 import { Candidate, Process } from '../types';
 
 interface CloseProcessModalProps {
@@ -8,6 +8,7 @@ interface CloseProcessModalProps {
     process: Process | null;
     candidates: Candidate[];
     onCloseProcess: (hiredCandidateIds: string[]) => Promise<void>;
+    onBack?: () => void;
 }
 
 export const CloseProcessModal: React.FC<CloseProcessModalProps> = ({
@@ -16,6 +17,7 @@ export const CloseProcessModal: React.FC<CloseProcessModalProps> = ({
     process,
     candidates,
     onCloseProcess,
+    onBack,
 }) => {
     const [selectedCandidateIds, setSelectedCandidateIds] = useState<Set<string>>(new Set());
     const [isClosing, setIsClosing] = useState(false);
@@ -105,18 +107,30 @@ export const CloseProcessModal: React.FC<CloseProcessModalProps> = ({
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
             <div className="bg-white rounded-xl shadow-2xl w-full max-w-3xl max-h-[90vh] flex flex-col">
                 <div className="p-6 border-b flex justify-between items-center">
-                    <div>
-                        <h2 className="text-2xl font-bold text-gray-800">
-                            {isProcessClosed ? 'Candidatos Contratados' : 'Cerrar Proceso de Selección'}
-                        </h2>
-                        <p className="text-sm text-gray-500 mt-1">
-                            {isProcessClosed 
-                                ? 'Candidatos seleccionados al cerrar este proceso'
-                                : 'Selecciona los candidatos que fueron contratados para este proceso'
-                            }
-                        </p>
+                    <div className="flex items-center gap-3">
+                        {onBack && (
+                            <button
+                                onClick={onBack}
+                                className="p-2 rounded-full hover:bg-gray-100 transition-colors"
+                                disabled={isClosing}
+                                title="Volver"
+                            >
+                                <ArrowLeft className="w-5 h-5" />
+                            </button>
+                        )}
+                        <div>
+                            <h2 className="text-2xl font-bold text-gray-800">
+                                {isProcessClosed ? 'Candidatos Contratados' : 'Cerrar Proceso de Selección'}
+                            </h2>
+                            <p className="text-sm text-gray-500 mt-1">
+                                {isProcessClosed 
+                                    ? 'Candidatos seleccionados al cerrar este proceso'
+                                    : 'Selecciona los candidatos que fueron contratados para este proceso'
+                                }
+                            </p>
+                        </div>
                     </div>
-                    <button 
+                    <button
                         onClick={onClose} 
                         className="p-2 rounded-full hover:bg-gray-100 transition-colors"
                         disabled={isClosing}

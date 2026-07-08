@@ -3,10 +3,14 @@ import { useAppState } from '../App';
 import { Plus, MoreVertical, Eye, Edit, Trash2, Users, RefreshCw, Copy, Search, X, AlertTriangle } from 'lucide-react';
 import { ProcessEditorModal } from './ProcessEditorModal';
 import { Process, UserRole, ProcessStatus, Candidate } from '../types';
+import { PROCESS_STATUS_LABELS, PROCESS_STATUS_COLORS, isProcessActive } from '../lib/processStatus';
 import { processesApi } from '../lib/api/processes';
 
 // Función utility para detectar si un proceso tiene candidatos en etapas críticas (no revisados)
 const hasCandidatesInCriticalStages = (process: Process, candidates: Candidate[]): { hasCritical: boolean; count: number; stageNames: string[] } => {
+    if (!isProcessActive(process.status)) {
+        return { hasCritical: false, count: 0, stageNames: [] };
+    }
     const criticalStageIds = process.stages.filter(stage => stage.isCritical).map(stage => stage.id);
     if (criticalStageIds.length === 0) {
         return { hasCritical: false, count: 0, stageNames: [] };
@@ -62,17 +66,8 @@ const ProcessCard: React.FC<{
         hiredCandidates = allProcessCandidates.filter(c => c.hireDate && c.hireDate.trim() !== '');
     }
 
-    const statusLabels: Record<ProcessStatus, string> = {
-        en_proceso: 'En Proceso',
-        standby: 'Stand By',
-        terminado: 'Terminado',
-    };
-
-    const statusColors: Record<ProcessStatus, string> = {
-        en_proceso: 'bg-green-100 text-green-800',
-        standby: 'bg-yellow-100 text-yellow-800',
-        terminado: 'bg-gray-200 text-gray-700',
-    };
+    const statusLabels = PROCESS_STATUS_LABELS;
+    const statusColors = PROCESS_STATUS_COLORS;
 
     return (
         <div className={`bg-white rounded-xl border-2 ${criticalInfo.hasCritical ? 'border-amber-400 shadow-lg shadow-amber-100' : 'border-gray-200 shadow-sm'} overflow-hidden flex flex-col group`}>
@@ -298,6 +293,8 @@ export const ProcessList: React.FC = () => {
         { id: 'en_proceso', label: 'En Proceso' },
         { id: 'standby', label: 'Stand By' },
         { id: 'terminado', label: 'Terminado' },
+        { id: 'cancelado', label: 'Cancelado' },
+        { id: 'trunco', label: 'Trunco' },
     ];
 
     // Filtrar procesos por estado y búsqueda

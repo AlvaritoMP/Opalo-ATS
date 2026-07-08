@@ -6,10 +6,12 @@ import { AddCandidateModal } from './AddCandidateModal';
 import { ProcessEditorModal } from './ProcessEditorModal';
 import { BulkLetterModal } from './BulkLetterModal';
 import { CloseProcessModal } from './CloseProcessModal';
+import { EndProcessModal } from './EndProcessModal';
 import { ProcessCommunicationModal } from './ProcessCommunicationModal';
 import { ProcessImportModal } from './BulkImportView';
 import { BulkProcessesView } from './BulkProcessesView';
-import { Attachment, UserRole, ProcessStatus, Candidate } from '../types';
+import { Attachment, UserRole, Candidate } from '../types';
+import { PROCESS_STATUS_LABELS, PROCESS_STATUS_COLORS, isProcessActive, isProcessEnded, isProcessOperational } from '../lib/processStatus';
 import * as XLSX from 'xlsx';
 import { openMailCompose, getMailComposeToastMessage } from '../lib/openMailto';
 import {
@@ -188,7 +190,7 @@ export const ProcessView: React.FC<ProcessViewProps> = ({ processId }) => {
     // Client y Viewer solo ven candidatos con visibleToClients === true
     const userRole = state.currentUser?.role as UserRole;
     const canManageProcess = ['admin', 'recruiter'].includes(userRole);
-    const canMoveCandidates = ['admin', 'recruiter', 'client'].includes(userRole);
+    const canMoveCandidates = ['admin', 'recruiter', 'client'].includes(userRole) && isProcessOperational(process?.status);
     const isClientOrViewer = ['client', 'viewer'].includes(userRole);
     
     const candidates = state.candidates.filter(c => {
@@ -431,17 +433,8 @@ export const ProcessView: React.FC<ProcessViewProps> = ({ processId }) => {
         );
     }
     
-    const statusLabels: Record<ProcessStatus, string> = {
-        en_proceso: 'En Proceso',
-        standby: 'Stand By',
-        terminado: 'Terminado',
-    };
-
-    const statusColors: Record<ProcessStatus, string> = {
-        en_proceso: 'bg-green-100 text-green-800',
-        standby: 'bg-yellow-100 text-yellow-800',
-        terminado: 'bg-gray-200 text-gray-700',
-    };
+    const statusLabels = PROCESS_STATUS_LABELS;
+    const statusColors = PROCESS_STATUS_COLORS;
 
     const InfoChip: React.FC<{icon: React.ElementType, text: string}> = ({ icon: Icon, text }) => (
         <div className="flex items-center bg-gray-100 text-gray-700 px-2 md:px-3 py-1 rounded-full text-xs md:text-sm">
@@ -486,6 +479,9 @@ export const ProcessView: React.FC<ProcessViewProps> = ({ processId }) => {
     };
 
     const currentStatus = process.status || 'en_proceso';
+    const processIsActive = isProcessActive(process.status);
+    const processIsEnded = isProcessEnded(process.status);
+    const processIsOperational = isProcessOperational(process.status);
     const totalVacancies = process.vacancies ?? 0;
 
     return (
@@ -520,22 +516,26 @@ export const ProcessView: React.FC<ProcessViewProps> = ({ processId }) => {
                             <button onClick={() => setIsCommunicationOpen(true)} className="flex items-center px-3 md:px-4 py-2 bg-white border border-gray-300 rounded-md shadow-sm text-xs md:text-sm font-medium text-gray-700 hover:bg-gray-50 whitespace-nowrap">
                                 <MessageCircle className="w-4 h-4 mr-1 md:mr-2"/> <span className="hidden md:inline">Comunicación masiva</span> <span className="md:hidden">Comunicar</span>
                             </button>
-                            <button 
-                                onClick={() => setIsCloseProcessOpen(true)} 
-                                className={`flex items-center px-3 md:px-4 py-2 rounded-md shadow-sm text-xs md:text-sm font-medium whitespace-nowrap ${
-                                    process.status === 'terminado'
-                                        ? 'bg-blue-600 text-white hover:bg-blue-700'
-                                        : 'bg-green-600 text-white hover:bg-green-700'
-                                }`}
-                            >
-                                <CheckCircle className="w-4 h-4 mr-1 md:mr-2"/> 
-                                <span className="hidden md:inline">
-                                    {process.status === 'terminado' ? 'Gestionar candidatos contratados' : 'Cerrar proceso'}
-                                </span> 
-                                <span className="md:hidden">
-                                    {process.status === 'terminado' ? 'Gestionar' : 'Cerrar'}
-                                </span>
-                            </button>
+                            {processIsOperational && (
+                                <button 
+                                    onClick={() => setIsCloseProcessOpen(true)} 
+                                    className="flex items-center px-3 md:px-4 py-2 rounded-md shadow-sm text-xs md:text-sm font-medium whitespace-nowrap bg-green-600 text-white hover:bg-green-700"
+                                >
+                                    <CheckCircle className="w-4 h-4 mr-1 md:mr-2"/> 
+                                    <span className="hidden md:inline">Finalizar proceso</span> 
+                                    <span className="md:hidden">Finalizar</span>
+                                </button>
+                            )}
+                            {process.status === 'terminado' && (
+                                <button 
+                                    onClick={() => setIsCloseProcessOpen(true)} 
+                                    className="flex items-center px-3 md:px-4 py-2 rounded-md shadow-sm text-xs md:text-sm font-medium whitespace-nowrap bg-blue-600 text-white hover:bg-blue-700"
+                                >
+                                    <CheckCircle className="w-4 h-4 mr-1 md:mr-2"/> 
+                                    <span className="hidden md:inline">Gestionar candidatos contratados</span> 
+                                    <span className="md:hidden">Gestionar</span>
+                                </button>
+                            )}
                             <button 
                                 onClick={async () => {
                                     setIsAttachmentsModalOpen(true);
@@ -580,7 +580,7 @@ export const ProcessView: React.FC<ProcessViewProps> = ({ processId }) => {
                                     <span className="md:hidden">Tabla</span>
                                 </button>
                             )}
-                            {!process.isBulkProcess && (
+                            {processIsActive && !process.isBulkProcess && (
                                 <button
                                     onClick={() => setIsImportOpen(true)}
                                     className="flex items-center px-3 md:px-4 py-2 bg-green-600 text-white rounded-lg shadow-sm hover:bg-green-700 whitespace-nowrap"
@@ -590,9 +590,11 @@ export const ProcessView: React.FC<ProcessViewProps> = ({ processId }) => {
                                     <span className="md:hidden">Importar</span>
                                 </button>
                             )}
-                            <button onClick={() => setIsAddCandidateOpen(true)} className="flex items-center px-3 md:px-4 py-2 bg-primary-600 text-white rounded-lg shadow-sm hover:bg-primary-700 whitespace-nowrap">
-                                <Plus className="w-4 h-4 md:w-5 md:h-5 mr-1 md:mr-2" /> <span className="hidden md:inline">Añadir candidato</span> <span className="md:hidden">Añadir</span>
-                            </button>
+                            {processIsOperational && (
+                                <button onClick={() => setIsAddCandidateOpen(true)} className="flex items-center px-3 md:px-4 py-2 bg-primary-600 text-white rounded-lg shadow-sm hover:bg-primary-700 whitespace-nowrap">
+                                    <Plus className="w-4 h-4 md:w-5 md:h-5 mr-1 md:mr-2" /> <span className="hidden md:inline">Añadir candidato</span> <span className="md:hidden">Añadir</span>
+                                </button>
+                            )}
                         </div>
                      )}
                 </div>
@@ -605,6 +607,17 @@ export const ProcessView: React.FC<ProcessViewProps> = ({ processId }) => {
                     <InfoChip icon={Users} text={`Vacantes: ${totalVacancies}`} />
                 </div>
             </header>
+            {processIsEnded && (
+                <div className={`px-4 py-3 border-b text-sm ${
+                    process.status === 'cancelado' ? 'bg-red-50 border-red-200 text-red-900' :
+                    process.status === 'trunco' ? 'bg-orange-50 border-orange-200 text-orange-900' :
+                    'bg-gray-50 border-gray-200 text-gray-800'
+                }`}>
+                    {process.status === 'cancelado' && 'Este proceso está cancelado. No hay acciones pendientes hasta reactivarlo en estado En Proceso.'}
+                    {process.status === 'trunco' && 'Este proceso está trunco (facturación parcial). No hay acciones pendientes hasta reactivarlo en estado En Proceso.'}
+                    {process.status === 'terminado' && 'Este proceso está terminado. Puedes consultar los candidatos contratados desde el botón de gestión.'}
+                </div>
+            )}
             <main className="flex-1 flex overflow-x-auto p-2 md:p-4 bg-gray-50/50 space-x-2 md:space-x-4 pb-4">
                 {process.stages.map(stage => (
                     <div
@@ -681,7 +694,30 @@ export const ProcessView: React.FC<ProcessViewProps> = ({ processId }) => {
                 />
             )}
             {isBulkLetterOpen && <BulkLetterModal candidateIds={selectedCandidates} onClose={() => setIsBulkLetterOpen(false)} />}
-            {isCloseProcessOpen && (
+            {isCloseProcessOpen && processIsOperational && (
+                <EndProcessModal
+                    isOpen={isCloseProcessOpen}
+                    onClose={() => setIsCloseProcessOpen(false)}
+                    process={process}
+                    candidates={candidates}
+                    onCloseWithHires={async (hiredCandidateIds) => {
+                        await processesApi.closeProcess(processId, hiredCandidateIds);
+                        await actions.reloadProcesses();
+                        actions.showToast('Proceso terminado exitosamente', 'success', 3000);
+                    }}
+                    onCancelProcess={async () => {
+                        await processesApi.cancelProcess(processId);
+                        await actions.reloadProcesses();
+                        actions.showToast('Proceso cancelado', 'success', 3000);
+                    }}
+                    onTruncateProcess={async () => {
+                        await processesApi.truncateProcess(processId);
+                        await actions.reloadProcesses();
+                        actions.showToast('Proceso marcado como trunco', 'success', 3000);
+                    }}
+                />
+            )}
+            {isCloseProcessOpen && process.status === 'terminado' && (
                 <CloseProcessModal
                     isOpen={isCloseProcessOpen}
                     onClose={() => setIsCloseProcessOpen(false)}

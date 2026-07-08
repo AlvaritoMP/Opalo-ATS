@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useAppState } from '../App';
 import { Process, Stage, ProcessStatus, BulkProcessConfig, KillerQuestion, PsycholaboralInventory, Attachment, Client } from '../types';
+import { PROCESS_STATUS_LABELS } from '../lib/processStatus';
 import { X, Plus, Trash2, GripVertical, Settings, Filter, Brain, MessageCircle, Upload, FileText } from 'lucide-react';
 import { processesApi } from '../lib/api/processes';
 import { clientsApi } from '../lib/api/clients';
@@ -632,9 +633,9 @@ export const BulkProcessEditorModal: React.FC<BulkProcessEditorModalProps> = ({ 
                                         onChange={(e) => setStatus(e.target.value as ProcessStatus)}
                                         className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
                                     >
-                                        <option value="en_proceso">En Proceso</option>
-                                        <option value="standby">Standby</option>
-                                        <option value="terminado">Terminado</option>
+                                        {Object.entries(PROCESS_STATUS_LABELS).map(([value, label]) => (
+                                            <option key={value} value={value}>{label}</option>
+                                        ))}
                                     </select>
                                 </div>
                                 <div>

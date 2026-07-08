@@ -1,18 +1,10 @@
 import React from 'react';
 import { Edit, Trash2, Paperclip } from 'lucide-react';
-import { Process, ProcessStatus } from '../types';
+import { Process } from '../types';
+import { PROCESS_STATUS_LABELS, PROCESS_STATUS_COLORS } from '../lib/processStatus';
 
-const STATUS_LABELS: Record<ProcessStatus, string> = {
-    en_proceso: 'En Proceso',
-    standby: 'Stand By',
-    terminado: 'Terminado',
-};
-
-const STATUS_COLORS: Record<ProcessStatus, string> = {
-    en_proceso: 'bg-green-100 text-green-800',
-    standby: 'bg-yellow-100 text-yellow-800',
-    terminado: 'bg-gray-200 text-gray-700',
-};
+const STATUS_LABELS = PROCESS_STATUS_LABELS;
+const STATUS_COLORS = PROCESS_STATUS_COLORS;
 
 const DEFAULT_FLYER =
     'https://images.unsplash.com/photo-1521737604893-d14cc237f11d?w=800';

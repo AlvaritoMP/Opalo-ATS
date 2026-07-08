@@ -30,7 +30,7 @@ export interface Attachment {
     uploadedAt?: string; // Fecha de subida
 }
 
-export type ProcessStatus = 'en_proceso' | 'standby' | 'terminado';
+export type ProcessStatus = 'en_proceso' | 'standby' | 'terminado' | 'cancelado' | 'trunco';
 
 export interface DocumentCategory {
     id: string;

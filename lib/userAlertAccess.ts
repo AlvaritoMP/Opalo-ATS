@@ -1,4 +1,5 @@
 import type { Process, Section, User, UserRole } from '../types';
+import { isProcessActive } from './processStatus';
 
 const DEFAULT_SECTIONS: Record<UserRole, Section[]> = {
     admin: [
@@ -24,7 +25,7 @@ export function getVisibleSectionsForUser(user: User | null): Section[] {
 /** Procesos activos que el usuario puede ver según clientes y secciones del menú. */
 export function getProcessesVisibleToUser(user: User, processes: Process[]): Process[] {
     const sections = new Set(getVisibleSectionsForUser(user));
-    let filtered = processes.filter(p => p.status === 'en_proceso');
+    let filtered = processes.filter(p => isProcessActive(p.status));
 
     if (user.allowedClientIds && user.allowedClientIds.length > 0) {
         const allowed = new Set(user.allowedClientIds);

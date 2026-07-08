@@ -541,33 +541,52 @@ export const processesApi = {
 
     // Cerrar proceso seleccionando candidatos contratados
     async closeProcess(processId: string, hiredCandidateIds: string[]): Promise<Process> {
-        // Obtener el proceso actual para verificar si ya tiene closed_at
+        return this.endProcess(processId, 'terminado', hiredCandidateIds);
+    },
+
+    /** Finaliza un proceso: terminado (con contratados), cancelado o trunco. */
+    async endProcess(
+        processId: string,
+        outcome: 'terminado' | 'cancelado' | 'trunco',
+        hiredCandidateIds: string[] = [],
+    ): Promise<Process> {
         const currentProcess = await this.getById(processId);
-        
-        const updateData: any = {
-            status: 'terminado',
-            hired_candidate_ids: hiredCandidateIds,
+
+        const updateData: Record<string, unknown> = {
+            status: outcome,
         };
-        
-        // Solo establecer closed_at si no existe ya
+
+        if (outcome === 'terminado') {
+            updateData.hired_candidate_ids = hiredCandidateIds;
+        } else {
+            updateData.hired_candidate_ids = [];
+        }
+
         if (!currentProcess?.closedAt) {
             updateData.closed_at = new Date().toISOString();
         }
-        
+
         const { error } = await supabase
             .from('processes')
             .update(updateData)
             .eq('id', processId)
             .eq('app_name', APP_NAME);
-        
+
         if (error) throw error;
 
-        // Recargar el proceso actualizado
         const updatedProcess = await this.getById(processId);
         if (!updatedProcess) {
-            throw new Error('No se pudo recargar el proceso después de cerrarlo');
+            throw new Error('No se pudo recargar el proceso después de finalizarlo');
         }
         return updatedProcess;
+    },
+
+    async cancelProcess(processId: string): Promise<Process> {
+        return this.endProcess(processId, 'cancelado');
+    },
+
+    async truncateProcess(processId: string): Promise<Process> {
+        return this.endProcess(processId, 'trunco');
     },
 
     // Crear proceso con sus stages y categorías

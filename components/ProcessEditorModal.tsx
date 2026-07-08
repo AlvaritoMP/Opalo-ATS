@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useAppState } from '../App';
 import { Process, Stage, Attachment, ProcessStatus, DocumentCategory, Client } from '../types';
+import { PROCESS_STATUS_LABELS } from '../lib/processStatus';
 import { X, Plus, Trash2, GripVertical, Paperclip, Upload, FileText, CheckSquare, Folder, Cloud, Eye, Info } from 'lucide-react';
 import { googleDriveService, GoogleDriveFolder } from '../lib/googleDrive';
 import { clientsApi } from '../lib/api';
@@ -58,11 +59,7 @@ export const ProcessEditorModal: React.FC<ProcessEditorModalProps> = ({ process,
     const flyerInputRef = useRef<HTMLInputElement>(null);
     const attachmentInputRef = useRef<HTMLInputElement>(null);
 
-    const statusLabels: Record<ProcessStatus, string> = {
-        en_proceso: 'En Proceso',
-        standby: 'Stand By',
-        terminado: 'Terminado',
-    };
+    const statusLabels = PROCESS_STATUS_LABELS;
 
     const googleDriveConfig = state.settings?.googleDrive;
     const isGoogleDriveConnected = googleDriveConfig?.connected && googleDriveConfig?.accessToken;

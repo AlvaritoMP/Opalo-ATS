@@ -3,6 +3,7 @@ import { useAppState } from '../App';
 import { Briefcase, Users, FileText, CheckCircle, Calendar, Grid3x3, Phone, TrendingUp, UserCheck, Headphones, UserPlus, MessageCircle, Mail, Clock, Target, Zap, RefreshCw } from 'lucide-react';
 import { Tooltip, Legend, BarChart, CartesianGrid, XAxis, YAxis, Bar, LineChart, Line, ComposedChart, Cell } from 'recharts';
 import { Candidate, Process } from '../types';
+import { isProcessActive } from '../lib/processStatus';
 import { resolveCandidateAgeForProcess, resolveCandidateHomonymField, buildLegacyColumnIdToName } from '../lib/bulkTableColumns';
 import {
     computeContactDashboardStats,
@@ -622,7 +623,7 @@ export const Dashboard: React.FC = () => {
         [filteredCandidates, processMap]
     );
 
-    const activeProcesses = scopedProcesses.filter(p => p.status === 'en_proceso');
+    const activeProcesses = scopedProcesses.filter(p => isProcessActive(p.status));
     const bulkActiveCount = activeProcesses.filter(p => p.isBulkProcess).length;
     const standardActiveCount = activeProcesses.length - bulkActiveCount;
 
