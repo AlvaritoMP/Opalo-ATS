@@ -1012,7 +1012,15 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                 config
             );
             const existingScore = scoreColumnLayoutInterleaving(existingOrder, cols);
-            if (existingScore > newScore) return;
+            if (existingScore > newScore) {
+                saveBulkTableLayoutBackup(processId, {
+                    ...existing,
+                    hiddenColumns: layout.hiddenColumns,
+                    pinnedColumns: layout.pinnedColumns ?? existing.pinnedColumns,
+                    columnWidths: layout.columnWidths ?? existing.columnWidths,
+                });
+                return;
+            }
         }
         saveBulkTableLayoutBackup(processId, layout);
     }, []);
@@ -1033,11 +1041,23 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
             return;
         }
 
+        const layoutOnlyKeys = new Set([
+            'hiddenColumns', 'columnOrder', 'pinnedColumns', 'columnWidths', 'floatingColumnRail',
+        ]);
+        const updateKeys = Object.keys(updates);
+        const isLayoutOnlyUpdate =
+            updateKeys.length > 0 && updateKeys.every(key => layoutOnlyKeys.has(key));
+
         const baseCustomCount = base.customColumns?.length ?? 0;
-        if (baseCustomCount === 0 && !updates.customColumns?.length) {
+        if (baseCustomCount === 0 && !updates.customColumns?.length && !isLayoutOnlyUpdate) {
             console.warn('[bulk] persistBulkConfig omitido: evitar borrar columnas custom');
             return;
         }
+
+        const baseWithColumns =
+            baseCustomCount > 0 || !customColumns.length
+                ? base
+                : { ...base, customColumns };
 
         let mergedUpdates = { ...updates };
         if (updates.customColumns) {
@@ -1053,7 +1073,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
             mergedUpdates = { ...mergedUpdates, columnKeyAliases: aliases };
         }
         const newBulkConfig: BulkProcessConfig = {
-            ...base,
+            ...baseWithColumns,
             ...mergedUpdates,
         };
         try {
@@ -1091,6 +1111,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
         } catch (error) {
             console.error('Error guardando configuración de tabla:', error);
             actions.showToast('Error al guardar configuración de columnas', 'error', 3000);
+            throw error;
         }
     }, [process, actions, logActivity, customColumns, persistBulkTableLayoutBackup]);
 
@@ -1192,8 +1213,8 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
     }, [columnOrder, hiddenColumns, customColumns, process?.bulkConfig, floatingRailVisible, floatingRailColumnIds]);
 
     const scoreIaColumnVisible = useMemo(
-        () => isScoreIaColumnVisible(process?.bulkConfig),
-        [process?.bulkConfig]
+        () => !hiddenColumns.includes('scoreIa'),
+        [hiddenColumns]
     );
 
     const idealProfileConfig = useMemo(() => {
@@ -1205,8 +1226,8 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
         return normalized.config;
     }, [process?.bulkConfig?.idealProfile, process?.bulkConfig, customColumns]);
     const profileMatchColumnVisible = useMemo(
-        () => isProfileMatchColumnVisible(process?.bulkConfig),
-        [process?.bulkConfig]
+        () => !!(idealProfileConfig?.enabled && !hiddenColumns.includes('profileMatch')),
+        [idealProfileConfig?.enabled, hiddenColumns]
     );
 
     const profileMatchScores = useMemo(() => {
@@ -1323,12 +1344,12 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
             idealProfile: profileConfig,
         };
         const layout = resolveBulkTableLayout(process.id, draftConfig, cols);
-        setHiddenColumns(layout.hiddenColumns);
+        const hiddenToPersist = hiddenColumns;
         setColumnOrder(layout.columnOrder);
         setPinnedColumns(layout.pinnedColumns);
         await persistBulkConfig({
             idealProfile: profileConfig,
-            hiddenColumns: layout.hiddenColumns,
+            hiddenColumns: hiddenToPersist,
             columnOrder: layout.columnOrder,
             pinnedColumns: layout.pinnedColumns,
         });
@@ -1340,7 +1361,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                         bulkConfig: {
                             ...p.bulkConfig,
                             idealProfile: profileConfig,
-                            hiddenColumns: layout.hiddenColumns,
+                            hiddenColumns: hiddenToPersist,
                             columnOrder: layout.columnOrder,
                             pinnedColumns: layout.pinnedColumns,
                         },
@@ -1352,7 +1373,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
             details: { summary: profileConfig.enabled ? 'Perfil ideal activado/actualizado' : 'Perfil ideal desactivado' },
         });
         actions.showToast('Perfil ideal guardado', 'success', 2500);
-    }, [process, customColumns, persistBulkConfig, logActivity, actions]);
+    }, [process, customColumns, hiddenColumns, persistBulkConfig, logActivity, actions]);
 
     const handleSaveCustomStats = useCallback(async (charts: BulkProcessStatChart[]) => {
         if (!process) return;
@@ -3259,9 +3280,14 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
             if (col?.type === 'route' || col?.type === 'route_cost') return;
         }
         const colId = field.startsWith('custom_') ? field : field;
-        setActiveCell({ candidateId, colId });
-        setSelectionAnchor({ candidateId, colId });
-        setSelectedCells(new Set([toCellKey({ candidateId, colId })]));
+        const cellKey = toCellKey({ candidateId, colId });
+        const coord = { candidateId, colId };
+        setActiveCell(coord);
+        setSelectionAnchor(coord);
+        setSelectedCells(new Set([cellKey]));
+        activeCellNavRef.current = coord;
+        selectionAnchorNavRef.current = coord;
+        selectedCellsNavRef.current = new Set([cellKey]);
 
         let initialValue = '';
         if (field.startsWith('custom_')) {
@@ -3334,12 +3360,25 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
 
         const trimmed = editValue.trim();
         if (field === 'email' && !trimmed) {
+            if (!isUndoingRef.current) {
+                pushUndo({
+                    type: 'cells',
+                    cells: [captureCellSnapshot(candidateId, field)],
+                    label: 'Edición de celda',
+                });
+            }
+            applyOptimisticUpdate(candidateId, { email: undefined });
             setEditingCell(null);
+            bulkCandidatesApi.patchFields(candidateId, { email: null }).catch(error => {
+                console.error('Error guardando celda:', error);
+                loadCandidates(currentPage, true);
+                actions.showToast('Error al guardar cambios', 'error', 3000);
+            });
             return;
         }
 
-        const updates: Record<string, string | undefined> = {
-            [field]: trimmed || undefined,
+        const updates: Record<string, string | null> = {
+            [field]: trimmed === '' ? null : trimmed,
         };
 
         if (!isUndoingRef.current) {
@@ -3388,16 +3427,18 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                 return;
             }
 
-            const value = rawValue.trim() || undefined;
-            applyOptimisticUpdate(candidateId, { [colId]: value } as Partial<BulkCandidate>);
+            const value = rawValue.trim();
+            const patchValue: string | null = value === '' ? null : value;
+            applyOptimisticUpdate(candidateId, { [colId]: value || undefined } as Partial<BulkCandidate>);
             if (colId === 'source' || colId === 'province' || colId === 'district') {
-                syncCustomFieldFromStandard(candidateId, colId, rawValue.trim());
+                syncCustomFieldFromStandard(candidateId, colId, value);
             }
-            bulkCandidatesApi.patchFields(candidateId, { [colId]: value }).catch(error => {
+            bulkCandidatesApi.patchFields(candidateId, { [colId]: patchValue }).catch(error => {
                 console.error('Error pegando valor:', error);
+                actions.showToast('Error al guardar cambios', 'error', 3000);
             });
         },
-        [customColumns, applyOptimisticUpdate, syncCustomFieldFromStandard, handleColumnValueChange]
+        [customColumns, applyOptimisticUpdate, syncCustomFieldFromStandard, handleColumnValueChange, actions]
     );
 
     const restoreCellSnapshot = useCallback(
@@ -3535,9 +3576,13 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
         const cellKeys =
             selectedCellsNavRef.current.size > 0
                 ? Array.from(selectedCellsNavRef.current)
-                : activeCellNavRef.current
-                  ? [toCellKey(activeCellNavRef.current)]
-                  : [];
+                : selectedCells.size > 0
+                  ? Array.from(selectedCells)
+                  : activeCellNavRef.current
+                    ? [toCellKey(activeCellNavRef.current)]
+                    : activeCell
+                      ? [toCellKey(activeCell)]
+                      : [];
         if (cellKeys.length === 0) return;
 
         e?.preventDefault();
@@ -3553,9 +3598,13 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
         }
 
         let cleared = 0;
+        let skipped = 0;
         for (const key of cellKeys) {
             const { candidateId, colId } = parseCellKey(key);
-            if (!isPasteEditableColumn(colId, customColumns)) continue;
+            if (!isPasteEditableColumn(colId, customColumns)) {
+                skipped++;
+                continue;
+            }
             await setCellValue(candidateId, colId, '', { skipUndo: true });
             cleared++;
         }
@@ -3565,6 +3614,12 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
             logActivity('cell_edit', {
                 details: { count: cleared, summary: `Borrado en ${cleared} celda(s)` },
             });
+        } else if (skipped > 0) {
+            actions.showToast(
+                'Las columnas seleccionadas no se pueden borrar con teclado (solo texto, números y columnas personalizadas editables)',
+                'info',
+                4000
+            );
         }
     }, [editingCell, selectedCells, activeCell, customColumns, setCellValue, actions, logActivity, captureCellSnapshot, pushUndo]);
 
@@ -3635,10 +3690,9 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
         const hidden = remapHiddenColumnIds(local.hiddenColumns, process.bulkConfig, customColumns);
         const pinned = remapPinnedColumnIds(local.pinnedColumns, process.bulkConfig, customColumns);
         let order = local.columnOrder;
-        let layoutHidden = hidden;
+        const layoutHidden = hidden;
         if (process.bulkConfig?.idealProfile?.enabled) {
             order = ensureProfileMatchInColumnOrder(order);
-            layoutHidden = layoutHidden.filter(id => id !== 'profileMatch');
         }
         setColumnOrder(order);
         setHiddenColumns(layoutHidden);
@@ -3670,6 +3724,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
 
     const toggleColumnVisibility = async (colId: string) => {
         const isHiding = !hiddenColumns.includes(colId);
+        const previousHidden = hiddenColumns;
         const newHidden = isHiding
             ? [...hiddenColumns, colId]
             : hiddenColumns.filter(id => id !== colId);
@@ -3688,8 +3743,25 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                 return rest;
             });
         }
+        if (colId === 'profileMatch' && isHiding) {
+            setColumnFilterDraft(prev => {
+                const { profileMatch: _, ...rest } = prev;
+                return rest;
+            });
+        }
 
-        await persistBulkConfig(updates);
+        try {
+            await persistBulkConfig(updates, {
+                baseConfig: {
+                    ...(process?.bulkConfig || {}),
+                    customColumns: customColumns.length > 0
+                        ? customColumns
+                        : process?.bulkConfig?.customColumns,
+                },
+            });
+        } catch {
+            setHiddenColumns(previousHidden);
+        }
     };
 
     const togglePinColumn = async (colId: string) => {

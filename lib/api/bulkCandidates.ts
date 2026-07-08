@@ -518,17 +518,17 @@ export const bulkCandidatesApi = {
      * Actualización ligera de campos editables en la tabla (sin getById)
      */
     async patchFields(candidateId: string, updates: {
-        name?: string;
-        email?: string;
-        phone?: string;
-        dni?: string;
-        source?: string;
-        province?: string;
-        district?: string;
+        name?: string | null;
+        email?: string | null;
+        phone?: string | null;
+        dni?: string | null;
+        source?: string | null;
+        province?: string | null;
+        district?: string | null;
         lastWhatsAppInteractionAt?: string | null;
     }): Promise<void> {
         const dbUpdates: Record<string, string | null> = {};
-        if (updates.name !== undefined) dbUpdates.name = updates.name;
+        if (updates.name !== undefined) dbUpdates.name = updates.name ?? '';
         if (updates.email !== undefined) dbUpdates.email = updates.email;
         if (updates.phone !== undefined) dbUpdates.phone = updates.phone || null;
         if (updates.dni !== undefined) dbUpdates.dni = updates.dni || null;

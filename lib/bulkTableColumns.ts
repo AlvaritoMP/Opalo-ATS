@@ -1355,13 +1355,12 @@ function applyIdealProfileLayoutRules(
     bulkConfig?: BulkProcessConfig
 ): { columnOrder: string[]; hiddenColumns: string[] } {
     let order = columnOrder;
-    let hidden = hiddenColumns;
+    const hidden = [...hiddenColumns];
     if (bulkConfig?.idealProfile?.enabled) {
         order = ensureProfileMatchInColumnOrder(order);
-        hidden = hidden.filter(id => id !== 'profileMatch');
     }
     if (order.length > 0 && order.every(id => hidden.includes(id))) {
-        hidden = [];
+        return { columnOrder: order, hiddenColumns: [] };
     }
     return { columnOrder: order, hiddenColumns: hidden };
 }
