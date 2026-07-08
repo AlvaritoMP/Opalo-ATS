@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useMemo, useRef } from 'react';
 import { initialProcesses, initialCandidates, initialUsers, initialSettings, initialFormIntegrations, initialInterviewEvents } from './lib/data';
-import { Process, Candidate, User, AppSettings, FormIntegration, InterviewEvent, CandidateHistory, Application, PostIt, Comment, Section, UserRole } from './types';
+import { Process, Candidate, User, AppSettings, FormIntegration, InterviewEvent, CandidateHistory, Application, PostIt, Comment, Section, UserRole, UserAlert } from './types';
 import { getSettings, saveSettings as saveSettingsToStorage } from './lib/settings';
 import { usersApi, processesApi, candidatesApi, postItsApi, commentsApi, interviewsApi, settingsApi, formIntegrationsApi, setCurrentUser } from './lib/api/index';
 import { isCorsError, getErrorMessage, isSupabaseConfigured } from './lib/supabase';
@@ -40,6 +40,8 @@ import { Spinner } from './components/Spinner';
 import { ArchivedCandidates } from './components/ArchivedCandidates';
 import { Letters } from './components/Letters';
 import { ToastContainer } from './components/Toast';
+import { MessagingBar } from './components/MessagingBar';
+import { UserAlertsPanel } from './components/UserAlertsPanel';
 import { LayoutDashboard, Briefcase, FileText, Settings as SettingsIcon, Users as UsersIcon, ChevronsLeft, ChevronsRight, BarChart2, Calendar, LogOut, X, Archive, RefreshCw, Menu, Grid3x3, Send } from 'lucide-react';
 import { CandidateComparator } from './components/CandidateComparator';
 
@@ -425,13 +427,33 @@ const Sidebar: React.FC = () => {
                             <p className="font-semibold text-sm text-gray-800 truncate">{state.currentUser.name}</p>
                             <p className="text-xs text-gray-500 capitalize">{state.currentUser.role}</p>
                         </div>
-                        <button 
-                            onClick={() => actions.logout()} 
-                            className={`p-2 rounded-md hover:bg-red-100 hover:text-red-600 text-gray-500 transition-colors ${isCollapsed ? 'w-full' : 'ml-auto'}`}
-                            title="Logout"
-                        >
-                            <LogOut className="w-5 h-5" />
-                        </button>
+                        <div className={`flex items-center ${isCollapsed ? 'flex-col gap-1 w-full' : 'gap-1 ml-auto'}`}>
+                            <div className="relative">
+                                <UserAlertsPanel
+                                    currentUser={state.currentUser}
+                                    processes={state.processes}
+                                    onNavigateToProcess={(processId) => {
+                                        const process = state.processes.find(p => p.id === processId);
+                                        if (process?.isBulkProcess) {
+                                            actions.setLastViewedBulkProcessId(processId);
+                                            actions.setView('bulk-processes');
+                                        } else {
+                                            actions.setView('process-view', processId);
+                                        }
+                                    }}
+                                    onSporadicAlert={(alert: UserAlert) => {
+                                        actions.showToast(alert.message, alert.severity === 'urgent' ? 'error' : 'info', 8000);
+                                    }}
+                                />
+                            </div>
+                            <button 
+                                onClick={() => actions.logout()} 
+                                className="p-2 rounded-md hover:bg-red-100 hover:text-red-600 text-gray-500 transition-colors"
+                                title="Logout"
+                            >
+                                <LogOut className="w-5 h-5" />
+                            </button>
+                        </div>
                     </div>
                 </div>
                 {/* POWERED BY Logo Section */}
@@ -2057,7 +2079,7 @@ const App: React.FC = () => {
         <AppContext.Provider value={appContextValue}>
             <div className="flex h-screen bg-gray-50 font-sans text-gray-900">
                 <Sidebar />
-                <div className={`flex-1 flex flex-col min-h-0 pt-16 md:pt-0 ${needsFixedViewport ? 'overflow-hidden' : 'overflow-y-auto'}`}>
+                <div className={`flex-1 flex flex-col min-h-0 pt-16 md:pt-0 pb-10 ${needsFixedViewport ? 'overflow-hidden' : 'overflow-y-auto'}`}>
                     {canSeeBulkProcesses && (
                         <div
                             className={isBulkProcessesView ? 'flex flex-col flex-1 min-h-0' : 'hidden'}
@@ -2073,6 +2095,13 @@ const App: React.FC = () => {
                     )}
                 </div>
                 <ToastContainer toasts={state.toasts || []} onClose={(id) => hideToastHelper(id)} />
+                <MessagingBar
+                    currentUser={state.currentUser}
+                    users={state.users}
+                    onNewMessage={(fromName) => {
+                        showToastHelper(`Nuevo mensaje de ${fromName}`, 'info', 5000);
+                    }}
+                />
             </div>
         </AppContext.Provider>
     );

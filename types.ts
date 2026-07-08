@@ -639,6 +639,35 @@ export type Section =
     | 'users' 
     | 'settings';
 
+export interface UserMessage {
+    id: string;
+    senderId: string;
+    recipientId: string;
+    text: string;
+    readAt?: string;
+    createdAt: string;
+}
+
+export type UserAlertType =
+    | 'new_candidates'
+    | 'stale_without_contact'
+    | 'lock_expired'
+    | 'no_new_in_process';
+
+export type UserAlertSeverity = 'info' | 'warning' | 'urgent';
+
+export interface UserAlert {
+    id: string;
+    type: UserAlertType;
+    severity: UserAlertSeverity;
+    title: string;
+    message: string;
+    processId?: string;
+    processTitle?: string;
+    count?: number;
+    candidateNames?: string[];
+}
+
 export interface User {
     id: string;
     name: string;
