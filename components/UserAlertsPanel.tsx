@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
     Bell,
     X,
@@ -215,47 +216,49 @@ export const UserAlertsPanel: React.FC<UserAlertsPanelProps> = ({
                 )}
             </button>
 
-            {showModal && (
-                <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/40">
-                    <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg max-h-[80vh] flex flex-col">
-                        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
-                            <div>
-                                <h2 className="text-lg font-semibold text-gray-900">
-                                    Avisos
-                                </h2>
-                                <p className="text-sm text-gray-500">
-                                    Hola {currentUser.name.split(' ')[0]}, esto requiere tu atención
-                                </p>
+            {showModal &&
+                createPortal(
+                    <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/40">
+                        <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg max-h-[80vh] flex flex-col">
+                            <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
+                                <div>
+                                    <h2 className="text-lg font-semibold text-gray-900">
+                                        Avisos
+                                    </h2>
+                                    <p className="text-sm text-gray-500">
+                                        Hola {currentUser.name.split(' ')[0]}, esto requiere tu atención
+                                    </p>
+                                </div>
+                                <button
+                                    onClick={closeModal}
+                                    className="p-1.5 hover:bg-gray-100 rounded-lg"
+                                >
+                                    <X className="w-5 h-5 text-gray-400" />
+                                </button>
                             </div>
-                            <button
-                                onClick={closeModal}
-                                className="p-1.5 hover:bg-gray-100 rounded-lg"
-                            >
-                                <X className="w-5 h-5 text-gray-400" />
-                            </button>
+                            <div className="flex-1 overflow-y-auto px-5 py-4">
+                                {alerts.length === 0 ? (
+                                    <p className="text-sm text-gray-500 text-center py-8">
+                                        Sin avisos pendientes
+                                    </p>
+                                ) : (
+                                    alerts.map(alert => (
+                                        <AlertCard key={alert.id} alert={alert} />
+                                    ))
+                                )}
+                            </div>
+                            <div className="px-5 py-3 border-t border-gray-100 flex justify-end">
+                                <button
+                                    onClick={closeModal}
+                                    className="px-4 py-2 bg-primary-600 text-white text-sm font-medium rounded-lg hover:bg-primary-700"
+                                >
+                                    Entendido
+                                </button>
+                            </div>
                         </div>
-                        <div className="flex-1 overflow-y-auto px-5 py-4">
-                            {alerts.length === 0 ? (
-                                <p className="text-sm text-gray-500 text-center py-8">
-                                    Sin avisos pendientes
-                                </p>
-                            ) : (
-                                alerts.map(alert => (
-                                    <AlertCard key={alert.id} alert={alert} />
-                                ))
-                            )}
-                        </div>
-                        <div className="px-5 py-3 border-t border-gray-100 flex justify-end">
-                            <button
-                                onClick={closeModal}
-                                className="px-4 py-2 bg-primary-600 text-white text-sm font-medium rounded-lg hover:bg-primary-700"
-                            >
-                                Entendido
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            )}
+                    </div>,
+                    document.body
+                )}
         </>
     );
 };
