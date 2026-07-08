@@ -1,5 +1,12 @@
-import type { Process, UserAlert, UserAlertSeverity } from '../types';
+import type { Process, User, UserAlert, UserAlertSeverity } from '../types';
 import type { AlertCandidateRow } from './api/userAlerts';
+import { getProcessesVisibleToUser } from './userAlertAccess';
+import {
+    isClosedForContact,
+    isUnderUserManagement,
+    lastUserContactMs,
+    neverContactedByAnyone,
+} from './userAlertContactRules';
 import {
     resolveActiveContactLock,
     isContactLockedForUser,
@@ -26,31 +33,19 @@ function isContactable(row: AlertCandidateRow, userId: string, nowMs: number): b
     return !isContactLockedForUser(lock, userId);
 }
 
-function lastActivityMs(row: AlertCandidateRow): number {
-    if (row.contactLastAttemptAt) {
-        const t = new Date(row.contactLastAttemptAt).getTime();
-        if (Number.isFinite(t)) return t;
-    }
-    if (row.createdAt) {
-        const t = new Date(row.createdAt).getTime();
-        if (Number.isFinite(t)) return t;
-    }
-    return 0;
-}
-
 function hadExpiredLockByUser(row: AlertCandidateRow, userId: string, nowMs: number): boolean {
-    if (!row.contactLockUserId || row.contactLockUserId !== userId) {
-        if (row.createdBy === userId && row.registrationOrigin) {
-            const uploadLock = resolveActiveContactLock(toLockRow(row), nowMs);
-            if (!uploadLock) {
-                const createdMs = row.createdAt ? new Date(row.createdAt).getTime() : 0;
-                if (createdMs > 0 && nowMs - createdMs > 30 * 60 * 1000) return true;
-            }
-        }
-        return false;
+    if (row.contactLockUserId === userId) {
+        const untilMs = row.contactLockUntil ? new Date(row.contactLockUntil).getTime() : 0;
+        return Number.isFinite(untilMs) && untilMs <= nowMs;
     }
-    const untilMs = row.contactLockUntil ? new Date(row.contactLockUntil).getTime() : 0;
-    return Number.isFinite(untilMs) && untilMs <= nowMs;
+    if (row.createdBy === userId && row.registrationOrigin) {
+        const uploadLock = resolveActiveContactLock(toLockRow(row), nowMs);
+        if (!uploadLock) {
+            const createdMs = row.createdAt ? new Date(row.createdAt).getTime() : 0;
+            return createdMs > 0 && nowMs - createdMs > 30 * 60 * 1000;
+        }
+    }
+    return false;
 }
 
 function buildProcessAlert(
@@ -79,14 +74,17 @@ export function computeUserAlerts(
     processes: Process[],
     bulkRows: AlertCandidateRow[],
     standardRows: AlertCandidateRow[],
-    userId: string,
+    user: User,
     nowMs = Date.now()
 ): UserAlert[] {
     const alerts: UserAlert[] = [];
-    const processMap = new Map(processes.map(p => [p.id, p]));
+    const visibleProcesses = getProcessesVisibleToUser(user, processes);
+    const processMap = new Map(visibleProcesses.map(p => [p.id, p]));
+    const visibleProcessIds = new Set(visibleProcesses.map(p => p.id));
 
     const bulkByProcess = new Map<string, AlertCandidateRow[]>();
     for (const row of bulkRows) {
+        if (!visibleProcessIds.has(row.processId)) continue;
         const list = bulkByProcess.get(row.processId) || [];
         list.push(row);
         bulkByProcess.set(row.processId, list);
@@ -94,11 +92,13 @@ export function computeUserAlerts(
 
     for (const [processId, rows] of bulkByProcess) {
         const process = processMap.get(processId);
-        if (!process || process.status !== 'en_proceso') continue;
+        if (!process?.isBulkProcess) continue;
 
         const newCandidates = rows.filter(row => {
-            const status = normalizeContactStatus(row.contactStatus);
-            return status === 'por_contactar' && isContactable(row, userId, nowMs);
+            if (isClosedForContact(row)) return false;
+            if (!neverContactedByAnyone(row)) return false;
+            if (!isContactable(row, user.id, nowMs)) return false;
+            return true;
         });
 
         if (newCandidates.length > 0) {
@@ -106,8 +106,8 @@ export function computeUserAlerts(
                 buildProcessAlert(
                     'new_candidates',
                     'info',
-                    'Candidatos nuevos por contactar',
-                    `Tienes ${newCandidates.length} candidato(s) listo(s) para llamar o contactar.`,
+                    'Candidatos sin ningún intento de contacto',
+                    `${newCandidates.length} candidato(s) aún no han sido contactados por ningún usuario.`,
                     process,
                     newCandidates.length,
                     newCandidates.map(c => c.name)
@@ -116,11 +116,14 @@ export function computeUserAlerts(
         }
 
         const stale = rows.filter(row => {
+            if (isClosedForContact(row)) return false;
+            if (neverContactedByAnyone(row)) return false;
+            if (!isUnderUserManagement(row, user.id, user.name)) return false;
+            if (!isContactable(row, user.id, nowMs)) return false;
             const status = normalizeContactStatus(row.contactStatus);
             if (status !== 'por_contactar' && status !== 'en_intento') return false;
-            if (!isContactable(row, userId, nowMs)) return false;
-            const activity = lastActivityMs(row);
-            return activity > 0 && nowMs - activity >= ONE_HOUR_MS;
+            const lastMine = lastUserContactMs(row, user.id, user.name);
+            return lastMine > 0 && nowMs - lastMine >= ONE_HOUR_MS;
         });
 
         if (stale.length > 0) {
@@ -128,8 +131,8 @@ export function computeUserAlerts(
                 buildProcessAlert(
                     'stale_without_contact',
                     'warning',
-                    'Sin contacto por más de 1 hora',
-                    `${stale.length} candidato(s) llevan más de 1 hora sin intento de contacto.`,
+                    'Tu gestión sin seguimiento (+1 h)',
+                    `${stale.length} candidato(s) de tu gestión llevan más de 1 hora sin nuevo intento de contacto.`,
                     process,
                     stale.length,
                     stale.map(c => c.name)
@@ -138,13 +141,12 @@ export function computeUserAlerts(
         }
 
         const lockExpired = rows.filter(row => {
+            if (isClosedForContact(row)) return false;
+            if (!isUnderUserManagement(row, user.id, user.name)) return false;
             const status = normalizeContactStatus(row.contactStatus);
             if (status !== 'en_intento') return false;
-            if (!isContactable(row, userId, nowMs)) return false;
-            const wasMyContact =
-                row.contactLastUserId === userId || row.contactLockUserId === userId;
-            if (!wasMyContact) return false;
-            return hadExpiredLockByUser(row, userId, nowMs);
+            if (!isContactable(row, user.id, nowMs)) return false;
+            return hadExpiredLockByUser(row, user.id, nowMs);
         });
 
         if (lockExpired.length > 0) {
@@ -153,7 +155,7 @@ export function computeUserAlerts(
                     'lock_expired',
                     'info',
                     'Bloqueo expirado — puedes recontactar',
-                    `${lockExpired.length} candidato(s) que contactaste sin respuesta ya pueden volver a contactarse.`,
+                    `${lockExpired.length} candidato(s) de tu gestión sin respuesta ya pueden volver a contactarse.`,
                     process,
                     lockExpired.length,
                     lockExpired.map(c => c.name)
@@ -172,8 +174,8 @@ export function computeUserAlerts(
                 buildProcessAlert(
                     'no_new_in_process',
                     'urgent',
-                    'Sin candidatos nuevos',
-                    `No ingresan candidatos hace ${hours}h. Inicia difusión orgánica de la oferta o carga candidatos manualmente.`,
+                    'Sin candidatos nuevos en el proceso',
+                    `No ingresan candidatos hace ${hours}h. Inicia difusión orgánica o carga manualmente.`,
                     process,
                     0,
                     []
@@ -184,6 +186,7 @@ export function computeUserAlerts(
 
     const standardByProcess = new Map<string, AlertCandidateRow[]>();
     for (const row of standardRows) {
+        if (!visibleProcessIds.has(row.processId)) continue;
         const list = standardByProcess.get(row.processId) || [];
         list.push(row);
         standardByProcess.set(row.processId, list);
@@ -191,23 +194,24 @@ export function computeUserAlerts(
 
     for (const [processId, rows] of standardByProcess) {
         const process = processMap.get(processId);
-        if (!process || process.status !== 'en_proceso') continue;
+        if (!process || process.isBulkProcess) continue;
 
         const firstStageId = process.stages[0]?.id;
-        const newInFirstStage = rows.filter(
-            row => !firstStageId || row.stageId === firstStageId
-        );
+        const mineInFirstStage = rows.filter(row => {
+            if (!isUnderUserManagement(row, user.id, user.name)) return false;
+            return !firstStageId || row.stageId === firstStageId;
+        });
 
-        if (newInFirstStage.length > 0) {
+        if (mineInFirstStage.length > 0) {
             alerts.push(
                 buildProcessAlert(
                     'new_candidates',
                     'info',
-                    'Candidatos en etapa inicial',
-                    `${newInFirstStage.length} candidato(s) en la primera etapa del proceso.`,
+                    'Candidatos en etapa inicial (tu gestión)',
+                    `${mineInFirstStage.length} candidato(s) en la primera etapa bajo tu gestión.`,
                     process,
-                    newInFirstStage.length,
-                    newInFirstStage.map(c => c.name)
+                    mineInFirstStage.length,
+                    mineInFirstStage.map(c => c.name)
                 )
             );
         }

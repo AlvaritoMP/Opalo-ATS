@@ -1,8 +1,7 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import {
     Bell,
-    X,
     AlertTriangle,
     Info,
     Clock,
@@ -10,13 +9,18 @@ import {
     Megaphone,
     Unlock,
     ChevronRight,
+    CheckCircle2,
 } from 'lucide-react';
 import type { Process, User, UserAlert } from '../types';
 import { userAlertsApi } from '../lib/api/userAlerts';
 import { computeUserAlerts, getSporadicAlerts } from '../lib/userAlerts';
-
-const SESSION_SHOWN_KEY = 'ats_alerts_shown_session_';
-const SPORADIC_SEEN_KEY = 'ats_alerts_sporadic_seen_';
+import { getProcessesVisibleToUser } from '../lib/userAlertAccess';
+import {
+    filterPendingAlerts,
+    isAlertPending,
+    loadAlertAcknowledgements,
+    saveAlertAcknowledgement,
+} from '../lib/userAlertAck';
 
 const SEVERITY_STYLES = {
     urgent: {
@@ -61,29 +65,29 @@ export const UserAlertsPanel: React.FC<UserAlertsPanelProps> = ({
     onNavigateToProcess,
 }) => {
     const [alerts, setAlerts] = useState<UserAlert[]>([]);
+    const [acks, setAcks] = useState<Record<string, string>>(() =>
+        loadAlertAcknowledgements(currentUser.id)
+    );
     const [loading, setLoading] = useState(true);
     const [showModal, setShowModal] = useState(false);
-    const sporadicSeenRef = useRef<Set<string>>(new Set());
 
-    const closeModal = () => setShowModal(false);
+    const pendingAlerts = useMemo(
+        () => filterPendingAlerts(alerts, acks),
+        [alerts, acks]
+    );
 
     const loadAlerts = useCallback(async () => {
         try {
-            const bulkProcessIds = processes
-                .filter(p => p.isBulkProcess && p.status === 'en_proceso')
-                .map(p => p.id);
+            const visible = getProcessesVisibleToUser(currentUser, processes);
+            const bulkProcessIds = visible.filter(p => p.isBulkProcess).map(p => p.id);
+            const standardProcessIds = visible.filter(p => !p.isBulkProcess).map(p => p.id);
 
             const [bulkRows, standardRows] = await Promise.all([
                 userAlertsApi.fetchBulkCandidates(bulkProcessIds),
-                userAlertsApi.fetchStandardCandidates(processes),
+                userAlertsApi.fetchStandardCandidates(standardProcessIds),
             ]);
 
-            const computed = computeUserAlerts(
-                processes,
-                bulkRows,
-                standardRows,
-                currentUser.id
-            );
+            const computed = computeUserAlerts(processes, bulkRows, standardRows, currentUser);
             setAlerts(computed);
             return computed;
         } catch (err) {
@@ -93,18 +97,13 @@ export const UserAlertsPanel: React.FC<UserAlertsPanelProps> = ({
         } finally {
             setLoading(false);
         }
-    }, [processes, currentUser.id]);
+    }, [processes, currentUser]);
 
     useEffect(() => {
         void loadAlerts().then(computed => {
-            if (computed.length === 0) return;
-            try {
-                const sessionKey = `${SESSION_SHOWN_KEY}${currentUser.id}`;
-                if (!sessionStorage.getItem(sessionKey)) {
-                    setShowModal(true);
-                    sessionStorage.setItem(sessionKey, '1');
-                }
-            } catch { /* ignore */ }
+            const currentAcks = loadAlertAcknowledgements(currentUser.id);
+            const pending = filterPendingAlerts(computed, currentAcks);
+            if (pending.length > 0) setShowModal(true);
         });
     }, [loadAlerts, currentUser.id]);
 
@@ -112,48 +111,36 @@ export const UserAlertsPanel: React.FC<UserAlertsPanelProps> = ({
         const interval = setInterval(() => {
             void loadAlerts().then(computed => {
                 const sporadic = getSporadicAlerts(computed);
-                let hasNew = false;
-                for (const alert of sporadic) {
-                    if (sporadicSeenRef.current.has(alert.id)) continue;
-                    sporadicSeenRef.current.add(alert.id);
-                    hasNew = true;
-                }
-                if (hasNew) setShowModal(true);
+                const hasNewPending = sporadic.some(a => isAlertPending(a, acks));
+                if (hasNewPending) setShowModal(true);
             });
         }, 5 * 60 * 1000);
 
         return () => clearInterval(interval);
-    }, [loadAlerts]);
+    }, [loadAlerts, acks]);
 
-    useEffect(() => {
-        try {
-            const stored = localStorage.getItem(`${SPORADIC_SEEN_KEY}${currentUser.id}`);
-            if (stored) {
-                sporadicSeenRef.current = new Set(JSON.parse(stored) as string[]);
-            }
-        } catch { /* ignore */ }
-    }, [currentUser.id]);
+    const acknowledgeAlert = (alert: UserAlert) => {
+        setAcks(prev => saveAlertAcknowledgement(currentUser.id, alert, prev));
+    };
 
-    useEffect(() => {
-        if (sporadicSeenRef.current.size > 0) {
-            try {
-                localStorage.setItem(
-                    `${SPORADIC_SEEN_KEY}${currentUser.id}`,
-                    JSON.stringify([...sporadicSeenRef.current])
-                );
-            } catch { /* ignore */ }
-        }
-    });
+    const allPendingRead = pendingAlerts.length === 0;
 
-    const urgentCount = alerts.filter(a => a.severity === 'urgent' || a.severity === 'warning').length;
+    const urgentCount = pendingAlerts.filter(
+        a => a.severity === 'urgent' || a.severity === 'warning'
+    ).length;
 
     const AlertCard: React.FC<{ alert: UserAlert }> = ({ alert }) => {
         const style = SEVERITY_STYLES[alert.severity];
         const TypeIcon = TYPE_ICONS[alert.type];
         const Icon = style.icon;
+        const isPending = isAlertPending(alert, acks);
 
         return (
-            <div className={`rounded-lg border p-3 mb-2 ${style.border} ${style.bg}`}>
+            <div
+                className={`rounded-lg border p-3 mb-3 ${style.border} ${style.bg} ${
+                    isPending ? '' : 'opacity-60'
+                }`}
+            >
                 <div className="flex items-start gap-2.5">
                     <div className={`mt-0.5 ${style.iconClass}`}>
                         <TypeIcon className="w-4 h-4" />
@@ -179,17 +166,29 @@ export const UserAlertsPanel: React.FC<UserAlertsPanelProps> = ({
                                 {(alert.count || 0) > 5 ? '…' : ''}
                             </p>
                         )}
-                        {alert.processId && onNavigateToProcess && (
-                            <button
-                                onClick={() => {
-                                    onNavigateToProcess(alert.processId!);
-                                    closeModal();
-                                }}
-                                className="mt-2 text-xs text-primary-600 hover:text-primary-800 font-medium flex items-center gap-0.5"
-                            >
-                                Ir al proceso <ChevronRight className="w-3 h-3" />
-                            </button>
-                        )}
+                        <div className="mt-3 flex flex-wrap items-center gap-2">
+                            {alert.processId && onNavigateToProcess && (
+                                <button
+                                    onClick={() => onNavigateToProcess(alert.processId!)}
+                                    className="text-xs text-primary-600 hover:text-primary-800 font-medium flex items-center gap-0.5"
+                                >
+                                    Ir al proceso <ChevronRight className="w-3 h-3" />
+                                </button>
+                            )}
+                            {isPending ? (
+                                <button
+                                    onClick={() => acknowledgeAlert(alert)}
+                                    className="text-xs px-3 py-1.5 rounded-lg bg-primary-600 text-white hover:bg-primary-700 font-medium"
+                                >
+                                    Confirmar lectura
+                                </button>
+                            ) : (
+                                <span className="text-xs text-green-700 flex items-center gap-1 font-medium">
+                                    <CheckCircle2 className="w-3.5 h-3.5" />
+                                    Leído
+                                </span>
+                            )}
+                        </div>
                     </div>
                     <Icon className={`w-4 h-4 shrink-0 ${style.iconClass}`} />
                 </div>
@@ -220,21 +219,17 @@ export const UserAlertsPanel: React.FC<UserAlertsPanelProps> = ({
                 createPortal(
                     <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/40">
                         <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg max-h-[80vh] flex flex-col">
-                            <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
-                                <div>
-                                    <h2 className="text-lg font-semibold text-gray-900">
-                                        Avisos
-                                    </h2>
-                                    <p className="text-sm text-gray-500">
-                                        Hola {currentUser.name.split(' ')[0]}, esto requiere tu atención
+                            <div className="px-5 py-4 border-b border-gray-100">
+                                <h2 className="text-lg font-semibold text-gray-900">Avisos</h2>
+                                <p className="text-sm text-gray-500 mt-0.5">
+                                    Hola {currentUser.name.split(' ')[0]}, confirma la lectura de
+                                    cada aviso para continuar.
+                                </p>
+                                {pendingAlerts.length > 0 && (
+                                    <p className="text-xs text-amber-700 mt-2">
+                                        {pendingAlerts.length} aviso(s) pendiente(s) de confirmar
                                     </p>
-                                </div>
-                                <button
-                                    onClick={closeModal}
-                                    className="p-1.5 hover:bg-gray-100 rounded-lg"
-                                >
-                                    <X className="w-5 h-5 text-gray-400" />
-                                </button>
+                                )}
                             </div>
                             <div className="flex-1 overflow-y-auto px-5 py-4">
                                 {alerts.length === 0 ? (
@@ -249,10 +244,11 @@ export const UserAlertsPanel: React.FC<UserAlertsPanelProps> = ({
                             </div>
                             <div className="px-5 py-3 border-t border-gray-100 flex justify-end">
                                 <button
-                                    onClick={closeModal}
-                                    className="px-4 py-2 bg-primary-600 text-white text-sm font-medium rounded-lg hover:bg-primary-700"
+                                    onClick={() => setShowModal(false)}
+                                    disabled={!allPendingRead && alerts.length > 0}
+                                    className="px-4 py-2 bg-primary-600 text-white text-sm font-medium rounded-lg hover:bg-primary-700 disabled:opacity-40 disabled:cursor-not-allowed"
                                 >
-                                    Entendido
+                                    {allPendingRead ? 'Cerrar' : 'Confirma todos los avisos'}
                                 </button>
                             </div>
                         </div>
