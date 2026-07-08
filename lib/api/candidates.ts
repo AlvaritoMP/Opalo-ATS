@@ -541,7 +541,12 @@ export const candidatesApi = {
     },
 
     // Obtener candidatos por proceso (consulta directa, no depende del límite global de getAll)
-    async getByProcess(processId: string, includeArchived: boolean = false, includeRelations: boolean = false): Promise<Candidate[]> {
+    async getByProcess(
+        processId: string,
+        includeArchived: boolean = false,
+        includeRelations: boolean = false,
+        abortSignal?: AbortSignal,
+    ): Promise<Candidate[]> {
         const { data, error } = await fetchCandidatesWithSelectFallback((selectFields) => {
             let query = supabase
                 .from('candidates')

@@ -95,7 +95,10 @@ export const EndProcessModal: React.FC<EndProcessModalProps> = ({
             onClose();
         } catch (error) {
             console.error('Error finalizando proceso:', error);
-            alert('Error al finalizar el proceso. Por favor, intenta nuevamente.');
+            const message = error instanceof Error
+                ? error.message
+                : (error as { message?: string })?.message || 'Error desconocido';
+            alert(`Error al finalizar el proceso: ${message}`);
         } finally {
             setIsSubmitting(false);
         }

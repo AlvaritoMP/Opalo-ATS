@@ -551,34 +551,36 @@ export const processesApi = {
         hiredCandidateIds: string[] = [],
     ): Promise<Process> {
         const currentProcess = await this.getById(processId);
+        if (!currentProcess) {
+            throw new Error('Proceso no encontrado');
+        }
 
-        const updateData: Record<string, unknown> = {
-            status: outcome,
-        };
+        const patch: Partial<Process> = { status: outcome };
 
         if (outcome === 'terminado') {
-            updateData.hired_candidate_ids = hiredCandidateIds;
-        } else {
-            updateData.hired_candidate_ids = [];
+            patch.hiredCandidateIds = hiredCandidateIds;
         }
 
-        if (!currentProcess?.closedAt) {
-            updateData.closed_at = new Date().toISOString();
+        if (!currentProcess.closedAt) {
+            patch.closedAt = new Date().toISOString();
         }
 
-        const { error } = await supabase
-            .from('processes')
-            .update(updateData)
-            .eq('id', processId)
-            .eq('app_name', APP_NAME);
+        try {
+            return await this.update(processId, patch);
+        } catch (error: any) {
+            const isColumnError =
+                error?.code === '42703' ||
+                error?.code === 'PGRST204' ||
+                error?.message?.includes('column') ||
+                error?.message?.includes('schema cache') ||
+                error?.message?.includes('hired_candidate_ids') ||
+                error?.message?.includes('closed_at');
 
-        if (error) throw error;
-
-        const updatedProcess = await this.getById(processId);
-        if (!updatedProcess) {
-            throw new Error('No se pudo recargar el proceso después de finalizarlo');
+            if (isColumnError && (patch.closedAt || patch.hiredCandidateIds)) {
+                return await this.update(processId, { status: outcome });
+            }
+            throw error;
         }
-        return updatedProcess;
     },
 
     async cancelProcess(processId: string): Promise<Process> {
