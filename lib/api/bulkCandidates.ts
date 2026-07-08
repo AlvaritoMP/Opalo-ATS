@@ -3,6 +3,7 @@ import { APP_NAME } from '../appConfig';
 import type { CustomColumn } from '../../types';
 import {
     enrichBulkColumnValuesForStorage,
+    stripBulkColumnValueKeys,
     resolveColumnValueFromRow,
     hasBulkCellValue,
     bulkColumnNameKey,
@@ -788,6 +789,51 @@ export const bulkCandidatesApi = {
 
         const current = (data.bulk_column_values as Record<string, unknown>) || {};
         const merged = { ...current, ...enriched };
+
+        const { error } = await supabase
+            .from('candidates')
+            .update({ bulk_column_values: merged })
+            .eq('id', candidateId)
+            .eq('app_name', APP_NAME);
+
+        if (error) {
+            if (isMissingColumnError(error)) {
+                bulkColumnValuesWriteSupported = false;
+                return false;
+            }
+            throw error;
+        }
+        return true;
+    },
+
+    /** Borra una columna custom en bulk_column_values (elimina id, nombre y claves legacy). */
+    async clearBulkColumnValue(
+        candidateId: string,
+        columnId: string,
+        customColumns: CustomColumn[] = [],
+        legacyIdToName: Record<string, string> = {}
+    ): Promise<boolean> {
+        if (!isBulkColumnValuesWriteSupported()) return false;
+
+        const { data, error: fetchError } = await supabase
+            .from('candidates')
+            .select('bulk_column_values')
+            .eq('id', candidateId)
+            .eq('app_name', APP_NAME)
+            .maybeSingle();
+
+        if (fetchError) {
+            if (isMissingColumnError(fetchError)) {
+                bulkColumnValuesWriteSupported = false;
+                return false;
+            }
+            if (isNotFoundError(fetchError)) return false;
+            throw fetchError;
+        }
+        if (!data) return false;
+
+        const current = (data.bulk_column_values as Record<string, unknown>) || {};
+        const merged = stripBulkColumnValueKeys(current, columnId, customColumns, legacyIdToName);
 
         const { error } = await supabase
             .from('candidates')

@@ -635,6 +635,48 @@ export function enrichBulkColumnValuesForStorage(
     return out;
 }
 
+/** Indica si el usuario está borrando el contenido de una celda custom. */
+export function isClearingBulkCellValue(value: unknown): boolean {
+    if (value === false) return false;
+    return value === '' || value === null || value === undefined;
+}
+
+/** Elimina todas las claves de una columna custom en bulk_column_values (id, nombre, legacy). */
+export function stripBulkColumnValueKeys(
+    row: Record<string, unknown>,
+    columnId: string,
+    customColumns: CustomColumn[] = [],
+    legacyIdToName: Record<string, string> = {}
+): Record<string, unknown> {
+    const col = customColumns.find(c => c.id === columnId);
+    const out: Record<string, unknown> = { ...row };
+    const keysToDelete = new Set<string>([columnId]);
+
+    if (col) {
+        keysToDelete.add(bulkColumnNameKey(col.name));
+        const bare = normalizeColumnNameKey(col.name);
+        for (const key of Object.keys(out)) {
+            if (key.startsWith(BULK_NAME_KEY_PREFIX)) {
+                const nk = key.slice(BULK_NAME_KEY_PREFIX.length);
+                if (nk === bare) keysToDelete.add(key);
+            } else if (normalizeColumnNameKey(key) === bare) {
+                keysToDelete.add(key);
+            }
+        }
+    }
+
+    for (const [legacyId, legacyName] of Object.entries(legacyIdToName)) {
+        const matchesId = legacyId === columnId;
+        const matchesCol =
+            col != null &&
+            normalizeColumnNameKey(legacyName) === normalizeColumnNameKey(col.name);
+        if (matchesId || matchesCol) keysToDelete.add(legacyId);
+    }
+
+    for (const key of keysToDelete) delete out[key];
+    return out;
+}
+
 /** Lee un valor de fila JSONB resolviendo id, nombre y IDs legacy */
 export function resolveColumnValueFromRow(
     row: Record<string, unknown> | undefined,

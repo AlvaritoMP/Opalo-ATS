@@ -99,6 +99,8 @@ import {
     normalizeBulkColumnValueKeys,
     buildLegacyColumnIdToName,
     enrichBulkColumnValuesForStorage,
+    stripBulkColumnValueKeys,
+    isClearingBulkCellValue,
     resolveColumnValueFromRow,
     hasBulkCellValue,
     normalizeColumnNameKey,
@@ -3255,22 +3257,58 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                 label: 'Edición de celda',
             });
         }
+
+        const clearing = isClearingBulkCellValue(value);
+
         setColumnValues(prev => {
-            const candidatePatch = enrichBulkColumnValuesForStorage(
-                {
-                    ...(prev[candidateId] || {}),
-                    [columnId]: value,
-                },
-                customColumns
-            );
+            const current = prev[candidateId] || {};
+            const candidatePatch = clearing
+                ? stripBulkColumnValueKeys(current, columnId, customColumns, legacyColumnIdToName)
+                : enrichBulkColumnValuesForStorage(
+                      { ...current, [columnId]: value },
+                      customColumns
+                  );
             const newValues = {
                 ...prev,
                 [candidateId]: candidatePatch,
             };
             persistLocalColumnValues(process.id, newValues);
-            persistCustomColumnValues(candidateId, candidatePatch);
+            if (clearing) {
+                bulkCandidatesApi
+                    .clearBulkColumnValue(candidateId, columnId, customColumns, legacyColumnIdToName)
+                    .then(ok => {
+                        if (!ok) {
+                            actions.showToast(
+                                'No se guardó en Supabase. Ejecute MIGRATION_ADD_BULK_COLUMN_VALUES.sql si aún no lo hizo.',
+                                'error',
+                                6000
+                            );
+                        }
+                    })
+                    .catch(err => {
+                        console.error('Error borrando columna personalizada:', err);
+                        actions.showToast('Error al borrar en Supabase', 'error', 4000);
+                    });
+            } else {
+                persistCustomColumnValues(candidateId, candidatePatch);
+            }
             return newValues;
         });
+
+        if (clearing) {
+            setCandidates(prev =>
+                prev.map(c => {
+                    if (c.id !== candidateId) return c;
+                    const stripped = stripBulkColumnValueKeys(
+                        (c.bulkColumnValues || {}) as Record<string, unknown>,
+                        columnId,
+                        customColumns,
+                        legacyColumnIdToName
+                    );
+                    return { ...c, bulkColumnValues: stripped };
+                })
+            );
+        }
     };
 
     const handleStartEdit = (candidateId: string, field: string, currentValue: unknown) => {
@@ -3312,20 +3350,44 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
     const syncCustomFieldFromStandard = useCallback((candidateId: string, field: 'source' | 'province' | 'district', value: string) => {
         const homonymCol = customColumns.find(c => mapImportHeader(c.name.toLowerCase()) === field);
         if (!homonymCol || !process?.id) return;
+        const clearing = value.trim() === '';
         setColumnValues(prev => {
-            const candidatePatch = enrichBulkColumnValuesForStorage(
-                { ...(prev[candidateId] || {}), [homonymCol.id]: value },
-                customColumns
-            );
+            const current = prev[candidateId] || {};
+            const candidatePatch = clearing
+                ? stripBulkColumnValueKeys(current, homonymCol.id, customColumns, legacyColumnIdToName)
+                : enrichBulkColumnValuesForStorage(
+                      { ...current, [homonymCol.id]: value },
+                      customColumns
+                  );
             const newValues = {
                 ...prev,
                 [candidateId]: candidatePatch,
             };
             persistLocalColumnValues(process.id, newValues);
-            persistCustomColumnValues(candidateId, candidatePatch);
+            if (clearing) {
+                bulkCandidatesApi
+                    .clearBulkColumnValue(candidateId, homonymCol.id, customColumns, legacyColumnIdToName)
+                    .catch(err => console.error('Error borrando homónimo en Supabase:', err));
+            } else {
+                persistCustomColumnValues(candidateId, candidatePatch);
+            }
             return newValues;
         });
-    }, [customColumns, process?.id, persistCustomColumnValues]);
+        if (clearing) {
+            setCandidates(prev =>
+                prev.map(c => {
+                    if (c.id !== candidateId) return c;
+                    const stripped = stripBulkColumnValueKeys(
+                        (c.bulkColumnValues || {}) as Record<string, unknown>,
+                        homonymCol.id,
+                        customColumns,
+                        legacyColumnIdToName
+                    );
+                    return { ...c, bulkColumnValues: stripped };
+                })
+            );
+        }
+    }, [customColumns, process?.id, persistCustomColumnValues, legacyColumnIdToName]);
 
     const handleSaveEdit = (candidateId: string, field: string, rawValue?: string) => {
         const candidate = candidates.find(c => c.id === candidateId);
