@@ -75,11 +75,12 @@ import {
     DEFAULT_COLUMN_ORDER,
     getColumnLabel,
     getColumnValuesStorageKey,
-    getColumnValuesBackupStorageKey,
     loadLocalColumnValuesForProcess,
     mergeColumnValueSources,
     discoverOrphanKeyAliases,
     persistLocalColumnValues,
+    clearLocalColumnValuesForProcess,
+    safeLocalStorageSetItem,
     resolveColumnOrder,
     formatBulkDate,
     normalizeBulkDateInput,
@@ -1587,7 +1588,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
             );
             const repaired = repairDateColumnValues(scopedMerged, cols);
             setColumnValues(repaired);
-            persistLocalColumnValues(processId, repaired);
+            clearLocalColumnValuesForProcess(processId);
 
             const repairs: Record<string, Record<string, unknown>> = {};
             for (const [candidateId, row] of Object.entries(scopedMerged)) {
@@ -2071,15 +2072,12 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
         columnMigrationInFlightRef.current = process.id;
 
         const storageKey = getColumnValuesStorageKey(process.id);
-        const backupKey = getColumnValuesBackupStorageKey(process.id);
         const saved = localStorage.getItem(storageKey);
         if (!saved) {
             columnValuesMigratedRef.current = process.id;
             columnMigrationInFlightRef.current = null;
             return;
         }
-
-        localStorage.setItem(backupKey, saved);
 
         let localValues: Record<string, Record<string, any>>;
         try {
@@ -2133,8 +2131,9 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                 Object.entries(localValues).filter(([id]) => validCandidateIds.has(id))
             );
             if (Object.keys(pruned).length !== Object.keys(localValues).length) {
-                localStorage.setItem(storageKey, JSON.stringify(pruned));
+                safeLocalStorageSetItem(storageKey, JSON.stringify(pruned));
             }
+            clearLocalColumnValuesForProcess(process.id);
             columnValuesMigratedRef.current = process.id;
             columnMigrationInFlightRef.current = null;
             return;
@@ -2143,6 +2142,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
         bulkCandidatesApi.batchSetBulkColumnValues(toMigrate, customColumns)
             .then(async () => {
                 columnValuesMigratedRef.current = process.id;
+                clearLocalColumnValuesForProcess(process.id);
                 await syncColumnValuesFromDatabase(process.id);
                 actionsRef.current.showToast('Datos de columnas sincronizados a la nube', 'success', 3000);
             })
@@ -3272,7 +3272,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                 ...prev,
                 [candidateId]: candidatePatch,
             };
-            persistLocalColumnValues(process.id, newValues);
+            persistLocalColumnValues(process.id, newValues, { candidateId });
             if (clearing) {
                 bulkCandidatesApi
                     .clearBulkColumnValue(candidateId, columnId, customColumns, legacyColumnIdToName)
@@ -3363,7 +3363,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                 ...prev,
                 [candidateId]: candidatePatch,
             };
-            persistLocalColumnValues(process.id, newValues);
+            persistLocalColumnValues(process.id, newValues, { candidateId });
             if (clearing) {
                 bulkCandidatesApi
                     .clearBulkColumnValue(candidateId, homonymCol.id, customColumns, legacyColumnIdToName)
@@ -3547,7 +3547,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                         next[candidateId] = { ...next[candidateId], [colId]: { ...previous } };
                     }
                 }
-                localStorage.setItem(getCellMetaStorageKey(process.id), JSON.stringify(next));
+                safeLocalStorageSetItem(getCellMetaStorageKey(process.id), JSON.stringify(next));
                 return next;
             });
         },
@@ -3883,7 +3883,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                     }
                 });
             });
-            localStorage.setItem(getCellMetaStorageKey(process.id), JSON.stringify(next));
+            safeLocalStorageSetItem(getCellMetaStorageKey(process.id), JSON.stringify(next));
             return next;
         });
         const candidateName = candidates.find(c => c.id === candidateIds[0])?.name;
@@ -4053,7 +4053,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                 customColumns
             );
             const newValues = { ...prev, [candidateId]: candidatePatch };
-            persistLocalColumnValues(process.id, newValues);
+            persistLocalColumnValues(process.id, newValues, { candidateId });
             persistCustomColumnValues(candidateId, candidatePatch);
             return newValues;
         });

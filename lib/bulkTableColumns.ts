@@ -537,16 +537,70 @@ export function scanLocalColumnBackups(
     return found.sort((a, b) => b.valueCount - a.valueCount);
 }
 
-/** Guarda copia local de columnas (respaldo en navegador) */
+/** Escritura segura en localStorage (evita crash por QuotaExceededError) */
+export function safeLocalStorageSetItem(key: string, value: string): boolean {
+    try {
+        localStorage.setItem(key, value);
+        return true;
+    } catch (error) {
+        console.warn(`localStorage quota exceeded for key ${key}`, error);
+        return false;
+    }
+}
+
+/** Elimina copias locales de valores de columnas para un proceso */
+export function clearLocalColumnValuesForProcess(processId: string): void {
+    try {
+        const prefix = getColumnValuesStorageKey(processId);
+        const keysToRemove: string[] = [];
+        for (let i = 0; i < localStorage.length; i++) {
+            const key = localStorage.key(i);
+            if (key && (key === prefix || key.startsWith(`${prefix}_`))) {
+                keysToRemove.push(key);
+            }
+        }
+        for (const key of keysToRemove) {
+            localStorage.removeItem(key);
+        }
+    } catch {
+        /* ignore */
+    }
+}
+
+/**
+ * Guarda copia local de columnas (respaldo en navegador).
+ * Preferir `candidateId` para actualizar solo una fila y no reescribir todo el proceso.
+ */
 export function persistLocalColumnValues(
     processId: string,
-    values: Record<string, Record<string, any>>
+    values: Record<string, Record<string, any>>,
+    options?: { candidateId?: string }
 ): void {
     if (Object.keys(values).length === 0) return;
     try {
         const key = getColumnValuesStorageKey(processId);
-        localStorage.setItem(key, JSON.stringify(values));
-        localStorage.setItem(getColumnValuesBackupStorageKey(processId), JSON.stringify(values));
+
+        if (options?.candidateId) {
+            const candidateId = options.candidateId;
+            const patch = values[candidateId];
+            if (!patch) return;
+
+            let existing: Record<string, Record<string, any>> = {};
+            try {
+                const saved = localStorage.getItem(key);
+                if (saved) existing = JSON.parse(saved) as Record<string, Record<string, any>>;
+            } catch {
+                /* ignore */
+            }
+
+            existing[candidateId] = patch;
+            if (!safeLocalStorageSetItem(key, JSON.stringify(existing))) {
+                safeLocalStorageSetItem(key, JSON.stringify({ [candidateId]: patch }));
+            }
+            return;
+        }
+
+        safeLocalStorageSetItem(key, JSON.stringify(values));
     } catch {
         /* ignore quota errors */
     }
