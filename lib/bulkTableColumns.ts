@@ -548,6 +548,24 @@ export function safeLocalStorageSetItem(key: string, value: string): boolean {
     }
 }
 
+/** Elimina TODAS las claves bulkColumnValues_* del navegador (datos viven en Supabase) */
+export function clearAllLocalBulkColumnValues(): void {
+    try {
+        const keysToRemove: string[] = [];
+        for (let i = 0; i < localStorage.length; i++) {
+            const key = localStorage.key(i);
+            if (key?.startsWith('bulkColumnValues_')) {
+                keysToRemove.push(key);
+            }
+        }
+        for (const key of keysToRemove) {
+            localStorage.removeItem(key);
+        }
+    } catch {
+        /* ignore */
+    }
+}
+
 /** Elimina copias locales de valores de columnas para un proceso */
 export function clearLocalColumnValuesForProcess(processId: string): void {
     try {
@@ -568,42 +586,15 @@ export function clearLocalColumnValuesForProcess(processId: string): void {
 }
 
 /**
- * Guarda copia local de columnas (respaldo en navegador).
- * Preferir `candidateId` para actualizar solo una fila y no reescribir todo el proceso.
+ * Los valores de columnas masivas se persisten en Supabase (bulk_column_values).
+ * No escribir en localStorage: procesos grandes superan la cuota (~5 MB) y tumbarían la app.
  */
 export function persistLocalColumnValues(
-    processId: string,
-    values: Record<string, Record<string, any>>,
-    options?: { candidateId?: string }
+    _processId: string,
+    _values: Record<string, Record<string, any>>,
+    _options?: { candidateId?: string }
 ): void {
-    if (Object.keys(values).length === 0) return;
-    try {
-        const key = getColumnValuesStorageKey(processId);
-
-        if (options?.candidateId) {
-            const candidateId = options.candidateId;
-            const patch = values[candidateId];
-            if (!patch) return;
-
-            let existing: Record<string, Record<string, any>> = {};
-            try {
-                const saved = localStorage.getItem(key);
-                if (saved) existing = JSON.parse(saved) as Record<string, Record<string, any>>;
-            } catch {
-                /* ignore */
-            }
-
-            existing[candidateId] = patch;
-            if (!safeLocalStorageSetItem(key, JSON.stringify(existing))) {
-                safeLocalStorageSetItem(key, JSON.stringify({ [candidateId]: patch }));
-            }
-            return;
-        }
-
-        safeLocalStorageSetItem(key, JSON.stringify(values));
-    } catch {
-        /* ignore quota errors */
-    }
+    /* no-op */
 }
 
 /** Cuenta celdas recuperables para columnas concretas */

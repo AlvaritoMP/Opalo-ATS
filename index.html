@@ -20,6 +20,19 @@
   </head>
   <body class="bg-gray-50 text-gray-800">
     <div id="root"></div>
+    <!-- Libera cuota de localStorage antes de cargar React (evita QuotaExceededError en procesos masivos) -->
+    <script>
+      (function () {
+        try {
+          var keys = [];
+          for (var i = 0; i < localStorage.length; i++) {
+            var k = localStorage.key(i);
+            if (k && k.indexOf('bulkColumnValues_') === 0) keys.push(k);
+          }
+          for (var j = 0; j < keys.length; j++) localStorage.removeItem(keys[j]);
+        } catch (e) { /* ignore */ }
+      })();
+    </script>
     <script type="module" src="/index.tsx"></script>
   </body>
 </html>

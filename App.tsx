@@ -17,7 +17,11 @@ import {
     consumeSessionExpiredNotice,
 } from './lib/sessionActivity';
 import { runWithAbortTimeout, isAbortOrTimeoutError } from './lib/runWithAbortTimeout';
-import { getBulkSelectedProcessId, setBulkSelectedProcessId } from './lib/bulkTableColumns';
+import {
+    clearAllLocalBulkColumnValues,
+    getBulkSelectedProcessId,
+    setBulkSelectedProcessId,
+} from './lib/bulkTableColumns';
 import {
     loadDashboardFilters,
     saveDashboardFilters,
@@ -512,6 +516,10 @@ const App: React.FC = () => {
 
     const INITIAL_LOAD_TIMEOUT_MS = 60_000;
     const BACKGROUND_LOAD_TIMEOUT_MS = 120_000;
+
+    useEffect(() => {
+        clearAllLocalBulkColumnValues();
+    }, []);
 
     useEffect(() => {
         const loadData = async () => {
