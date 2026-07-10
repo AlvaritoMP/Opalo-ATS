@@ -174,13 +174,84 @@ export function buildBulkQuickReplyHtml(reply: BulkQuickReply): string {
     return chunks.join('');
 }
 
-async function dataUrlToBlob(dataUrl: string): Promise<Blob | null> {
+function dataUrlToBlob(dataUrl: string): Blob | null {
     try {
-        const res = await fetch(dataUrl);
-        return await res.blob();
+        const comma = dataUrl.indexOf(',');
+        if (comma === -1) return null;
+        const header = dataUrl.slice(0, comma);
+        const base64 = dataUrl.slice(comma + 1);
+        const mime = header.match(/data:([^;]+)/)?.[1] || 'image/png';
+        const binary = atob(base64);
+        const bytes = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+        return new Blob([bytes], { type: mime });
     } catch {
         return null;
     }
+}
+
+/** Copia HTML con imágenes embebidas en el DOM (Word, Gmail, Outlook, etc.). */
+function copyHtmlSelectionToClipboard(html: string): boolean {
+    if (!html.trim() || typeof document === 'undefined') return false;
+
+    const container = document.createElement('div');
+    container.innerHTML = html;
+    container.setAttribute('contenteditable', 'true');
+    Object.assign(container.style, {
+        position: 'fixed',
+        left: '-9999px',
+        top: '0',
+        opacity: '0',
+        pointerEvents: 'none',
+    });
+    document.body.appendChild(container);
+
+    const range = document.createRange();
+    range.selectNodeContents(container);
+    const selection = window.getSelection();
+    if (!selection) {
+        document.body.removeChild(container);
+        return false;
+    }
+
+    selection.removeAllRanges();
+    selection.addRange(range);
+
+    let ok = false;
+    try {
+        ok = document.execCommand('copy');
+    } catch {
+        ok = false;
+    }
+
+    selection.removeAllRanges();
+    document.body.removeChild(container);
+    return ok;
+}
+
+async function writeClipboardItems(
+    plain: string,
+    html: string,
+    imageDataUrl?: string
+): Promise<boolean> {
+    if (!navigator.clipboard?.write || typeof ClipboardItem === 'undefined') return false;
+
+    const payload: Record<string, Blob | Promise<Blob>> = {
+        'text/plain': new Blob([plain || ' '], { type: 'text/plain' }),
+    };
+    if (html) {
+        payload['text/html'] = new Blob([html], { type: 'text/html' });
+    }
+    if (imageDataUrl) {
+        const blob = dataUrlToBlob(imageDataUrl);
+        if (blob) {
+            const mime = blob.type.startsWith('image/') ? blob.type : 'image/png';
+            payload[mime] = blob;
+        }
+    }
+
+    await navigator.clipboard.write([new ClipboardItem(payload)]);
+    return true;
 }
 
 export interface CopyBulkQuickReplyResult {
@@ -188,49 +259,69 @@ export interface CopyBulkQuickReplyResult {
     message: string;
 }
 
-/** Copia texto enriquecido y, si hay imagen, también el blob para pegar en chats. */
+function embeddedImageAttachments(reply: BulkQuickReply): BulkQuickReplyAttachment[] {
+    return (reply.attachments ?? []).filter(a => a.type === 'image' && !!a.dataUrl);
+}
+
+/** Copia texto enriquecido con imágenes embebidas cuando el destino lo admite (editores de texto enriquecido). */
 export async function copyBulkQuickReplyToClipboard(
     reply: BulkQuickReply
 ): Promise<CopyBulkQuickReplyResult> {
     const plain = buildBulkQuickReplyPlainText(reply);
     const html = buildBulkQuickReplyHtml(reply);
     const attachments = reply.attachments ?? [];
-    const imageAttachment = attachments.find(a => a.type === 'image' && a.dataUrl);
+    const embeddedImages = embeddedImageAttachments(reply);
+    const firstImageDataUrl = embeddedImages[0]?.dataUrl;
 
     if (!plain && attachments.length === 0) {
         return { success: false, message: 'La respuesta está vacía' };
     }
 
+    const richPasteHint =
+        embeddedImages.length > 0
+            ? ' Pega en Word, Gmail u Outlook para ver las imágenes; en campos de solo texto verás el nombre del archivo.'
+            : '';
+
     try {
-        if (navigator.clipboard?.write && typeof ClipboardItem !== 'undefined') {
-            const clipItems: Record<string, Blob> = {
-                'text/plain': new Blob([plain || ' '], { type: 'text/plain' }),
-            };
-            if (html) {
-                clipItems['text/html'] = new Blob([html], { type: 'text/html' });
-            }
-            if (imageAttachment?.dataUrl) {
-                const blob = await dataUrlToBlob(imageAttachment.dataUrl);
-                if (blob) {
-                    clipItems[blob.type || 'image/png'] = blob;
-                }
-            }
-            await navigator.clipboard.write([new ClipboardItem(clipItems)]);
+        // execCommand con el HTML en el DOM: forma más fiable de pegar imágenes en editores enriquecidos.
+        if (html && copyHtmlSelectionToClipboard(html)) {
             const extra =
                 attachments.length > 1
-                    ? ' (texto + adjuntos; algunas apps requieren pegar por separado)'
-                    : imageAttachment
+                    ? ' (texto + adjuntos)'
+                    : embeddedImages.length === 1
+                      ? ' (texto e imagen)'
+                      : ' (texto e imágenes)';
+            return {
+                success: true,
+                message: `Copiado al portapapeles${extra}.${richPasteHint}`,
+            };
+        }
+
+        if (await writeClipboardItems(plain, html, firstImageDataUrl)) {
+            const extra =
+                attachments.length > 1
+                    ? ' (texto + adjuntos)'
+                    : firstImageDataUrl
                       ? ' (texto e imagen)'
                       : '';
-            return { success: true, message: `Copiado al portapapeles${extra}` };
+            return {
+                success: true,
+                message: `Copiado al portapapeles${extra}.${richPasteHint}`,
+            };
         }
 
         await navigator.clipboard.writeText(plain);
-        return { success: true, message: 'Texto copiado al portapapeles' };
+        return {
+            success: true,
+            message: `Texto copiado al portapapeles.${richPasteHint}`,
+        };
     } catch {
         try {
             await navigator.clipboard.writeText(plain);
-            return { success: true, message: 'Texto copiado al portapapeles' };
+            return {
+                success: true,
+                message: `Texto copiado al portapapeles.${richPasteHint}`,
+            };
         } catch {
             return { success: false, message: 'No se pudo copiar. Prueba con Ctrl+C manualmente.' };
         }

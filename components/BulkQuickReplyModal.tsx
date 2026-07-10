@@ -285,7 +285,9 @@ export const BulkQuickReplyModal: React.FC<BulkQuickReplyModalProps> = ({
                             <kbd className="px-1 py-0.5 rounded bg-white/80 border border-black/10 text-[10px] font-mono">
                                 Ctrl+V
                             </kbd>{' '}
-                            o agregar enlaces externos.
+                            o agregar enlaces externos. Al copiar, las imágenes embebidas se pegan en
+                            editores enriquecidos (Word, Gmail, Outlook); en WhatsApp o campos de solo
+                            texto solo se copia el nombre del archivo.
                         </p>
 
                         <div className="flex flex-wrap gap-2 mb-3">
