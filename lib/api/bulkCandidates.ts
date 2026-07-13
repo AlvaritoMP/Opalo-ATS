@@ -35,10 +35,12 @@ const BULK_SELECT_WITH_FIDELIZ = `${BULK_SELECT_WITH_CONTACT},
 const BULK_SELECT_WITH_CREATED = `${BULK_SELECT_WITH_FIDELIZ}, created_at`;
 const BULK_SELECT_WITH_APPLICATION = `${BULK_SELECT_WITH_CREATED}, application_count, first_application_at`;
 const BULK_SELECT_WITH_REGISTRATION = `${BULK_SELECT_WITH_APPLICATION}, registration_origin, created_by, contact_lock_user_id, contact_lock_user_name, contact_lock_until, contact_lock_reason`;
-const BULK_SELECT_FULL = `${BULK_SELECT_WITH_REGISTRATION}, bulk_column_values`;
+const BULK_SELECT_WITH_TRANSFER = `${BULK_SELECT_WITH_REGISTRATION}, transfer_pending_review`;
+const BULK_SELECT_FULL = `${BULK_SELECT_WITH_TRANSFER}, bulk_column_values`;
 const BULK_EFFICIENCY_FIELDS =
     'hire_date, offer_accepted_date, application_started_date, application_completed_date';
 const BULK_SELECT_FULL_EFFICIENCY = `${BULK_SELECT_FULL}, ${BULK_EFFICIENCY_FIELDS}`;
+const BULK_SELECT_WITH_TRANSFER_EFFICIENCY = `${BULK_SELECT_WITH_TRANSFER}, ${BULK_EFFICIENCY_FIELDS}`;
 const BULK_SELECT_WITH_REGISTRATION_EFFICIENCY = `${BULK_SELECT_WITH_REGISTRATION}, ${BULK_EFFICIENCY_FIELDS}`;
 const BULK_SELECT_WITH_APPLICATION_EFFICIENCY = `${BULK_SELECT_WITH_APPLICATION}, ${BULK_EFFICIENCY_FIELDS}`;
 const BULK_SELECT_WITH_CREATED_EFFICIENCY = `${BULK_SELECT_WITH_CREATED}, ${BULK_EFFICIENCY_FIELDS}`;
@@ -59,6 +61,8 @@ function getBulkSelectCandidates(): string[] {
     const allVariants = [
         BULK_SELECT_FULL_EFFICIENCY,
         BULK_SELECT_FULL,
+        BULK_SELECT_WITH_TRANSFER_EFFICIENCY,
+        BULK_SELECT_WITH_TRANSFER,
         BULK_SELECT_WITH_REGISTRATION_EFFICIENCY,
         BULK_SELECT_WITH_REGISTRATION,
         BULK_SELECT_WITH_APPLICATION_EFFICIENCY,
@@ -75,7 +79,8 @@ function getBulkSelectCandidates(): string[] {
     if (!cachedBulkSelect) return allVariants;
     if (
         !cachedBulkSelect.includes('application_count') ||
-        !cachedBulkSelect.includes('registration_origin')
+        !cachedBulkSelect.includes('registration_origin') ||
+        !cachedBulkSelect.includes('transfer_pending_review')
     ) {
         return allVariants;
     }
@@ -111,6 +116,7 @@ function mapBulkCandidateRow(
         applicationCount: c.application_count != null ? Number(c.application_count) : undefined,
         firstApplicationAt: (c.first_application_at as string) || undefined,
         registrationOrigin: (c.registration_origin as BulkCandidate['registrationOrigin']) || undefined,
+        transferPendingReview: c.transfer_pending_review === true,
         createdBy: (c.created_by as string) || undefined,
         contactLockUserId: (c.contact_lock_user_id as string) || undefined,
         contactLockUserName: (c.contact_lock_user_name as string) || undefined,
@@ -128,6 +134,7 @@ function mapBulkCandidateRow(
 }
 
 let bulkColumnValuesWriteSupported: boolean | null = null;
+let transferPendingReviewWriteSupported: boolean | null = null;
 
 function isBulkColumnValuesWriteSupported(): boolean {
     return bulkColumnValuesWriteSupported !== false;
@@ -159,6 +166,8 @@ export interface BulkCandidate {
     createdAt?: string;
     /** Origen de incorporación: formulario, manual o carga masiva */
     registrationOrigin?: 'formulario' | 'manual' | 'masivo';
+    /** TRUE si llegó por traslado y aún no se editó ninguna columna en el proceso destino */
+    transferPendingReview?: boolean;
     createdBy?: string;
     contactLockUserId?: string;
     contactLockUserName?: string;
@@ -563,6 +572,26 @@ export const bulkCandidatesApi = {
                     throw locationError;
                 }
             }
+        }
+    },
+
+    /**
+     * Quita el resaltado de traslado tras editar/borrar alguna columna del registro.
+     * Tolerante si la migración aún no se ejecutó.
+     */
+    async clearTransferPendingReview(candidateId: string): Promise<void> {
+        if (transferPendingReviewWriteSupported === false) return;
+        const { error } = await supabase
+            .from('candidates')
+            .update({ transfer_pending_review: false })
+            .eq('id', candidateId)
+            .eq('app_name', APP_NAME);
+        if (error) {
+            if (isMissingColumnError(error)) {
+                transferPendingReviewWriteSupported = false;
+                return;
+            }
+            console.warn('No se pudo limpiar transfer_pending_review:', error.message);
         }
     },
 

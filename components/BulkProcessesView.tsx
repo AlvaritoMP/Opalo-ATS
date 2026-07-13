@@ -1,6 +1,10 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef, useLayoutEffect } from 'react';
 import { useAppState } from '../App';
 import { bulkCandidatesApi, BulkCandidate } from '../lib/api/bulkCandidates';
+
+/** Fondo de fila para candidatos trasladados pendientes de revisión (yellow-50) */
+const TRANSFER_PENDING_ROW_BG = '#FEFCE8';
+const SELECTED_ROW_BG = '#EFF6FF'; // primary-50
 import { bulkTableTemplatesApi } from '../lib/api/bulkTableTemplates';
 import { bulkProcessActivityApi, BulkActivityActionType } from '../lib/api/bulkProcessActivity';
 import { contactTrackingApi, type ResetContactTrackingResult } from '../lib/api/contactTracking';
@@ -2220,6 +2224,24 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
         setCandidates(prev => prev.map(c => c.id === candidateId ? { ...c, ...updates } : c));
     }, []);
 
+    /** Quita el resaltado amarillo de traslado al editar/borrar una columna del registro */
+    const clearTransferHighlight = useCallback((candidateId: string) => {
+        const base = candidates.find(c => c.id === candidateId);
+        const optimistic = optimisticUpdates.get(candidateId);
+        const pending = optimistic?.transferPendingReview ?? base?.transferPendingReview;
+        if (!pending) return;
+        applyOptimisticUpdate(candidateId, { transferPendingReview: false });
+        void bulkCandidatesApi.clearTransferPendingReview(candidateId);
+    }, [candidates, optimisticUpdates, applyOptimisticUpdate]);
+
+    const resolveRowBackground = useCallback((candidateId: string, isSelected: boolean): string | undefined => {
+        if (isSelected) return SELECTED_ROW_BG;
+        const base = candidates.find(c => c.id === candidateId);
+        const optimistic = optimisticUpdates.get(candidateId);
+        const pending = optimistic?.transferPendingReview ?? base?.transferPendingReview;
+        return pending ? TRANSFER_PENDING_ROW_BG : undefined;
+    }, [candidates, optimisticUpdates]);
+
     const patchCandidateInterviewFields = useCallback((
         candidateId: string,
         fields: Pick<BulkCandidate, 'nextInterviewAt' | 'nextInterviewerId' | 'nextInterviewEventId'>
@@ -3250,6 +3272,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
         options?: { skipUndo?: boolean }
     ) => {
         if (!process) return;
+        clearTransferHighlight(candidateId);
         if (!options?.skipUndo && !isUndoingRef.current) {
             pushUndo({
                 type: 'cells',
@@ -3394,6 +3417,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
         const oldValue = readCandidateFieldValue(candidateId, field);
         const fieldLabel = getFieldLabel(field.startsWith('custom_') ? field : field);
         const editValue = rawValue ?? editingCell?.initialValue ?? '';
+        clearTransferHighlight(candidateId);
 
         if (field.startsWith('custom_')) {
             const colId = field.replace('custom_', '');
@@ -3475,6 +3499,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
     const setCellValue = useCallback(
         async (candidateId: string, colId: string, rawValue: string, options?: { skipUndo?: boolean }) => {
             if (!isPasteEditableColumn(colId, customColumns)) return;
+            clearTransferHighlight(candidateId);
 
             if (colId.startsWith('custom_')) {
                 const customColId = colId.replace('custom_', '');
@@ -3500,7 +3525,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                 actions.showToast('Error al guardar cambios', 'error', 3000);
             });
         },
-        [customColumns, applyOptimisticUpdate, syncCustomFieldFromStandard, handleColumnValueChange, actions]
+        [customColumns, applyOptimisticUpdate, syncCustomFieldFromStandard, handleColumnValueChange, actions, clearTransferHighlight]
     );
 
     const restoreCellSnapshot = useCallback(
@@ -3906,16 +3931,24 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
 
     const buildTdStyle = useCallback((candidateId: string, colId: string): React.CSSProperties => {
         const meta = getCellMetaFor(candidateId, colId);
-        const sticky = getStickyColumnStyle(colId, visibleColumns, pinnedColumns, false, meta?.bgColor, columnWidths);
+        const rowBg = resolveRowBackground(candidateId, selectedIds.has(candidateId));
+        const sticky = getStickyColumnStyle(
+            colId,
+            visibleColumns,
+            pinnedColumns,
+            false,
+            meta?.bgColor ?? rowBg,
+            columnWidths
+        );
         return { ...getColumnWidthStyle(colId, columnWidths), ...sticky };
-    }, [getCellMetaFor, visibleColumns, pinnedColumns, columnWidths]);
+    }, [getCellMetaFor, visibleColumns, pinnedColumns, columnWidths, resolveRowBackground, selectedIds]);
 
     const buildThStyle = useCallback((colId: string): React.CSSProperties | undefined => {
         return getStickyColumnStyle(colId, visibleColumns, pinnedColumns, true, undefined, columnWidths);
     }, [visibleColumns, pinnedColumns, columnWidths]);
 
-    const buildCheckboxStyle = useCallback((isHeader: boolean): React.CSSProperties | undefined => {
-        return getStickyColumnStyle('checkbox', visibleColumns, pinnedColumns, isHeader, undefined, columnWidths);
+    const buildCheckboxStyle = useCallback((isHeader: boolean, rowBg?: string): React.CSSProperties | undefined => {
+        return getStickyColumnStyle('checkbox', visibleColumns, pinnedColumns, isHeader, rowBg, columnWidths);
     }, [visibleColumns, pinnedColumns, columnWidths]);
 
     const handleTableContextMenu = useCallback((e: React.MouseEvent) => {
@@ -6612,6 +6645,8 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                                 const isSelected = selectedIds.has(candidate.id);
                                 const optimistic = optimisticUpdates.get(candidate.id);
                                 const displayCandidate = optimistic ? { ...candidate, ...optimistic } : candidate;
+                                const isTransferPending = !!displayCandidate.transferPendingReview;
+                                const rowBg = resolveRowBackground(candidate.id, isSelected);
                                 const displayEmail = getDisplayEmail(displayCandidate.email);
                                 const displaySource = resolveStandardFieldValue('source', candidate.id, displayCandidate, columnValues, customColumns);
                                 const displayProvince = resolveStandardFieldValue('province', candidate.id, displayCandidate, columnValues, customColumns);
@@ -6621,12 +6656,29 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                                     <tr
                                         key={candidate.id}
                                         data-bulk-candidate-row={candidate.id}
-                                        className={`hover:bg-gray-50 ${isSelected ? 'bg-primary-50' : ''}`}
+                                        className={`hover:bg-gray-50 ${
+                                            isSelected
+                                                ? 'bg-primary-50'
+                                                : isTransferPending
+                                                  ? 'bg-yellow-50'
+                                                  : ''
+                                        }`}
+                                        title={
+                                            isTransferPending
+                                                ? 'Candidato trasladado desde otro proceso. El resaltado se quita al editar o borrar alguna columna.'
+                                                : undefined
+                                        }
                                         onDoubleClick={() => openDrawer(candidate, 'details')}
                                     >
                                         <td
-                                            className={`${COMPACT_TD_CLASS} bg-white`}
-                                            style={buildCheckboxStyle(false)}
+                                            className={`${COMPACT_TD_CLASS} ${
+                                                isSelected
+                                                    ? 'bg-primary-50'
+                                                    : isTransferPending
+                                                      ? 'bg-yellow-50'
+                                                      : 'bg-white'
+                                            }`}
+                                            style={buildCheckboxStyle(false, rowBg)}
                                             onClick={(e) => e.stopPropagation()}
                                         >
                                             <input
@@ -7209,7 +7261,16 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                                             }
                                             return null;
                                         })}
-                                        <td className={`${COMPACT_TD_CLASS} bg-white`} onClick={(e) => e.stopPropagation()}>
+                                        <td
+                                            className={`${COMPACT_TD_CLASS} ${
+                                                isSelected
+                                                    ? 'bg-primary-50'
+                                                    : isTransferPending
+                                                      ? 'bg-yellow-50'
+                                                      : 'bg-white'
+                                            }`}
+                                            onClick={(e) => e.stopPropagation()}
+                                        >
                                             <div className="flex gap-1">
                                                 <button
                                                     onClick={() => openDrawer(candidate, 'contactology')}

@@ -12,10 +12,22 @@ import {
 import { isMissingColumnError } from '../supabaseColumnErrors';
 
 const TRANSFER_SELECT_VARIANTS = [
+    'id, name, email, phone, phone2, dni, age, source, province, district, description, salary_expectation, agreed_salary, linkedin_url, address, score_ia, metadata_ia, stage_id, process_id, bulk_column_values, registration_origin, transfer_pending_review',
     'id, name, email, phone, phone2, dni, age, source, province, district, description, salary_expectation, agreed_salary, linkedin_url, address, score_ia, metadata_ia, stage_id, process_id, bulk_column_values, registration_origin',
     'id, name, email, phone, dni, age, source, province, district, description, score_ia, metadata_ia, stage_id, process_id, bulk_column_values',
     'id, name, email, phone, dni, age, source, province, district, stage_id, process_id',
 ];
+
+async function setTransferPendingReview(candidateId: string, value: boolean): Promise<void> {
+    const { error } = await supabase
+        .from('candidates')
+        .update({ transfer_pending_review: value })
+        .eq('id', candidateId)
+        .eq('app_name', APP_NAME);
+    if (error && !isMissingColumnError(error)) {
+        console.warn('No se pudo marcar transfer_pending_review:', error.message);
+    }
+}
 
 export interface BulkCandidateTransferParams {
     candidateIds: string[];
@@ -82,6 +94,7 @@ async function moveOneCandidate(
         archived: false,
         discarded_at: null,
         archived_at: null,
+        transfer_pending_review: true,
     };
 
     if (Object.keys(remapped).length > 0) {
@@ -95,17 +108,35 @@ async function moveOneCandidate(
         .eq('app_name', APP_NAME);
 
     if (error) {
-        if (isMissingColumnError(error) && update.bulk_column_values) {
-            delete update.bulk_column_values;
-            const { error: retryError } = await supabase
+        if (!isMissingColumnError(error)) throw error;
+
+        // Reintentar sin columnas opcionales (migración pendiente)
+        const retryUpdate: Record<string, unknown> = {
+            process_id: params.targetProcessId,
+            stage_id: params.targetStageId,
+            discarded: false,
+            archived: false,
+            discarded_at: null,
+            archived_at: null,
+        };
+        const { error: retryError } = await supabase
+            .from('candidates')
+            .update(retryUpdate)
+            .eq('id', id)
+            .eq('app_name', APP_NAME);
+        if (retryError) throw retryError;
+
+        if (Object.keys(remapped).length > 0) {
+            const { error: bulkErr } = await supabase
                 .from('candidates')
-                .update(update)
+                .update({ bulk_column_values: remapped })
                 .eq('id', id)
                 .eq('app_name', APP_NAME);
-            if (retryError) throw retryError;
-        } else {
-            throw error;
+            if (bulkErr && !isMissingColumnError(bulkErr)) {
+                console.warn('No se pudieron remapar columnas al trasladar:', bulkErr.message);
+            }
         }
+        await setTransferPendingReview(id, true);
     }
 
     await supabase.from('candidate_history').insert({
@@ -143,7 +174,9 @@ async function duplicateOneCandidate(
         targetColumns
     );
 
-    const patch: Record<string, unknown> = {};
+    const patch: Record<string, unknown> = {
+        transfer_pending_review: true,
+    };
     if (row.score_ia != null) patch.score_ia = row.score_ia;
     if (row.metadata_ia) patch.metadata_ia = row.metadata_ia;
     if (Object.keys(remapped).length > 0) {
@@ -156,13 +189,17 @@ async function duplicateOneCandidate(
             .update(patch)
             .eq('id', created.id)
             .eq('app_name', APP_NAME);
-        if (error && !(isMissingColumnError(error) && patch.bulk_column_values)) {
-            console.warn('No se pudieron copiar algunos campos al duplicar:', error.message);
-        } else if (error && patch.bulk_column_values) {
-            delete patch.bulk_column_values;
-            if (Object.keys(patch).length > 0) {
-                await supabase.from('candidates').update(patch).eq('id', created.id);
+        if (error && isMissingColumnError(error)) {
+            const fallback: Record<string, unknown> = {};
+            if (row.score_ia != null) fallback.score_ia = row.score_ia;
+            if (row.metadata_ia) fallback.metadata_ia = row.metadata_ia;
+            if (Object.keys(fallback).length > 0) {
+                await supabase.from('candidates').update(fallback).eq('id', created.id).eq('app_name', APP_NAME);
             }
+            await setTransferPendingReview(created.id, true);
+        } else if (error) {
+            console.warn('No se pudieron copiar algunos campos al duplicar:', error.message);
+            await setTransferPendingReview(created.id, true);
         }
     }
 
