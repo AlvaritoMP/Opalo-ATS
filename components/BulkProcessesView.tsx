@@ -5640,27 +5640,26 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
 
     return (
         <div className="min-h-0 flex-1 flex flex-col bg-white overflow-hidden">
-            <div className={`border-b bg-white shrink-0 bulk-process-header ${selectedProcess ? 'px-2 py-2 space-y-2' : 'p-4 space-y-4'}`}>
-                {!isEmbedded && !selectedProcess && (
-                <div className="flex items-center justify-between">
-                    <h1 className="text-2xl font-bold text-gray-900">Procesos Masivos</h1>
-                    <div className="flex items-center gap-4">
-                        <div className="text-sm text-gray-500">
-                            {bulkProcesses.length} procesos
+            {!isEmbedded && !selectedProcess ? (
+                <>
+                    <div className="border-b bg-white shrink-0 bulk-process-header p-4">
+                        <div className="flex items-center justify-between">
+                            <h1 className="text-2xl font-bold text-gray-900">Procesos Masivos</h1>
+                            <div className="flex items-center gap-4">
+                                <div className="text-sm text-gray-500">
+                                    {bulkProcesses.length} procesos
+                                </div>
+                                <button
+                                    onClick={handleCreateProcess}
+                                    className="flex items-center gap-2 px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors"
+                                >
+                                    <Plus className="w-4 h-4" />
+                                    Nuevo Proceso Masivo
+                                </button>
+                            </div>
                         </div>
-                        <button
-                            onClick={handleCreateProcess}
-                            className="flex items-center gap-2 px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors"
-                        >
-                            <Plus className="w-4 h-4" />
-                            Nuevo Proceso Masivo
-                        </button>
                     </div>
-                </div>
-                )}
-
-                {!isEmbedded && !selectedProcess ? (
-                    <div className="space-y-2">
+                    <div className="flex-1 min-h-0 overflow-y-auto p-4">
                         {isLoadingProcesses ? (
                             <div className="flex items-center justify-center py-12">
                                 <Loader2 className="w-6 h-6 animate-spin text-primary-600" />
@@ -5695,8 +5694,10 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                             </div>
                         )}
                     </div>
-                ) : (
-                    <>
+                </>
+            ) : (
+                <>
+            <div className="border-b bg-white shrink-0 bulk-process-header px-2 py-2 space-y-2">
                         <div className="flex flex-col gap-1.5 w-full min-w-0">
                             <div className="flex items-center gap-2 min-w-0 flex-wrap">
                                 <button
@@ -6224,8 +6225,6 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                                     </div>
                                 </div>
                             </div>
-                    </>
-                )}
             </div>
 
             {selectedProcess && (
@@ -7375,6 +7374,8 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                     </>
                     )}
                 </div>
+            )}
+                </>
             )}
 
             <BulkActionsFAB
