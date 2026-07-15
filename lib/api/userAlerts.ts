@@ -98,57 +98,165 @@ function rowToChannelRecord(row: AlertCandidateRow): Record<string, unknown> {
 
 export { rowToChannelRecord };
 
-// PostgREST limita cada consulta a 1000 filas; sin paginar, los candidatos más
-// recientes pueden quedar fuera y las alertas se calculan sobre datos parciales.
-const ALERT_PAGE_SIZE = 1000;
+/**
+ * Tope de filas por proceso y por tipo de alerta. Las alertas son un aviso,
+ * no un listado exhaustivo: 50 candidatos bastan para el conteo y los nombres.
+ */
+const ALERT_ROW_LIMIT = 50;
 
-async function fetchAllPages(select: string, processIds: string[]): Promise<Record<string, unknown>[]> {
-    const all: Record<string, unknown>[] = [];
-    for (let page = 0; ; page++) {
-        const from = page * ALERT_PAGE_SIZE;
-        const { data, error } = await supabase
-            .from('candidates')
-            .select(select)
-            .eq('app_name', APP_NAME)
-            .eq('archived', false)
-            .in('process_id', processIds)
-            .order('created_at', { ascending: false })
-            .range(from, from + ALERT_PAGE_SIZE - 1);
+const ALERT_SELECT_FALLBACK =
+    'id, name, process_id, stage_id, created_at, contact_status, contact_attempt_count, contact_last_attempt_at, contact_last_user_id, contact_lock_user_id, contact_lock_until, contact_lock_reason, created_by, registration_origin';
 
-        if (error) throw error;
-        const rows = (data || []) as Record<string, unknown>[];
-        all.push(...rows);
-        if (rows.length < ALERT_PAGE_SIZE) break;
+/** Valor seguro para usar dentro de un filtro .or() de PostgREST. */
+function quoteOrValue(value: string): string {
+    return `"${value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
+}
+
+type AlertQuery = ReturnType<ReturnType<typeof supabase.from>['select']>;
+
+async function runCapped(query: AlertQuery): Promise<Record<string, unknown>[]> {
+    const { data, error } = await query
+        .order('created_at', { ascending: false })
+        .limit(ALERT_ROW_LIMIT);
+    if (error) throw error;
+    return (data || []) as Record<string, unknown>[];
+}
+
+function baseQuery(select: string, processId: string): AlertQuery {
+    return supabase
+        .from('candidates')
+        .select(select)
+        .eq('app_name', APP_NAME)
+        .eq('archived', false)
+        .eq('process_id', processId) as AlertQuery;
+}
+
+/**
+ * Candidatos sin ningún intento de contacto global. Es un superconjunto de lo
+ * que valida `neverContactedByAnyone` en el cliente, que aplica el filtro fino
+ * por canal sobre estas filas.
+ */
+function fetchUncontacted(select: string, processId: string): Promise<Record<string, unknown>[]> {
+    return runCapped(
+        baseQuery(select, processId)
+            .or('contact_attempt_count.is.null,contact_attempt_count.eq.0')
+            .is('contact_last_attempt_at', null) as AlertQuery
+    );
+}
+
+/**
+ * Candidatos vinculados al usuario (creados por él, con su bloqueo o con su
+ * último intento). Superconjunto de `isUnderUserManagement`.
+ */
+function fetchUnderMyManagement(
+    select: string,
+    processId: string,
+    userId: string,
+    userName: string,
+    includeChannelNameColumns: boolean
+): Promise<Record<string, unknown>[]> {
+    const conditions = [
+        `created_by.eq.${userId}`,
+        `contact_lock_user_id.eq.${userId}`,
+        `contact_last_user_id.eq.${userId}`,
+    ];
+    const name = userName.trim();
+    if (name && includeChannelNameColumns) {
+        const quoted = quoteOrValue(name);
+        conditions.push(
+            `contact_last_user_name.ilike.${quoted}`,
+            `contact_phone_last_user_name.ilike.${quoted}`,
+            `contact_whatsapp_last_user_name.ilike.${quoted}`,
+            `contact_email_last_user_name.ilike.${quoted}`
+        );
     }
-    return all;
+    return runCapped(baseQuery(select, processId).or(conditions.join(',')) as AlertQuery);
+}
+
+async function fetchBulkRows(
+    select: string,
+    processIds: string[],
+    userId: string,
+    userName: string,
+    includeChannelNameColumns: boolean
+): Promise<AlertCandidateRow[]> {
+    const perProcess = await Promise.all(
+        processIds.map(async processId => {
+            const [uncontacted, mine] = await Promise.all([
+                fetchUncontacted(select, processId),
+                fetchUnderMyManagement(select, processId, userId, userName, includeChannelNameColumns),
+            ]);
+            return [...uncontacted, ...mine];
+        })
+    );
+
+    const byId = new Map<string, Record<string, unknown>>();
+    for (const row of perProcess.flat()) {
+        byId.set(row.id as string, row);
+    }
+    return Array.from(byId.values()).map(mapRow);
 }
 
 export const userAlertsApi = {
-    async fetchBulkCandidates(processIds: string[]): Promise<AlertCandidateRow[]> {
+    async fetchBulkCandidates(
+        processIds: string[],
+        userId: string,
+        userName: string
+    ): Promise<AlertCandidateRow[]> {
         if (processIds.length === 0) return [];
 
         try {
-            const data = await fetchAllPages(ALERT_SELECT, processIds);
-            return data.map(mapRow);
+            return await fetchBulkRows(ALERT_SELECT, processIds, userId, userName, true);
         } catch (error) {
             if (isMissingColumnError(error as { message?: string; code?: string })) {
-                const fallback = await fetchAllPages(
-                    'id, name, process_id, stage_id, created_at, contact_status, contact_attempt_count, contact_last_attempt_at, contact_last_user_id, contact_lock_user_id, contact_lock_until, contact_lock_reason, created_by, registration_origin',
-                    processIds
-                );
-                return fallback.map(mapRow);
+                return fetchBulkRows(ALERT_SELECT_FALLBACK, processIds, userId, userName, false);
             }
             throw error;
         }
     },
 
-    async fetchStandardCandidates(processIds: string[]): Promise<AlertCandidateRow[]> {
+    async fetchStandardCandidates(processIds: string[], userId: string): Promise<AlertCandidateRow[]> {
         if (processIds.length === 0) return [];
 
-        const data = await fetchAllPages(
-            'id, name, process_id, stage_id, created_at, created_by',
-            processIds
+        const perProcess = await Promise.all(
+            processIds.map(processId =>
+                runCapped(
+                    baseQuery(
+                        'id, name, process_id, stage_id, created_at, created_by',
+                        processId
+                    ).eq('created_by', userId) as AlertQuery
+                )
+            )
         );
-        return data.map(mapRow);
+        return perProcess.flat().map(mapRow);
+    },
+
+    /**
+     * Fecha de registro del último candidato de cada proceso.
+     * Una consulta mínima por proceso (1 fila) en lugar de traer candidatos completos.
+     */
+    async fetchLatestCandidateCreatedAt(processIds: string[]): Promise<Map<string, number>> {
+        const result = new Map<string, number>();
+        if (processIds.length === 0) return result;
+
+        await Promise.all(
+            processIds.map(async processId => {
+                const { data, error } = await supabase
+                    .from('candidates')
+                    .select('created_at')
+                    .eq('app_name', APP_NAME)
+                    .eq('process_id', processId)
+                    .order('created_at', { ascending: false })
+                    .limit(1);
+
+                if (error) throw error;
+                const createdAt = data?.[0]?.created_at as string | undefined;
+                if (!createdAt) return;
+                const ms = new Date(createdAt).getTime();
+                if (Number.isFinite(ms) && ms > 0) result.set(processId, ms);
+            })
+        );
+
+        return result;
     },
 };

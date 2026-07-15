@@ -75,6 +75,7 @@ export function computeUserAlerts(
     bulkRows: AlertCandidateRow[],
     standardRows: AlertCandidateRow[],
     user: User,
+    latestBulkCreatedAt?: Map<string, number>,
     nowMs = Date.now()
 ): UserAlert[] {
     const alerts: UserAlert[] = [];
@@ -163,10 +164,19 @@ export function computeUserAlerts(
             );
         }
 
-        const latestCreated = rows.reduce((max, row) => {
-            const t = row.createdAt ? new Date(row.createdAt).getTime() : 0;
-            return Math.max(max, Number.isFinite(t) ? t : 0);
-        }, 0);
+    }
+
+    // Aviso "sin candidatos nuevos": se basa en la fecha del último registro real de cada
+    // proceso (consulta dedicada), no en las filas cargadas para las alertas de contacto.
+    for (const process of visibleProcesses) {
+        if (!process.isBulkProcess) continue;
+
+        const latestCreated = latestBulkCreatedAt
+            ? latestBulkCreatedAt.get(process.id) ?? 0
+            : (bulkByProcess.get(process.id) || []).reduce((max, row) => {
+                  const t = row.createdAt ? new Date(row.createdAt).getTime() : 0;
+                  return Math.max(max, Number.isFinite(t) ? t : 0);
+              }, 0);
 
         if (latestCreated > 0 && nowMs - latestCreated >= ONE_HOUR_MS) {
             const hours = Math.floor((nowMs - latestCreated) / ONE_HOUR_MS);

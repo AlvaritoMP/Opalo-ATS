@@ -82,12 +82,19 @@ export const UserAlertsPanel: React.FC<UserAlertsPanelProps> = ({
             const bulkProcessIds = visible.filter(p => p.isBulkProcess).map(p => p.id);
             const standardProcessIds = visible.filter(p => !p.isBulkProcess).map(p => p.id);
 
-            const [bulkRows, standardRows] = await Promise.all([
-                userAlertsApi.fetchBulkCandidates(bulkProcessIds),
-                userAlertsApi.fetchStandardCandidates(standardProcessIds),
+            const [bulkRows, standardRows, latestBulkCreatedAt] = await Promise.all([
+                userAlertsApi.fetchBulkCandidates(bulkProcessIds, currentUser.id, currentUser.name),
+                userAlertsApi.fetchStandardCandidates(standardProcessIds, currentUser.id),
+                userAlertsApi.fetchLatestCandidateCreatedAt(bulkProcessIds),
             ]);
 
-            const computed = computeUserAlerts(processes, bulkRows, standardRows, currentUser);
+            const computed = computeUserAlerts(
+                processes,
+                bulkRows,
+                standardRows,
+                currentUser,
+                latestBulkCreatedAt
+            );
             setAlerts(computed);
             return computed;
         } catch (err) {
