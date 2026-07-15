@@ -98,46 +98,57 @@ function rowToChannelRecord(row: AlertCandidateRow): Record<string, unknown> {
 
 export { rowToChannelRecord };
 
+// PostgREST limita cada consulta a 1000 filas; sin paginar, los candidatos más
+// recientes pueden quedar fuera y las alertas se calculan sobre datos parciales.
+const ALERT_PAGE_SIZE = 1000;
+
+async function fetchAllPages(select: string, processIds: string[]): Promise<Record<string, unknown>[]> {
+    const all: Record<string, unknown>[] = [];
+    for (let page = 0; ; page++) {
+        const from = page * ALERT_PAGE_SIZE;
+        const { data, error } = await supabase
+            .from('candidates')
+            .select(select)
+            .eq('app_name', APP_NAME)
+            .eq('archived', false)
+            .in('process_id', processIds)
+            .order('created_at', { ascending: false })
+            .range(from, from + ALERT_PAGE_SIZE - 1);
+
+        if (error) throw error;
+        const rows = (data || []) as Record<string, unknown>[];
+        all.push(...rows);
+        if (rows.length < ALERT_PAGE_SIZE) break;
+    }
+    return all;
+}
+
 export const userAlertsApi = {
     async fetchBulkCandidates(processIds: string[]): Promise<AlertCandidateRow[]> {
         if (processIds.length === 0) return [];
 
-        const { data, error } = await supabase
-            .from('candidates')
-            .select(ALERT_SELECT)
-            .eq('app_name', APP_NAME)
-            .eq('archived', false)
-            .in('process_id', processIds);
-
-        if (error) {
-            if (isMissingColumnError(error)) {
-                const { data: fallback, error: fallbackError } = await supabase
-                    .from('candidates')
-                    .select(
-                        'id, name, process_id, stage_id, created_at, contact_status, contact_attempt_count, contact_last_attempt_at, contact_last_user_id, contact_lock_user_id, contact_lock_until, contact_lock_reason, created_by, registration_origin'
-                    )
-                    .eq('app_name', APP_NAME)
-                    .eq('archived', false)
-                    .in('process_id', processIds);
-                if (fallbackError) throw fallbackError;
-                return (fallback || []).map(mapRow);
+        try {
+            const data = await fetchAllPages(ALERT_SELECT, processIds);
+            return data.map(mapRow);
+        } catch (error) {
+            if (isMissingColumnError(error as { message?: string; code?: string })) {
+                const fallback = await fetchAllPages(
+                    'id, name, process_id, stage_id, created_at, contact_status, contact_attempt_count, contact_last_attempt_at, contact_last_user_id, contact_lock_user_id, contact_lock_until, contact_lock_reason, created_by, registration_origin',
+                    processIds
+                );
+                return fallback.map(mapRow);
             }
             throw error;
         }
-        return (data || []).map(mapRow);
     },
 
     async fetchStandardCandidates(processIds: string[]): Promise<AlertCandidateRow[]> {
         if (processIds.length === 0) return [];
 
-        const { data, error } = await supabase
-            .from('candidates')
-            .select('id, name, process_id, stage_id, created_at, created_by')
-            .eq('app_name', APP_NAME)
-            .eq('archived', false)
-            .in('process_id', processIds);
-
-        if (error) throw error;
-        return (data || []).map(mapRow);
+        const data = await fetchAllPages(
+            'id, name, process_id, stage_id, created_at, created_by',
+            processIds
+        );
+        return data.map(mapRow);
     },
 };
