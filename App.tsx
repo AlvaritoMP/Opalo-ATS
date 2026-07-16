@@ -29,6 +29,7 @@ import {
 } from './lib/dashboardFilters';
 import { fetchDashboardData, type DashboardDataCache } from './lib/dashboardDataLoader';
 import { Dashboard } from './components/Dashboard';
+import { IntelligenceView } from './components/IntelligenceView';
 import { ProcessList } from './components/ProcessList';
 import { ProcessView } from './components/ProcessView';
 import { ReportsView } from './components/ReportsView';
@@ -46,7 +47,7 @@ import { Letters } from './components/Letters';
 import { ToastContainer } from './components/Toast';
 import { MessagingBar } from './components/MessagingBar';
 import { UserAlertsPanel } from './components/UserAlertsPanel';
-import { LayoutDashboard, Briefcase, FileText, Settings as SettingsIcon, Users as UsersIcon, ChevronsLeft, ChevronsRight, BarChart2, Calendar, LogOut, X, Archive, RefreshCw, Menu, Grid3x3, Send } from 'lucide-react';
+import { LayoutDashboard, Briefcase, FileText, Settings as SettingsIcon, Users as UsersIcon, ChevronsLeft, ChevronsRight, BarChart2, Calendar, LogOut, X, Archive, RefreshCw, Menu, Grid3x3, Send, Brain } from 'lucide-react';
 import { CandidateComparator } from './components/CandidateComparator';
 
 
@@ -280,18 +281,26 @@ const LoginPage: React.FC = () => {
 // --- Sidebar Components (defined in App.tsx to avoid creating new files) ---
 
 // Helper para obtener las secciones visibles de un usuario
+// Helper para obtener las secciones visibles de un usuario
 const getVisibleSections = (user: User | null): Section[] => {
     if (!user) return [];
+    let sections: Section[];
     if (user.visibleSections && user.visibleSections.length > 0) {
-        return user.visibleSections;
+        sections = [...user.visibleSections];
+    } else {
+        const defaultSections: Record<UserRole, Section[]> = {
+            admin: ['dashboard', 'intelligence', 'processes', 'archived', 'candidates', 'forms', 'letters', 'calendar', 'reports', 'compare', 'bulk-processes', 'opsflow-handoffs', 'users', 'settings'],
+            recruiter: ['dashboard', 'processes', 'archived', 'candidates', 'forms', 'letters', 'calendar', 'reports', 'compare', 'bulk-processes', 'opsflow-handoffs'],
+            client: ['dashboard', 'processes', 'candidates', 'calendar', 'reports', 'compare'],
+            viewer: ['dashboard', 'processes', 'candidates', 'calendar', 'reports']
+        };
+        sections = defaultSections[user.role] || [];
     }
-    const defaultSections: Record<UserRole, Section[]> = {
-        admin: ['dashboard', 'processes', 'archived', 'candidates', 'forms', 'letters', 'calendar', 'reports', 'compare', 'bulk-processes', 'opsflow-handoffs', 'users', 'settings'],
-        recruiter: ['dashboard', 'processes', 'archived', 'candidates', 'forms', 'letters', 'calendar', 'reports', 'compare', 'bulk-processes', 'opsflow-handoffs'],
-        client: ['dashboard', 'processes', 'candidates', 'calendar', 'reports', 'compare'],
-        viewer: ['dashboard', 'processes', 'candidates', 'calendar', 'reports']
-    };
-    return defaultSections[user.role] || [];
+    // Admin siempre tiene Inteligencia (supervisión ejecutiva), aunque su lista guardada sea anterior
+    if (user.role === 'admin' && !sections.includes('intelligence')) {
+        sections = [...sections, 'intelligence'];
+    }
+    return sections;
 };
 
 const NavItem: React.FC<{
@@ -379,6 +388,7 @@ const Sidebar: React.FC = () => {
                 </div>
             <nav className="flex-1 p-4 space-y-2 overflow-y-auto">
                 {canSeeSection('dashboard') && <NavItem icon={LayoutDashboard} label={getLabel('sidebar_dashboard', 'Panel')} view="dashboard" currentView={state.view.type} setView={actions.setView} isCollapsed={isCollapsed} />}
+                {canSeeSection('intelligence') && <NavItem icon={Brain} label={getLabel('sidebar_intelligence', 'Inteligencia')} view="intelligence" currentView={state.view.type} setView={actions.setView} isCollapsed={isCollapsed} />}
                 {canSeeSection('processes') && <NavItem icon={Briefcase} label={getLabel('sidebar_processes', 'Procesos')} view="processes" currentView={state.view.type} setView={actions.setView} isCollapsed={isCollapsed} />}
                 {canSeeSection('bulk-processes') && <NavItem icon={Grid3x3} label={getLabel('sidebar_bulk_processes', 'Procesos Masivos')} view="bulk-processes" currentView={state.view.type} setView={actions.setView} isCollapsed={isCollapsed} />}
                 {canSeeSection('archived') && <NavItem icon={Archive} label={getLabel('sidebar_archived', 'Archivados')} view="archived" currentView={state.view.type} setView={actions.setView} isCollapsed={isCollapsed} />}
@@ -2016,6 +2026,7 @@ const App: React.FC = () => {
             const visibleSections = getVisibleSections(state.currentUser);
             const viewSectionMap: Record<string, Section> = {
                 'dashboard': 'dashboard',
+                'intelligence': 'intelligence',
                 'processes': 'processes',
                 'process-view': 'processes',
                 'archived': 'archived',
@@ -2042,6 +2053,7 @@ const App: React.FC = () => {
         
         switch (state.view.type) {
             case 'dashboard': return <Dashboard />;
+            case 'intelligence': return <IntelligenceView />;
             case 'processes': return <ProcessList />;
             case 'process-view': 
                 if (!state.view.payload) {

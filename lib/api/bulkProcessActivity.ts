@@ -156,4 +156,25 @@ export const bulkProcessActivityApi = {
         }
         return all;
     },
+
+    /** Traslados entre procesos (para Inteligencia / métricas de cartera). */
+    async getTransfersForProcesses(processIds: string[], limitPerProcess = 2000): Promise<BulkProcessActivityEntry[]> {
+        if (processIds.length === 0) return [];
+
+        const all: BulkProcessActivityEntry[] = [];
+        for (const processId of processIds) {
+            const { data, error } = await supabase
+                .from('bulk_process_activity_log')
+                .select('*')
+                .eq('process_id', processId)
+                .eq('app_name', APP_NAME)
+                .eq('action_type', 'candidate_transfer')
+                .order('created_at', { ascending: false })
+                .limit(limitPerProcess);
+
+            if (error) throw error;
+            all.push(...(data || []).map(mapRow));
+        }
+        return all;
+    },
 };

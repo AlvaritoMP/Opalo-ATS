@@ -3,7 +3,7 @@ import { isProcessActive } from './processStatus';
 
 const DEFAULT_SECTIONS: Record<UserRole, Section[]> = {
     admin: [
-        'dashboard', 'processes', 'archived', 'candidates', 'forms', 'letters',
+        'dashboard', 'intelligence', 'processes', 'archived', 'candidates', 'forms', 'letters',
         'calendar', 'reports', 'compare', 'bulk-processes', 'opsflow-handoffs', 'users', 'settings',
     ],
     recruiter: [
@@ -16,10 +16,16 @@ const DEFAULT_SECTIONS: Record<UserRole, Section[]> = {
 
 export function getVisibleSectionsForUser(user: User | null): Section[] {
     if (!user) return [];
+    let sections: Section[];
     if (user.visibleSections && user.visibleSections.length > 0) {
-        return user.visibleSections;
+        sections = [...user.visibleSections];
+    } else {
+        sections = DEFAULT_SECTIONS[user.role] || [];
     }
-    return DEFAULT_SECTIONS[user.role] || [];
+    if (user.role === 'admin' && !sections.includes('intelligence')) {
+        sections = [...sections, 'intelligence'];
+    }
+    return sections;
 }
 
 /** Procesos activos que el usuario puede ver según clientes y secciones del menú. */
