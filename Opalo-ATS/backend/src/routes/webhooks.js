@@ -22,17 +22,26 @@ router.post('/test', (req, res) => {
     res.json({ message: 'Webhook router POST funciona', body: req.body, timestamp: new Date().toISOString() });
 });
 
-// Inicializar cliente de Supabase con service key para bypass RLS
-console.log('🔵 Inicializando cliente Supabase...');
+// Cliente Supabase (inicialización perezosa para permitir arrancar sin credenciales)
 console.log('🔵 SUPABASE_URL:', process.env.SUPABASE_URL ? '✅ Configurado' : '❌ NO configurado');
 console.log('🔵 SUPABASE_SERVICE_KEY:', process.env.SUPABASE_SERVICE_KEY ? '✅ Configurado' : '❌ NO configurado');
 
-const supabase = createClient(
-    process.env.SUPABASE_URL,
-    process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_ANON_KEY
-);
+let supabaseClient = null;
 
-console.log('🔵 Cliente Supabase inicializado');
+function getSupabase() {
+    if (supabaseClient) return supabaseClient;
+
+    const url = process.env.SUPABASE_URL;
+    const key = process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_ANON_KEY;
+
+    if (!url || !key) {
+        throw new Error('Supabase no configurado. Agrega SUPABASE_URL y SUPABASE_SERVICE_KEY en Opalo-ATS/backend/.env');
+    }
+
+    supabaseClient = createClient(url, key);
+    console.log('🔵 Cliente Supabase inicializado');
+    return supabaseClient;
+}
 
 // Endpoint para recibir webhooks de Tally
 router.post('/tally/:webhookId', async (req, res) => {
