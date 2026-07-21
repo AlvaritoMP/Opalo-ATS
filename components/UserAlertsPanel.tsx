@@ -9,7 +9,6 @@ import {
     Megaphone,
     Unlock,
     ChevronRight,
-    CheckCircle2,
 } from 'lucide-react';
 import type { Process, User, UserAlert } from '../types';
 import { userAlertsApi } from '../lib/api/userAlerts';
@@ -140,14 +139,9 @@ export const UserAlertsPanel: React.FC<UserAlertsPanelProps> = ({
         const style = SEVERITY_STYLES[alert.severity];
         const TypeIcon = TYPE_ICONS[alert.type];
         const Icon = style.icon;
-        const isPending = isAlertPending(alert, acks);
 
         return (
-            <div
-                className={`rounded-lg border p-3 mb-3 ${style.border} ${style.bg} ${
-                    isPending ? '' : 'opacity-60'
-                }`}
-            >
+            <div className={`rounded-lg border p-3 mb-3 ${style.border} ${style.bg}`}>
                 <div className="flex items-start gap-2.5">
                     <div className={`mt-0.5 ${style.iconClass}`}>
                         <TypeIcon className="w-4 h-4" />
@@ -182,19 +176,12 @@ export const UserAlertsPanel: React.FC<UserAlertsPanelProps> = ({
                                     Ir al proceso <ChevronRight className="w-3 h-3" />
                                 </button>
                             )}
-                            {isPending ? (
-                                <button
-                                    onClick={() => acknowledgeAlert(alert)}
-                                    className="text-xs px-3 py-1.5 rounded-lg bg-primary-600 text-white hover:bg-primary-700 font-medium"
-                                >
-                                    Confirmar lectura
-                                </button>
-                            ) : (
-                                <span className="text-xs text-green-700 flex items-center gap-1 font-medium">
-                                    <CheckCircle2 className="w-3.5 h-3.5" />
-                                    Leído
-                                </span>
-                            )}
+                            <button
+                                onClick={() => acknowledgeAlert(alert)}
+                                className="text-xs px-3 py-1.5 rounded-lg bg-primary-600 text-white hover:bg-primary-700 font-medium"
+                            >
+                                Confirmar lectura
+                            </button>
                         </div>
                     </div>
                     <Icon className={`w-4 h-4 shrink-0 ${style.iconClass}`} />
@@ -239,12 +226,12 @@ export const UserAlertsPanel: React.FC<UserAlertsPanelProps> = ({
                                 )}
                             </div>
                             <div className="flex-1 overflow-y-auto px-5 py-4">
-                                {alerts.length === 0 ? (
+                                {pendingAlerts.length === 0 ? (
                                     <p className="text-sm text-gray-500 text-center py-8">
                                         Sin avisos pendientes
                                     </p>
                                 ) : (
-                                    alerts.map(alert => (
+                                    pendingAlerts.map(alert => (
                                         <AlertCard key={alert.id} alert={alert} />
                                     ))
                                 )}
@@ -252,7 +239,7 @@ export const UserAlertsPanel: React.FC<UserAlertsPanelProps> = ({
                             <div className="px-5 py-3 border-t border-gray-100 flex justify-end">
                                 <button
                                     onClick={() => setShowModal(false)}
-                                    disabled={!allPendingRead && alerts.length > 0}
+                                    disabled={!allPendingRead}
                                     className="px-4 py-2 bg-primary-600 text-white text-sm font-medium rounded-lg hover:bg-primary-700 disabled:opacity-40 disabled:cursor-not-allowed"
                                 >
                                     {allPendingRead ? 'Cerrar' : 'Confirma todos los avisos'}
