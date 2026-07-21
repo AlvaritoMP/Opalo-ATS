@@ -11,17 +11,19 @@ const CANDIDATE_PAGE_SIZE = 250;
 const CANDIDATE_MAX_ROWS = 2000;
 
 const CANDIDATE_LIST_SELECT_CORE =
-    'id, name, email, phone, phone2, process_id, stage_id, description, avatar_url, source, salary_expectation, agreed_salary, agreed_salary_in_words, age, dni, linkedin_url, address, province, district, archived, archived_at, discarded, discard_reason, discarded_at, hire_date, google_drive_folder_id, google_drive_folder_name, visible_to_clients, offer_accepted_date, application_started_date, application_completed_date, critical_stage_reviewed_at, created_at';
+    'id, name, email, phone, phone2, process_id, stage_id, description, avatar_url, source, salary_expectation, agreed_salary, agreed_salary_in_words, age, dni, linkedin_url, address, province, district, archived, archived_at, discarded, discard_reason, discarded_at, hire_date, google_drive_folder_id, google_drive_folder_name, visible_to_clients, offer_accepted_date, application_started_date, application_completed_date, critical_stage_reviewed_at, created_at, score_ia, metadata_ia';
 
-const CANDIDATE_LIST_SELECT = `${CANDIDATE_LIST_SELECT_CORE}, application_count, first_application_at`;
+const CANDIDATE_LIST_SELECT = `${CANDIDATE_LIST_SELECT_CORE}, application_count, first_application_at, registration_origin`;
 
 /** Variantes de select (de más completa a mínima) si faltan migraciones en Supabase */
 function getCandidateListSelectVariants(): string[] {
     return [
+        `${CANDIDATE_LIST_SELECT}, bulk_column_values, psycholaboral_evaluation`,
         `${CANDIDATE_LIST_SELECT}, bulk_column_values`,
         CANDIDATE_LIST_SELECT,
         `${CANDIDATE_LIST_SELECT_CORE}, bulk_column_values`,
         CANDIDATE_LIST_SELECT_CORE,
+        'id, name, email, phone, phone2, process_id, stage_id, description, avatar_url, source, salary_expectation, agreed_salary, agreed_salary_in_words, age, dni, linkedin_url, address, province, district, archived, archived_at, discarded, discard_reason, discarded_at, hire_date, google_drive_folder_id, google_drive_folder_name, visible_to_clients, offer_accepted_date, application_started_date, application_completed_date, critical_stage_reviewed_at, created_at',
     ];
 }
 
@@ -220,6 +222,9 @@ function mapListCandidate(dbCandidate: any, extras: Partial<Candidate> = {}): Ca
         contactLockUntil: dbCandidate.contact_lock_until || undefined,
         contactLockReason: dbCandidate.contact_lock_reason || undefined,
         createdAt: dbCandidate.created_at || undefined,
+        scoreIa: dbCandidate.score_ia != null ? Number(dbCandidate.score_ia) : undefined,
+        metadataIa: dbCandidate.metadata_ia || undefined,
+        psycholaboralEvaluation: dbCandidate.psycholaboral_evaluation || undefined,
         bulkColumnValues: mapBulkColumnValues(dbCandidate),
         ...extras,
     };
@@ -354,6 +359,9 @@ async function dbToCandidate(dbCandidate: any): Promise<Candidate> {
         contactLockUntil: dbCandidate.contact_lock_until || undefined,
         contactLockReason: dbCandidate.contact_lock_reason || undefined,
         createdAt: dbCandidate.created_at || undefined,
+        scoreIa: dbCandidate.score_ia != null ? Number(dbCandidate.score_ia) : undefined,
+        metadataIa: dbCandidate.metadata_ia || undefined,
+        psycholaboralEvaluation: dbCandidate.psycholaboral_evaluation || undefined,
         bulkColumnValues: mapBulkColumnValues(dbCandidate),
     };
 }
@@ -676,18 +684,36 @@ export const candidatesApi = {
     // Obtener un candidato por ID (con todas las relaciones - para vista de detalle)
     // OPTIMIZADO EGRESS: Selecciona solo campos necesarios
     async getById(id: string): Promise<Candidate | null> {
-        const { data, error } = await supabase
-            .from('candidates')
-            .select('id, name, email, phone, phone2, process_id, stage_id, description, avatar_url, source, salary_expectation, agreed_salary, agreed_salary_in_words, age, dni, linkedin_url, address, province, district, archived, archived_at, discarded, discard_reason, discarded_at, hire_date, google_drive_folder_id, google_drive_folder_name, visible_to_clients, offer_accepted_date, application_started_date, application_completed_date, critical_stage_reviewed_at, created_at')
-            .eq('id', id)
-            .eq('app_name', APP_NAME) // Filtrar solo candidatos de esta app
-            .single();
-        
-        if (error) {
-            if (error.code === 'PGRST116') return null;
-            throw error;
+        const selectVariants = [
+            'id, name, email, phone, phone2, process_id, stage_id, description, avatar_url, source, salary_expectation, agreed_salary, agreed_salary_in_words, age, dni, linkedin_url, address, province, district, archived, archived_at, discarded, discard_reason, discarded_at, hire_date, google_drive_folder_id, google_drive_folder_name, visible_to_clients, offer_accepted_date, application_started_date, application_completed_date, critical_stage_reviewed_at, created_at, application_count, first_application_at, registration_origin, bulk_column_values, score_ia, metadata_ia, psycholaboral_evaluation',
+            'id, name, email, phone, phone2, process_id, stage_id, description, avatar_url, source, salary_expectation, agreed_salary, agreed_salary_in_words, age, dni, linkedin_url, address, province, district, archived, archived_at, discarded, discard_reason, discarded_at, hire_date, google_drive_folder_id, google_drive_folder_name, visible_to_clients, offer_accepted_date, application_started_date, application_completed_date, critical_stage_reviewed_at, created_at, bulk_column_values, score_ia, metadata_ia',
+            'id, name, email, phone, phone2, process_id, stage_id, description, avatar_url, source, salary_expectation, agreed_salary, agreed_salary_in_words, age, dni, linkedin_url, address, province, district, archived, archived_at, discarded, discard_reason, discarded_at, hire_date, google_drive_folder_id, google_drive_folder_name, visible_to_clients, offer_accepted_date, application_started_date, application_completed_date, critical_stage_reviewed_at, created_at, bulk_column_values',
+            'id, name, email, phone, phone2, process_id, stage_id, description, avatar_url, source, salary_expectation, agreed_salary, agreed_salary_in_words, age, dni, linkedin_url, address, province, district, archived, archived_at, discarded, discard_reason, discarded_at, hire_date, google_drive_folder_id, google_drive_folder_name, visible_to_clients, offer_accepted_date, application_started_date, application_completed_date, critical_stage_reviewed_at, created_at',
+        ];
+
+        let data: any = null;
+        let lastError: { code?: string; message?: string } | null = null;
+
+        for (const selectFields of selectVariants) {
+            const result = await supabase
+                .from('candidates')
+                .select(selectFields)
+                .eq('id', id)
+                .eq('app_name', APP_NAME)
+                .single();
+
+            if (!result.error) {
+                data = result.data;
+                lastError = null;
+                break;
+            }
+
+            lastError = result.error;
+            if (result.error.code === 'PGRST116') return null;
+            if (!isMissingColumnError(result.error)) throw result.error;
         }
 
+        if (lastError) throw lastError;
         return data ? await dbToCandidate(data) : null;
     },
 

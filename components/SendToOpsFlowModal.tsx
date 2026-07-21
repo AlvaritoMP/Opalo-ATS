@@ -1,15 +1,9 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { X, Send, Loader2, AlertTriangle, ChevronDown, ChevronUp } from 'lucide-react';
+import { X, Send, Loader2, AlertTriangle } from 'lucide-react';
 import { useAppState } from '../App';
+import { candidatesApi } from '../lib/api/candidates';
 import { workerHandoffApi } from '../lib/api/workerHandoff';
-import {
-    WORKER_HANDOFF_FIELD_GROUPS,
-    ALL_WORKER_HANDOFF_FIELD_KEYS,
-    countCandidatesWithFieldData,
-    loadSavedWorkerHandoffFieldKeys,
-    saveWorkerHandoffFieldKeys,
-    validateFieldSelection,
-} from '../lib/workerHandoffFields';
+import { countSendableFieldsForCandidate } from '../lib/workerHandoffFields';
 import type { Candidate } from '../types';
 
 interface SendToOpsFlowModalProps {
@@ -17,6 +11,21 @@ interface SendToOpsFlowModalProps {
     onClose: () => void;
     candidates: Candidate[];
     onSent?: () => void;
+}
+
+function mergeCandidateData(fromApi: Candidate, fromUi: Candidate): Candidate {
+    return {
+        ...fromApi,
+        bulkColumnValues: {
+            ...(fromApi.bulkColumnValues || {}),
+            ...(fromUi.bulkColumnValues || {}),
+        },
+        scoreIa: fromApi.scoreIa ?? fromUi.scoreIa,
+        metadataIa: fromApi.metadataIa ?? fromUi.metadataIa,
+        psycholaboralEvaluation: fromApi.psycholaboralEvaluation ?? fromUi.psycholaboralEvaluation,
+        attachments:
+            fromApi.attachments?.length ? fromApi.attachments : fromUi.attachments || fromApi.attachments,
+    };
 }
 
 export const SendToOpsFlowModal: React.FC<SendToOpsFlowModalProps> = ({
@@ -28,21 +37,21 @@ export const SendToOpsFlowModal: React.FC<SendToOpsFlowModalProps> = ({
     const { state, actions } = useAppState();
     const [senderNote, setSenderNote] = useState('');
     const [busy, setBusy] = useState(false);
+    const [loadingCandidates, setLoadingCandidates] = useState(false);
     const [checkingDuplicates, setCheckingDuplicates] = useState(false);
     const [activeDuplicateIds, setActiveDuplicateIds] = useState<Set<string>>(new Set());
     const [ignoreDuplicates, setIgnoreDuplicates] = useState(false);
-    const [selectedFields, setSelectedFields] = useState<Set<string>>(
-        () => new Set(loadSavedWorkerHandoffFieldKeys())
-    );
-    const [fieldsExpanded, setFieldsExpanded] = useState(true);
+    const [resolvedCandidates, setResolvedCandidates] = useState<Candidate[]>([]);
 
-    const uniqueCandidates = useMemo(() => {
+    const inputCandidates = useMemo(() => {
         const byId = new Map<string, Candidate>();
         for (const candidate of candidates) {
             if (!byId.has(candidate.id)) byId.set(candidate.id, candidate);
         }
         return [...byId.values()];
     }, [candidates]);
+
+    const uniqueCandidates = resolvedCandidates.length > 0 ? resolvedCandidates : inputCandidates;
 
     const processById = useMemo(
         () => new Map(state.processes.map(process => [process.id, process])),
@@ -54,76 +63,67 @@ export const SendToOpsFlowModal: React.FC<SendToOpsFlowModalProps> = ({
         [uniqueCandidates, activeDuplicateIds]
     );
 
-    const fieldSelectionError = useMemo(
-        () => validateFieldSelection(selectedFields),
-        [selectedFields]
-    );
+    const fieldsPreview = useMemo(() => {
+        if (uniqueCandidates.length === 0) {
+            return { min: 0, max: 0, avg: 0 };
+        }
+        const counts = uniqueCandidates.map(candidate =>
+            countSendableFieldsForCandidate(candidate, processById.get(candidate.processId))
+        );
+        const min = Math.min(...counts);
+        const max = Math.max(...counts);
+        const avg = Math.round(counts.reduce((sum, n) => sum + n, 0) / counts.length);
+        return { min, max, avg };
+    }, [uniqueCandidates, processById]);
 
     useEffect(() => {
         if (!isOpen) return;
         setSenderNote('');
         setIgnoreDuplicates(false);
         setActiveDuplicateIds(new Set());
-        setSelectedFields(new Set(loadSavedWorkerHandoffFieldKeys()));
-        setFieldsExpanded(true);
+        setResolvedCandidates([]);
 
-        if (uniqueCandidates.length === 0) return;
+        if (inputCandidates.length === 0) return;
 
         let cancelled = false;
+        setLoadingCandidates(true);
         setCheckingDuplicates(true);
-        workerHandoffApi
-            .getActiveCandidateIds(uniqueCandidates.map(candidate => candidate.id))
-            .then(ids => {
+
+        (async () => {
+            try {
+                const loaded = await Promise.all(
+                    inputCandidates.map(async fromUi => {
+                        try {
+                            const fromApi = await candidatesApi.getById(fromUi.id);
+                            return fromApi ? mergeCandidateData(fromApi, fromUi) : fromUi;
+                        } catch {
+                            return fromUi;
+                        }
+                    })
+                );
+                if (!cancelled) setResolvedCandidates(loaded);
+
+                const ids = await workerHandoffApi.getActiveCandidateIds(
+                    inputCandidates.map(candidate => candidate.id)
+                );
                 if (!cancelled) setActiveDuplicateIds(new Set(ids));
-            })
-            .catch(error => {
-                console.error('Error verificando envíos activos:', error);
-            })
-            .finally(() => {
-                if (!cancelled) setCheckingDuplicates(false);
-            });
+            } catch (error) {
+                console.error('Error preparando envío a OpsFlow:', error);
+                if (!cancelled) setResolvedCandidates(inputCandidates);
+            } finally {
+                if (!cancelled) {
+                    setLoadingCandidates(false);
+                    setCheckingDuplicates(false);
+                }
+            }
+        })();
 
         return () => {
             cancelled = true;
         };
-    }, [isOpen, uniqueCandidates]);
+    }, [isOpen, inputCandidates]);
 
     if (!isOpen) return null;
-
-    const toggleField = (key: string) => {
-        setSelectedFields(prev => {
-            const next = new Set(prev);
-            if (next.has(key)) {
-                if (key === 'fullName' && !next.has('dni')) return prev;
-                if (key === 'dni' && !next.has('fullName')) return prev;
-                next.delete(key);
-            } else {
-                next.add(key);
-            }
-            return next;
-        });
-    };
-
-    const selectAllFields = () => {
-        setSelectedFields(new Set(ALL_WORKER_HANDOFF_FIELD_KEYS));
-    };
-
-    const selectFieldsWithData = () => {
-        const withData = ALL_WORKER_HANDOFF_FIELD_KEYS.filter(
-            key => countCandidatesWithFieldData(key, uniqueCandidates, processById) > 0
-        );
-        const next = new Set(withData);
-        if (!next.has('fullName') && !next.has('dni')) {
-            if (countCandidatesWithFieldData('fullName', uniqueCandidates, processById) > 0) {
-                next.add('fullName');
-            } else if (countCandidatesWithFieldData('dni', uniqueCandidates, processById) > 0) {
-                next.add('dni');
-            } else {
-                next.add('fullName');
-            }
-        }
-        setSelectedFields(next);
-    };
 
     const handleSend = async () => {
         if (uniqueCandidates.length === 0) {
@@ -131,18 +131,10 @@ export const SendToOpsFlowModal: React.FC<SendToOpsFlowModalProps> = ({
             return;
         }
 
-        if (fieldSelectionError) {
-            actions.showToast(fieldSelectionError, 'error', 3500);
-            return;
-        }
-
         if (duplicateCandidates.length > 0 && !ignoreDuplicates) {
             actions.showToast('Confirma el envío a pesar de los envíos activos', 'error', 3500);
             return;
         }
-
-        const includedFields = [...selectedFields];
-        saveWorkerHandoffFieldKeys(includedFields);
 
         setBusy(true);
         try {
@@ -152,11 +144,10 @@ export const SendToOpsFlowModal: React.FC<SendToOpsFlowModalProps> = ({
                 senderNote: senderNote.trim() || undefined,
                 createdBy: state.currentUser?.id,
                 createdByName: state.currentUser?.name,
-                includedFields,
             });
 
             actions.showToast(
-                `Paquete enviado a OpsFlow (${uniqueCandidates.length} trabajador${uniqueCandidates.length === 1 ? '' : 'es'}, ${includedFields.length} campos)`,
+                `Paquete enviado a OpsFlow (${uniqueCandidates.length} trabajador${uniqueCandidates.length === 1 ? '' : 'es'}, todos los campos disponibles)`,
                 'success',
                 4000
             );
@@ -170,9 +161,11 @@ export const SendToOpsFlowModal: React.FC<SendToOpsFlowModalProps> = ({
         }
     };
 
+    const preparing = loadingCandidates || checkingDuplicates;
+
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
-            <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl max-h-[90vh] flex flex-col">
+            <div className="bg-white rounded-xl shadow-xl w-full max-w-lg max-h-[90vh] flex flex-col">
                 <div className="flex items-center justify-between p-4 border-b">
                     <div className="flex items-center gap-2">
                         <Send className="w-5 h-5 text-primary-600" />
@@ -191,158 +184,101 @@ export const SendToOpsFlowModal: React.FC<SendToOpsFlowModalProps> = ({
 
                 <div className="p-4 space-y-4 overflow-y-auto flex-1">
                     <p className="text-sm text-gray-600">
-                        Elige qué datos incluir en el paquete para{' '}
+                        Se enviarán{' '}
                         <span className="font-medium text-gray-900">{uniqueCandidates.length}</span>{' '}
-                        trabajador{uniqueCandidates.length === 1 ? '' : 'es'}. Solo se envían campos
-                        seleccionados que tengan valor en cada candidato.
+                        trabajador{uniqueCandidates.length === 1 ? '' : 'es'} con{' '}
+                        <span className="font-medium text-gray-900">todos los campos disponibles</span>{' '}
+                        (identidad, datos del candidato, proceso, evaluación y columnas del proceso
+                        masivo). OpsFlow decidirá cómo usarlos.
                     </p>
 
-                    <div className="border border-gray-200 rounded-lg max-h-32 overflow-y-auto">
-                        <ul className="divide-y divide-gray-100">
-                            {uniqueCandidates.map(candidate => (
-                                <li key={candidate.id} className="px-3 py-2 text-sm text-gray-800">
-                                    {candidate.name || candidate.dni || 'Sin nombre'}
-                                </li>
-                            ))}
-                        </ul>
-                    </div>
-
-                    <div className="border border-gray-200 rounded-lg">
-                        <button
-                            type="button"
-                            onClick={() => setFieldsExpanded(expanded => !expanded)}
-                            className="w-full flex items-center justify-between px-3 py-2 text-sm font-medium text-gray-900 hover:bg-gray-50 rounded-t-lg"
-                        >
-                            <span>
-                                Campos a enviar ({selectedFields.size}/{ALL_WORKER_HANDOFF_FIELD_KEYS.length})
-                            </span>
-                            {fieldsExpanded ? (
-                                <ChevronUp className="w-4 h-4 text-gray-500" />
-                            ) : (
-                                <ChevronDown className="w-4 h-4 text-gray-500" />
-                            )}
-                        </button>
-
-                        {fieldsExpanded && (
-                            <div className="px-3 pb-3 space-y-3 border-t border-gray-100">
-                                <div className="flex flex-wrap gap-2 pt-2">
-                                    <button
-                                        type="button"
-                                        onClick={selectAllFields}
-                                        className="text-xs px-2 py-1 rounded border border-gray-300 text-gray-700 hover:bg-gray-50"
-                                    >
-                                        Todos
-                                    </button>
-                                    <button
-                                        type="button"
-                                        onClick={selectFieldsWithData}
-                                        className="text-xs px-2 py-1 rounded border border-gray-300 text-gray-700 hover:bg-gray-50"
-                                    >
-                                        Solo con datos
-                                    </button>
-                                    <button
-                                        type="button"
-                                        onClick={() => setSelectedFields(new Set(['fullName', 'dni']))}
-                                        className="text-xs px-2 py-1 rounded border border-gray-300 text-gray-700 hover:bg-gray-50"
-                                    >
-                                        Mínimo (nombre/DNI)
-                                    </button>
-                                </div>
-
-                                {WORKER_HANDOFF_FIELD_GROUPS.map(group => (
-                                    <div key={group.id}>
-                                        <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">
-                                            {group.label}
-                                        </p>
-                                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-1">
-                                            {group.fields.map(field => {
-                                                const withData = countCandidatesWithFieldData(
-                                                    field.key,
-                                                    uniqueCandidates,
-                                                    processById
-                                                );
-                                                const checked = selectedFields.has(field.key);
-                                                const isRequiredIdentity =
-                                                    (field.key === 'fullName' && !selectedFields.has('dni')) ||
-                                                    (field.key === 'dni' && !selectedFields.has('fullName'));
-
-                                                return (
-                                                    <label
-                                                        key={field.key}
-                                                        className={`flex items-start gap-2 text-sm rounded px-2 py-1 cursor-pointer hover:bg-gray-50 ${
-                                                            withData === 0 ? 'text-gray-400' : 'text-gray-800'
-                                                        }`}
-                                                    >
-                                                        <input
-                                                            type="checkbox"
-                                                            checked={checked}
-                                                            disabled={checked && isRequiredIdentity}
-                                                            onChange={() => toggleField(field.key)}
-                                                            className="mt-0.5 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
-                                                        />
-                                                        <span className="flex-1 min-w-0">
-                                                            {field.label}
-                                                            <span className="ml-1 text-xs text-gray-500">
-                                                                ({withData}/{uniqueCandidates.length})
-                                                            </span>
-                                                        </span>
-                                                    </label>
-                                                );
-                                            })}
-                                        </div>
-                                    </div>
-                                ))}
-
-                                {fieldSelectionError && (
-                                    <p className="text-xs text-red-600">{fieldSelectionError}</p>
-                                )}
-                            </div>
-                        )}
-                    </div>
-
-                    {checkingDuplicates && (
-                        <p className="text-xs text-gray-500 flex items-center gap-2">
-                            <Loader2 className="w-3 h-3 animate-spin" />
-                            Verificando envíos activos…
+                    {preparing ? (
+                        <div className="flex items-center gap-2 text-sm text-gray-500">
+                            <Loader2 className="w-4 h-4 animate-spin" />
+                            Cargando datos completos de los candidatos…
+                        </div>
+                    ) : (
+                        <p className="text-xs text-gray-500">
+                            Campos con valor por trabajador:{' '}
+                            {fieldsPreview.min === fieldsPreview.max
+                                ? fieldsPreview.min
+                                : `${fieldsPreview.min}–${fieldsPreview.max}`}
+                            {uniqueCandidates.length > 1 ? ` (promedio ${fieldsPreview.avg})` : ''}.
                         </p>
                     )}
 
-                    {!checkingDuplicates && duplicateCandidates.length > 0 && (
-                        <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
-                            <div className="flex items-start gap-2">
-                                <AlertTriangle className="w-4 h-4 mt-0.5 flex-shrink-0" />
+                    <div className="border border-gray-200 rounded-lg max-h-40 overflow-y-auto">
+                        <ul className="divide-y divide-gray-100">
+                            {uniqueCandidates.map(candidate => {
+                                const fieldCount = preparing
+                                    ? null
+                                    : countSendableFieldsForCandidate(
+                                          candidate,
+                                          processById.get(candidate.processId)
+                                      );
+                                return (
+                                    <li
+                                        key={candidate.id}
+                                        className="px-3 py-2 text-sm text-gray-800 flex items-center justify-between gap-2"
+                                    >
+                                        <span className="truncate">
+                                            {candidate.name || candidate.dni || 'Sin nombre'}
+                                        </span>
+                                        {fieldCount != null && (
+                                            <span className="text-xs text-gray-500 whitespace-nowrap">
+                                                {fieldCount} campos
+                                            </span>
+                                        )}
+                                    </li>
+                                );
+                            })}
+                        </ul>
+                    </div>
+
+                    {!preparing && duplicateCandidates.length > 0 && (
+                        <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 space-y-2">
+                            <div className="flex items-start gap-2 text-sm text-amber-900">
+                                <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
                                 <div>
-                                    <p className="font-medium">Envíos activos detectados</p>
-                                    <ul className="mt-1 list-disc list-inside text-amber-800">
-                                        {duplicateCandidates.map(candidate => (
-                                            <li key={candidate.id}>{candidate.name}</li>
-                                        ))}
-                                    </ul>
-                                    <label className="mt-2 flex items-center gap-2 cursor-pointer">
-                                        <input
-                                            type="checkbox"
-                                            checked={ignoreDuplicates}
-                                            onChange={event => setIgnoreDuplicates(event.target.checked)}
-                                            className="rounded border-amber-400"
-                                        />
-                                        <span>Enviar de todos modos</span>
-                                    </label>
+                                    <p className="font-medium">
+                                        {duplicateCandidates.length} candidato
+                                        {duplicateCandidates.length === 1 ? '' : 's'} ya tiene envío
+                                        activo en OpsFlow
+                                    </p>
+                                    <p className="text-amber-800 mt-1">
+                                        {duplicateCandidates
+                                            .slice(0, 5)
+                                            .map(c => c.name || c.dni || c.id)
+                                            .join(', ')}
+                                        {duplicateCandidates.length > 5
+                                            ? ` y ${duplicateCandidates.length - 5} más`
+                                            : ''}
+                                    </p>
                                 </div>
                             </div>
+                            <label className="flex items-center gap-2 text-sm text-amber-900 cursor-pointer">
+                                <input
+                                    type="checkbox"
+                                    checked={ignoreDuplicates}
+                                    onChange={e => setIgnoreDuplicates(e.target.checked)}
+                                    className="rounded border-amber-300 text-primary-600 focus:ring-primary-500"
+                                />
+                                Enviar de todos modos
+                            </label>
                         </div>
                     )}
 
                     <div>
-                        <label htmlFor="opsflow-sender-note" className="block text-sm font-medium text-gray-700 mb-1">
-                            Nota para OpsFlow (opcional)
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                            Nota para operaciones (opcional)
                         </label>
                         <textarea
-                            id="opsflow-sender-note"
                             value={senderNote}
-                            onChange={event => setSenderNote(event.target.value)}
+                            onChange={e => setSenderNote(e.target.value)}
                             rows={3}
-                            placeholder="Ej: Ingresan el lunes, prioridad alta…"
-                            className="w-full border border-gray-300 rounded-md shadow-sm px-3 py-2 text-sm"
+                            placeholder="Ej. Priorizar ingreso esta semana…"
+                            className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+                            disabled={busy}
                         />
                     </div>
                 </div>
@@ -352,23 +288,27 @@ export const SendToOpsFlowModal: React.FC<SendToOpsFlowModalProps> = ({
                         type="button"
                         onClick={onClose}
                         disabled={busy}
-                        className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50"
+                        className="px-4 py-2 text-sm rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50"
                     >
                         Cancelar
                     </button>
                     <button
                         type="button"
-                        onClick={handleSend}
+                        onClick={() => void handleSend()}
                         disabled={
                             busy ||
+                            preparing ||
                             uniqueCandidates.length === 0 ||
-                            checkingDuplicates ||
-                            !!fieldSelectionError
+                            (duplicateCandidates.length > 0 && !ignoreDuplicates)
                         }
-                        className="inline-flex items-center px-4 py-2 text-sm font-medium text-white bg-primary-600 rounded-md hover:bg-primary-700 disabled:opacity-50"
+                        className="inline-flex items-center gap-2 px-4 py-2 text-sm rounded-lg bg-orange-600 text-white hover:bg-orange-700 disabled:opacity-50"
                     >
-                        {busy ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Send className="w-4 h-4 mr-2" />}
-                        Enviar {selectedFields.size} campos
+                        {busy ? (
+                            <Loader2 className="w-4 h-4 animate-spin" />
+                        ) : (
+                            <Send className="w-4 h-4" />
+                        )}
+                        Enviar a OpsFlow
                     </button>
                 </div>
             </div>

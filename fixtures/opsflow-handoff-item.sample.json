@@ -1,11 +1,5 @@
 {
-  "_comment": "Ejemplo de item de handoff ATS → OpsFlow con identidad estructurada (envíos nuevos).",
-  "_before_identity": {
-    "fullName": "Juan Pérez García",
-    "dni": "12345678",
-    "email": "juan.perez@example.com",
-    "phone": "999888777"
-  },
+  "_comment": "Ejemplo de item de handoff ATS → OpsFlow con identidad estructurada + todos los campos disponibles (snapshotVersion 2).",
   "sourceCandidateId": "00000000-0000-4000-8000-000000000001",
   "sourceProcessId": "00000000-0000-4000-8000-000000000002",
   "workerName": "Juan Pérez García",
@@ -23,16 +17,22 @@
       "address": "Av. Ejemplo 123",
       "province": "Lima",
       "district": "Miraflores",
+      "age": 28,
+      "source": "Referido",
+      "agreedSalary": "1500",
+      "hireDate": "2026-06-01",
       "processTitle": "Operarios planta",
       "clientName": "Cliente Demo",
-      "agreedSalary": "1500",
-      "hireDate": "2026-06-01"
+      "stageName": "Contratado",
+      "scoreIa": 78,
+      "fechaNacimiento": "1998-03-15",
+      "tallaUniforme": "M"
     },
     "meta": {
       "sourceCandidateId": "00000000-0000-4000-8000-000000000001",
       "sourceProcessId": "00000000-0000-4000-8000-000000000002",
       "sourceApp": "Opalo ATS",
-      "snapshotVersion": 1,
+      "snapshotVersion": 2,
       "includedFieldKeys": [
         "fullName",
         "dni",
@@ -41,11 +41,36 @@
         "address",
         "province",
         "district",
+        "age",
+        "source",
+        "agreedSalary",
+        "hireDate",
         "processTitle",
         "clientName",
-        "agreedSalary",
-        "hireDate"
+        "stageName",
+        "scoreIa",
+        "fechaNacimiento",
+        "tallaUniforme"
       ],
+      "fieldLabels": {
+        "fullName": "Nombre completo",
+        "dni": "DNI",
+        "email": "Email",
+        "phone": "Teléfono",
+        "address": "Dirección",
+        "province": "Provincia",
+        "district": "Distrito",
+        "age": "Edad",
+        "source": "Fuente",
+        "agreedSalary": "Salario acordado",
+        "hireDate": "Fecha de contratación",
+        "processTitle": "Título del proceso",
+        "clientName": "Cliente",
+        "stageName": "Etapa actual",
+        "scoreIa": "Score IA",
+        "fechaNacimiento": "Fecha de nacimiento",
+        "tallaUniforme": "Talla uniforme"
+      },
       "capturedAt": "2026-05-25T14:30:00.000Z"
     }
   }

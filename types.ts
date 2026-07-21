@@ -577,6 +577,8 @@ export interface WorkerSnapshot {
         sourceApp: string;
         snapshotVersion: number;
         includedFieldKeys: string[];
+        /** Etiquetas legibles para claves de fields (catálogo + columnas del proceso). */
+        fieldLabels?: Record<string, string>;
         capturedAt: string;
     };
 }

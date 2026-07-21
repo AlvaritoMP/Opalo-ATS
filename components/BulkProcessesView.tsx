@@ -2968,7 +2968,25 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
         setOpsFlowModalLoading(true);
         try {
             const loaded = await Promise.all(candidateIds.map(id => candidatesApi.getById(id)));
-            const valid = loaded.filter((c): c is Candidate => c !== null);
+            const valid = loaded
+                .filter((c): c is Candidate => c !== null)
+                .map(candidate => {
+                    const localRow = columnValues[candidate.id] || {};
+                    const mergedBulk = {
+                        ...(candidate.bulkColumnValues || {}),
+                        ...localRow,
+                    };
+                    return {
+                        ...candidate,
+                        bulkColumnValues:
+                            Object.keys(mergedBulk).length > 0 ? mergedBulk : candidate.bulkColumnValues,
+                        // Preferir score/metadata del estado local de la tabla si getById no los trae
+                        scoreIa: candidate.scoreIa ?? candidates.find(c => c.id === candidate.id)?.scoreIa,
+                        metadataIa:
+                            candidate.metadataIa ??
+                            candidates.find(c => c.id === candidate.id)?.metadataIa,
+                    };
+                });
             if (valid.length === 0) {
                 actions.showToast('No se pudieron cargar los candidatos', 'error', 3000);
                 return;
@@ -2981,7 +2999,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
         } finally {
             setOpsFlowModalLoading(false);
         }
-    }, [actions]);
+    }, [actions, columnValues, candidates]);
 
     const handleOpsFlowSent = useCallback(() => {
         for (const candidate of opsFlowCandidates) {
