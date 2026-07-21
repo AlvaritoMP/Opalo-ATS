@@ -1,5 +1,6 @@
 import { Candidate, Process, WorkerSnapshot, WorkerSnapshotIdentity } from '../types';
 import { APP_NAME } from './appConfig';
+import { resolveStructuredWorkerNameParts, composeWorkerFullName } from './workerNameParts';
 
 export const SNAPSHOT_VERSION = 1;
 export const TARGET_APP = 'OpsFlow';
@@ -177,6 +178,10 @@ export function fieldHasDataForCandidate(
     candidate: Candidate,
     process?: Process
 ): boolean {
+    if (fieldKey === 'fullName') {
+        const parts = resolveStructuredWorkerNameParts(candidate, process);
+        return Boolean(parts.fullName);
+    }
     if (fieldKey in IDENTITY_EXTRACTORS) {
         return hasValue(IDENTITY_EXTRACTORS[fieldKey](candidate));
     }
@@ -210,17 +215,41 @@ export function buildWorkerSnapshot(
     const included = normalizeIncludedFields(options?.includedFields);
     const identity: WorkerSnapshotIdentity = {};
     const includedFieldKeys: string[] = [];
+    const nameParts = resolveStructuredWorkerNameParts(candidate, process);
+
+    // Partes estructuradas siempre que existan (OpsFlow las usa para armar el nombre).
+    if (nameParts.nombres) identity.nombres = nameParts.nombres;
+    if (nameParts.apellidoPaterno) identity.apellidoPaterno = nameParts.apellidoPaterno;
+    if (nameParts.apellidoMaterno) identity.apellidoMaterno = nameParts.apellidoMaterno;
 
     for (const [key, extract] of Object.entries(IDENTITY_EXTRACTORS)) {
         if (!shouldInclude(key, included)) continue;
+
+        if (key === 'fullName') {
+            const composed =
+                nameParts.fullName ||
+                asString(extract(candidate)) ||
+                undefined;
+            if (composed) {
+                identity.fullName = composed;
+                includedFieldKeys.push(key);
+            }
+            continue;
+        }
+
         const raw = extract(candidate);
         const text = asString(raw);
-        if (key === 'fullName' && text) identity.fullName = text;
         if (key === 'dni' && text) identity.dni = text;
         if (key === 'email' && text) identity.email = text;
         if (key === 'phone' && text) identity.phone = text;
         if (key === 'phone2' && text) identity.phone2 = text;
         if (hasValue(raw)) includedFieldKeys.push(key);
+    }
+
+    // Si el usuario no marcó fullName pero sí hay partes, igual deja fullName compuesto
+    // para que workerName / OpsFlow no caigan a solo DNI.
+    if (!identity.fullName && nameParts.fullName) {
+        identity.fullName = nameParts.fullName;
     }
 
     const fields: Record<string, string | number | boolean> = {};
@@ -257,11 +286,22 @@ export function buildWorkerSnapshot(
 }
 
 export function getWorkerDisplayName(snapshot: WorkerSnapshot): string {
-    return snapshot.identity.fullName || snapshot.identity.dni || 'Sin nombre';
+    const composed = composeWorkerFullName(
+        snapshot.identity.nombres,
+        snapshot.identity.apellidoPaterno,
+        snapshot.identity.apellidoMaterno
+    );
+    return composed || snapshot.identity.fullName || snapshot.identity.dni || 'Sin nombre';
 }
 
 export function validateSnapshotForSend(snapshot: WorkerSnapshot): string | null {
-    if (snapshot.identity.fullName || snapshot.identity.dni) return null;
+    if (
+        snapshot.identity.fullName ||
+        snapshot.identity.nombres ||
+        snapshot.identity.dni
+    ) {
+        return null;
+    }
     return 'El candidato debe tener al menos nombre o DNI (entre los campos seleccionados).';
 }
 

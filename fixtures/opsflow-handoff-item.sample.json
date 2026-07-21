@@ -1,0 +1,52 @@
+{
+  "_comment": "Ejemplo de item de handoff ATS → OpsFlow con identidad estructurada (envíos nuevos).",
+  "_before_identity": {
+    "fullName": "Juan Pérez García",
+    "dni": "12345678",
+    "email": "juan.perez@example.com",
+    "phone": "999888777"
+  },
+  "sourceCandidateId": "00000000-0000-4000-8000-000000000001",
+  "sourceProcessId": "00000000-0000-4000-8000-000000000002",
+  "workerName": "Juan Pérez García",
+  "workerSnapshot": {
+    "identity": {
+      "nombres": "Juan",
+      "apellidoPaterno": "Pérez",
+      "apellidoMaterno": "García",
+      "fullName": "Juan Pérez García",
+      "dni": "12345678",
+      "email": "juan.perez@example.com",
+      "phone": "999888777"
+    },
+    "fields": {
+      "address": "Av. Ejemplo 123",
+      "province": "Lima",
+      "district": "Miraflores",
+      "processTitle": "Operarios planta",
+      "clientName": "Cliente Demo",
+      "agreedSalary": "1500",
+      "hireDate": "2026-06-01"
+    },
+    "meta": {
+      "sourceCandidateId": "00000000-0000-4000-8000-000000000001",
+      "sourceProcessId": "00000000-0000-4000-8000-000000000002",
+      "sourceApp": "Opalo ATS",
+      "snapshotVersion": 1,
+      "includedFieldKeys": [
+        "fullName",
+        "dni",
+        "email",
+        "phone",
+        "address",
+        "province",
+        "district",
+        "processTitle",
+        "clientName",
+        "agreedSalary",
+        "hireDate"
+      ],
+      "capturedAt": "2026-05-25T14:30:00.000Z"
+    }
+  }
+}

@@ -46,4 +46,30 @@ npx supabase functions deploy deliver-worker-handoff
 
 1. En Opalo ATS: enviar un candidato a OpsFlow
 2. En OpsFlow: menú **Recepción ATS** → debe aparecer el paquete
-3. Si falla: revisar logs de la Edge Function en Supabase ATS
+3. Abrir el detalle del candidato: deben verse **nombres**, **apellido paterno** y **apellido materno**
+4. Al **Registrar en unidad**, el Nombre completo debe prellenarse como `nombres + apellidoPaterno + apellidoMaterno`
+5. Si falla: revisar logs de la Edge Function en Supabase ATS
+
+### Identidad en el snapshot (envíos nuevos)
+
+Cada item incluye en `workerSnapshot.identity`:
+
+| Campo | Origen en ATS |
+|-------|----------------|
+| `nombres` | Columna bulk marcada/inferida como Nombres, o parse del `candidates.name` |
+| `apellidoPaterno` | Columna bulk Apellido paterno (`reportNamePart` o encabezado) |
+| `apellidoMaterno` | Columna bulk Apellido materno |
+| `fullName` | Composición: `nombres + apellidoPaterno + apellidoMaterno` |
+| `dni`, `email`, `phone`, `phone2` | Campos del candidato (si existen) |
+
+`workerName` del item = mismo valor que `fullName`.
+
+Ejemplo: `fixtures/opsflow-handoff-item.sample.json`.
+
+Smoke local de composición/parse:
+
+```powershell
+node scripts/verify-worker-handoff-names.mjs
+```
+
+> Los paquetes antiguos en OpsFlow no se reescriben; solo aplica a envíos o reenvíos nuevos.

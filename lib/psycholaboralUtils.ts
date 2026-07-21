@@ -192,7 +192,7 @@ export function createEmptyEvaluation(
     };
 }
 
-function normalizeColumnHeaderForMatching(label: string): string {
+export function normalizeColumnHeaderForMatching(label: string): string {
     return label
         .trim()
         .toLowerCase()
@@ -200,7 +200,7 @@ function normalizeColumnHeaderForMatching(label: string): string {
         .replace(/\s+/g, ' ');
 }
 
-function inferReportNamePartFromLabel(labelNorm: string): PsycholaboralReportNamePart | null {
+export function inferReportNamePartFromLabel(labelNorm: string): PsycholaboralReportNamePart | null {
     if (/^nombres?$/.test(labelNorm) && !/completo/.test(labelNorm)) return 'given_names';
     if (
         /^apellido\s*paterno$/.test(labelNorm) ||

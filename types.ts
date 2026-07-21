@@ -556,6 +556,11 @@ export type WorkerHandoffPackageStatus =
 export type WorkerHandoffItemStatus = 'pending' | 'accepted' | 'rejected' | 'assigned';
 
 export interface WorkerSnapshotIdentity {
+    /** Nombres de pila (sin apellidos). */
+    nombres?: string;
+    apellidoPaterno?: string;
+    apellidoMaterno?: string;
+    /** Nombre completo compuesto: nombres + apellidoPaterno + apellidoMaterno. */
     fullName?: string;
     dni?: string;
     email?: string;
