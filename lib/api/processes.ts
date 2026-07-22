@@ -6,6 +6,9 @@ import { fetchWithRetry } from '../fetchWithRetry';
 
 const STAGE_LIST_FIELDS = 'id, process_id, name, order_index, required_documents, is_critical, color';
 
+/** Etapas que no se pudieron borrar (FK) se aparcan con order_index >= este valor y no se muestran en la UI. */
+const ORPHAN_STAGE_ORDER_BASE = 1000;
+
 function isMissingColumnError(error: any, columnName?: string): boolean {
     if (!error) return false;
     if (error.code === '42703') return true;
@@ -92,34 +95,66 @@ async function updateStageRecord(
         color?: string | null;
     }
 ) {
-    const payload: Record<string, unknown> = {
+    const basePayload: Record<string, unknown> = {
         name: fields.name,
         order_index: fields.order_index,
         required_documents: fields.required_documents,
     };
-    if (fields.color !== undefined) payload.color = fields.color;
-    if (fields.is_critical !== undefined) payload.is_critical = fields.is_critical;
 
-    let { data, error } = await supabase
-        .from('stages')
-        .update(payload)
-        .eq('id', stageId)
-        .eq('process_id', processId)
-        .select('id, color');
+    const attempts: Array<Record<string, unknown>> = [
+        {
+            ...basePayload,
+            ...(fields.color !== undefined ? { color: fields.color } : {}),
+            ...(fields.is_critical !== undefined ? { is_critical: fields.is_critical } : {}),
+        },
+        {
+            ...basePayload,
+            ...(fields.color !== undefined ? { color: fields.color } : {}),
+        },
+        {
+            ...basePayload,
+            ...(fields.is_critical !== undefined ? { is_critical: fields.is_critical } : {}),
+        },
+        basePayload,
+    ];
 
-    if (error && fields.color !== undefined && isMissingColumnError(error, 'color')) {
-        const { color: _c, ...withoutColor } = payload;
-        ({ data, error } = await supabase
+    // Deduplicar payloads equivalentes
+    const seen = new Set<string>();
+    const uniqueAttempts = attempts.filter(payload => {
+        const key = JSON.stringify(payload);
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+    });
+
+    let data: Array<{ id: string; color?: string | null }> | null = null;
+    let error: any = null;
+    let usedPayload = uniqueAttempts[0];
+
+    for (const payload of uniqueAttempts) {
+        usedPayload = payload;
+        const selectFields = 'color' in payload ? 'id, color' : 'id';
+        const result = await supabase
             .from('stages')
-            .update(withoutColor)
+            .update(payload)
             .eq('id', stageId)
             .eq('process_id', processId)
-            .select('id'));
-        if (!error) {
-            throw new Error(
-                'La columna color no existe en stages. Ejecuta MIGRATION_ADD_STAGE_COLOR.sql en Supabase y recarga el esquema (Settings → API → Reload schema).'
-            );
-        }
+            .select(selectFields);
+
+        data = (result.data as Array<{ id: string; color?: string | null }> | null) || null;
+        error = result.error;
+
+        if (!error) break;
+
+        const missingOptionalColumn =
+            ('color' in payload && isMissingColumnError(error, 'color')) ||
+            ('is_critical' in payload && isMissingColumnError(error, 'is_critical'));
+
+        if (!missingOptionalColumn) break;
+        console.warn(
+            `Columna opcional no disponible al actualizar etapa "${fields.name}". Reintentando sin ella:`,
+            error.message || error
+        );
     }
 
     if (error) throw error;
@@ -128,8 +163,12 @@ async function updateStageRecord(
         throw new Error(`No se pudo actualizar la etapa "${fields.name}". Verifica permisos en Supabase.`);
     }
 
-    if (fields.color !== undefined && fields.color !== null) {
-        const savedColor = (data[0] as { color?: string | null }).color;
+    if (fields.color !== undefined && fields.color !== null && !('color' in usedPayload)) {
+        console.warn(
+            `Color de etapa "${fields.name}" no se pudo guardar en stages (columna ausente). Se usará bulkConfig como respaldo. Ejecuta MIGRATION_ADD_STAGE_COLOR.sql si aún no está aplicada.`
+        );
+    } else if (fields.color !== undefined && fields.color !== null) {
+        const savedColor = data[0]?.color;
         if (savedColor !== fields.color) {
             console.warn(
                 `Color de etapa "${fields.name}" no persistió en la tabla stages (esperado: ${fields.color}, guardado: ${savedColor ?? 'null'}). Se usará bulkConfig como respaldo.`
@@ -175,13 +214,15 @@ function dbToProcess(dbProcess: any, stages: any[] = [], documentCategories: any
         ? (typeof dbProcess.bulk_config === 'string' ? JSON.parse(dbProcess.bulk_config) : dbProcess.bulk_config)
         : undefined;
 
-    const mappedStages = stages.map(s => ({
-        id: s.id,
-        name: s.name,
-        requiredDocuments: s.required_documents || undefined,
-        isCritical: s.is_critical === true || s.is_critical === 1 || s.is_critical === 'true',
-        color: s.color ?? undefined,
-    }));
+    const mappedStages = stages
+        .filter(s => (s.order_index ?? 0) < ORPHAN_STAGE_ORDER_BASE)
+        .map(s => ({
+            id: s.id,
+            name: s.name,
+            requiredDocuments: s.required_documents || undefined,
+            isCritical: s.is_critical === true || s.is_critical === 1 || s.is_critical === 'true',
+            color: s.color ?? undefined,
+        }));
 
     return {
         id: dbProcess.id,
@@ -848,11 +889,22 @@ export const processesApi = {
                 existingStages.map(s => [String(s.name || '').trim().toLowerCase(), s])
             );
             const resolvedIncomingIds = new Set<string>();
+            const isTemporaryStageId = (stageId?: string) =>
+                !stageId ||
+                stageId.startsWith('new-') ||
+                /^stage-\d+/.test(stageId);
 
             processData.stages.forEach((stage, index) => {
                 const byId = stage.id ? existingStagesMap.get(stage.id) : undefined;
                 const byName = existingByName.get(stage.name.trim().toLowerCase());
-                const existing = byId || byName;
+                // Solo emparejar por nombre si el id es temporal; evita colisiones al renombrar/reordenar
+                let existing = byId;
+                if (!existing && isTemporaryStageId(stage.id) && byName && !resolvedIncomingIds.has(byName.id)) {
+                    existing = byName;
+                }
+                if (existing && resolvedIncomingIds.has(existing.id)) {
+                    existing = undefined;
+                }
 
                 if (existing) {
                     resolvedIncomingIds.add(existing.id);
@@ -882,22 +934,18 @@ export const processesApi = {
                 }
             });
             
-            // Primero, actualizar todos los order_index a valores temporales negativos para evitar conflictos
-            // Esto asegura que no haya conflictos de clave única durante la actualización
-            const tempOrderUpdates = stagesToUpdate.map(stage => ({
-                id: stage.id,
-                temp_order: -1000 - stagesToUpdate.indexOf(stage) // Valores temporales únicos
-            }));
-            
-            for (const tempUpdate of tempOrderUpdates) {
+            // Mover a order_index temporales TODOS los stages del proceso (incluye los a eliminar)
+            // para liberar índices antes de reordenar/insertar y evitar conflictos.
+            const allExistingIds = existingStages.map(s => s.id as string);
+            for (let i = 0; i < allExistingIds.length; i++) {
                 const { error: tempError } = await supabase
                     .from('stages')
-                    .update({ order_index: tempUpdate.temp_order })
-                    .eq('id', tempUpdate.id)
+                    .update({ order_index: -1000 - i })
+                    .eq('id', allExistingIds[i])
                     .eq('process_id', id);
 
                 if (tempError) {
-                    console.error(`Error actualizando order_index temporal para stage ${tempUpdate.id}:`, tempError);
+                    console.error(`Error actualizando order_index temporal para stage ${allExistingIds[i]}:`, tempError);
                     throw tempError;
                 }
             }
@@ -913,6 +961,7 @@ export const processesApi = {
             }
             
             // Insertar nuevos stages (sin is_critical primero)
+            let insertedStages: Array<{ id: string; order_index: number }> | null = null;
             if (stagesToInsert.length > 0) {
                 const stagesWithoutCritical = stagesToInsert.map(s => ({
                     process_id: s.process_id,
@@ -922,15 +971,16 @@ export const processesApi = {
                     app_name: APP_NAME, // Asegurar que siempre se asigne el app_name
                 }));
                 
-                const { data: insertedStages, error: insertError } = await supabase
+                const insertResult = await supabase
                     .from('stages')
                     .insert(stagesWithoutCritical)
                     .select('id, order_index');
                 
-                if (insertError) {
-                    console.error('Error insertando nuevos stages:', insertError);
-                    throw insertError;
+                if (insertResult.error) {
+                    console.error('Error insertando nuevos stages:', insertResult.error);
+                    throw insertResult.error;
                 }
+                insertedStages = insertResult.data;
                 
                 // Ahora intentar actualizar is_critical y color por separado para cada stage insertado
                 if (insertedStages) {
@@ -945,37 +995,71 @@ export const processesApi = {
                 }
             }
             
-            // Eliminar stages que ya no están en la lista nueva
-            // IMPORTANTE: Solo eliminar si no tienen referencias en candidate_history
-            // Si tienen referencias, no podemos eliminarlos (violaría foreign key constraint)
+            // Eliminar stages que ya no están en la lista nueva.
+            // Si tienen candidatos o historial, reasignamos candidatos y/o aparcamos la etapa
+            // para no interferir con el orden lógico visible.
+            let orphanOrderBase = ORPHAN_STAGE_ORDER_BASE;
+            const fallbackStageId =
+                stagesToUpdate.find(s => s.order_index === 0)?.id ||
+                stagesToUpdate[0]?.id ||
+                insertedStages?.find(s => s.order_index === 0)?.id ||
+                insertedStages?.[0]?.id ||
+                null;
+
             for (const stageId of stagesToDelete) {
-                // Verificar si hay referencias en candidate_history
-                const { data: historyRefs, error: checkError } = await supabase
-                    .from('candidate_history')
-                    .select('id')
-                    .eq('stage_id', stageId)
-                    .limit(1);
-                
-                if (checkError) {
-                    console.warn(`Error verificando referencias para stage ${stageId}:`, checkError);
-                    // No eliminar si no podemos verificar
-                    continue;
+                // Reasignar candidatos activos a la primera etapa restante antes de intentar borrar
+                if (fallbackStageId) {
+                    const { error: reassignError } = await supabase
+                        .from('candidates')
+                        .update({ stage_id: fallbackStageId })
+                        .eq('stage_id', stageId)
+                        .eq('process_id', id);
+                    if (reassignError) {
+                        console.warn(`Error reasignando candidatos de stage ${stageId}:`, reassignError);
+                    }
                 }
-                
-                if (!historyRefs || historyRefs.length === 0) {
-                    // No hay referencias, podemos eliminar
+
+                const [{ data: historyRefs, error: checkError }, { data: candidateRefs, error: candidateCheckError }] =
+                    await Promise.all([
+                        supabase.from('candidate_history').select('id').eq('stage_id', stageId).limit(1),
+                        supabase.from('candidates').select('id').eq('stage_id', stageId).limit(1),
+                    ]);
+
+                if (checkError) {
+                    console.warn(`Error verificando historial para stage ${stageId}:`, checkError);
+                }
+                if (candidateCheckError) {
+                    console.warn(`Error verificando candidatos para stage ${stageId}:`, candidateCheckError);
+                }
+
+                const hasRefs =
+                    (historyRefs && historyRefs.length > 0) ||
+                    (candidateRefs && candidateRefs.length > 0) ||
+                    !!checkError ||
+                    !!candidateCheckError;
+
+                if (!hasRefs) {
                     const { error: deleteError } = await supabase
                         .from('stages')
                         .delete()
                         .eq('id', stageId)
                         .eq('app_name', APP_NAME);
-                    
+
                     if (deleteError) {
                         console.warn(`Error eliminando stage ${stageId}:`, deleteError);
-                        // No lanzar error, solo loguear (puede tener referencias que no detectamos)
+                        await supabase
+                            .from('stages')
+                            .update({ order_index: orphanOrderBase++ })
+                            .eq('id', stageId)
+                            .eq('process_id', id);
                     }
                 } else {
-                    console.log(`⚠️ No se puede eliminar stage ${stageId} porque tiene referencias en candidate_history`);
+                    console.log(`⚠️ No se puede eliminar stage ${stageId} porque tiene referencias; se aparta del orden activo`);
+                    await supabase
+                        .from('stages')
+                        .update({ order_index: orphanOrderBase++ })
+                        .eq('id', stageId)
+                        .eq('process_id', id);
                 }
             }
         }

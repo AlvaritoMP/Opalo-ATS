@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useAppState } from '../App';
 import { Process, Stage, ProcessStatus, BulkProcessConfig, KillerQuestion, PsycholaboralInventory, Attachment, Client } from '../types';
 import { PROCESS_STATUS_LABELS } from '../lib/processStatus';
-import { X, Plus, Trash2, GripVertical, Settings, Filter, Brain, MessageCircle, Upload, FileText } from 'lucide-react';
+import { X, Plus, Trash2, GripVertical, Settings, Filter, Brain, MessageCircle, Upload, FileText, ChevronUp, ChevronDown } from 'lucide-react';
 import { processesApi } from '../lib/api/processes';
 import { clientsApi } from '../lib/api/clients';
 import { isScoreIaColumnVisible, pickBulkTableLayoutConfig } from '../lib/bulkTableColumns';
@@ -158,6 +158,9 @@ export const BulkProcessEditorModal: React.FC<BulkProcessEditorModalProps> = ({ 
         processesApi.getAttachments(process.id).then(setAttachments).catch(() => {});
     }, [process?.id]);
 
+    const dragItem = useRef<number | null>(null);
+    const dragOverItem = useRef<number | null>(null);
+
     const handleAddStage = () => {
         setStages([...stages, { id: `new-${Date.now()}`, name: '', color: suggestStageColor(stages.length) }]);
     };
@@ -178,6 +181,29 @@ export const BulkProcessEditorModal: React.FC<BulkProcessEditorModalProps> = ({ 
         const newStages = [...stages];
         newStages[index] = { ...newStages[index], color: color || undefined };
         setStages(newStages);
+    };
+
+    const handleStageSort = () => {
+        if (dragItem.current === null || dragOverItem.current === null) return;
+        if (dragItem.current === dragOverItem.current) {
+            dragItem.current = null;
+            dragOverItem.current = null;
+            return;
+        }
+        const next = [...stages];
+        const [dragged] = next.splice(dragItem.current, 1);
+        next.splice(dragOverItem.current, 0, dragged);
+        dragItem.current = null;
+        dragOverItem.current = null;
+        setStages(next);
+    };
+
+    const moveStage = (fromIndex: number, toIndex: number) => {
+        if (toIndex < 0 || toIndex >= stages.length || fromIndex === toIndex) return;
+        const next = [...stages];
+        const [moved] = next.splice(fromIndex, 1);
+        next.splice(toIndex, 0, moved);
+        setStages(next);
     };
 
     const handleFlyerUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -367,7 +393,13 @@ export const BulkProcessEditorModal: React.FC<BulkProcessEditorModalProps> = ({ 
             onClose();
         } catch (error: any) {
             console.error('Error guardando proceso masivo:', error);
-            actions.showToast(`Error: ${error.message || 'Error desconocido'}`, 'error', 5000);
+            const detail = error?.details || error?.hint || error?.code;
+            const message = error?.message || 'Error desconocido';
+            actions.showToast(
+                detail ? `Error: ${message} (${detail})` : `Error: ${message}`,
+                'error',
+                7000
+            );
         } finally {
             setIsSaving(false);
         }
@@ -583,28 +615,62 @@ export const BulkProcessEditorModal: React.FC<BulkProcessEditorModalProps> = ({ 
                                 <label className="block text-sm font-medium text-gray-700 mb-2">
                                     Etapas del Proceso *
                                 </label>
+                                <p className="text-xs text-gray-500 mb-2">
+                                    Arrastra el ícono <GripVertical className="w-3.5 h-3.5 inline align-text-bottom" /> o usa las flechas para definir el orden lógico.
+                                </p>
                                 <div className="space-y-2">
                                     {stages.map((stage, index) => (
-                                        <div key={stage.id} className="space-y-1.5">
-                                            <div className="flex items-center gap-2">
-                                                <GripVertical className="w-5 h-5 text-gray-400" />
+                                        <div key={stage.id} className="space-y-1.5 rounded-lg border border-transparent px-1 py-1 hover:border-gray-200">
+                                            <div
+                                                className="flex items-center gap-2"
+                                                draggable
+                                                onDragStart={() => { dragItem.current = index; }}
+                                                onDragEnter={() => { dragOverItem.current = index; }}
+                                                onDragEnd={handleStageSort}
+                                                onDragOver={(e) => e.preventDefault()}
+                                            >
+                                                <GripVertical className="w-5 h-5 text-gray-400 cursor-move shrink-0" title="Arrastrar para reordenar" />
+                                                <span className="text-xs text-gray-400 w-5 text-center shrink-0">{index + 1}</span>
                                                 <input
                                                     type="text"
                                                     value={stage.name}
                                                     onChange={(e) => handleStageChange(index, e.target.value)}
+                                                    onMouseDown={(e) => e.stopPropagation()}
                                                     placeholder={`Etapa ${index + 1}`}
                                                     className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
                                                 />
+                                                <div className="flex flex-col shrink-0">
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => moveStage(index, index - 1)}
+                                                        disabled={index === 0}
+                                                        className="p-0.5 text-gray-500 hover:text-primary-600 disabled:opacity-30 disabled:hover:text-gray-500"
+                                                        title="Subir"
+                                                    >
+                                                        <ChevronUp className="w-4 h-4" />
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => moveStage(index, index + 1)}
+                                                        disabled={index === stages.length - 1}
+                                                        className="p-0.5 text-gray-500 hover:text-primary-600 disabled:opacity-30 disabled:hover:text-gray-500"
+                                                        title="Bajar"
+                                                    >
+                                                        <ChevronDown className="w-4 h-4" />
+                                                    </button>
+                                                </div>
                                                 {stages.length > 1 && (
                                                     <button
+                                                        type="button"
                                                         onClick={() => handleRemoveStage(index)}
                                                         className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                                                        title="Eliminar etapa"
                                                     >
                                                         <Trash2 className="w-4 h-4" />
                                                     </button>
                                                 )}
                                             </div>
-                                            <div className="ml-7">
+                                            <div className="ml-12">
                                                 <StageColorPicker
                                                     compact
                                                     value={stage.color}
@@ -615,6 +681,7 @@ export const BulkProcessEditorModal: React.FC<BulkProcessEditorModalProps> = ({ 
                                     ))}
                                 </div>
                                 <button
+                                    type="button"
                                     onClick={handleAddStage}
                                     className="mt-2 flex items-center gap-2 text-sm text-primary-600 hover:text-primary-700"
                                 >
