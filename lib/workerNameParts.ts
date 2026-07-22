@@ -1,12 +1,15 @@
 import type { Candidate, CustomColumn, Process, PsycholaboralReportNamePart } from '../types';
 import {
     buildLegacyColumnIdToName,
+    normalizeColumnNameKey,
     resolveColumnValueFromRow,
 } from './bulkTableColumns';
 import {
     inferReportNamePartFromLabel,
     normalizeColumnHeaderForMatching,
 } from './psycholaboralUtils';
+
+const BULK_NAME_KEY_PREFIX = '__name__';
 
 export interface StructuredWorkerNameParts {
     nombres?: string;
@@ -65,7 +68,6 @@ function stripTrailingSurnames(
         const re = new RegExp(`(?:^|\\s+)${escaped}\\s*$`, 'i');
         remaining = remaining.replace(re, '').trim();
     };
-    // Quitar de atrás hacia adelante
     stripOnce(apellidoMaterno);
     stripOnce(apellidoPaterno);
     return remaining || undefined;
@@ -84,6 +86,22 @@ function splitCombinedSurnames(combined: string): {
     };
 }
 
+function applyNamePart(
+    target: {
+        nombres?: string;
+        apellidoPaterno?: string;
+        apellidoMaterno?: string;
+        surnamesCombined?: string;
+    },
+    part: PsycholaboralReportNamePart | null,
+    val: string
+): void {
+    if (part === 'given_names') target.nombres = val;
+    else if (part === 'paternal_surname') target.apellidoPaterno = val;
+    else if (part === 'maternal_surname') target.apellidoMaterno = val;
+    else if (part === 'surnames_combined') target.surnamesCombined = val;
+}
+
 function readNamePartFromColumns(
     customColumns: CustomColumn[],
     getCellValue: (columnId: string) => unknown
@@ -94,10 +112,12 @@ function readNamePartFromColumns(
     surnamesCombined?: string;
     hasStructured: boolean;
 } {
-    let nombres: string | undefined;
-    let apellidoPaterno: string | undefined;
-    let apellidoMaterno: string | undefined;
-    let surnamesCombined: string | undefined;
+    const target: {
+        nombres?: string;
+        apellidoPaterno?: string;
+        apellidoMaterno?: string;
+        surnamesCombined?: string;
+    } = {};
 
     for (const col of customColumns) {
         const label = (col.name || '').trim();
@@ -108,22 +128,76 @@ function readNamePartFromColumns(
         const labelNorm = normalizeColumnHeaderForMatching(label);
         const part: PsycholaboralReportNamePart | null =
             col.reportNamePart || inferReportNamePartFromLabel(labelNorm);
-
-        if (part === 'given_names') nombres = val;
-        else if (part === 'paternal_surname') apellidoPaterno = val;
-        else if (part === 'maternal_surname') apellidoMaterno = val;
-        else if (part === 'surnames_combined') surnamesCombined = val;
+        applyNamePart(target, part, val);
     }
 
     const hasStructured = Boolean(
-        nombres || apellidoPaterno || apellidoMaterno || surnamesCombined
+        target.nombres || target.apellidoPaterno || target.apellidoMaterno || target.surnamesCombined
     );
-    return { nombres, apellidoPaterno, apellidoMaterno, surnamesCombined, hasStructured };
+    return { ...target, hasStructured };
+}
+
+/**
+ * Fallback: lee apellidos/nombres desde claves `__name__…` en bulk_column_values
+ * aunque el proceso no traiga customColumns en memoria.
+ */
+function readNamePartFromBulkRow(row: Record<string, unknown>): {
+    nombres?: string;
+    apellidoPaterno?: string;
+    apellidoMaterno?: string;
+    surnamesCombined?: string;
+    hasStructured: boolean;
+} {
+    const target: {
+        nombres?: string;
+        apellidoPaterno?: string;
+        apellidoMaterno?: string;
+        surnamesCombined?: string;
+    } = {};
+
+    for (const [rawKey, rawVal] of Object.entries(row)) {
+        const val = trimText(rawVal);
+        if (!val) continue;
+
+        let label: string | undefined;
+        if (rawKey.startsWith(BULK_NAME_KEY_PREFIX)) {
+            label = rawKey.slice(BULK_NAME_KEY_PREFIX.length);
+        } else if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(rawKey)) {
+            label = rawKey;
+        }
+        if (!label) continue;
+
+        const labelNorm = normalizeColumnHeaderForMatching(label);
+        // También probar sin acentos (las claves __name__ ya vienen normalizadas)
+        const labelNoAccents = normalizeColumnNameKey(label);
+        const part =
+            inferReportNamePartFromLabel(labelNorm) ||
+            inferReportNamePartFromLabel(labelNoAccents);
+        applyNamePart(target, part, val);
+    }
+
+    const hasStructured = Boolean(
+        target.nombres || target.apellidoPaterno || target.apellidoMaterno || target.surnamesCombined
+    );
+    return { ...target, hasStructured };
+}
+
+function mergeNameParts(
+    primary: ReturnType<typeof readNamePartFromColumns>,
+    fallback: ReturnType<typeof readNamePartFromBulkRow>
+): ReturnType<typeof readNamePartFromColumns> {
+    return {
+        nombres: primary.nombres || fallback.nombres,
+        apellidoPaterno: primary.apellidoPaterno || fallback.apellidoPaterno,
+        apellidoMaterno: primary.apellidoMaterno || fallback.apellidoMaterno,
+        surnamesCombined: primary.surnamesCombined || fallback.surnamesCombined,
+        hasStructured: primary.hasStructured || fallback.hasStructured,
+    };
 }
 
 /**
  * Resuelve nombres / apellidos para el handoff a OpsFlow.
- * Preferencia: columnas bulk estructuradas; fallback: parsear candidates.name.
+ * Preferencia: columnas bulk estructuradas; luego claves __name__; fallback: parsear candidates.name.
  */
 export function resolveStructuredWorkerNameParts(
     candidate: Candidate,
@@ -138,11 +212,13 @@ export function resolveStructuredWorkerNameParts(
         if (!col) return undefined;
         return resolveColumnValueFromRow(row, col, legacyIdToName);
     });
+    const fromRow = readNamePartFromBulkRow(row);
+    const fromStructured = mergeNameParts(fromColumns, fromRow);
 
-    let { nombres, apellidoPaterno, apellidoMaterno } = fromColumns;
+    let { nombres, apellidoPaterno, apellidoMaterno } = fromStructured;
     const legacyFull = trimText(candidate.name);
 
-    if (!fromColumns.hasStructured) {
+    if (!fromStructured.hasStructured) {
         if (!legacyFull) return { fullName: '' };
         const parsed = parseLegacyFullName(legacyFull);
         const fullName =
@@ -151,8 +227,8 @@ export function resolveStructuredWorkerNameParts(
         return { ...parsed, fullName };
     }
 
-    if (!apellidoPaterno && !apellidoMaterno && fromColumns.surnamesCombined) {
-        const split = splitCombinedSurnames(fromColumns.surnamesCombined);
+    if (!apellidoPaterno && !apellidoMaterno && fromStructured.surnamesCombined) {
+        const split = splitCombinedSurnames(fromStructured.surnamesCombined);
         apellidoPaterno = split.apellidoPaterno;
         apellidoMaterno = split.apellidoMaterno;
     }

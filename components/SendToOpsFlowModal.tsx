@@ -2,9 +2,10 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { X, Send, Loader2, AlertTriangle } from 'lucide-react';
 import { useAppState } from '../App';
 import { candidatesApi } from '../lib/api/candidates';
+import { processesApi } from '../lib/api/processes';
 import { workerHandoffApi } from '../lib/api/workerHandoff';
 import { countSendableFieldsForCandidate } from '../lib/workerHandoffFields';
-import type { Candidate } from '../types';
+import type { Candidate, Process } from '../types';
 
 interface SendToOpsFlowModalProps {
     isOpen: boolean;
@@ -42,6 +43,7 @@ export const SendToOpsFlowModal: React.FC<SendToOpsFlowModalProps> = ({
     const [activeDuplicateIds, setActiveDuplicateIds] = useState<Set<string>>(new Set());
     const [ignoreDuplicates, setIgnoreDuplicates] = useState(false);
     const [resolvedCandidates, setResolvedCandidates] = useState<Candidate[]>([]);
+    const [resolvedProcesses, setResolvedProcesses] = useState<Process[]>([]);
 
     const inputCandidates = useMemo(() => {
         const byId = new Map<string, Candidate>();
@@ -53,10 +55,13 @@ export const SendToOpsFlowModal: React.FC<SendToOpsFlowModalProps> = ({
 
     const uniqueCandidates = resolvedCandidates.length > 0 ? resolvedCandidates : inputCandidates;
 
-    const processById = useMemo(
-        () => new Map(state.processes.map(process => [process.id, process])),
-        [state.processes]
-    );
+    const processById = useMemo(() => {
+        const map = new Map(state.processes.map(process => [process.id, process]));
+        for (const process of resolvedProcesses) {
+            map.set(process.id, process);
+        }
+        return map;
+    }, [state.processes, resolvedProcesses]);
 
     const duplicateCandidates = useMemo(
         () => uniqueCandidates.filter(candidate => activeDuplicateIds.has(candidate.id)),
@@ -82,6 +87,7 @@ export const SendToOpsFlowModal: React.FC<SendToOpsFlowModalProps> = ({
         setIgnoreDuplicates(false);
         setActiveDuplicateIds(new Set());
         setResolvedCandidates([]);
+        setResolvedProcesses([]);
 
         if (inputCandidates.length === 0) return;
 
@@ -103,6 +109,25 @@ export const SendToOpsFlowModal: React.FC<SendToOpsFlowModalProps> = ({
                 );
                 if (!cancelled) setResolvedCandidates(loaded);
 
+                const processIds = [...new Set(loaded.map(c => c.processId).filter(Boolean))];
+                const fullProcesses = await Promise.all(
+                    processIds.map(async processId => {
+                        const existing = state.processes.find(p => p.id === processId);
+                        if ((existing?.bulkConfig?.customColumns?.length || 0) > 0) return existing!;
+                        try {
+                            return (
+                                (await processesApi.getById(processId, { includeAttachments: false })) ||
+                                existing
+                            );
+                        } catch {
+                            return existing;
+                        }
+                    })
+                );
+                if (!cancelled) {
+                    setResolvedProcesses(fullProcesses.filter((p): p is Process => Boolean(p)));
+                }
+
                 const ids = await workerHandoffApi.getActiveCandidateIds(
                     inputCandidates.map(candidate => candidate.id)
                 );
@@ -121,7 +146,7 @@ export const SendToOpsFlowModal: React.FC<SendToOpsFlowModalProps> = ({
         return () => {
             cancelled = true;
         };
-    }, [isOpen, inputCandidates]);
+    }, [isOpen, inputCandidates, state.processes]);
 
     if (!isOpen) return null;
 
@@ -138,9 +163,13 @@ export const SendToOpsFlowModal: React.FC<SendToOpsFlowModalProps> = ({
 
         setBusy(true);
         try {
+            const processesForSend = [
+                ...state.processes.filter(p => !resolvedProcesses.some(r => r.id === p.id)),
+                ...resolvedProcesses,
+            ];
             await workerHandoffApi.sendPackage({
                 candidates: uniqueCandidates,
-                processes: state.processes,
+                processes: processesForSend,
                 senderNote: senderNote.trim() || undefined,
                 createdBy: state.currentUser?.id,
                 createdByName: state.currentUser?.name,

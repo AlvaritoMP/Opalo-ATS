@@ -8,6 +8,7 @@ import {
     validateSnapshotForSend,
     ACTIVE_PACKAGE_STATUSES,
 } from '../workerHandoffFields';
+import { processesApi } from './processes';
 import type {
     Candidate,
     Process,
@@ -25,8 +26,37 @@ export interface SendWorkerHandoffInput {
     senderNote?: string;
     createdBy?: string;
     createdByName?: string;
-    /** Claves de campos a incluir en el snapshot (ver WORKER_HANDOFF_FIELD_GROUPS). */
+    /** @deprecated El snapshot siempre incluye todos los campos con valor. */
     includedFields?: string[];
+}
+
+/**
+ * Los procesos masivos en App state suelen cargarse sin bulk_config (customColumns).
+ * Sin eso el handoff pierde apellidos y columnas personalizadas. Recarga getById.
+ */
+async function ensureProcessesForHandoff(
+    candidates: Candidate[],
+    processes: Process[]
+): Promise<Map<string, Process>> {
+    const processById = new Map(processes.map(process => [process.id, process]));
+    const neededIds = [...new Set(candidates.map(c => c.processId).filter(Boolean))];
+
+    await Promise.all(
+        neededIds.map(async processId => {
+            const existing = processById.get(processId);
+            const hasColumns = (existing?.bulkConfig?.customColumns?.length || 0) > 0;
+            if (hasColumns) return;
+
+            try {
+                const full = await processesApi.getById(processId, { includeAttachments: false });
+                if (full) processById.set(processId, full);
+            } catch (error) {
+                console.warn(`No se pudo cargar bulk_config del proceso ${processId}:`, error);
+            }
+        })
+    );
+
+    return processById;
 }
 
 const DELIVER_FUNCTION_NAME = 'deliver-worker-handoff';
@@ -254,13 +284,13 @@ export const workerHandoffApi = {
     },
 
     async sendPackage(input: SendWorkerHandoffInput): Promise<WorkerHandoffPackage> {
-        const { candidates, processes, senderNote, createdBy, createdByName, includedFields } = input;
+        const { candidates, processes, senderNote, createdBy, createdByName } = input;
 
         if (candidates.length === 0) {
             throw new Error('Selecciona al menos un candidato para enviar.');
         }
 
-        const processById = new Map(processes.map(process => [process.id, process]));
+        const processById = await ensureProcessesForHandoff(candidates, processes);
         const preparedItems: Array<{
             sourceCandidateId: string;
             sourceProcessId: string;
@@ -270,7 +300,7 @@ export const workerHandoffApi = {
 
         for (const candidate of candidates) {
             const process = processById.get(candidate.processId);
-            const snapshot = buildWorkerSnapshot(candidate, process, { includedFields });
+            const snapshot = buildWorkerSnapshot(candidate, process);
             const validationError = validateSnapshotForSend(snapshot);
             if (validationError) {
                 throw new Error(`${candidate.name || 'Candidato'}: ${validationError}`);

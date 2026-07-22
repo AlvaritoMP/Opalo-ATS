@@ -60,6 +60,8 @@ Cada item incluye:
 
 ATS ya no filtra por selección de campos en la UI: OpsFlow decide qué usar.
 
+**Importante:** al enviar, ATS recarga el proceso con `bulk_config` completo (`getById`). La lista global de procesos masivos no incluye `customColumns`; sin esa recarga se perdían apellidos y columnas del grid.
+
 Ejemplo: `fixtures/opsflow-handoff-item.sample.json`.
 
 Smoke local de composición/parse:

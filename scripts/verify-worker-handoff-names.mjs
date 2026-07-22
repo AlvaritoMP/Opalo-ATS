@@ -76,4 +76,33 @@ assertEqual(
   'sample identity matches OpsFlow composition'
 );
 
+// Inferencia desde claves __name__ (como en bulk_column_values sin customColumns en memoria)
+function inferPart(labelNorm) {
+  if (/^nombres?$/.test(labelNorm) && !/completo/.test(labelNorm)) return 'given_names';
+  if (/^apellido\s*paterno$/.test(labelNorm) || labelNorm === 'paterno') return 'paternal_surname';
+  if (/^apellido\s*materno$/.test(labelNorm) || labelNorm === 'materno') return 'maternal_surname';
+  return null;
+}
+const row = {
+  '__name__nombres': 'Fernando',
+  '__name__apellido paterno': 'Ramírez',
+  '__name__apellido materno': 'Quispe',
+};
+const parts = {};
+for (const [k, v] of Object.entries(row)) {
+  const label = k.startsWith('__name__') ? k.slice('__name__'.length) : k;
+  const part = inferPart(label);
+  if (part === 'given_names') parts.nombres = v;
+  if (part === 'paternal_surname') parts.apellidoPaterno = v;
+  if (part === 'maternal_surname') parts.apellidoMaterno = v;
+}
+assertEqual(parts.nombres, 'Fernando', 'bulk row nombres');
+assertEqual(parts.apellidoPaterno, 'Ramírez', 'bulk row paternal');
+assertEqual(parts.apellidoMaterno, 'Quispe', 'bulk row maternal');
+assertEqual(
+  composeWorkerFullName(parts.nombres, parts.apellidoPaterno, parts.apellidoMaterno),
+  'Fernando Ramírez Quispe',
+  'bulk row fullName'
+);
+
 console.log('verify-worker-handoff-names: OK');

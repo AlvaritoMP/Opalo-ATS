@@ -2,11 +2,14 @@ import { Candidate, CustomColumn, Process, WorkerSnapshot, WorkerSnapshotIdentit
 import { APP_NAME } from './appConfig';
 import {
     buildLegacyColumnIdToName,
+    mapImportHeader,
     normalizeColumnNameKey,
     resolveColumnValueFromRow,
 } from './bulkTableColumns';
 import { extractRouteCostTotal } from './routeCostStorage';
 import { resolveStructuredWorkerNameParts, composeWorkerFullName } from './workerNameParts';
+
+const BULK_NAME_KEY_PREFIX = '__name__';
 
 export const SNAPSHOT_VERSION = 2;
 export const TARGET_APP = 'OpsFlow';
@@ -268,11 +271,10 @@ function collectCustomColumnFields(
     includedFieldKeys: string[]
 ): void {
     const customColumns = process?.bulkConfig?.customColumns || [];
-    if (customColumns.length === 0) return;
-
     const legacyIdToName = buildLegacyColumnIdToName(process?.bulkConfig, customColumns);
     const row = candidate.bulkColumnValues || {};
     const usedKeys = new Set(Object.keys(fields));
+    const coveredNameKeys = new Set<string>();
 
     for (const col of customColumns) {
         if (!col?.id || !col.name?.trim()) continue;
@@ -282,11 +284,107 @@ function collectCustomColumnFields(
         const serialized = serializeCustomColumnValue(col, raw);
         if (!hasValue(serialized)) continue;
 
+        coveredNameKeys.add(normalizeColumnNameKey(col.name));
+
+        // Si la columna mapea a un campo canónico vacío, rellénalo también.
+        const mapped = mapImportHeader(col.name.toLowerCase());
+        if (
+            mapped &&
+            ALL_WORKER_HANDOFF_FIELD_KEYS.includes(mapped) &&
+            !(mapped in IDENTITY_EXTRACTORS) &&
+            !hasValue(fields[mapped])
+        ) {
+            putField(
+                fields,
+                fieldLabels,
+                includedFieldKeys,
+                mapped,
+                serialized,
+                CATALOG_FIELD_LABELS[mapped]
+            );
+            usedKeys.add(mapped);
+        }
+
         const baseKey = handoffKeyFromColumnName(col.name);
         const key = uniqueHandoffKey(baseKey, usedKeys, col.id);
         fields[key] = serialized as string | number | boolean;
         fieldLabels[key] = col.name.trim();
         includedFieldKeys.push(key);
+    }
+
+    // Volcar el resto de bulk_column_values aunque falte customColumns en el proceso.
+    collectRemainingBulkRowFields(
+        row,
+        fields,
+        fieldLabels,
+        includedFieldKeys,
+        usedKeys,
+        coveredNameKeys,
+        customColumns.length === 0
+    );
+}
+
+function serializeLooseBulkValue(raw: unknown): string | number | boolean | undefined {
+    if (typeof raw === 'boolean') return raw;
+    if (typeof raw === 'number' && !Number.isNaN(raw)) return raw;
+    if (raw && typeof raw === 'object') {
+        const total = extractRouteCostTotal(raw);
+        if (total != null) return total;
+        return undefined;
+    }
+    return asString(raw);
+}
+
+function collectRemainingBulkRowFields(
+    row: Record<string, unknown>,
+    fields: Record<string, string | number | boolean>,
+    fieldLabels: Record<string, string>,
+    includedFieldKeys: string[],
+    usedKeys: Set<string>,
+    coveredNameKeys: Set<string>,
+    includeUuidKeys: boolean
+): void {
+    for (const [rawKey, rawVal] of Object.entries(row)) {
+        const serialized = serializeLooseBulkValue(rawVal);
+        if (!hasValue(serialized)) continue;
+
+        let label: string;
+        if (rawKey.startsWith(BULK_NAME_KEY_PREFIX)) {
+            label = rawKey.slice(BULK_NAME_KEY_PREFIX.length);
+        } else if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(rawKey)) {
+            if (!includeUuidKeys) continue;
+            label = `columna_${rawKey.slice(0, 8)}`;
+        } else {
+            label = rawKey;
+        }
+
+        const norm = normalizeColumnNameKey(label);
+        if (coveredNameKeys.has(norm)) continue;
+
+        const mapped = mapImportHeader(label.toLowerCase()) || mapImportHeader(norm);
+        if (
+            mapped &&
+            ALL_WORKER_HANDOFF_FIELD_KEYS.includes(mapped) &&
+            !(mapped in IDENTITY_EXTRACTORS) &&
+            !hasValue(fields[mapped])
+        ) {
+            putField(
+                fields,
+                fieldLabels,
+                includedFieldKeys,
+                mapped,
+                serialized,
+                CATALOG_FIELD_LABELS[mapped]
+            );
+            usedKeys.add(mapped);
+        }
+
+        const baseKey = handoffKeyFromColumnName(label);
+        const key = uniqueHandoffKey(baseKey, usedKeys, rawKey);
+        fields[key] = serialized as string | number | boolean;
+        fieldLabels[key] = label.trim();
+        includedFieldKeys.push(key);
+        coveredNameKeys.add(norm);
     }
 }
 
