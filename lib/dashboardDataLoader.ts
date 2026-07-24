@@ -90,8 +90,8 @@ export async function fetchDashboardData(
                     nextInterviewerId: c.nextInterviewerId,
                 });
             }
-        } catch {
-            /* continuar con otros procesos */
+        } catch (err) {
+            console.warn(`Inteligencia/Panel: no se pudo cargar el proceso masivo ${processId}`, err);
         }
     }
 

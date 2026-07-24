@@ -14,7 +14,6 @@ import {
 import {
     isInterestedCandidateResponse,
     isNotInterestedCandidateResponse,
-    resolveCandidateRecordCreatedAt,
 } from './contactologyAnalytics';
 import type { ContactAttempt } from './contactTracking';
 import { PROCESS_STATUS_LABELS } from './processStatus';
@@ -168,14 +167,41 @@ function isHiredCandidate(
     return Boolean(bulkHiringActorsByProcess[candidate.processId]?.[candidate.id]);
 }
 
+export interface InflowTimestamp {
+    processId: string;
+    createdAt: string;
+}
+
+/**
+ * Resuelve la fecha de ingreso para métricas de flujo.
+ * Preferimos created_at explícito (altas / re-postulaciones). Los traslados por
+ * movimiento no cambian created_at, así que no cuentan como ingreso nuevo.
+ */
+export function resolveInflowCreatedAt(candidate: {
+    createdAt?: string;
+    firstApplicationAt?: string;
+    applicationStartedDate?: string;
+    history?: { movedAt?: string }[];
+}): string | undefined {
+    // Solo created_at: evita contar traslados vía history.movedAt del día del traslado.
+    if (candidate.createdAt) return candidate.createdAt;
+    return (
+        candidate.firstApplicationAt ||
+        candidate.applicationStartedDate ||
+        undefined
+    );
+}
+
 /**
  * Flujo diario de nuevos postulantes por proceso (comparativo) + totalización.
+ * `inflowRows` (si viene) tiene prioridad: consulta fresca por created_at desde BD.
  */
 export function buildMultiProcessDailyInflow(
     candidates: Candidate[],
     processes: Process[],
     period: ContactConsultantPeriod,
-    maxProcesses = 8
+    maxProcesses = 8,
+    inflowRows?: InflowTimestamp[] | null
 ): DailyInflowSeries {
     const { startKey, endKey, label: periodLabel } = getContactPeriodRange(period);
     const dateKeys = iterDateKeys(startKey, endKey);
@@ -183,19 +209,24 @@ export function buildMultiProcessDailyInflow(
     const countsByProcessDay = new Map<string, Map<string, number>>();
     const totalsByProcess = new Map<string, number>();
 
-    for (const candidate of candidates) {
-        const createdAt = resolveCandidateRecordCreatedAt(candidate);
-        if (!createdAt) continue;
-        const dayKey = formatDateKeyLima(createdAt);
-        if (dayKey < startKey || dayKey > endKey) continue;
+    const source: InflowTimestamp[] =
+        inflowRows != null
+            ? inflowRows
+            : candidates
+                  .map(c => {
+                      const createdAt = resolveInflowCreatedAt(c);
+                      return createdAt ? { processId: c.processId, createdAt } : null;
+                  })
+                  .filter((r): r is InflowTimestamp => Boolean(r));
 
-        const byDay = countsByProcessDay.get(candidate.processId) || new Map<string, number>();
+    for (const row of source) {
+        const dayKey = formatDateKeyLima(row.createdAt);
+        if (!dayKey || dayKey < startKey || dayKey > endKey) continue;
+
+        const byDay = countsByProcessDay.get(row.processId) || new Map<string, number>();
         byDay.set(dayKey, (byDay.get(dayKey) || 0) + 1);
-        countsByProcessDay.set(candidate.processId, byDay);
-        totalsByProcess.set(
-            candidate.processId,
-            (totalsByProcess.get(candidate.processId) || 0) + 1
-        );
+        countsByProcessDay.set(row.processId, byDay);
+        totalsByProcess.set(row.processId, (totalsByProcess.get(row.processId) || 0) + 1);
     }
 
     const rankedProcessIds = [...totalsByProcess.entries()]
@@ -433,8 +464,28 @@ function countTransfers(
     return count;
 }
 
+function countInflowForProcess(
+    rows: InflowTimestamp[],
+    processId: string,
+    startKey: string,
+    endKey: string,
+    last24hCutoff: number
+): { newInPeriod: number; newLast24h: number } {
+    let newInPeriod = 0;
+    let newLast24h = 0;
+    for (const row of rows) {
+        if (row.processId !== processId) continue;
+        const dayKey = formatDateKeyLima(row.createdAt);
+        if (dayKey >= startKey && dayKey <= endKey) newInPeriod += 1;
+        const ts = new Date(row.createdAt).getTime();
+        if (!Number.isNaN(ts) && ts >= last24hCutoff) newLast24h += 1;
+    }
+    return { newInPeriod, newLast24h };
+}
+
 /**
  * Cuadro resumen por proceso: flujo, desistimiento, traspasos, estado y ratios.
+ * `inflowRows` (si viene) define ingresos 24h/periodo; el resto usa el pool de candidatos.
  */
 export function computeProcessIntelligenceRows(
     candidates: Candidate[],
@@ -444,7 +495,8 @@ export function computeProcessIntelligenceRows(
     contactSummaries: Record<string, ContactSummaryCandidate>,
     bulkHiringActorsByProcess: Record<string, Record<string, HiredStageActor>>,
     period: ContactConsultantPeriod,
-    now = new Date()
+    now = new Date(),
+    inflowRows?: InflowTimestamp[] | null
 ): ProcessIntelligenceRow[] {
     const { startKey, endKey } = getContactPeriodRange(period);
     const hours = hoursElapsedInPeriod(startKey, endKey, now);
@@ -458,6 +510,16 @@ export function computeProcessIntelligenceRows(
         candidatesByProcess.set(c.processId, list);
     }
 
+    const inflowSource: InflowTimestamp[] =
+        inflowRows != null
+            ? inflowRows
+            : candidates
+                  .map(c => {
+                      const createdAt = resolveInflowCreatedAt(c);
+                      return createdAt ? { processId: c.processId, createdAt } : null;
+                  })
+                  .filter((r): r is InflowTimestamp => Boolean(r));
+
     const notInterestedAttemptsByProcess = new Map<string, Set<string>>();
     for (const attempt of filterAttemptsInDateRange(attempts, startKey, endKey)) {
         if (!isNotInterestedCandidateResponse(attempt)) continue;
@@ -469,22 +531,19 @@ export function computeProcessIntelligenceRows(
     return processes.map(process => {
         const list = candidatesByProcess.get(process.id) || [];
         const active = list.filter(c => !c.discarded && !c.archived);
-        let newInPeriod = 0;
-        let newLast24h = 0;
+        const { newInPeriod, newLast24h } = countInflowForProcess(
+            inflowSource,
+            process.id,
+            startKey,
+            endKey,
+            last24hCutoff
+        );
         let desisted = 0;
         let interested = 0;
         let contacted = 0;
         let hired = 0;
 
         for (const candidate of list) {
-            const createdAt = resolveCandidateRecordCreatedAt(candidate);
-            if (createdAt) {
-                const dayKey = formatDateKeyLima(createdAt);
-                if (dayKey >= startKey && dayKey <= endKey) newInPeriod += 1;
-                const ts = new Date(createdAt).getTime();
-                if (!Number.isNaN(ts) && ts >= last24hCutoff) newLast24h += 1;
-            }
-
             const summary = contactSummaries[candidate.id];
             if (candidateHasContactStatus(summary, 'no_interesado')) desisted += 1;
             else if (notInterestedAttemptsByProcess.get(process.id)?.has(candidate.id)) desisted += 1;

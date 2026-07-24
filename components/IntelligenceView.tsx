@@ -30,13 +30,19 @@ import {
 } from '../lib/dashboardActorNames';
 import { bulkProcessActivityApi, type BulkProcessActivityEntry } from '../lib/api/bulkProcessActivity';
 import {
+    fetchCandidateInflowRows,
+    limaDateKeyToStartIso,
+} from '../lib/api/candidateInflow';
+import {
     buildMultiProcessDailyInflow,
     buildTeamDailyEvolution,
     computePortfolioStatusCounts,
     computeProcessIntelligenceRows,
     computeUserPerformanceRows,
+    type InflowTimestamp,
     type ProcessIntelligenceRow,
 } from '../lib/intelligenceAnalytics';
+import { getContactPeriodRange } from '../lib/contactDashboardStats';
 import { PROCESS_STATUS_COLORS } from '../lib/processStatus';
 import type { ProcessStatus } from '../types';
 
@@ -131,6 +137,8 @@ export const IntelligenceView: React.FC = () => {
     const [period, setPeriod] = useState<ContactConsultantPeriod>('month');
     const [transferActivity, setTransferActivity] = useState<BulkProcessActivityEntry[]>([]);
     const [transfersLoading, setTransfersLoading] = useState(false);
+    const [inflowRows, setInflowRows] = useState<InflowTimestamp[] | null>(null);
+    const [inflowLoading, setInflowLoading] = useState(false);
     const [sortKey, setSortKey] = useState<SortKey>('newPerHour');
     const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
     const [statusFilter, setStatusFilter] = useState<'all' | ProcessStatus>('all');
@@ -155,6 +163,13 @@ export const IntelligenceView: React.FC = () => {
             }, 400);
             return () => window.clearTimeout(timer);
         }
+        // Si el cache tiene más de 5 min, refrescar en segundo plano al abrir Inteligencia
+        if (dashboardCache?.loadedAt && !dashboardCacheLoading) {
+            const ageMs = Date.now() - new Date(dashboardCache.loadedAt).getTime();
+            if (ageMs > 5 * 60 * 1000) {
+                void actions.loadDashboardCache(true);
+            }
+        }
     }, [dashboardCache, dashboardCacheLoading, actions]);
 
     const loadTransfers = useCallback(async () => {
@@ -173,9 +188,34 @@ export const IntelligenceView: React.FC = () => {
         }
     }, [processIds]);
 
+    const loadInflow = useCallback(async () => {
+        if (processIds.length === 0) {
+            setInflowRows([]);
+            return;
+        }
+        setInflowLoading(true);
+        try {
+            const { startKey } = getContactPeriodRange(period);
+            const periodStartMs = new Date(limaDateKeyToStartIso(startKey)).getTime();
+            const last24hMs = Date.now() - 24 * 60 * 60 * 1000;
+            const sinceIso = new Date(Math.min(periodStartMs, last24hMs)).toISOString();
+            const rows = await fetchCandidateInflowRows(processIds, sinceIso);
+            setInflowRows(rows);
+        } catch (err) {
+            console.warn('Inteligencia: no se pudo cargar el flujo de ingresos', err);
+            setInflowRows(null);
+        } finally {
+            setInflowLoading(false);
+        }
+    }, [processIds, period]);
+
     useEffect(() => {
         void loadTransfers();
     }, [loadTransfers]);
+
+    useEffect(() => {
+        void loadInflow();
+    }, [loadInflow]);
 
     const bulkPoolCandidates = useMemo(() => {
         if (!dashboardCache) return [];
@@ -219,8 +259,15 @@ export const IntelligenceView: React.FC = () => {
     }, [dashboardCache, processIds]);
 
     const inflow = useMemo(
-        () => buildMultiProcessDailyInflow(analyticsCandidates, visibleProcesses, period),
-        [analyticsCandidates, visibleProcesses, period]
+        () =>
+            buildMultiProcessDailyInflow(
+                analyticsCandidates,
+                visibleProcesses,
+                period,
+                8,
+                inflowRows ?? undefined
+            ),
+        [analyticsCandidates, visibleProcesses, period, inflowRows]
     );
 
     const userRows = useMemo(
@@ -272,7 +319,9 @@ export const IntelligenceView: React.FC = () => {
                 transferActivity,
                 contactSummaries,
                 bulkHiringActorsByProcess,
-                period
+                period,
+                new Date(),
+                inflowRows ?? undefined
             ),
         [
             analyticsCandidates,
@@ -282,6 +331,7 @@ export const IntelligenceView: React.FC = () => {
             contactSummaries,
             bulkHiringActorsByProcess,
             period,
+            inflowRows,
         ]
     );
 
@@ -319,7 +369,8 @@ export const IntelligenceView: React.FC = () => {
 
     const totalHires = userRows.reduce((s, u) => s + u.hires, 0);
     const totalCalls = userRows.reduce((s, u) => s + u.calls, 0);
-    const loading = (dashboardCacheLoading && !dashboardCache) || transfersLoading;
+    const loading =
+        (dashboardCacheLoading && !dashboardCache) || transfersLoading || inflowLoading;
 
     const toggleSort = (key: SortKey) => {
         if (sortKey === key) {
@@ -334,8 +385,11 @@ export const IntelligenceView: React.FC = () => {
         sortKey === key ? (sortDir === 'asc' ? ' ↑' : ' ↓') : '';
 
     const handleRefresh = async () => {
-        await actions.loadDashboardCache(true);
-        await loadTransfers();
+        await Promise.all([
+            actions.loadDashboardCache(true),
+            loadTransfers(),
+            loadInflow(),
+        ]);
     };
 
     return (

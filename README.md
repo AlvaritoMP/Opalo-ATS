@@ -42,6 +42,9 @@ Sistema de gestión de talento (Applicant Tracking System) para facilitar el pro
    - Crea `.env.local` en la raíz del proyecto
    - Crea `.env` en la carpeta `backend/`
 
+> ⚠️ Si este código está en un servidor de producción, evita ejecutar herramientas automáticas que puedan modificar archivos de configuración.
+> Mantén las credenciales sensibles en variables de entorno del servidor y no dejes que `opencode` sobrescriba `.env.local`.
+
 ## Configuración Inicial
 
 **IMPORTANTE**: Esta es una nueva instancia de Opalo ATS sin datos. Debes:
