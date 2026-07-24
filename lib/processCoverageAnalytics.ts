@@ -2,7 +2,9 @@ import {
     addDaysToDateKey,
     formatDateKeyLima,
     formatDayLabelFromKey,
+    formatMonthKeyLima,
     iterDateKeys,
+    startOfWeekMondayLimaKey,
 } from './contactDashboardStats';
 import {
     resolveHistoryUserName,
@@ -367,4 +369,236 @@ export function formatDateTimeLima(iso: string): string {
         hour: '2-digit',
         minute: '2-digit',
     });
+}
+
+/** Granularidad de gráficos: diario ≤45 días, semanal ≤150, mensual el resto. */
+export type CoverageChartGranularity = 'day' | 'week' | 'month';
+
+export interface CoverageChartBucket {
+    bucketKey: string;
+    label: string;
+    dateKeys: string[];
+    count: number;
+}
+
+export interface CoverageConsultantChartBucket {
+    bucketKey: string;
+    label: string;
+    dateKeys: string[];
+    [consultantKey: string]: string | number | string[];
+}
+
+export function resolveCoverageChartGranularity(days: number): CoverageChartGranularity {
+    if (days <= 45) return 'day';
+    if (days <= 150) return 'week';
+    return 'month';
+}
+
+export function coverageGranularityLabel(granularity: CoverageChartGranularity): string {
+    if (granularity === 'day') return 'por día';
+    if (granularity === 'week') return 'por semana';
+    return 'por mes';
+}
+
+function dateKeyToNoonLima(dateKey: string): Date {
+    return new Date(`${dateKey}T12:00:00-05:00`);
+}
+
+function shortDayMonth(dateKey: string): string {
+    const d = dateKeyToNoonLima(dateKey);
+    return d.toLocaleDateString('es-PE', { day: 'numeric', month: 'short', timeZone: 'America/Lima' });
+}
+
+function formatWeekBucketLabel(startKey: string, endKey: string): string {
+    const start = dateKeyToNoonLima(startKey);
+    const end = dateKeyToNoonLima(endKey);
+    const startDay = start.toLocaleDateString('es-PE', { day: 'numeric', timeZone: 'America/Lima' });
+    const endLabel = end.toLocaleDateString('es-PE', {
+        day: 'numeric',
+        month: 'short',
+        timeZone: 'America/Lima',
+    });
+    return `${startDay}–${endLabel}`;
+}
+
+function formatMonthBucketLabel(monthKey: string): string {
+    const d = dateKeyToNoonLima(`${monthKey}-01`);
+    return d.toLocaleDateString('es-PE', { month: 'short', year: '2-digit', timeZone: 'America/Lima' });
+}
+
+export function dateKeyToCoverageBucketKey(
+    dateKey: string,
+    granularity: CoverageChartGranularity
+): string {
+    if (granularity === 'day') return dateKey;
+    if (granularity === 'week') return startOfWeekMondayLimaKey(dateKeyToNoonLima(dateKey));
+    return formatMonthKeyLima(dateKeyToNoonLima(dateKey));
+}
+
+function bucketLabelForKeys(
+    bucketKey: string,
+    dateKeys: string[],
+    granularity: CoverageChartGranularity
+): string {
+    if (granularity === 'day') {
+        return shortDayMonth(bucketKey);
+    }
+    if (granularity === 'week') {
+        const sorted = [...dateKeys].sort();
+        return formatWeekBucketLabel(sorted[0] || bucketKey, sorted[sorted.length - 1] || bucketKey);
+    }
+    return formatMonthBucketLabel(bucketKey);
+}
+
+/** Agrega serie diaria en buckets legibles para el eje X. */
+export function aggregateDailyCountsForChart(
+    daily: DailyCountPoint[],
+    granularity: CoverageChartGranularity
+): CoverageChartBucket[] {
+    if (granularity === 'day') {
+        return daily.map(d => ({
+            bucketKey: d.dateKey,
+            label: shortDayMonth(d.dateKey),
+            dateKeys: [d.dateKey],
+            count: d.count,
+        }));
+    }
+
+    const order: string[] = [];
+    const map = new Map<string, { dateKeys: string[]; count: number }>();
+    for (const point of daily) {
+        const bucketKey = dateKeyToCoverageBucketKey(point.dateKey, granularity);
+        let bucket = map.get(bucketKey);
+        if (!bucket) {
+            bucket = { dateKeys: [], count: 0 };
+            map.set(bucketKey, bucket);
+            order.push(bucketKey);
+        }
+        bucket.dateKeys.push(point.dateKey);
+        bucket.count += point.count;
+    }
+
+    return order.map(bucketKey => {
+        const bucket = map.get(bucketKey)!;
+        return {
+            bucketKey,
+            label: bucketLabelForKeys(bucketKey, bucket.dateKeys, granularity),
+            dateKeys: bucket.dateKeys,
+            count: bucket.count,
+        };
+    });
+}
+
+export function aggregateConsultantDailyForChart(
+    daily: ConsultantDailyPoint[],
+    seriesKeys: string[],
+    granularity: CoverageChartGranularity
+): CoverageConsultantChartBucket[] {
+    if (granularity === 'day') {
+        return daily.map(d => {
+            const out: CoverageConsultantChartBucket = {
+                bucketKey: d.dateKey,
+                label: shortDayMonth(d.dateKey),
+                dateKeys: [d.dateKey],
+            };
+            for (const key of seriesKeys) out[key] = Number(d[key]) || 0;
+            return out;
+        });
+    }
+
+    const order: string[] = [];
+    const map = new Map<string, CoverageConsultantChartBucket>();
+    for (const point of daily) {
+        const bucketKey = dateKeyToCoverageBucketKey(point.dateKey, granularity);
+        let bucket = map.get(bucketKey);
+        if (!bucket) {
+            bucket = {
+                bucketKey,
+                label: '',
+                dateKeys: [],
+            };
+            for (const key of seriesKeys) bucket[key] = 0;
+            map.set(bucketKey, bucket);
+            order.push(bucketKey);
+        }
+        bucket.dateKeys = [...(bucket.dateKeys as string[]), point.dateKey];
+        for (const key of seriesKeys) {
+            bucket[key] = (Number(bucket[key]) || 0) + (Number(point[key]) || 0);
+        }
+    }
+
+    return order.map(bucketKey => {
+        const bucket = map.get(bucketKey)!;
+        const dateKeys = bucket.dateKeys as string[];
+        return {
+            ...bucket,
+            label: bucketLabelForKeys(bucketKey, dateKeys, granularity),
+            dateKeys,
+        };
+    });
+}
+
+export interface CoverageChartAxisConfig {
+    angle: number;
+    textAnchor: 'end' | 'middle';
+    height: number;
+    interval: number | 'preserveStartEnd';
+    fontSize: number;
+    chartHeightExtra: number;
+}
+
+/** Eje X: vertical con muchos días; semanal/mensual más compacto. */
+export function getCoverageChartAxisConfig(
+    pointCount: number,
+    granularity: CoverageChartGranularity
+): CoverageChartAxisConfig {
+    if (granularity === 'month') {
+        return {
+            angle: pointCount > 10 ? -35 : 0,
+            textAnchor: pointCount > 10 ? 'end' : 'middle',
+            height: pointCount > 10 ? 48 : 28,
+            interval: 0,
+            fontSize: 11,
+            chartHeightExtra: pointCount > 10 ? 18 : 0,
+        };
+    }
+    if (granularity === 'week') {
+        return {
+            angle: -55,
+            textAnchor: 'end',
+            height: 62,
+            interval: pointCount > 20 ? 1 : 0,
+            fontSize: 10,
+            chartHeightExtra: 28,
+        };
+    }
+    // Diario: etiquetas verticales cuando hay densidad
+    if (pointCount > 14) {
+        return {
+            angle: -90,
+            textAnchor: 'end',
+            height: 72,
+            interval: pointCount > 28 ? 1 : 0,
+            fontSize: 9,
+            chartHeightExtra: 40,
+        };
+    }
+    if (pointCount > 8) {
+        return {
+            angle: -45,
+            textAnchor: 'end',
+            height: 52,
+            interval: 0,
+            fontSize: 10,
+            chartHeightExtra: 20,
+        };
+    }
+    return {
+        angle: 0,
+        textAnchor: 'middle',
+        height: 28,
+        interval: 0,
+        fontSize: 11,
+        chartHeightExtra: 0,
+    };
 }

@@ -42,9 +42,15 @@ import {
     buildProcessCoverageReport,
     COVERAGE_PERIOD_OPTIONS,
     consolidateArrivalsForDays,
+    coverageGranularityLabel,
     coverageStartKeyToIso,
+    aggregateConsultantDailyForChart,
+    aggregateDailyCountsForChart,
     formatDateTimeLima,
+    getCoverageChartAxisConfig,
     getCoveragePeriodRange,
+    resolveCoverageChartGranularity,
+    type CoverageChartBucket,
     type CoveragePeriod,
     type FinalStageArrivalDetail,
     type ProcessCoverageReport,
@@ -214,7 +220,12 @@ export const ProcessPerformanceModal: React.FC<ProcessPerformanceModalProps> = (
             });
             setReport(built);
             setSelectedDayKey(prev => {
-                if (prev && built.arrivalsByDay[prev]) return prev;
+                if (prev) {
+                    const stillThere =
+                        built.arrivalsByDay[prev] ||
+                        Object.keys(built.arrivalsByDay).some(k => k.startsWith(prev.slice(0, 7)));
+                    if (stillThere || prev.length >= 7) return prev;
+                }
                 const peak = [...built.finalStageDaily].reverse().find(d => d.count > 0);
                 return peak?.dateKey ?? null;
             });
@@ -240,15 +251,60 @@ export const ProcessPerformanceModal: React.FC<ProcessPerformanceModalProps> = (
         }
     }, [isOpen]);
 
-    const dayArrivals = useMemo(() => {
-        if (!report || !selectedDayKey) return [];
-        return report.arrivalsByDay[selectedDayKey] || [];
-    }, [report, selectedDayKey]);
-
     const consolidatedArrivals = useMemo(() => {
         if (!report) return [];
         return consolidateArrivalsForDays(report, [...consolidatedDays]);
     }, [report, consolidatedDays]);
+
+    const chartGranularity = useMemo(
+        () => resolveCoverageChartGranularity(effectiveRange.days),
+        [effectiveRange.days]
+    );
+
+    const chartFinal = useMemo(
+        () => (report ? aggregateDailyCountsForChart(report.finalStageDaily, chartGranularity) : []),
+        [report, chartGranularity]
+    );
+    const chartNew = useMemo(
+        () => (report ? aggregateDailyCountsForChart(report.newCandidatesDaily, chartGranularity) : []),
+        [report, chartGranularity]
+    );
+    const chartDiscards = useMemo(
+        () => (report ? aggregateDailyCountsForChart(report.discardsDaily, chartGranularity) : []),
+        [report, chartGranularity]
+    );
+    const chartConsultants = useMemo(() => {
+        if (!report) return [];
+        return aggregateConsultantDailyForChart(
+            report.consultantDaily,
+            report.consultantSeries.map(s => s.key),
+            chartGranularity
+        );
+    }, [report, chartGranularity]);
+
+    const xAxis = useMemo(
+        () => getCoverageChartAxisConfig(chartFinal.length || effectiveRange.days, chartGranularity),
+        [chartFinal.length, effectiveRange.days, chartGranularity]
+    );
+
+    const selectedBucket = useMemo(() => {
+        if (!selectedDayKey) return null;
+        return (
+            chartFinal.find(
+                b => b.bucketKey === selectedDayKey || b.dateKeys.includes(selectedDayKey)
+            ) ?? null
+        );
+    }, [chartFinal, selectedDayKey]);
+
+    const bucketArrivals = useMemo(() => {
+        if (!report || !selectedBucket) return [];
+        return consolidateArrivalsForDays(report, selectedBucket.dateKeys);
+    }, [report, selectedBucket]);
+
+    const bucketHasConsolidated = useMemo(() => {
+        if (!selectedBucket) return false;
+        return selectedBucket.dateKeys.every(k => consolidatedDays.has(k));
+    }, [selectedBucket, consolidatedDays]);
 
     const toggleConsolidateDay = (dateKey: string) => {
         setConsolidatedDays(prev => {
@@ -257,6 +313,28 @@ export const ProcessPerformanceModal: React.FC<ProcessPerformanceModalProps> = (
             else next.add(dateKey);
             return next;
         });
+    };
+
+    const toggleConsolidateBucket = (bucket: CoverageChartBucket) => {
+        setConsolidatedDays(prev => {
+            const next = new Set(prev);
+            const allIn = bucket.dateKeys.every(k => next.has(k));
+            if (allIn) {
+                for (const k of bucket.dateKeys) next.delete(k);
+            } else {
+                for (const k of bucket.dateKeys) next.add(k);
+            }
+            return next;
+        });
+    };
+
+    const bucketPartiallyConsolidated = (bucket: CoverageChartBucket) =>
+        bucket.dateKeys.some(k => consolidatedDays.has(k));
+
+    const selectChartBucket = (bucketKey?: string) => {
+        if (!bucketKey) return;
+        setSelectedDayKey(bucketKey);
+        setActiveTab('day');
     };
 
     const exportFullReport = () => {
@@ -327,7 +405,13 @@ export const ProcessPerformanceModal: React.FC<ProcessPerformanceModalProps> = (
 
     if (!isOpen) return null;
 
-    const tickInterval = effectiveRange.days > 90 ? Math.ceil(effectiveRange.days / 12) : effectiveRange.days > 40 ? 3 : 0;
+    const periodUnitHint = coverageGranularityLabel(chartGranularity);
+    const flowTitle =
+        chartGranularity === 'day'
+            ? `Flujo diario a ${hiringStageName}`
+            : chartGranularity === 'week'
+              ? `Flujo semanal a ${hiringStageName}`
+              : `Flujo mensual a ${hiringStageName}`;
 
     return (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-2 md:p-4">
@@ -482,54 +566,52 @@ export const ProcessPerformanceModal: React.FC<ProcessPerformanceModalProps> = (
 
                             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                                 <section className="bg-white rounded-xl border border-gray-200 shadow-sm p-4">
-                                    <h3 className="text-sm font-semibold text-gray-900 mb-1">
-                                        Flujo diario a {hiringStageName}
-                                    </h3>
+                                    <h3 className="text-sm font-semibold text-gray-900 mb-1">{flowTitle}</h3>
                                     <p className="text-xs text-gray-500 mb-3">
-                                        Haz clic en un día para ver el detalle. Marca días para consolidar y exportar.
+                                        Datos {periodUnitHint}. Clic en una barra para ver el detalle
+                                        {chartGranularity === 'day' ? ' del día' : chartGranularity === 'week' ? ' de la semana' : ' del mes'}.
                                     </p>
-                                    <MeasuredChartArea height={220}>
+                                    <MeasuredChartArea height={220 + xAxis.chartHeightExtra}>
                                         {({ width, height }) => (
                                             <BarChart
                                                 width={width}
                                                 height={height}
-                                                data={report.finalStageDaily}
+                                                data={chartFinal}
+                                                margin={{ bottom: 4, left: 0, right: 4, top: 8 }}
                                                 onClick={(data) => {
                                                     const payload = data as {
-                                                        activePayload?: Array<{ payload?: { dateKey?: string } }>;
+                                                        activePayload?: Array<{ payload?: CoverageChartBucket }>;
                                                     };
-                                                    const key = payload.activePayload?.[0]?.payload?.dateKey;
-                                                    if (key) {
-                                                        setSelectedDayKey(key);
-                                                        setActiveTab('day');
-                                                    }
+                                                    selectChartBucket(payload.activePayload?.[0]?.payload?.bucketKey);
                                                 }}
                                             >
                                                 <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
                                                 <XAxis
                                                     dataKey="label"
-                                                    tick={{ fontSize: 10 }}
-                                                    interval={tickInterval}
-                                                    angle={effectiveRange.days > 40 ? -35 : 0}
-                                                    textAnchor={effectiveRange.days > 40 ? 'end' : 'middle'}
-                                                    height={effectiveRange.days > 40 ? 50 : 30}
+                                                    tick={{ fontSize: xAxis.fontSize }}
+                                                    interval={xAxis.interval}
+                                                    angle={xAxis.angle}
+                                                    textAnchor={xAxis.textAnchor}
+                                                    height={xAxis.height}
                                                 />
                                                 <YAxis allowDecimals={false} tick={{ fontSize: 11 }} width={32} />
                                                 <Tooltip
                                                     formatter={(value: number) => [value, 'Llegadas']}
                                                     labelFormatter={(_, payload) => {
-                                                        const p = payload?.[0]?.payload as { dateKey?: string; label?: string };
-                                                        return p?.dateKey ? `${p.label} (${p.dateKey})` : '';
+                                                        const p = payload?.[0]?.payload as CoverageChartBucket | undefined;
+                                                        if (!p) return '';
+                                                        if (p.dateKeys.length <= 1) return `${p.label} (${p.bucketKey})`;
+                                                        return `${p.label} (${p.dateKeys[0]} → ${p.dateKeys[p.dateKeys.length - 1]})`;
                                                     }}
                                                 />
                                                 <Bar dataKey="count" radius={[3, 3, 0, 0]} cursor="pointer">
-                                                    {report.finalStageDaily.map(entry => (
+                                                    {chartFinal.map(entry => (
                                                         <Cell
-                                                            key={entry.dateKey}
+                                                            key={entry.bucketKey}
                                                             fill={
-                                                                entry.dateKey === selectedDayKey
+                                                                selectedBucket?.bucketKey === entry.bucketKey
                                                                     ? '#0f766e'
-                                                                    : consolidatedDays.has(entry.dateKey)
+                                                                    : bucketPartiallyConsolidated(entry)
                                                                       ? '#14b8a6'
                                                                       : '#2dd4bf'
                                                             }
@@ -542,28 +624,41 @@ export const ProcessPerformanceModal: React.FC<ProcessPerformanceModalProps> = (
                                 </section>
 
                                 <section className="bg-white rounded-xl border border-gray-200 shadow-sm p-4">
-                                    <h3 className="text-sm font-semibold text-gray-900 mb-1">Candidatos nuevos diarios</h3>
+                                    <h3 className="text-sm font-semibold text-gray-900 mb-1">
+                                        Candidatos nuevos {periodUnitHint}
+                                    </h3>
                                     <p className="text-xs text-gray-500 mb-3">Altas reales al proceso (sin contar traslados).</p>
-                                    <MeasuredChartArea height={220}>
+                                    <MeasuredChartArea height={220 + xAxis.chartHeightExtra}>
                                         {({ width, height }) => (
-                                            <LineChart width={width} height={height} data={report.newCandidatesDaily}>
+                                            <LineChart
+                                                width={width}
+                                                height={height}
+                                                data={chartNew}
+                                                margin={{ bottom: 4, left: 0, right: 4, top: 8 }}
+                                            >
                                                 <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
                                                 <XAxis
                                                     dataKey="label"
-                                                    tick={{ fontSize: 10 }}
-                                                    interval={tickInterval}
-                                                    angle={effectiveRange.days > 40 ? -35 : 0}
-                                                    textAnchor={effectiveRange.days > 40 ? 'end' : 'middle'}
-                                                    height={effectiveRange.days > 40 ? 50 : 30}
+                                                    tick={{ fontSize: xAxis.fontSize }}
+                                                    interval={xAxis.interval}
+                                                    angle={xAxis.angle}
+                                                    textAnchor={xAxis.textAnchor}
+                                                    height={xAxis.height}
                                                 />
                                                 <YAxis allowDecimals={false} tick={{ fontSize: 11 }} width={32} />
-                                                <Tooltip formatter={(value: number) => [value, 'Nuevos']} />
+                                                <Tooltip
+                                                    formatter={(value: number) => [value, 'Nuevos']}
+                                                    labelFormatter={(_, payload) => {
+                                                        const p = payload?.[0]?.payload as CoverageChartBucket | undefined;
+                                                        return p?.label || '';
+                                                    }}
+                                                />
                                                 <Line
                                                     type="monotone"
                                                     dataKey="count"
                                                     stroke="#059669"
                                                     strokeWidth={2}
-                                                    dot={effectiveRange.days <= 45}
+                                                    dot={chartGranularity !== 'day' || chartNew.length <= 45}
                                                 />
                                             </LineChart>
                                         )}
@@ -572,20 +667,25 @@ export const ProcessPerformanceModal: React.FC<ProcessPerformanceModalProps> = (
 
                                 <section className="bg-white rounded-xl border border-gray-200 shadow-sm p-4">
                                     <h3 className="text-sm font-semibold text-gray-900 mb-1">
-                                        Llegadas a etapa final por consultor
+                                        Llegadas a etapa final por consultor ({periodUnitHint})
                                     </h3>
-                                    <p className="text-xs text-gray-500 mb-3">Volumen diario atribuido al consultor que movió al candidato.</p>
-                                    <MeasuredChartArea height={240}>
+                                    <p className="text-xs text-gray-500 mb-3">Volumen atribuido al consultor que movió al candidato.</p>
+                                    <MeasuredChartArea height={240 + xAxis.chartHeightExtra}>
                                         {({ width, height }) => (
-                                            <BarChart width={width} height={height} data={report.consultantDaily}>
+                                            <BarChart
+                                                width={width}
+                                                height={height}
+                                                data={chartConsultants}
+                                                margin={{ bottom: 4, left: 0, right: 4, top: 8 }}
+                                            >
                                                 <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
                                                 <XAxis
                                                     dataKey="label"
-                                                    tick={{ fontSize: 10 }}
-                                                    interval={tickInterval}
-                                                    angle={effectiveRange.days > 40 ? -35 : 0}
-                                                    textAnchor={effectiveRange.days > 40 ? 'end' : 'middle'}
-                                                    height={effectiveRange.days > 40 ? 50 : 30}
+                                                    tick={{ fontSize: xAxis.fontSize }}
+                                                    interval={xAxis.interval}
+                                                    angle={xAxis.angle}
+                                                    textAnchor={xAxis.textAnchor}
+                                                    height={xAxis.height}
                                                 />
                                                 <YAxis allowDecimals={false} tick={{ fontSize: 11 }} width={32} />
                                                 <Tooltip />
@@ -631,21 +731,28 @@ export const ProcessPerformanceModal: React.FC<ProcessPerformanceModalProps> = (
                                 </section>
 
                                 <section className="bg-white rounded-xl border border-gray-200 shadow-sm p-4">
-                                    <h3 className="text-sm font-semibold text-gray-900 mb-1">Descartes diarios y motivos</h3>
+                                    <h3 className="text-sm font-semibold text-gray-900 mb-1">
+                                        Descartes {periodUnitHint} y motivos
+                                    </h3>
                                     <p className="text-xs text-gray-500 mb-3">
                                         {report.kpis.discardedInPeriod} descartes en el período · {report.kpis.discardedTotal} en el proceso
                                     </p>
-                                    <MeasuredChartArea height={160}>
+                                    <MeasuredChartArea height={160 + xAxis.chartHeightExtra}>
                                         {({ width, height }) => (
-                                            <BarChart width={width} height={height} data={report.discardsDaily}>
+                                            <BarChart
+                                                width={width}
+                                                height={height}
+                                                data={chartDiscards}
+                                                margin={{ bottom: 4, left: 0, right: 4, top: 8 }}
+                                            >
                                                 <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
                                                 <XAxis
                                                     dataKey="label"
-                                                    tick={{ fontSize: 10 }}
-                                                    interval={tickInterval}
-                                                    angle={effectiveRange.days > 40 ? -35 : 0}
-                                                    textAnchor={effectiveRange.days > 40 ? 'end' : 'middle'}
-                                                    height={effectiveRange.days > 40 ? 45 : 28}
+                                                    tick={{ fontSize: xAxis.fontSize }}
+                                                    interval={xAxis.interval}
+                                                    angle={xAxis.angle}
+                                                    textAnchor={xAxis.textAnchor}
+                                                    height={Math.max(28, xAxis.height - 8)}
                                                 />
                                                 <YAxis allowDecimals={false} tick={{ fontSize: 11 }} width={28} />
                                                 <Tooltip formatter={(value: number) => [value, 'Descartes']} />
@@ -712,8 +819,12 @@ export const ProcessPerformanceModal: React.FC<ProcessPerformanceModalProps> = (
                                                 activeTab === 'day' ? 'bg-teal-600 text-white' : 'bg-white text-gray-700'
                                             }`}
                                         >
-                                            Día seleccionado
-                                            {selectedDayKey ? ` (${dayArrivals.length})` : ''}
+                                            {chartGranularity === 'day'
+                                                ? 'Día seleccionado'
+                                                : chartGranularity === 'week'
+                                                  ? 'Semana seleccionada'
+                                                  : 'Mes seleccionado'}
+                                            {selectedBucket ? ` (${bucketArrivals.length})` : ''}
                                         </button>
                                         <button
                                             type="button"
@@ -735,37 +846,39 @@ export const ProcessPerformanceModal: React.FC<ProcessPerformanceModalProps> = (
                                         </button>
                                     </div>
                                     <div className="flex flex-wrap items-center gap-2">
-                                        {selectedDayKey && (
+                                        {selectedBucket && (
                                             <button
                                                 type="button"
-                                                onClick={() => toggleConsolidateDay(selectedDayKey)}
+                                                onClick={() => toggleConsolidateBucket(selectedBucket)}
                                                 className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-md border border-gray-300 text-gray-700 hover:bg-gray-50"
                                             >
-                                                {consolidatedDays.has(selectedDayKey) ? (
+                                                {bucketHasConsolidated ? (
                                                     <CheckSquare className="w-3.5 h-3.5 text-teal-600" />
                                                 ) : (
                                                     <Square className="w-3.5 h-3.5" />
                                                 )}
-                                                {consolidatedDays.has(selectedDayKey)
+                                                {bucketHasConsolidated
                                                     ? 'Quitar del consolidado'
-                                                    : 'Añadir día al consolidado'}
+                                                    : chartGranularity === 'day'
+                                                      ? 'Añadir día al consolidado'
+                                                      : 'Añadir período al consolidado'}
                                             </button>
                                         )}
                                         {activeTab === 'day' && (
                                             <button
                                                 type="button"
-                                                disabled={dayArrivals.length === 0}
+                                                disabled={bucketArrivals.length === 0}
                                                 onClick={() =>
                                                     exportArrivalsSheet(
-                                                        dayArrivals,
-                                                        `llegadas_${hiringStageName}_${selectedDayKey || 'dia'}.xlsx`,
-                                                        'Día'
+                                                        bucketArrivals,
+                                                        `llegadas_${hiringStageName}_${selectedBucket?.bucketKey || 'periodo'}.xlsx`,
+                                                        chartGranularity === 'day' ? 'Día' : chartGranularity === 'week' ? 'Semana' : 'Mes'
                                                     )
                                                 }
                                                 className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-md bg-white border border-teal-300 text-teal-800 hover:bg-teal-50 disabled:opacity-50"
                                             >
                                                 <Download className="w-3.5 h-3.5" />
-                                                Excel del día
+                                                Excel del período
                                             </button>
                                         )}
                                         {activeTab === 'consolidated' && (
@@ -821,13 +934,13 @@ export const ProcessPerformanceModal: React.FC<ProcessPerformanceModalProps> = (
 
                                 {activeTab === 'day' && (
                                     <div className="overflow-x-auto max-h-72">
-                                        {!selectedDayKey ? (
+                                        {!selectedBucket ? (
                                             <p className="text-sm text-gray-400 p-6 text-center">
-                                                Selecciona un día en el gráfico de flujo diario.
+                                                Selecciona un período en el gráfico de flujo.
                                             </p>
-                                        ) : dayArrivals.length === 0 ? (
+                                        ) : bucketArrivals.length === 0 ? (
                                             <p className="text-sm text-gray-400 p-6 text-center">
-                                                Sin llegadas a {hiringStageName} el {selectedDayKey}.
+                                                Sin llegadas a {hiringStageName} en {selectedBucket.label}.
                                             </p>
                                         ) : (
                                             <table className="min-w-full text-sm">
@@ -840,7 +953,7 @@ export const ProcessPerformanceModal: React.FC<ProcessPerformanceModalProps> = (
                                                     </tr>
                                                 </thead>
                                                 <tbody>
-                                                    {dayArrivals.map(a => (
+                                                    {bucketArrivals.map(a => (
                                                         <tr key={`${a.candidateId}-${a.movedAt}`} className="border-t border-gray-100">
                                                             <td className="px-4 py-2 font-medium text-gray-900">{a.name}</td>
                                                             <td className="px-4 py-2 text-gray-600">{a.email}</td>
