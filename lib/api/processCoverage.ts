@@ -9,6 +9,8 @@ export interface FinalStageArrivalRow {
     name: string;
     email: string;
     phone?: string;
+    dni?: string;
+    bulkColumnValues?: Record<string, unknown>;
     movedAt: string;
     movedBy: string | null;
     discarded: boolean;
@@ -20,6 +22,8 @@ export interface ProcessDiscardRow {
     name: string;
     email: string;
     phone?: string;
+    dni?: string;
+    bulkColumnValues?: Record<string, unknown>;
     discardedAt: string | null;
     discardReason: string | null;
     stageId: string | null;
@@ -100,14 +104,22 @@ export async function fetchFinalStageArrivals(
 
     const details = new Map<
         string,
-        { name: string; email: string; phone?: string; discarded: boolean; stageId: string | null }
+        {
+            name: string;
+            email: string;
+            phone?: string;
+            dni?: string;
+            bulkColumnValues?: Record<string, unknown>;
+            discarded: boolean;
+            stageId: string | null;
+        }
     >();
 
     for (let i = 0; i < arrivalIds.length; i += 80) {
         const chunk = arrivalIds.slice(i, i + 80);
         const { data, error } = await supabase
             .from('candidates')
-            .select('id, name, email, phone, discarded, stage_id')
+            .select('id, name, email, phone, dni, discarded, stage_id, bulk_column_values')
             .eq('app_name', APP_NAME)
             .in('id', chunk);
         if (error) throw error;
@@ -116,13 +128,17 @@ export async function fetchFinalStageArrivals(
             name: string;
             email: string;
             phone: string | null;
+            dni: string | null;
             discarded: boolean | null;
             stage_id: string | null;
+            bulk_column_values?: Record<string, unknown> | null;
         }>) {
             details.set(row.id, {
                 name: row.name || 'Sin nombre',
                 email: row.email || '',
                 phone: row.phone || undefined,
+                dni: row.dni?.trim() || undefined,
+                bulkColumnValues: row.bulk_column_values || undefined,
                 discarded: Boolean(row.discarded),
                 stageId: row.stage_id,
             });
@@ -138,6 +154,8 @@ export async function fetchFinalStageArrivals(
             name: detail.name,
             email: detail.email,
             phone: detail.phone,
+            dni: detail.dni,
+            bulkColumnValues: detail.bulkColumnValues,
             movedAt: move.movedAt,
             movedBy: move.movedBy,
             discarded: detail.discarded,
@@ -159,7 +177,7 @@ export async function fetchProcessDiscards(
         const to = from + PAGE_SIZE - 1;
         let query = supabase
             .from('candidates')
-            .select('id, name, email, phone, discarded_at, discard_reason, stage_id')
+            .select('id, name, email, phone, dni, discarded_at, discard_reason, stage_id, bulk_column_values')
             .eq('app_name', APP_NAME)
             .eq('process_id', processId)
             .eq('discarded', true)
@@ -175,9 +193,11 @@ export async function fetchProcessDiscards(
             name: string;
             email: string;
             phone: string | null;
+            dni: string | null;
             discarded_at: string | null;
             discard_reason: string | null;
             stage_id: string | null;
+            bulk_column_values?: Record<string, unknown> | null;
         }>;
         for (const row of rows) {
             out.push({
@@ -185,6 +205,8 @@ export async function fetchProcessDiscards(
                 name: row.name || 'Sin nombre',
                 email: row.email || '',
                 phone: row.phone || undefined,
+                dni: row.dni?.trim() || undefined,
+                bulkColumnValues: row.bulk_column_values || undefined,
                 discardedAt: row.discarded_at,
                 discardReason: row.discard_reason,
                 stageId: row.stage_id,

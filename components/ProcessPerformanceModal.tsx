@@ -50,6 +50,7 @@ import {
     getCoverageChartAxisConfig,
     getCoveragePeriodRange,
     resolveCoverageChartGranularity,
+    resolveCoveragePersonIdentity,
     type CoverageChartBucket,
     type CoveragePeriod,
     type FinalStageArrivalDetail,
@@ -130,7 +131,12 @@ function exportArrivalsSheet(
     sheetName = 'Llegadas etapa final'
 ) {
     const rows = arrivals.map(a => ({
-        Candidato: a.name,
+        Nombres: a.nombres || '',
+        'Apellido paterno': a.apellidoPaterno || '',
+        'Apellido materno': a.apellidoMaterno || '',
+        Apellidos: a.apellidos || '',
+        'Nombre completo': a.name,
+        DNI: a.dni || '',
         Email: a.email,
         Teléfono: a.phone || '',
         Consultor: a.consultant,
@@ -218,6 +224,7 @@ export const ProcessPerformanceModal: React.FC<ProcessPerformanceModalProps> = (
                 discards,
                 inflow,
                 users: statsUsers,
+                process,
             });
             setReport(built);
             setSelectedDayKey(prev => {
@@ -237,7 +244,7 @@ export const ProcessPerformanceModal: React.FC<ProcessPerformanceModalProps> = (
         } finally {
             setLoading(false);
         }
-    }, [process.id, process.vacancies, hiringStageId, effectiveRange, statsUsers]);
+    }, [process, hiringStageId, effectiveRange, statsUsers]);
 
     useEffect(() => {
         if (!isOpen) return;
@@ -397,7 +404,12 @@ export const ProcessPerformanceModal: React.FC<ProcessPerformanceModalProps> = (
         XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(dailyRows), 'Diario');
 
         const arrivalRows = report.allArrivals.map(a => ({
-            Candidato: a.name,
+            Nombres: a.nombres || '',
+            'Apellido paterno': a.apellidoPaterno || '',
+            'Apellido materno': a.apellidoMaterno || '',
+            Apellidos: a.apellidos || '',
+            'Nombre completo': a.name,
+            DNI: a.dni || '',
             Email: a.email,
             Teléfono: a.phone || '',
             Consultor: a.consultant,
@@ -421,13 +433,21 @@ export const ProcessPerformanceModal: React.FC<ProcessPerformanceModalProps> = (
         }));
         XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(reasonRows), 'Motivos descarte');
 
-        const discardDetailRows = report.discardsInPeriod.map(d => ({
-            Candidato: d.name,
-            Email: d.email,
-            Teléfono: d.phone || '',
-            Motivo: d.discardReason || 'Sin motivo registrado',
-            'Fecha y hora': d.discardedAt ? formatDateTimeLima(d.discardedAt) : '',
-        }));
+        const discardDetailRows = report.discardsInPeriod.map(d => {
+            const identity = resolveCoveragePersonIdentity(d, process);
+            return {
+                Nombres: identity.nombres || '',
+                'Apellido paterno': identity.apellidoPaterno || '',
+                'Apellido materno': identity.apellidoMaterno || '',
+                Apellidos: identity.apellidos || '',
+                'Nombre completo': identity.name,
+                DNI: identity.dni || d.dni || '',
+                Email: d.email,
+                Teléfono: d.phone || '',
+                Motivo: d.discardReason || 'Sin motivo registrado',
+                'Fecha y hora': d.discardedAt ? formatDateTimeLima(d.discardedAt) : '',
+            };
+        });
         XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(discardDetailRows), 'Descartes');
 
         const stamp = effectiveRange.endKey.replace(/-/g, '');
@@ -958,15 +978,23 @@ export const ProcessPerformanceModal: React.FC<ProcessPerformanceModalProps> = (
                                                 type="button"
                                                 disabled={report.discardsInPeriod.length === 0}
                                                 onClick={() => {
-                                                    const rows = report.discardsInPeriod.map(d => ({
-                                                        Candidato: d.name,
-                                                        Email: d.email,
-                                                        Teléfono: d.phone || '',
-                                                        Motivo: d.discardReason || 'Sin motivo registrado',
-                                                        'Fecha y hora': d.discardedAt
-                                                            ? formatDateTimeLima(d.discardedAt)
-                                                            : '',
-                                                    }));
+                                                    const rows = report.discardsInPeriod.map(d => {
+                                                        const identity = resolveCoveragePersonIdentity(d, process);
+                                                        return {
+                                                            Nombres: identity.nombres || '',
+                                                            'Apellido paterno': identity.apellidoPaterno || '',
+                                                            'Apellido materno': identity.apellidoMaterno || '',
+                                                            Apellidos: identity.apellidos || '',
+                                                            'Nombre completo': identity.name,
+                                                            DNI: identity.dni || d.dni || '',
+                                                            Email: d.email,
+                                                            Teléfono: d.phone || '',
+                                                            Motivo: d.discardReason || 'Sin motivo registrado',
+                                                            'Fecha y hora': d.discardedAt
+                                                                ? formatDateTimeLima(d.discardedAt)
+                                                                : '',
+                                                        };
+                                                    });
                                                     const wb = XLSX.utils.book_new();
                                                     XLSX.utils.book_append_sheet(
                                                         wb,
@@ -1019,6 +1047,7 @@ export const ProcessPerformanceModal: React.FC<ProcessPerformanceModalProps> = (
                                                     <thead className="bg-gray-50 sticky top-0">
                                                         <tr className="text-left text-xs text-gray-500">
                                                             <th className="px-4 py-2 font-medium">Candidato</th>
+                                                            <th className="px-4 py-2 font-medium">DNI</th>
                                                             <th className="px-4 py-2 font-medium">Email</th>
                                                             <th className="px-4 py-2 font-medium">Consultor</th>
                                                             <th className="px-4 py-2 font-medium">Fecha y hora</th>
@@ -1032,6 +1061,9 @@ export const ProcessPerformanceModal: React.FC<ProcessPerformanceModalProps> = (
                                                             >
                                                                 <td className="px-4 py-2 font-medium text-gray-900">
                                                                     {a.name}
+                                                                </td>
+                                                                <td className="px-4 py-2 tabular-nums text-gray-700">
+                                                                    {a.dni || '—'}
                                                                 </td>
                                                                 <td className="px-4 py-2 text-gray-600">{a.email}</td>
                                                                 <td className="px-4 py-2 text-gray-700">{a.consultant}</td>
@@ -1120,6 +1152,7 @@ export const ProcessPerformanceModal: React.FC<ProcessPerformanceModalProps> = (
                                                     <thead className="bg-gray-50 sticky top-0">
                                                         <tr className="text-left text-xs text-gray-500">
                                                             <th className="px-4 py-2 font-medium">Candidato</th>
+                                                            <th className="px-4 py-2 font-medium">DNI</th>
                                                             <th className="px-4 py-2 font-medium">Día</th>
                                                             <th className="px-4 py-2 font-medium">Consultor</th>
                                                             <th className="px-4 py-2 font-medium">Fecha y hora</th>
@@ -1133,6 +1166,9 @@ export const ProcessPerformanceModal: React.FC<ProcessPerformanceModalProps> = (
                                                             >
                                                                 <td className="px-4 py-2 font-medium text-gray-900">
                                                                     {a.name}
+                                                                </td>
+                                                                <td className="px-4 py-2 tabular-nums text-gray-700">
+                                                                    {a.dni || '—'}
                                                                 </td>
                                                                 <td className="px-4 py-2 tabular-nums text-gray-600">
                                                                     {a.dateKey}

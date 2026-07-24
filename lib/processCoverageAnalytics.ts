@@ -12,7 +12,12 @@ import {
 } from './hiringStageTracking';
 import type { FinalStageArrivalRow, ProcessDiscardRow, ProcessCoverageSnapshot } from './api/processCoverage';
 import type { CandidateInflowRow } from './api/candidateInflow';
-import type { User } from '../types';
+import type { Candidate, Process, User } from '../types';
+import {
+    composeWorkerFullName,
+    parseLegacyFullName,
+    resolveStructuredWorkerNameParts,
+} from './workerNameParts';
 
 export type CoveragePeriod = '30d' | '6m' | '1y';
 
@@ -50,6 +55,11 @@ type UserLookup = Pick<User, 'id' | 'name'> & Partial<Pick<User, 'email'>>;
 export interface FinalStageArrivalDetail {
     candidateId: string;
     name: string;
+    nombres?: string;
+    apellidoPaterno?: string;
+    apellidoMaterno?: string;
+    apellidos?: string;
+    dni?: string;
     email: string;
     phone?: string;
     movedAt: string;
@@ -132,14 +142,64 @@ function normalizeReason(reason: string | null | undefined): string {
     return trimmed || 'Sin motivo registrado';
 }
 
+export function resolveCoveragePersonIdentity(
+    row: Pick<FinalStageArrivalRow, 'candidateId' | 'name' | 'dni' | 'bulkColumnValues'>,
+    process?: Process
+): Pick<FinalStageArrivalDetail, 'name' | 'nombres' | 'apellidoPaterno' | 'apellidoMaterno' | 'apellidos' | 'dni'> {
+    return resolveArrivalIdentity(row, process);
+}
+
+function resolveArrivalIdentity(
+    row: Pick<FinalStageArrivalRow, 'candidateId' | 'name' | 'dni' | 'bulkColumnValues'>,
+    process?: Process
+): Pick<FinalStageArrivalDetail, 'name' | 'nombres' | 'apellidoPaterno' | 'apellidoMaterno' | 'apellidos' | 'dni'> {
+    const candidateLike = {
+        id: row.candidateId,
+        name: row.name,
+        dni: row.dni,
+        bulkColumnValues: row.bulkColumnValues,
+        history: [],
+        attachments: [],
+        email: '',
+        processId: process?.id || '',
+        stageId: '',
+    } as Candidate;
+
+    const parts = process
+        ? resolveStructuredWorkerNameParts(candidateLike, process)
+        : (() => {
+              const parsed = parseLegacyFullName(row.name || '');
+              return {
+                  ...parsed,
+                  fullName:
+                      composeWorkerFullName(parsed.nombres, parsed.apellidoPaterno, parsed.apellidoMaterno) ||
+                      row.name ||
+                      '',
+              };
+          })();
+
+    const apellidos = composeWorkerFullName(undefined, parts.apellidoPaterno, parts.apellidoMaterno) || undefined;
+
+    return {
+        name: parts.fullName || row.name || 'Sin nombre',
+        nombres: parts.nombres,
+        apellidoPaterno: parts.apellidoPaterno,
+        apellidoMaterno: parts.apellidoMaterno,
+        apellidos,
+        dni: row.dni,
+    };
+}
+
 function toArrivalDetail(
     row: FinalStageArrivalRow,
-    users: UserLookup[]
+    users: UserLookup[],
+    process?: Process
 ): FinalStageArrivalDetail {
     const dateKey = formatDateKeyLima(row.movedAt);
+    const identity = resolveArrivalIdentity(row, process);
     return {
         candidateId: row.candidateId,
-        name: row.name,
+        ...identity,
         email: row.email,
         phone: row.phone,
         movedAt: row.movedAt,
@@ -209,13 +269,15 @@ export function buildProcessCoverageReport(input: {
     discards: ProcessDiscardRow[];
     inflow: CandidateInflowRow[];
     users?: UserLookup[];
+    process?: Process;
 }): ProcessCoverageReport {
     const { range, snapshot, arrivals, discards, inflow } = input;
     const users = input.users || [];
+    const process = input.process;
     const dateKeys = iterDateKeys(range.startKey, range.endKey);
 
     const details = arrivals
-        .map(row => toArrivalDetail(row, users))
+        .map(row => toArrivalDetail(row, users, process))
         .filter(d => inRange(d.dateKey, range.startKey, range.endKey))
         .sort((a, b) => b.movedAt.localeCompare(a.movedAt));
 
