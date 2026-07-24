@@ -69,7 +69,7 @@ import {
 } from '../lib/bulkConfigBackup';
 import { useDebouncedValue } from '../lib/useDebouncedValue';
 import { fetchWithRetry } from '../lib/fetchWithRetry';
-import { Check, X, Loader2, Send, Archive, Search, ChevronDown, ChevronUp, Plus, Edit, Trash2, ArrowLeft, MessageCircle, Phone, Upload, Download, Filter, Mail, Calendar, Settings, ArrowUp, ArrowDown, Pin, FileText, BookOpen, Paperclip, ClipboardList, ListPlus, RefreshCw, HardDrive, CaseSensitive, Package, History, Target, BarChart3, UserCheck, Coins, Bus, Undo2, ArrowRightLeft, LayoutGrid } from 'lucide-react';
+import { Check, X, Loader2, Send, Archive, Search, ChevronDown, ChevronUp, Plus, Edit, Trash2, ArrowLeft, MessageCircle, Phone, Upload, Download, Filter, Mail, Calendar, Settings, ArrowUp, ArrowDown, Pin, FileText, BookOpen, Paperclip, ClipboardList, ListPlus, RefreshCw, HardDrive, CaseSensitive, Package, History, Target, BarChart3, UserCheck, Coins, Bus, Undo2, ArrowRightLeft, LayoutGrid, LineChart } from 'lucide-react';
 import { BulkCandidateTimeline } from './BulkCandidateTimeline';
 import { BulkContactologyHistory } from './BulkContactologyHistory';
 import { Process, CustomColumn, BulkProcessConfig, Candidate, IdealProfileConfig, BulkProcessStatChart, BulkInfoPin, BulkQuickReply } from '../types';
@@ -183,6 +183,7 @@ import {
     createUndoEntryId,
 } from '../lib/bulkUndo';
 import { BulkProcessStatsModal } from './BulkProcessStatsModal';
+import { ProcessPerformanceModal } from './ProcessPerformanceModal';
 import {
     getApplicationCountLabelFromCandidate,
     getApplicationCountPriorityClass,
@@ -784,6 +785,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
     const [showExportModal, setShowExportModal] = useState(false);
     const [showIdealProfileModal, setShowIdealProfileModal] = useState(false);
     const [showStatsModal, setShowStatsModal] = useState(false);
+    const [showPerformanceModal, setShowPerformanceModal] = useState(false);
     const [showTransportFaresModal, setShowTransportFaresModal] = useState(false);
     const [showActivityLogModal, setShowActivityLogModal] = useState(false);
     const [showTransferModal, setShowTransferModal] = useState(false);
@@ -6152,6 +6154,15 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                                         </button>
                                         <button
                                             type="button"
+                                            onClick={() => setShowPerformanceModal(true)}
+                                            className="bg-teal-600 text-white hover:bg-teal-700 transition-colors whitespace-nowrap"
+                                            title="Informe de cobertura y desempeño del proceso"
+                                        >
+                                            <LineChart className="w-4 h-4 shrink-0" />
+                                            Performance
+                                        </button>
+                                        <button
+                                            type="button"
                                             onClick={() => setShowIdealProfileModal(true)}
                                             className={`transition-colors whitespace-nowrap ${
                                                 idealProfileConfig?.enabled
@@ -7796,6 +7807,14 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                     loadingAllCandidates={loadingAllCandidatesForStats}
                     selectedStageId={selectedStage}
                     onSave={handleSaveCustomStats}
+                />
+            )}
+
+            {showPerformanceModal && process && (
+                <ProcessPerformanceModal
+                    isOpen={showPerformanceModal}
+                    onClose={() => setShowPerformanceModal(false)}
+                    process={process}
                 />
             )}
 

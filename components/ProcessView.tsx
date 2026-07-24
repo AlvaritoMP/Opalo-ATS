@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useAppState } from '../App';
 import { CandidateCard } from './CandidateCard';
-import { Plus, Edit, Briefcase, DollarSign, BarChart, Clock, Paperclip, X, FileText, ClipboardList, Tag, Users, ArrowLeft, CheckCircle, Mail, MessageCircle, Download, FileUp, Table2 } from 'lucide-react';
+import { Plus, Edit, Briefcase, DollarSign, BarChart, Clock, Paperclip, X, FileText, ClipboardList, Tag, Users, ArrowLeft, CheckCircle, Mail, MessageCircle, Download, FileUp, Table2, LineChart } from 'lucide-react';
 import { AddCandidateModal } from './AddCandidateModal';
 import { ProcessEditorModal } from './ProcessEditorModal';
 import { BulkLetterModal } from './BulkLetterModal';
@@ -10,6 +10,7 @@ import { EndProcessModal } from './EndProcessModal';
 import { ProcessCommunicationModal } from './ProcessCommunicationModal';
 import { ProcessImportModal } from './BulkImportView';
 import { BulkProcessesView } from './BulkProcessesView';
+import { ProcessPerformanceModal } from './ProcessPerformanceModal';
 import { Attachment, UserRole, Candidate } from '../types';
 import { PROCESS_STATUS_LABELS, PROCESS_STATUS_COLORS, isProcessActive, isProcessEnded, isProcessOperational } from '../lib/processStatus';
 import * as XLSX from 'xlsx';
@@ -115,6 +116,7 @@ export const ProcessView: React.FC<ProcessViewProps> = ({ processId }) => {
     const [isCloseProcessOpen, setIsCloseProcessOpen] = useState(false);
     const [isCommunicationOpen, setIsCommunicationOpen] = useState(false);
     const [isImportOpen, setIsImportOpen] = useState(false);
+    const [isPerformanceOpen, setIsPerformanceOpen] = useState(false);
     const [selectedCandidates, setSelectedCandidates] = useState<string[]>([]);
     const [attachmentsCount, setAttachmentsCount] = useState<number | null>(null);
     const [processAttachments, setProcessAttachments] = useState<Attachment[]>([]);
@@ -501,8 +503,19 @@ export const ProcessView: React.FC<ProcessViewProps> = ({ processId }) => {
                             {statusLabels[currentStatus]}
                         </span>
                      </div>
+                     <div className="flex flex-wrap items-center gap-2 md:gap-3">
+                            <button
+                                type="button"
+                                onClick={() => setIsPerformanceOpen(true)}
+                                className="flex items-center px-3 md:px-4 py-2 bg-teal-600 text-white rounded-md shadow-sm hover:bg-teal-700 text-xs md:text-sm font-medium whitespace-nowrap"
+                                title="Informe de cobertura y desempeño del proceso"
+                            >
+                                <LineChart className="w-4 h-4 mr-1 md:mr-2" />
+                                <span className="hidden md:inline">Performance</span>
+                                <span className="md:hidden">Perf.</span>
+                            </button>
                      {canManageProcess && (
-                        <div className="flex flex-wrap items-center gap-2 md:gap-3">
+                        <>
                             {selectedCandidates.length > 0 && (
                                 <>
                                     <button onClick={() => setIsBulkLetterOpen(true)} className="flex items-center px-3 md:px-4 py-2 bg-white border border-gray-300 rounded-md shadow-sm text-xs md:text-sm font-medium text-gray-700 hover:bg-gray-50 whitespace-nowrap">
@@ -595,8 +608,9 @@ export const ProcessView: React.FC<ProcessViewProps> = ({ processId }) => {
                                     <Plus className="w-4 h-4 md:w-5 md:h-5 mr-1 md:mr-2" /> <span className="hidden md:inline">Añadir candidato</span> <span className="md:hidden">Añadir</span>
                                 </button>
                             )}
-                        </div>
+                        </>
                      )}
+                     </div>
                 </div>
                 <div className="flex items-center flex-wrap gap-2 md:gap-3">
                     {process.serviceOrderCode && <InfoChip icon={ClipboardList} text={`OS: ${process.serviceOrderCode}`} />}
@@ -669,6 +683,13 @@ export const ProcessView: React.FC<ProcessViewProps> = ({ processId }) => {
                         setIsImportOpen(false);
                         void actions.reloadCandidates?.();
                     }}
+                />
+            )}
+            {isPerformanceOpen && (
+                <ProcessPerformanceModal
+                    isOpen={isPerformanceOpen}
+                    onClose={() => setIsPerformanceOpen(false)}
+                    process={process}
                 />
             )}
             {isProcessEditorOpen && <ProcessEditorModal process={process} onClose={() => setIsProcessEditorOpen(false)} />}
