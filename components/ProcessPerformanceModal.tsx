@@ -166,6 +166,7 @@ export const ProcessPerformanceModal: React.FC<ProcessPerformanceModalProps> = (
     const [selectedDayKey, setSelectedDayKey] = useState<string | null>(null);
     const [consolidatedDays, setConsolidatedDays] = useState<Set<string>>(new Set());
     const [activeTab, setActiveTab] = useState<'day' | 'consolidated' | 'discards'>('day');
+    const detailSectionRef = useRef<HTMLElement | null>(null);
 
     const hiringStageId = useMemo(() => resolveHiringStageId(process), [process]);
     const hiringStageName = useMemo(() => {
@@ -331,11 +332,41 @@ export const ProcessPerformanceModal: React.FC<ProcessPerformanceModalProps> = (
     const bucketPartiallyConsolidated = (bucket: CoverageChartBucket) =>
         bucket.dateKeys.some(k => consolidatedDays.has(k));
 
-    const selectChartBucket = (bucketKey?: string) => {
+    const selectChartBucket = useCallback((bucketKey?: string, scrollToDetail = true) => {
         if (!bucketKey) return;
         setSelectedDayKey(bucketKey);
         setActiveTab('day');
-    };
+        if (scrollToDetail) {
+            window.requestAnimationFrame(() => {
+                detailSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            });
+        }
+    }, []);
+
+    /** Recharts v3: el clic fiable viene del Bar (payload o índice), no del BarChart. */
+    const handleFinalBarClick = useCallback(
+        (data: unknown, index: number) => {
+            const raw = data as { payload?: CoverageChartBucket; bucketKey?: string } | CoverageChartBucket | null;
+            const fromPayload =
+                raw && typeof raw === 'object'
+                    ? ('payload' in raw && raw.payload?.bucketKey
+                          ? raw.payload.bucketKey
+                          : 'bucketKey' in raw
+                            ? raw.bucketKey
+                            : undefined)
+                    : undefined;
+            const fromIndex = chartFinal[index]?.bucketKey;
+            selectChartBucket(fromPayload || fromIndex);
+        },
+        [chartFinal, selectChartBucket]
+    );
+
+    const daysWithArrivals = useMemo(() => {
+        if (!report) return [] as Array<{ dateKey: string; count: number; label: string }>;
+        return report.finalStageDaily
+            .filter(d => d.count > 0)
+            .map(d => ({ dateKey: d.dateKey, count: d.count, label: d.label }));
+    }, [report]);
 
     const exportFullReport = () => {
         if (!report) return;
@@ -578,12 +609,6 @@ export const ProcessPerformanceModal: React.FC<ProcessPerformanceModalProps> = (
                                                 height={height}
                                                 data={chartFinal}
                                                 margin={{ bottom: 4, left: 0, right: 4, top: 8 }}
-                                                onClick={(data) => {
-                                                    const payload = data as {
-                                                        activePayload?: Array<{ payload?: CoverageChartBucket }>;
-                                                    };
-                                                    selectChartBucket(payload.activePayload?.[0]?.payload?.bucketKey);
-                                                }}
                                             >
                                                 <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
                                                 <XAxis
@@ -604,10 +629,16 @@ export const ProcessPerformanceModal: React.FC<ProcessPerformanceModalProps> = (
                                                         return `${p.label} (${p.dateKeys[0]} → ${p.dateKeys[p.dateKeys.length - 1]})`;
                                                     }}
                                                 />
-                                                <Bar dataKey="count" radius={[3, 3, 0, 0]} cursor="pointer">
+                                                <Bar
+                                                    dataKey="count"
+                                                    radius={[3, 3, 0, 0]}
+                                                    cursor="pointer"
+                                                    onClick={handleFinalBarClick}
+                                                >
                                                     {chartFinal.map(entry => (
                                                         <Cell
                                                             key={entry.bucketKey}
+                                                            cursor="pointer"
                                                             fill={
                                                                 selectedBucket?.bucketKey === entry.bucketKey
                                                                     ? '#0f766e'
@@ -615,12 +646,32 @@ export const ProcessPerformanceModal: React.FC<ProcessPerformanceModalProps> = (
                                                                       ? '#14b8a6'
                                                                       : '#2dd4bf'
                                                             }
+                                                            onClick={() => selectChartBucket(entry.bucketKey)}
                                                         />
                                                     ))}
                                                 </Bar>
                                             </BarChart>
                                         )}
                                     </MeasuredChartArea>
+                                    {selectedBucket && (
+                                        <div className="mt-3 flex flex-wrap items-center gap-2 rounded-lg border border-teal-200 bg-teal-50 px-3 py-2 text-xs text-teal-900">
+                                            <span className="font-semibold">Seleccionado:</span>
+                                            <span>{selectedBucket.label}</span>
+                                            <span className="text-teal-700">· {bucketArrivals.length} candidato(s)</span>
+                                            <button
+                                                type="button"
+                                                onClick={() => toggleConsolidateBucket(selectedBucket)}
+                                                className="ml-auto inline-flex items-center gap-1 rounded-md border border-teal-300 bg-white px-2 py-1 font-medium text-teal-800 hover:bg-teal-100"
+                                            >
+                                                {bucketHasConsolidated ? (
+                                                    <CheckSquare className="w-3.5 h-3.5" />
+                                                ) : (
+                                                    <Square className="w-3.5 h-3.5" />
+                                                )}
+                                                {bucketHasConsolidated ? 'Quitar del consolidado' : 'Añadir al consolidado'}
+                                            </button>
+                                        </div>
+                                    )}
                                 </section>
 
                                 <section className="bg-white rounded-xl border border-gray-200 shadow-sm p-4">
@@ -809,7 +860,10 @@ export const ProcessPerformanceModal: React.FC<ProcessPerformanceModalProps> = (
                                 </section>
                             </div>
 
-                            <section className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+                            <section
+                                ref={detailSectionRef}
+                                className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden"
+                            >
                                 <div className="px-4 py-3 border-b flex flex-wrap items-center gap-2 justify-between">
                                     <div className="flex items-center gap-1 rounded-lg border border-gray-200 overflow-hidden">
                                         <button
@@ -846,11 +900,14 @@ export const ProcessPerformanceModal: React.FC<ProcessPerformanceModalProps> = (
                                         </button>
                                     </div>
                                     <div className="flex flex-wrap items-center gap-2">
-                                        {selectedBucket && (
+                                        {activeTab === 'day' && selectedBucket && (
                                             <button
                                                 type="button"
-                                                onClick={() => toggleConsolidateBucket(selectedBucket)}
-                                                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-md border border-gray-300 text-gray-700 hover:bg-gray-50"
+                                                onClick={() => {
+                                                    toggleConsolidateBucket(selectedBucket);
+                                                    setActiveTab('consolidated');
+                                                }}
+                                                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-md border border-teal-300 bg-teal-50 text-teal-900 hover:bg-teal-100"
                                             >
                                                 {bucketHasConsolidated ? (
                                                     <CheckSquare className="w-3.5 h-3.5 text-teal-600" />
@@ -859,9 +916,7 @@ export const ProcessPerformanceModal: React.FC<ProcessPerformanceModalProps> = (
                                                 )}
                                                 {bucketHasConsolidated
                                                     ? 'Quitar del consolidado'
-                                                    : chartGranularity === 'day'
-                                                      ? 'Añadir día al consolidado'
-                                                      : 'Añadir período al consolidado'}
+                                                    : 'Añadir al consolidado'}
                                             </button>
                                         )}
                                         {activeTab === 'day' && (
@@ -933,64 +988,134 @@ export const ProcessPerformanceModal: React.FC<ProcessPerformanceModalProps> = (
                                 </div>
 
                                 {activeTab === 'day' && (
-                                    <div className="overflow-x-auto max-h-72">
-                                        {!selectedBucket ? (
-                                            <p className="text-sm text-gray-400 p-6 text-center">
-                                                Selecciona un período en el gráfico de flujo.
-                                            </p>
-                                        ) : bucketArrivals.length === 0 ? (
-                                            <p className="text-sm text-gray-400 p-6 text-center">
-                                                Sin llegadas a {hiringStageName} en {selectedBucket.label}.
-                                            </p>
-                                        ) : (
-                                            <table className="min-w-full text-sm">
-                                                <thead className="bg-gray-50 sticky top-0">
-                                                    <tr className="text-left text-xs text-gray-500">
-                                                        <th className="px-4 py-2 font-medium">Candidato</th>
-                                                        <th className="px-4 py-2 font-medium">Email</th>
-                                                        <th className="px-4 py-2 font-medium">Consultor</th>
-                                                        <th className="px-4 py-2 font-medium">Fecha y hora</th>
-                                                    </tr>
-                                                </thead>
-                                                <tbody>
-                                                    {bucketArrivals.map(a => (
-                                                        <tr key={`${a.candidateId}-${a.movedAt}`} className="border-t border-gray-100">
-                                                            <td className="px-4 py-2 font-medium text-gray-900">{a.name}</td>
-                                                            <td className="px-4 py-2 text-gray-600">{a.email}</td>
-                                                            <td className="px-4 py-2 text-gray-700">{a.consultant}</td>
-                                                            <td className="px-4 py-2 tabular-nums text-gray-700">
-                                                                {formatDateTimeLima(a.movedAt)}
-                                                            </td>
-                                                        </tr>
-                                                    ))}
-                                                </tbody>
-                                            </table>
+                                    <div>
+                                        {selectedBucket && (
+                                            <div className="px-4 py-2 bg-gray-50 border-b text-xs text-gray-700 flex flex-wrap items-center gap-2">
+                                                <span className="font-semibold text-gray-900">
+                                                    {selectedBucket.label}
+                                                </span>
+                                                {selectedBucket.dateKeys.length > 1 && (
+                                                    <span className="text-gray-500">
+                                                        ({selectedBucket.dateKeys[0]} →{' '}
+                                                        {selectedBucket.dateKeys[selectedBucket.dateKeys.length - 1]})
+                                                    </span>
+                                                )}
+                                                <span className="tabular-nums text-gray-500">
+                                                    {bucketArrivals.length} candidato(s)
+                                                </span>
+                                            </div>
                                         )}
+                                        <div className="overflow-x-auto max-h-72">
+                                            {!selectedBucket ? (
+                                                <p className="text-sm text-gray-400 p-6 text-center">
+                                                    Selecciona una barra en el gráfico de flujo para ver el detalle.
+                                                </p>
+                                            ) : bucketArrivals.length === 0 ? (
+                                                <p className="text-sm text-gray-400 p-6 text-center">
+                                                    Sin llegadas a {hiringStageName} en {selectedBucket.label}.
+                                                </p>
+                                            ) : (
+                                                <table className="min-w-full text-sm">
+                                                    <thead className="bg-gray-50 sticky top-0">
+                                                        <tr className="text-left text-xs text-gray-500">
+                                                            <th className="px-4 py-2 font-medium">Candidato</th>
+                                                            <th className="px-4 py-2 font-medium">Email</th>
+                                                            <th className="px-4 py-2 font-medium">Consultor</th>
+                                                            <th className="px-4 py-2 font-medium">Fecha y hora</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody>
+                                                        {bucketArrivals.map(a => (
+                                                            <tr
+                                                                key={`${a.candidateId}-${a.movedAt}`}
+                                                                className="border-t border-gray-100"
+                                                            >
+                                                                <td className="px-4 py-2 font-medium text-gray-900">
+                                                                    {a.name}
+                                                                </td>
+                                                                <td className="px-4 py-2 text-gray-600">{a.email}</td>
+                                                                <td className="px-4 py-2 text-gray-700">{a.consultant}</td>
+                                                                <td className="px-4 py-2 tabular-nums text-gray-700">
+                                                                    {formatDateTimeLima(a.movedAt)}
+                                                                </td>
+                                                            </tr>
+                                                        ))}
+                                                    </tbody>
+                                                </table>
+                                            )}
+                                        </div>
                                     </div>
                                 )}
 
                                 {activeTab === 'consolidated' && (
-                                    <div className="overflow-x-auto max-h-72">
-                                        {consolidatedDays.size === 0 ? (
-                                            <p className="text-sm text-gray-400 p-6 text-center">
-                                                Añade días al consolidado desde el gráfico o el botón «Añadir día».
+                                    <div>
+                                        <div className="px-4 py-3 border-b bg-teal-50/60">
+                                            <p className="text-xs font-medium text-teal-900 mb-2">
+                                                Marca los días que quieres incluir en el consolidado:
                                             </p>
-                                        ) : (
-                                            <>
-                                                <div className="px-4 py-2 bg-teal-50 border-b border-teal-100 text-xs text-teal-900 flex flex-wrap gap-1.5">
-                                                    {[...consolidatedDays].sort().map(key => (
-                                                        <button
-                                                            key={key}
-                                                            type="button"
-                                                            onClick={() => toggleConsolidateDay(key)}
-                                                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-white border border-teal-200 hover:bg-teal-100"
-                                                            title="Quitar día"
-                                                        >
-                                                            {key}
-                                                            <X className="w-3 h-3" />
-                                                        </button>
-                                                    ))}
+                                            {daysWithArrivals.length === 0 ? (
+                                                <p className="text-xs text-gray-500">
+                                                    No hay días con llegadas a etapa final en el período.
+                                                </p>
+                                            ) : (
+                                                <div className="flex flex-wrap gap-1.5 max-h-28 overflow-y-auto">
+                                                    {daysWithArrivals.map(day => {
+                                                        const checked = consolidatedDays.has(day.dateKey);
+                                                        return (
+                                                            <button
+                                                                key={day.dateKey}
+                                                                type="button"
+                                                                onClick={() => toggleConsolidateDay(day.dateKey)}
+                                                                className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-xs border transition-colors ${
+                                                                    checked
+                                                                        ? 'bg-teal-600 text-white border-teal-700'
+                                                                        : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
+                                                                }`}
+                                                                title={`${day.label} · ${day.count} llegada(s)`}
+                                                            >
+                                                                {checked ? (
+                                                                    <CheckSquare className="w-3.5 h-3.5" />
+                                                                ) : (
+                                                                    <Square className="w-3.5 h-3.5" />
+                                                                )}
+                                                                <span className="tabular-nums">{day.dateKey}</span>
+                                                                <span className={checked ? 'text-teal-100' : 'text-gray-400'}>
+                                                                    ({day.count})
+                                                                </span>
+                                                            </button>
+                                                        );
+                                                    })}
                                                 </div>
+                                            )}
+                                            {daysWithArrivals.length > 0 && (
+                                                <div className="mt-2 flex flex-wrap gap-2">
+                                                    <button
+                                                        type="button"
+                                                        onClick={() =>
+                                                            setConsolidatedDays(
+                                                                new Set(daysWithArrivals.map(d => d.dateKey))
+                                                            )
+                                                        }
+                                                        className="text-[11px] font-medium text-teal-800 hover:underline"
+                                                    >
+                                                        Seleccionar todos
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => setConsolidatedDays(new Set())}
+                                                        className="text-[11px] font-medium text-gray-600 hover:underline"
+                                                    >
+                                                        Limpiar
+                                                    </button>
+                                                </div>
+                                            )}
+                                        </div>
+                                        <div className="overflow-x-auto max-h-72">
+                                            {consolidatedDays.size === 0 ? (
+                                                <p className="text-sm text-gray-400 p-6 text-center">
+                                                    Selecciona uno o más días arriba para consolidar la lista.
+                                                </p>
+                                            ) : (
                                                 <table className="min-w-full text-sm">
                                                     <thead className="bg-gray-50 sticky top-0">
                                                         <tr className="text-left text-xs text-gray-500">
@@ -1020,8 +1145,8 @@ export const ProcessPerformanceModal: React.FC<ProcessPerformanceModalProps> = (
                                                         ))}
                                                     </tbody>
                                                 </table>
-                                            </>
-                                        )}
+                                            )}
+                                        </div>
                                     </div>
                                 )}
 
