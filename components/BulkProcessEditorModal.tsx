@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useAppState } from '../App';
 import { Process, Stage, ProcessStatus, BulkProcessConfig, KillerQuestion, PsycholaboralInventory, Attachment, Client } from '../types';
 import { PROCESS_STATUS_LABELS } from '../lib/processStatus';
-import { X, Plus, Trash2, GripVertical, Settings, Filter, Brain, MessageCircle, Upload, FileText, ChevronUp, ChevronDown } from 'lucide-react';
+import { X, Plus, Trash2, GripVertical, Settings, Filter, Brain, MessageCircle, Upload, FileText, ChevronUp, ChevronDown, Download } from 'lucide-react';
 import { processesApi } from '../lib/api/processes';
 import { clientsApi } from '../lib/api/clients';
 import { isScoreIaColumnVisible, pickBulkTableLayoutConfig } from '../lib/bulkTableColumns';
@@ -214,6 +214,21 @@ export const BulkProcessEditorModal: React.FC<BulkProcessEditorModalProps> = ({ 
             setFlyerPosition('center center');
         }
         if (e.target) e.target.value = '';
+    };
+
+    const handleFlyerDownload = () => {
+        if (!flyerUrl) return;
+        const mimeMatch = flyerUrl.match(/^data:image\/([\w+.-]+);/);
+        const rawExt = mimeMatch?.[1]?.split('+')[0] || 'png';
+        const ext = rawExt === 'jpeg' ? 'jpg' : rawExt;
+        const safeTitle = (title || 'proceso').replace(/[^\w\-]+/g, '_').slice(0, 50);
+        const a = document.createElement('a');
+        a.href = flyerUrl;
+        a.download = `flyer_${safeTitle}.${ext}`;
+        a.rel = 'noopener';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
     };
 
     const handleFlyerAreaClick = (e: React.MouseEvent<HTMLDivElement>) => {
@@ -546,13 +561,23 @@ export const BulkProcessEditorModal: React.FC<BulkProcessEditorModalProps> = ({ 
                                         {flyerUrl ? 'Cambiar imagen' : 'Subir imagen'}
                                     </button>
                                     {flyerUrl && (
-                                        <button
-                                            type="button"
-                                            onClick={() => setFlyerUrl('')}
-                                            className="px-3 py-2 text-sm text-gray-600 border rounded-lg hover:bg-gray-50"
-                                        >
-                                            Quitar
-                                        </button>
+                                        <>
+                                            <button
+                                                type="button"
+                                                onClick={handleFlyerDownload}
+                                                className="flex items-center gap-2 px-3 py-2 text-sm text-gray-700 border rounded-lg hover:bg-gray-50"
+                                            >
+                                                <Download className="w-4 h-4" />
+                                                Descargar
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={() => setFlyerUrl('')}
+                                                className="px-3 py-2 text-sm text-gray-600 border rounded-lg hover:bg-gray-50"
+                                            >
+                                                Quitar
+                                            </button>
+                                        </>
                                     )}
                                 </div>
                             </div>

@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { useAppState } from '../App';
 import { Process, Stage, Attachment, ProcessStatus, DocumentCategory, Client } from '../types';
 import { PROCESS_STATUS_LABELS } from '../lib/processStatus';
-import { X, Plus, Trash2, GripVertical, Paperclip, Upload, FileText, CheckSquare, Folder, Cloud, Eye, Info } from 'lucide-react';
+import { X, Plus, Trash2, GripVertical, Paperclip, Upload, FileText, CheckSquare, Folder, Cloud, Eye, Info, Download } from 'lucide-react';
 import { googleDriveService, GoogleDriveFolder } from '../lib/googleDrive';
 import { clientsApi } from '../lib/api';
 import { processesApi } from '../lib/api/processes';
@@ -244,6 +244,21 @@ export const ProcessEditorModal: React.FC<ProcessEditorModalProps> = ({ process,
             setFlyerPosition('center center'); // Resetear posición al subir nueva imagen
             setShowFlyerEditor(true); // Mostrar editor automáticamente
         }
+    };
+
+    const handleFlyerDownload = () => {
+        if (!flyerUrl) return;
+        const mimeMatch = flyerUrl.match(/^data:image\/([\w+.-]+);/);
+        const rawExt = mimeMatch?.[1]?.split('+')[0] || 'png';
+        const ext = rawExt === 'jpeg' ? 'jpg' : rawExt;
+        const safeTitle = (title || 'proceso').replace(/[^\w\-]+/g, '_').slice(0, 50);
+        const a = document.createElement('a');
+        a.href = flyerUrl;
+        a.download = `flyer_${safeTitle}.${ext}`;
+        a.rel = 'noopener';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
     };
 
     const handleFlyerPositionChange = (x: number, y: number) => {
@@ -682,13 +697,23 @@ export const ProcessEditorModal: React.FC<ProcessEditorModalProps> = ({ process,
                                             {flyerUrl ? 'Cambiar Imagen' : 'Subir Imagen'}
                                         </button>
                                         {flyerUrl && (
-                                            <button 
-                                                type="button" 
-                                                onClick={() => setShowFlyerEditor(!showFlyerEditor)} 
-                                                className="px-3 py-2 bg-primary-100 border border-primary-300 rounded-md shadow-sm text-sm font-medium text-primary-700 hover:bg-primary-200"
-                                            >
-                                                {showFlyerEditor ? 'Ocultar Editor' : 'Ajustar Posición'}
-                                            </button>
+                                            <>
+                                                <button 
+                                                    type="button" 
+                                                    onClick={() => setShowFlyerEditor(!showFlyerEditor)} 
+                                                    className="px-3 py-2 bg-primary-100 border border-primary-300 rounded-md shadow-sm text-sm font-medium text-primary-700 hover:bg-primary-200"
+                                                >
+                                                    {showFlyerEditor ? 'Ocultar Editor' : 'Ajustar Posición'}
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={handleFlyerDownload}
+                                                    className="flex items-center justify-center gap-1.5 px-3 py-2 bg-white border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 hover:bg-gray-50"
+                                                >
+                                                    <Download className="w-4 h-4" />
+                                                    Descargar
+                                                </button>
+                                            </>
                                         )}
                                     </div>
                                     <input type="file" accept="image/*" ref={flyerInputRef} onChange={handleFlyerUpload} className="hidden" />

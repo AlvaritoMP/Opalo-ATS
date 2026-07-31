@@ -69,7 +69,7 @@ import {
 } from '../lib/bulkConfigBackup';
 import { useDebouncedValue } from '../lib/useDebouncedValue';
 import { fetchWithRetry } from '../lib/fetchWithRetry';
-import { Check, X, Loader2, Send, Archive, Search, ChevronDown, ChevronUp, Plus, Edit, Trash2, ArrowLeft, MessageCircle, Phone, Upload, Download, Filter, Mail, Calendar, Settings, ArrowUp, ArrowDown, Pin, FileText, BookOpen, Paperclip, ClipboardList, ListPlus, RefreshCw, HardDrive, CaseSensitive, Package, History, Target, BarChart3, UserCheck, Coins, Bus, Undo2, ArrowRightLeft, LayoutGrid, LineChart } from 'lucide-react';
+import { Check, X, Loader2, Send, Archive, Search, ChevronDown, ChevronUp, Plus, Edit, Trash2, ArrowLeft, MessageCircle, Phone, Upload, Download, Filter, Mail, Calendar, Settings, ArrowUp, ArrowDown, Pin, FileText, BookOpen, Paperclip, ClipboardList, ListPlus, RefreshCw, HardDrive, CaseSensitive, Package, History, Target, BarChart3, UserCheck, Coins, Bus, Undo2, ArrowRightLeft, LayoutGrid, LineChart, ClipboardCopy } from 'lucide-react';
 import { BulkCandidateTimeline } from './BulkCandidateTimeline';
 import { BulkContactologyHistory } from './BulkContactologyHistory';
 import { Process, CustomColumn, BulkProcessConfig, Candidate, IdealProfileConfig, BulkProcessStatChart, BulkInfoPin, BulkQuickReply, BulkClipboardFieldPreset } from '../types';
@@ -867,7 +867,9 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
     const canSendToOpsFlow = state.currentUser?.role === 'admin' || state.currentUser?.role === 'recruiter';
     const canEditBulkInfoPins = canSendToOpsFlow;
     const canEditBulkQuickReplies = canSendToOpsFlow;
-    const canEditClipboardPresets = canSendToOpsFlow;
+    /** Misma barra de tabla que columnas: cualquier usuario no-cliente puede crear botones de copia */
+    const canEditClipboardPresets =
+        Boolean(state.currentUser) && state.currentUser?.role !== 'client';
 
     const infoPins = useMemo(
         () => process?.bulkConfig?.infoPins ?? [],
@@ -6126,6 +6128,22 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                                             <Download className="w-4 h-4" />
                                             Exportar
                                         </button>
+                                        {canEditClipboardPresets && (
+                                            <button
+                                                type="button"
+                                                onClick={() =>
+                                                    setClipboardPresetModal({
+                                                        preset: createBulkClipboardFieldPreset(),
+                                                        isNew: true,
+                                                    })
+                                                }
+                                                className="bg-emerald-600 text-white hover:bg-emerald-700 transition-colors"
+                                                title="Crear botón para copiar campos de candidatos seleccionados al portapapeles"
+                                            >
+                                                <ClipboardCopy className="w-4 h-4" />
+                                                Botón copia
+                                            </button>
+                                        )}
                                         <button
                                             type="button"
                                             onClick={handleNormalizeTextCase}
@@ -7975,7 +7993,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                 />
             )}
 
-            {canEditClipboardPresets && (
+            {(canEditClipboardPresets || clipboardPresetModal) && (
                 <BulkClipboardPresetModal
                     isOpen={!!clipboardPresetModal}
                     preset={clipboardPresetModal?.preset ?? null}
