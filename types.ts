@@ -242,6 +242,11 @@ export interface BulkProcessConfig {
     infoPins?: BulkInfoPin[];
     /** Respuestas rápidas copiables al portapapeles (texto + adjuntos) */
     quickReplies?: BulkQuickReply[];
+    /**
+     * Botones que copian al portapapeles campos elegidos de los candidatos
+     * seleccionados con checkbox en la tabla masiva.
+     */
+    clipboardFieldPresets?: BulkClipboardFieldPreset[];
     /** Plantillas predefinidas de correo y WhatsApp para contactar candidatos */
     contactMessageTemplates?: BulkContactMessageTemplate[];
     /** Plantillas Word (.docx) para generar documentos por candidato en la tabla masiva */
@@ -332,6 +337,29 @@ export interface BulkQuickReply {
     content: string;
     color?: BulkInfoPinColor;
     attachments?: BulkQuickReplyAttachment[];
+}
+
+/** Separador entre campos en una misma fila al copiar candidatos */
+export type BulkClipboardFieldSeparator = 'tab' | 'comma' | 'pipe' | 'newline';
+
+/**
+ * Preset de copia al portapapeles: elige columnas de la tabla y, al hacer clic,
+ * copia esos datos de uno o más candidatos seleccionados con checkbox.
+ */
+export interface BulkClipboardFieldPreset {
+    id: string;
+    title: string;
+    color?: BulkInfoPinColor;
+    /** IDs de columna de la tabla (name, phone, custom_*, …) */
+    columnIds: string[];
+    /**
+     * Cómo unir los campos de un mismo candidato.
+     * - tab / comma / pipe → una línea por candidato (ideal Excel / WhatsApp)
+     * - newline → un campo por línea; candidatos separados por línea en blanco
+     */
+    fieldSeparator?: BulkClipboardFieldSeparator;
+    /** Incluir fila de encabezados (solo cuando fieldSeparator no es newline) */
+    includeHeader?: boolean;
 }
 
 /** Tipo de gráfico para estadísticas del proceso masivo */

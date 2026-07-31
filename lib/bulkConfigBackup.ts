@@ -61,6 +61,7 @@ export function scoreBulkConfigRichness(config?: BulkProcessConfig): number {
     score += (config.hiddenColumns?.length ?? 0);
     score += (config.quickReplies?.length ?? 0) * 12;
     score += (config.infoPins?.length ?? 0) * 12;
+    score += (config.clipboardFieldPresets?.length ?? 0) * 12;
     score += (config.contactMessageTemplates?.length ?? 0) * 8;
     score += (config.customStats?.length ?? 0) * 6;
     score += config.idealProfile?.enabled ? 50 : 0;
@@ -188,6 +189,14 @@ export function mergeBulkConfigPreferRicher(
 
     const infoPins = pickRicherArray(current?.infoPins, backup.infoPins);
     if (infoPins && infoPins !== current?.infoPins) mark('infoPins', infoPins);
+
+    const clipboardFieldPresets = pickRicherArray(
+        current?.clipboardFieldPresets,
+        backup.clipboardFieldPresets
+    );
+    if (clipboardFieldPresets && clipboardFieldPresets !== current?.clipboardFieldPresets) {
+        mark('clipboardFieldPresets', clipboardFieldPresets);
+    }
 
     const contactMessageTemplates = pickRicherArray(
         current?.contactMessageTemplates,

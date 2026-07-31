@@ -72,7 +72,7 @@ import { fetchWithRetry } from '../lib/fetchWithRetry';
 import { Check, X, Loader2, Send, Archive, Search, ChevronDown, ChevronUp, Plus, Edit, Trash2, ArrowLeft, MessageCircle, Phone, Upload, Download, Filter, Mail, Calendar, Settings, ArrowUp, ArrowDown, Pin, FileText, BookOpen, Paperclip, ClipboardList, ListPlus, RefreshCw, HardDrive, CaseSensitive, Package, History, Target, BarChart3, UserCheck, Coins, Bus, Undo2, ArrowRightLeft, LayoutGrid, LineChart } from 'lucide-react';
 import { BulkCandidateTimeline } from './BulkCandidateTimeline';
 import { BulkContactologyHistory } from './BulkContactologyHistory';
-import { Process, CustomColumn, BulkProcessConfig, Candidate, IdealProfileConfig, BulkProcessStatChart, BulkInfoPin, BulkQuickReply } from '../types';
+import { Process, CustomColumn, BulkProcessConfig, Candidate, IdealProfileConfig, BulkProcessStatChart, BulkInfoPin, BulkQuickReply, BulkClipboardFieldPreset } from '../types';
 import { candidatesApi } from '../lib/api/candidates';
 import {
     BASE_COLUMNS,
@@ -162,6 +162,13 @@ import { BulkInfoPinModal } from './BulkInfoPinModal';
 import { BulkInfoPinPanel } from './BulkInfoPinPanel';
 import { BulkQuickRepliesBar } from './BulkQuickRepliesBar';
 import { BulkQuickReplyModal } from './BulkQuickReplyModal';
+import { BulkClipboardPresetsBar } from './BulkClipboardPresetsBar';
+import { BulkClipboardPresetModal } from './BulkClipboardPresetModal';
+import {
+    createBulkClipboardFieldPreset,
+    buildClipboardPresetText,
+    copyClipboardPresetToClipboard,
+} from '../lib/bulkClipboardPresets';
 import { BulkQuickRepliesGlobalPanel } from './BulkQuickRepliesGlobalPanel';
 import { createBulkInfoPin } from '../lib/bulkInfoPins';
 import {
@@ -794,6 +801,12 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
     const [quickReplyModal, setQuickReplyModal] = useState<{ reply: BulkQuickReply; isNew: boolean } | null>(null);
     const [isSavingQuickReply, setIsSavingQuickReply] = useState(false);
     const [copyingQuickReplyId, setCopyingQuickReplyId] = useState<string | null>(null);
+    const [clipboardPresetModal, setClipboardPresetModal] = useState<{
+        preset: BulkClipboardFieldPreset;
+        isNew: boolean;
+    } | null>(null);
+    const [isSavingClipboardPreset, setIsSavingClipboardPreset] = useState(false);
+    const [copyingClipboardPresetId, setCopyingClipboardPresetId] = useState<string | null>(null);
     const [showGlobalQuickRepliesPanel, setShowGlobalQuickRepliesPanel] = useState(false);
     /** Respuestas rápidas de TODOS los procesos masivos (carga ligera, sin entrar a cada uno). */
     const [globalQuickReplies, setGlobalQuickReplies] = useState<
@@ -854,6 +867,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
     const canSendToOpsFlow = state.currentUser?.role === 'admin' || state.currentUser?.role === 'recruiter';
     const canEditBulkInfoPins = canSendToOpsFlow;
     const canEditBulkQuickReplies = canSendToOpsFlow;
+    const canEditClipboardPresets = canSendToOpsFlow;
 
     const infoPins = useMemo(
         () => process?.bulkConfig?.infoPins ?? [],
@@ -863,6 +877,11 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
     const quickReplies = useMemo(
         () => process?.bulkConfig?.quickReplies ?? [],
         [process?.bulkConfig?.quickReplies]
+    );
+
+    const clipboardFieldPresets = useMemo(
+        () => process?.bulkConfig?.clipboardFieldPresets ?? [],
+        [process?.bulkConfig?.clipboardFieldPresets]
     );
 
     const contactMessageTemplates = useMemo(
@@ -1203,6 +1222,86 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
         (entry: BulkQuickReplyProcessEntry) => handleCopyQuickReply(entry.reply, entry.processId),
         [handleCopyQuickReply]
     );
+
+    const handleSaveClipboardPreset = useCallback(async (preset: BulkClipboardFieldPreset) => {
+        setIsSavingClipboardPreset(true);
+        try {
+            const exists = clipboardFieldPresets.some(p => p.id === preset.id);
+            const next = exists
+                ? clipboardFieldPresets.map(p => (p.id === preset.id ? preset : p))
+                : [...clipboardFieldPresets, preset];
+            await persistBulkConfig({ clipboardFieldPresets: next });
+            actions.showToast(exists ? 'Botón de copia actualizado' : 'Botón de copia creado', 'success', 2500);
+            setClipboardPresetModal(null);
+        } catch {
+            actions.showToast('Error al guardar botón de copia', 'error', 3000);
+        } finally {
+            setIsSavingClipboardPreset(false);
+        }
+    }, [clipboardFieldPresets, persistBulkConfig, actions]);
+
+    const handleDeleteClipboardPreset = useCallback(async (presetId: string) => {
+        if (!window.confirm('¿Eliminar este botón de copia?')) return;
+        setIsSavingClipboardPreset(true);
+        try {
+            await persistBulkConfig({
+                clipboardFieldPresets: clipboardFieldPresets.filter(p => p.id !== presetId),
+            });
+            actions.showToast('Botón de copia eliminado', 'success', 2500);
+            setClipboardPresetModal(null);
+        } catch {
+            actions.showToast('Error al eliminar botón de copia', 'error', 3000);
+        } finally {
+            setIsSavingClipboardPreset(false);
+        }
+    }, [clipboardFieldPresets, persistBulkConfig, actions]);
+
+    const handleCopyClipboardPreset = useCallback(async (preset: BulkClipboardFieldPreset) => {
+        if (selectedIds.size === 0) {
+            actions.showToast('Selecciona uno o más candidatos con el checkbox', 'info', 3000);
+            return;
+        }
+        if (preset.columnIds.length === 0) {
+            actions.showToast('Este botón no tiene campos configurados', 'error', 3000);
+            return;
+        }
+        setCopyingClipboardPresetId(preset.id);
+        try {
+            const selected = candidates.filter(c => selectedIds.has(c.id));
+            if (selected.length === 0) {
+                actions.showToast('No se encontraron los candidatos seleccionados en la vista actual', 'info', 3500);
+                return;
+            }
+            const text = buildClipboardPresetText(preset, selected, {
+                columnValues,
+                customColumns,
+                process,
+                bulkConfig: process?.bulkConfig,
+                hiringStageActors,
+            });
+            const result = await copyClipboardPresetToClipboard(text);
+            if (result.success) {
+                actions.showToast(
+                    `Copiados datos de ${selected.length} candidato(s)`,
+                    'success',
+                    3000
+                );
+            } else {
+                actions.showToast(result.message, 'error', 3000);
+            }
+        } finally {
+            setCopyingClipboardPresetId(null);
+        }
+    }, [
+        selectedIds,
+        candidates,
+        columnValues,
+        customColumns,
+        process,
+        hiringStageActors,
+        actions,
+    ]);
+
 
     useEffect(() => {
         setActiveInfoPinId(null);
@@ -5759,9 +5858,11 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                             {process &&
                                 (infoPins.length > 0 ||
                                     quickReplies.length > 0 ||
+                                    clipboardFieldPresets.length > 0 ||
                                     allQuickReplyEntries.length > 0 ||
                                     canEditBulkInfoPins ||
-                                    canEditBulkQuickReplies) && (
+                                    canEditBulkQuickReplies ||
+                                    canEditClipboardPresets) && (
                                 <div className="flex flex-wrap items-start gap-x-4 gap-y-2 w-full min-w-0">
                                     {(infoPins.length > 0 || canEditBulkInfoPins) && (
                                         <BulkInfoPinsBar
@@ -5798,6 +5899,24 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                                                 })
                                             }
                                             onOpenGlobalPanel={() => setShowGlobalQuickRepliesPanel(true)}
+                                        />
+                                    )}
+                                    {(clipboardFieldPresets.length > 0 || canEditClipboardPresets) && (
+                                        <BulkClipboardPresetsBar
+                                            presets={clipboardFieldPresets}
+                                            canEdit={canEditClipboardPresets}
+                                            selectedCount={selectedIds.size}
+                                            isCopyingId={copyingClipboardPresetId}
+                                            onCopyPreset={handleCopyClipboardPreset}
+                                            onEditPreset={preset =>
+                                                setClipboardPresetModal({ preset, isNew: false })
+                                            }
+                                            onAddPreset={() =>
+                                                setClipboardPresetModal({
+                                                    preset: createBulkClipboardFieldPreset(),
+                                                    isNew: true,
+                                                })
+                                            }
                                         />
                                     )}
                                 </div>
@@ -7853,6 +7972,20 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                     onClose={() => setQuickReplyModal(null)}
                     onSave={handleSaveQuickReply}
                     onDelete={handleDeleteQuickReply}
+                />
+            )}
+
+            {canEditClipboardPresets && (
+                <BulkClipboardPresetModal
+                    isOpen={!!clipboardPresetModal}
+                    preset={clipboardPresetModal?.preset ?? null}
+                    isNew={clipboardPresetModal?.isNew ?? false}
+                    isSaving={isSavingClipboardPreset}
+                    columnOrder={columnConfigIds}
+                    customColumns={customColumns}
+                    onClose={() => setClipboardPresetModal(null)}
+                    onSave={handleSaveClipboardPreset}
+                    onDelete={handleDeleteClipboardPreset}
                 />
             )}
 
