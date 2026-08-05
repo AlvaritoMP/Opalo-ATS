@@ -1,5 +1,5 @@
 {
-  "_comment": "Ejemplo de item de handoff ATS → OpsFlow con identidad estructurada + todos los campos disponibles (snapshotVersion 2).",
+  "_comment": "Ejemplo de item de handoff ATS → OpsFlow (snapshotVersion 3): presentación + ficha complementaria.",
   "sourceCandidateId": "00000000-0000-4000-8000-000000000001",
   "sourceProcessId": "00000000-0000-4000-8000-000000000002",
   "workerName": "Juan Pérez García",
@@ -19,20 +19,41 @@
       "district": "Miraflores",
       "age": 28,
       "source": "Referido",
-      "agreedSalary": "1500",
-      "hireDate": "2026-06-01",
       "processTitle": "Operarios planta",
       "clientName": "Cliente Demo",
-      "stageName": "Contratado",
-      "scoreIa": 78,
-      "fechaNacimiento": "1998-03-15",
-      "tallaUniforme": "M"
+      "stageName": "Presentación",
+      "fechaNacimiento": "15/03/1998",
+      "tallaCamisa": "M",
+      "sexo": "Masculino"
+    },
+    "complementary": {
+      "version": 1,
+      "nombres": "Juan",
+      "apellidoPaterno": "Pérez",
+      "apellidoMaterno": "García",
+      "fechaNacimiento": "15/03/1998",
+      "tipoDocumento": "DNI",
+      "nroDocumento": "12345678",
+      "sexo": "Masculino",
+      "estadoCivil": "Soltero",
+      "email": "juan.perez@example.com",
+      "telefono": "999888777",
+      "tallaCamisa": "M",
+      "direccion": "Av. Ejemplo 123",
+      "distrito": "Miraflores",
+      "provincia": "Lima",
+      "departamento": "Lima",
+      "declaracionAceptada": true,
+      "submittedAt": "2026-08-05T17:00:00.000Z"
     },
     "meta": {
       "sourceCandidateId": "00000000-0000-4000-8000-000000000001",
       "sourceProcessId": "00000000-0000-4000-8000-000000000002",
       "sourceApp": "Opalo ATS",
-      "snapshotVersion": 2,
+      "snapshotVersion": 3,
+      "purpose": "presentation",
+      "complementaryStatus": "complete",
+      "complementaryFilledAt": "2026-08-05T17:00:00.000Z",
       "includedFieldKeys": [
         "fullName",
         "dni",
@@ -42,15 +63,9 @@
         "province",
         "district",
         "age",
-        "source",
-        "agreedSalary",
-        "hireDate",
-        "processTitle",
-        "clientName",
-        "stageName",
-        "scoreIa",
         "fechaNacimiento",
-        "tallaUniforme"
+        "tallaCamisa",
+        "sexo"
       ],
       "fieldLabels": {
         "fullName": "Nombre completo",
@@ -61,17 +76,11 @@
         "province": "Provincia",
         "district": "Distrito",
         "age": "Edad",
-        "source": "Fuente",
-        "agreedSalary": "Salario acordado",
-        "hireDate": "Fecha de contratación",
-        "processTitle": "Título del proceso",
-        "clientName": "Cliente",
-        "stageName": "Etapa actual",
-        "scoreIa": "Score IA",
         "fechaNacimiento": "Fecha de nacimiento",
-        "tallaUniforme": "Talla uniforme"
+        "tallaCamisa": "Talla camisa",
+        "sexo": "Sexo"
       },
-      "capturedAt": "2026-05-25T14:30:00.000Z"
+      "capturedAt": "2026-08-05T17:05:00.000Z"
     }
   }
 }

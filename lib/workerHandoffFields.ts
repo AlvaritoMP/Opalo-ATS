@@ -1,4 +1,4 @@
-import { Candidate, CustomColumn, Process, WorkerSnapshot, WorkerSnapshotIdentity } from '../types';
+import { Candidate, CustomColumn, Process, WorkerSnapshot, WorkerSnapshotIdentity, ComplementaryHandoffStatus } from '../types';
 import { APP_NAME } from './appConfig';
 import {
     buildLegacyColumnIdToName,
@@ -8,11 +8,18 @@ import {
 } from './bulkTableColumns';
 import { extractRouteCostTotal } from './routeCostStorage';
 import { resolveStructuredWorkerNameParts, composeWorkerFullName } from './workerNameParts';
+import type { ComplementaryFichaData } from './complementaryFicha';
+import {
+    COMPLEMENTARY_FICHA_MAPPABLE_FIELDS,
+    getMissingRequiredComplementaryFields,
+    resolveComplementaryRequiredFields,
+} from './complementaryFichaMapping';
 
 const BULK_NAME_KEY_PREFIX = '__name__';
 
-export const SNAPSHOT_VERSION = 2;
+export const SNAPSHOT_VERSION = 3;
 export const TARGET_APP = 'OpsFlow';
+export const DEFAULT_HANDOFF_PURPOSE = 'presentation' as const;
 
 export interface WorkerHandoffFieldDef {
     key: string;
@@ -436,8 +443,131 @@ export interface BuildWorkerSnapshotOptions {
 }
 
 /**
+ * Estado de la ficha complementaria respecto a los obligatorios del proceso.
+ */
+export function assessComplementaryHandoff(
+    candidate: Candidate,
+    process?: Process
+): {
+    status: ComplementaryHandoffStatus;
+    filledAt?: string;
+    missingLabels: string[];
+} {
+    const required = resolveComplementaryRequiredFields(
+        process?.bulkConfig?.complementaryFichaRequiredFields
+    );
+    const data = candidate.complementaryData;
+    const hasPayload =
+        Boolean(candidate.complementaryFilledAt) ||
+        (data &&
+            typeof data === 'object' &&
+            Boolean(
+                data.nombres ||
+                    data.apellidoPaterno ||
+                    data.nroDocumento ||
+                    data.email ||
+                    data.telefono
+            ));
+
+    if (!hasPayload || !data) {
+        return {
+            status: 'missing',
+            filledAt: candidate.complementaryFilledAt,
+            missingLabels: getMissingRequiredComplementaryFields({}, required),
+        };
+    }
+
+    const missingLabels = getMissingRequiredComplementaryFields(data, required);
+    return {
+        status: missingLabels.length > 0 ? 'incomplete' : 'complete',
+        filledAt: candidate.complementaryFilledAt,
+        missingLabels,
+    };
+}
+
+function applyComplementaryToSnapshot(
+    candidate: Candidate,
+    process: Process | undefined,
+    identity: WorkerSnapshotIdentity,
+    fields: Record<string, string | number | boolean>,
+    fieldLabels: Record<string, string>,
+    includedFieldKeys: string[]
+): {
+    complementary?: ComplementaryFichaData;
+    complementaryStatus: ComplementaryHandoffStatus;
+    complementaryFilledAt?: string;
+    complementaryMissingFields?: string[];
+} {
+    const assessment = assessComplementaryHandoff(candidate, process);
+    const data = candidate.complementaryData;
+
+    if (data && typeof data === 'object') {
+        // Completar identidad si la ficha trae partes más claras
+        if (!identity.nombres && data.nombres) identity.nombres = String(data.nombres).trim();
+        if (!identity.apellidoPaterno && data.apellidoPaterno) {
+            identity.apellidoPaterno = String(data.apellidoPaterno).trim();
+        }
+        if (!identity.apellidoMaterno && data.apellidoMaterno) {
+            identity.apellidoMaterno = String(data.apellidoMaterno).trim();
+        }
+        if (!identity.dni && data.nroDocumento) identity.dni = String(data.nroDocumento).trim();
+        if (!identity.email && data.email) identity.email = String(data.email).trim();
+        if (!identity.phone && data.telefono) identity.phone = String(data.telefono).trim();
+
+        const composed = composeWorkerFullName(
+            identity.nombres,
+            identity.apellidoPaterno,
+            identity.apellidoMaterno
+        );
+        if (composed) {
+            identity.fullName = composed;
+            if (!includedFieldKeys.includes('fullName')) includedFieldKeys.push('fullName');
+            fieldLabels.fullName = CATALOG_FIELD_LABELS.fullName || 'Nombre completo';
+        }
+
+        // Aplanar escalares de ficha en fields (sin pisar valores ya presentes)
+        for (const def of COMPLEMENTARY_FICHA_MAPPABLE_FIELDS) {
+            const raw = (data as Record<string, unknown>)[def.key];
+            if (raw === undefined || raw === null || raw === '') continue;
+            if (hasValue(fields[def.key])) continue;
+            putField(fields, fieldLabels, includedFieldKeys, def.key, raw, def.label);
+        }
+
+        // Ubicación canónica
+        if (!hasValue(fields.address) && data.direccion) {
+            putField(fields, fieldLabels, includedFieldKeys, 'address', data.direccion);
+        }
+        if (!hasValue(fields.province) && data.provincia) {
+            putField(fields, fieldLabels, includedFieldKeys, 'province', data.provincia);
+        }
+        if (!hasValue(fields.district) && data.distrito) {
+            putField(fields, fieldLabels, includedFieldKeys, 'district', data.distrito);
+        }
+        if (!hasValue(fields.age) && data.edad) {
+            const ageNum = Number(data.edad);
+            putField(
+                fields,
+                fieldLabels,
+                includedFieldKeys,
+                'age',
+                Number.isNaN(ageNum) ? data.edad : ageNum
+            );
+        }
+    }
+
+    return {
+        complementary: data,
+        complementaryStatus: assessment.status,
+        complementaryFilledAt: assessment.filledAt,
+        complementaryMissingFields:
+            assessment.missingLabels.length > 0 ? assessment.missingLabels : undefined,
+    };
+}
+
+/**
  * Congela un snapshot con toda la información disponible del candidato/proceso.
  * OpsFlow decide qué campos consumir; ATS no filtra por selección de UI.
+ * Incluye ficha complementaria y purpose=presentation (entrevista área usuaria).
  */
 export function buildWorkerSnapshot(
     candidate: Candidate,
@@ -492,9 +622,19 @@ export function buildWorkerSnapshot(
 
     collectCustomColumnFields(candidate, process, fields, fieldLabels, includedFieldKeys);
 
+    const complementaryMeta = applyComplementaryToSnapshot(
+        candidate,
+        process,
+        identity,
+        fields,
+        fieldLabels,
+        includedFieldKeys
+    );
+
     return {
         identity,
         fields,
+        complementary: complementaryMeta.complementary,
         meta: {
             sourceCandidateId: candidate.id,
             sourceProcessId: candidate.processId,
@@ -503,6 +643,10 @@ export function buildWorkerSnapshot(
             includedFieldKeys,
             fieldLabels,
             capturedAt: new Date().toISOString(),
+            purpose: DEFAULT_HANDOFF_PURPOSE,
+            complementaryStatus: complementaryMeta.complementaryStatus,
+            complementaryFilledAt: complementaryMeta.complementaryFilledAt,
+            complementaryMissingFields: complementaryMeta.complementaryMissingFields,
         },
     };
 }

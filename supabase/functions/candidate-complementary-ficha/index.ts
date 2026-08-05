@@ -182,6 +182,7 @@ Deno.serve(async (req) => {
         customColumns,
         savedMapping,
         columnKeyAliases,
+        processTitle: processInfo?.title || '',
       })
 
       return json({
@@ -236,19 +237,25 @@ Deno.serve(async (req) => {
       }
 
       let requiredFields = resolveRequiredFields(null)
+      let processTitle = ''
       if (row.process_id) {
         const { data: processRow } = await supabase
           .from('processes')
-          .select('bulk_config')
+          .select('title, bulk_config')
           .eq('id', row.process_id)
           .eq('app_name', APP_NAME)
           .maybeSingle()
+        processTitle = trimText(processRow?.title) || ''
         const bulkConfig = (processRow?.bulk_config || {}) as Record<string, unknown>
         requiredFields = resolveRequiredFields(
           Array.isArray(bulkConfig.complementaryFichaRequiredFields)
             ? (bulkConfig.complementaryFichaRequiredFields as string[])
             : null
         )
+      }
+
+      if (processTitle) {
+        form.puestoContrato = processTitle
       }
 
       const missing = getMissingRequired(form, requiredFields)

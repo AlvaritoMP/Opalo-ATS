@@ -57,7 +57,7 @@ export const COMPLEMENTARY_FICHA_MAPPABLE_FIELDS: ComplementaryFichaFieldDef[] =
     { key: 'provincia', label: 'Provincia', group: 'Ubicación', aliases: ['provincia', 'province'] },
     { key: 'departamento', label: 'Departamento', group: 'Ubicación', aliases: ['departamento', 'region', 'department'] },
     { key: 'unidadDestaque', label: 'Unidad de destaque', group: 'Contratación', aliases: ['unidad', 'unidaddestaque', 'destaque'] },
-    { key: 'puestoContrato', label: 'Puesto (contratación)', group: 'Contratación', aliases: ['puesto', 'cargo', 'posicion', 'position'] },
+    { key: 'puestoContrato', label: 'Puesto (proceso de selección)', group: 'Contratación', aliases: ['puesto', 'cargo', 'posicion', 'position'] },
     { key: 'bancoSueldo', label: 'Banco para sueldo', group: 'Contratación', aliases: ['bancosueldo', 'banco', 'cuentabanco', 'entidadbancaria'] },
     { key: 'bancoCts', label: 'Banco para CTS', group: 'Contratación', aliases: ['bancocts', 'cts'] },
     { key: 'sistemaPensionesAnterior', label: 'Sistema pensiones anterior', group: 'Contratación', aliases: ['sistemapensionesanterior', 'afpanterior', 'onpanterior', 'pensionanterior'] },

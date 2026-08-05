@@ -611,9 +611,19 @@ export interface WorkerSnapshotIdentity {
     phone2?: string;
 }
 
+/** Motivo del handoff ATS → OpsFlow. */
+export type WorkerHandoffPurpose = 'presentation' | 'hire';
+
+export type ComplementaryHandoffStatus = 'complete' | 'incomplete' | 'missing';
+
 export interface WorkerSnapshot {
     identity: WorkerSnapshotIdentity;
     fields: Record<string, string | number | boolean>;
+    /**
+     * Ficha complementaria completa (formulario público).
+     * OpsFlow la usa en la bandeja de entrevista / presentación.
+     */
+        complementary?: ComplementaryFichaData;
     meta: {
         sourceCandidateId: string;
         sourceProcessId: string;
@@ -623,6 +633,11 @@ export interface WorkerSnapshot {
         /** Etiquetas legibles para claves de fields (catálogo + columnas del proceso). */
         fieldLabels?: Record<string, string>;
         capturedAt: string;
+        /** Por defecto presentation: candidato a entrevista con área usuaria. */
+        purpose?: WorkerHandoffPurpose;
+        complementaryStatus?: ComplementaryHandoffStatus;
+        complementaryFilledAt?: string;
+        complementaryMissingFields?: string[];
     };
 }
 

@@ -50,13 +50,17 @@ npx supabase functions deploy deliver-worker-handoff
 4. Al **Registrar en unidad**, el Nombre completo debe prellenarse como `nombres + apellidoPaterno + apellidoMaterno`
 5. Si falla: revisar logs de la Edge Function en Supabase ATS
 
-### Identidad y campos en el snapshot (envíos nuevos)
+### Identidad, ficha y campos en el snapshot (envíos nuevos)
 
 Cada item incluye:
 
 1. **`workerSnapshot.identity`**: `nombres`, `apellidoPaterno`, `apellidoMaterno`, `fullName`, `dni`, `email`, `phone`, `phone2`
-2. **`workerSnapshot.fields`**: **todos** los campos canónicos con valor (candidato, proceso, evaluación) **más todas las columnas personalizadas del proceso masivo** que tengan dato
-3. **`meta.fieldLabels`**: etiquetas legibles para que OpsFlow muestre nombres de columna
+2. **`workerSnapshot.fields`**: campos canónicos + columnas del proceso masivo + escalares de la ficha complementaria
+3. **`workerSnapshot.complementary`**: JSON completo de la ficha pública (si el candidato la envió)
+4. **`meta.purpose`**: siempre `presentation` (candidato a entrevista con área usuaria; no es alta operativa)
+5. **`meta.complementaryStatus`**: `complete` | `incomplete` | `missing`
+6. **`meta.fieldLabels`**: etiquetas legibles
+7. **`meta.snapshotVersion`**: `3` en envíos nuevos
 
 ATS ya no filtra por selección de campos en la UI: OpsFlow decide qué usar.
 

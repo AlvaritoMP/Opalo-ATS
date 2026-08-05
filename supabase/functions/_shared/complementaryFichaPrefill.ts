@@ -317,6 +317,7 @@ export function buildPrefillForm(params: {
   customColumns: CustomColumn[];
   savedMapping?: FichaMapping;
   columnKeyAliases?: Record<string, string>;
+  processTitle?: string;
 }): Record<string, unknown> {
   const { candidate, customColumns } = params;
   const mapping = { ...suggestMapping(customColumns), ...(params.savedMapping || {}) };
@@ -346,7 +347,8 @@ export function buildPrefillForm(params: {
       const t = trimText(raw).toLowerCase();
       if (['si', 'sí', 'true', '1', 'yes'].includes(t)) fromMapped[field.key] = true;
       else if (['no', 'false', '0'].includes(t)) fromMapped[field.key] = false;
-    } else {
+    } else if (field.key !== 'puestoContrato') {
+      // puestoContrato se fuerza desde el título del proceso
       fromMapped[field.key] = trimText(raw);
     }
   }
@@ -366,10 +368,19 @@ export function buildPrefillForm(params: {
   if (!fromMapped.provincia && candidate.province) fromMapped.provincia = String(candidate.province);
   if (!fromMapped.distrito && candidate.district) fromMapped.distrito = String(candidate.district);
 
+  const processTitle = trimText(params.processTitle);
+  if (processTitle) {
+    fromMapped.puestoContrato = processTitle;
+  }
+
   const saved =
     candidate.complementary_data && typeof candidate.complementary_data === 'object'
       ? (candidate.complementary_data as Record<string, unknown>)
       : {};
 
-  return mergePrefill({ ...emptyForm(), ...saved }, fromMapped);
+  const merged = mergePrefill({ ...emptyForm(), ...saved }, fromMapped);
+  if (processTitle) {
+    merged.puestoContrato = processTitle;
+  }
+  return merged;
 }

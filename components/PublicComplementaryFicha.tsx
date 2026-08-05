@@ -20,6 +20,7 @@ import {
     COMPLEMENTARY_FICHA_DEFAULT_REQUIRED,
     getMissingRequiredComplementaryFields,
 } from '../lib/complementaryFichaMapping';
+import { bankSelectOptions } from '../lib/peruFinancialInstitutions';
 
 type Step = 'dni' | 'pick' | 'form' | 'done';
 
@@ -169,7 +170,12 @@ export const PublicComplementaryFicha: React.FC = () => {
                 ? payload.requiredFields
                 : [...COMPLEMENTARY_FICHA_DEFAULT_REQUIRED]
         );
-        setForm({ ...emptyComplementaryFicha(), ...payload.form, version: 1 });
+        setForm({
+            ...emptyComplementaryFicha(),
+            ...payload.form,
+            version: 1,
+            puestoContrato: payload.processTitle || payload.form.puestoContrato || '',
+        });
         setStep('form');
     };
 
@@ -217,6 +223,7 @@ export const PublicComplementaryFicha: React.FC = () => {
                 form: {
                     ...form,
                     nroDocumento: normalizeDniDigits(form.nroDocumento || dni),
+                    puestoContrato: prefillMeta.processTitle || form.puestoContrato || '',
                     version: 1,
                 },
             });
@@ -926,29 +933,49 @@ export const PublicComplementaryFicha: React.FC = () => {
                                         onChange={(e) => patchForm({ unidadDestaque: e.target.value })}
                                     />
                                 </Field>
-                                <Field label="Puesto" required={isReq('puestoContrato')} value={form.puestoContrato}>
+                                <Field
+                                    label="Puesto (del proceso de selección)"
+                                    required={isReq('puestoContrato')}
+                                    value={form.puestoContrato || prefillMeta.processTitle}
+                                    disabled
+                                >
                                     <input
                                         className={inputClass}
                                         required={isReq('puestoContrato')}
-                                        value={form.puestoContrato || ''}
-                                        onChange={(e) => patchForm({ puestoContrato: e.target.value })}
+                                        value={form.puestoContrato || prefillMeta.processTitle || ''}
+                                        readOnly
+                                        title="Se toma automáticamente del proceso de selección"
                                     />
                                 </Field>
                                 <Field label="Banco para sueldo" required={isReq('bancoSueldo')} value={form.bancoSueldo}>
-                                    <input
+                                    <select
                                         className={inputClass}
                                         required={isReq('bancoSueldo')}
                                         value={form.bancoSueldo || ''}
                                         onChange={(e) => patchForm({ bancoSueldo: e.target.value })}
-                                    />
+                                    >
+                                        <option value="">— Selecciona banco —</option>
+                                        {bankSelectOptions(form.bancoSueldo).map((bank) => (
+                                            <option key={`sueldo-${bank}`} value={bank}>
+                                                {bank}
+                                            </option>
+                                        ))}
+                                    </select>
                                 </Field>
                                 <Field label="Banco para CTS" required={isReq('bancoCts')} value={form.bancoCts}>
-                                    <input
+                                    <select
                                         className={inputClass}
                                         required={isReq('bancoCts')}
                                         value={form.bancoCts || ''}
                                         onChange={(e) => patchForm({ bancoCts: e.target.value })}
-                                    />
+                                    >
+                                        <option value="">— Selecciona banco —</option>
+                                        {bankSelectOptions(form.bancoCts).map((bank) => (
+                                            <option key={`cts-${bank}`} value={bank}>
+                                                {bank}
+                                            </option>
+                                        ))}
+                                    </select>
                                 </Field>
                                 <Field label="Sistema de pensiones anterior" required={isReq('sistemaPensionesAnterior')} value={form.sistemaPensionesAnterior}>
                                     <select
@@ -985,6 +1012,12 @@ export const PublicComplementaryFicha: React.FC = () => {
                                     </select>
                                 </Field>
                             </div>
+                            {form.bancoSueldo === 'Otro' || form.bancoCts === 'Otro' ? (
+                                <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-3 py-2">
+                                    Si elegiste “Otro”, indícalo en la nota al reclutador o contacta a selección para
+                                    registrar la entidad.
+                                </p>
+                            ) : null}
                         </section>
 
                         <section

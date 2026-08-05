@@ -4,8 +4,8 @@ import { useAppState } from '../App';
 import { candidatesApi } from '../lib/api/candidates';
 import { processesApi } from '../lib/api/processes';
 import { workerHandoffApi } from '../lib/api/workerHandoff';
-import { countSendableFieldsForCandidate } from '../lib/workerHandoffFields';
-import type { Candidate, Process } from '../types';
+import { countSendableFieldsForCandidate, assessComplementaryHandoff } from '../lib/workerHandoffFields';
+import type { Candidate, Process, ComplementaryHandoffStatus } from '../types';
 
 interface SendToOpsFlowModalProps {
     isOpen: boolean;
@@ -21,12 +21,24 @@ function mergeCandidateData(fromApi: Candidate, fromUi: Candidate): Candidate {
             ...(fromApi.bulkColumnValues || {}),
             ...(fromUi.bulkColumnValues || {}),
         },
+        complementaryData: fromApi.complementaryData || fromUi.complementaryData,
+        complementaryFilledAt: fromApi.complementaryFilledAt || fromUi.complementaryFilledAt,
         scoreIa: fromApi.scoreIa ?? fromUi.scoreIa,
         metadataIa: fromApi.metadataIa ?? fromUi.metadataIa,
         psycholaboralEvaluation: fromApi.psycholaboralEvaluation ?? fromUi.psycholaboralEvaluation,
         attachments:
             fromApi.attachments?.length ? fromApi.attachments : fromUi.attachments || fromApi.attachments,
     };
+}
+
+function complementaryBadge(status: ComplementaryHandoffStatus): { label: string; className: string } {
+    if (status === 'complete') {
+        return { label: 'Ficha OK', className: 'bg-green-100 text-green-800' };
+    }
+    if (status === 'incomplete') {
+        return { label: 'Ficha incompleta', className: 'bg-amber-100 text-amber-900' };
+    }
+    return { label: 'Sin ficha', className: 'bg-red-100 text-red-800' };
 }
 
 export const SendToOpsFlowModal: React.FC<SendToOpsFlowModalProps> = ({
@@ -42,6 +54,7 @@ export const SendToOpsFlowModal: React.FC<SendToOpsFlowModalProps> = ({
     const [checkingDuplicates, setCheckingDuplicates] = useState(false);
     const [activeDuplicateIds, setActiveDuplicateIds] = useState<Set<string>>(new Set());
     const [ignoreDuplicates, setIgnoreDuplicates] = useState(false);
+    const [ignoreIncompleteFicha, setIgnoreIncompleteFicha] = useState(false);
     const [resolvedCandidates, setResolvedCandidates] = useState<Candidate[]>([]);
     const [resolvedProcesses, setResolvedProcesses] = useState<Process[]>([]);
 
@@ -68,6 +81,19 @@ export const SendToOpsFlowModal: React.FC<SendToOpsFlowModalProps> = ({
         [uniqueCandidates, activeDuplicateIds]
     );
 
+    const fichaAssessments = useMemo(() => {
+        return uniqueCandidates.map(candidate => {
+            const process = processById.get(candidate.processId);
+            const assessment = assessComplementaryHandoff(candidate, process);
+            return { candidate, ...assessment };
+        });
+    }, [uniqueCandidates, processById]);
+
+    const incompleteFichaCandidates = useMemo(
+        () => fichaAssessments.filter(a => a.status !== 'complete'),
+        [fichaAssessments]
+    );
+
     const fieldsPreview = useMemo(() => {
         if (uniqueCandidates.length === 0) {
             return { min: 0, max: 0, avg: 0 };
@@ -85,6 +111,7 @@ export const SendToOpsFlowModal: React.FC<SendToOpsFlowModalProps> = ({
         if (!isOpen) return;
         setSenderNote('');
         setIgnoreDuplicates(false);
+        setIgnoreIncompleteFicha(false);
         setActiveDuplicateIds(new Set());
         setResolvedCandidates([]);
         setResolvedProcesses([]);
@@ -161,6 +188,15 @@ export const SendToOpsFlowModal: React.FC<SendToOpsFlowModalProps> = ({
             return;
         }
 
+        if (incompleteFichaCandidates.length > 0 && !ignoreIncompleteFicha) {
+            actions.showToast(
+                'Hay candidatos sin ficha completa. Confirma el envío o pide que completen la ficha.',
+                'error',
+                4500
+            );
+            return;
+        }
+
         setBusy(true);
         try {
             const processesForSend = [
@@ -176,7 +212,7 @@ export const SendToOpsFlowModal: React.FC<SendToOpsFlowModalProps> = ({
             });
 
             actions.showToast(
-                `Paquete enviado a OpsFlow (${uniqueCandidates.length} trabajador${uniqueCandidates.length === 1 ? '' : 'es'}, todos los campos disponibles)`,
+                `Enviado a OpsFlow para presentación (${uniqueCandidates.length} candidato${uniqueCandidates.length === 1 ? '' : 's'}, con ficha complementaria)`,
                 'success',
                 4000
             );
@@ -215,10 +251,10 @@ export const SendToOpsFlowModal: React.FC<SendToOpsFlowModalProps> = ({
                     <p className="text-sm text-gray-600">
                         Se enviarán{' '}
                         <span className="font-medium text-gray-900">{uniqueCandidates.length}</span>{' '}
-                        trabajador{uniqueCandidates.length === 1 ? '' : 'es'} con{' '}
-                        <span className="font-medium text-gray-900">todos los campos disponibles</span>{' '}
-                        (identidad, datos del candidato, proceso, evaluación y columnas del proceso
-                        masivo). OpsFlow decidirá cómo usarlos.
+                        candidato{uniqueCandidates.length === 1 ? '' : 's'} a OpsFlow como{' '}
+                        <span className="font-medium text-gray-900">presentación / entrevista</span>{' '}
+                        (no como alta operativa). Incluye identidad, datos del proceso, columnas
+                        personalizadas y la <span className="font-medium">ficha complementaria</span>.
                     </p>
 
                     {preparing ? (
@@ -228,7 +264,7 @@ export const SendToOpsFlowModal: React.FC<SendToOpsFlowModalProps> = ({
                         </div>
                     ) : (
                         <p className="text-xs text-gray-500">
-                            Campos con valor por trabajador:{' '}
+                            Campos con valor por candidato:{' '}
                             {fieldsPreview.min === fieldsPreview.max
                                 ? fieldsPreview.min
                                 : `${fieldsPreview.min}–${fieldsPreview.max}`}
@@ -236,33 +272,86 @@ export const SendToOpsFlowModal: React.FC<SendToOpsFlowModalProps> = ({
                         </p>
                     )}
 
-                    <div className="border border-gray-200 rounded-lg max-h-40 overflow-y-auto">
+                    <div className="border border-gray-200 rounded-lg max-h-48 overflow-y-auto">
                         <ul className="divide-y divide-gray-100">
                             {uniqueCandidates.map(candidate => {
+                                const process = processById.get(candidate.processId);
                                 const fieldCount = preparing
                                     ? null
-                                    : countSendableFieldsForCandidate(
-                                          candidate,
-                                          processById.get(candidate.processId)
-                                      );
+                                    : countSendableFieldsForCandidate(candidate, process);
+                                const assessment = preparing
+                                    ? null
+                                    : assessComplementaryHandoff(candidate, process);
+                                const badge = assessment
+                                    ? complementaryBadge(assessment.status)
+                                    : null;
                                 return (
                                     <li
                                         key={candidate.id}
                                         className="px-3 py-2 text-sm text-gray-800 flex items-center justify-between gap-2"
                                     >
-                                        <span className="truncate">
-                                            {candidate.name || candidate.dni || 'Sin nombre'}
-                                        </span>
-                                        {fieldCount != null && (
-                                            <span className="text-xs text-gray-500 whitespace-nowrap">
-                                                {fieldCount} campos
-                                            </span>
-                                        )}
+                                        <div className="min-w-0">
+                                            <div className="truncate font-medium">
+                                                {candidate.name || candidate.dni || 'Sin nombre'}
+                                            </div>
+                                            {assessment?.status === 'incomplete' &&
+                                                assessment.missingLabels.length > 0 && (
+                                                    <div className="text-[11px] text-amber-700 truncate">
+                                                        Falta: {assessment.missingLabels.slice(0, 4).join(', ')}
+                                                        {assessment.missingLabels.length > 4
+                                                            ? '…'
+                                                            : ''}
+                                                    </div>
+                                                )}
+                                        </div>
+                                        <div className="flex items-center gap-2 shrink-0">
+                                            {badge && (
+                                                <span
+                                                    className={`text-[10px] font-semibold px-1.5 py-0.5 rounded ${badge.className}`}
+                                                >
+                                                    {badge.label}
+                                                </span>
+                                            )}
+                                            {fieldCount != null && (
+                                                <span className="text-xs text-gray-500 whitespace-nowrap">
+                                                    {fieldCount} campos
+                                                </span>
+                                            )}
+                                        </div>
                                     </li>
                                 );
                             })}
                         </ul>
                     </div>
+
+                    {!preparing && incompleteFichaCandidates.length > 0 && (
+                        <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 space-y-2">
+                            <div className="flex items-start gap-2 text-sm text-amber-900">
+                                <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+                                <div>
+                                    <p className="font-medium">
+                                        {incompleteFichaCandidates.length} candidato
+                                        {incompleteFichaCandidates.length === 1 ? '' : 's'} sin ficha
+                                        complementaria completa
+                                    </p>
+                                    <p className="text-amber-800 mt-1 text-xs">
+                                        Idealmente el candidato completa la ficha pública antes de la
+                                        entrevista. Puedes enviar igual si el área usuaria completará
+                                        datos en OpsFlow.
+                                    </p>
+                                </div>
+                            </div>
+                            <label className="flex items-center gap-2 text-sm text-amber-900 cursor-pointer">
+                                <input
+                                    type="checkbox"
+                                    checked={ignoreIncompleteFicha}
+                                    onChange={e => setIgnoreIncompleteFicha(e.target.checked)}
+                                    className="rounded border-amber-300 text-primary-600 focus:ring-primary-500"
+                                />
+                                Enviar de todos modos
+                            </label>
+                        </div>
+                    )}
 
                     {!preparing && duplicateCandidates.length > 0 && (
                         <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 space-y-2">
@@ -299,13 +388,13 @@ export const SendToOpsFlowModal: React.FC<SendToOpsFlowModalProps> = ({
 
                     <div>
                         <label className="block text-sm font-medium text-gray-700 mb-1">
-                            Nota para operaciones (opcional)
+                            Nota para el área usuaria (opcional)
                         </label>
                         <textarea
                             value={senderNote}
                             onChange={e => setSenderNote(e.target.value)}
                             rows={3}
-                            placeholder="Ej. Priorizar ingreso esta semana…"
+                            placeholder="Ej. Candidato para entrevista el jueves…"
                             className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
                             disabled={busy}
                         />
@@ -328,7 +417,8 @@ export const SendToOpsFlowModal: React.FC<SendToOpsFlowModalProps> = ({
                             busy ||
                             preparing ||
                             uniqueCandidates.length === 0 ||
-                            (duplicateCandidates.length > 0 && !ignoreDuplicates)
+                            (duplicateCandidates.length > 0 && !ignoreDuplicates) ||
+                            (incompleteFichaCandidates.length > 0 && !ignoreIncompleteFicha)
                         }
                         className="inline-flex items-center gap-2 px-4 py-2 text-sm rounded-lg bg-orange-600 text-white hover:bg-orange-700 disabled:opacity-50"
                     >
