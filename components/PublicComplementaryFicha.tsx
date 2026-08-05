@@ -317,10 +317,12 @@ export const PublicComplementaryFicha: React.FC = () => {
                                 </Field>
                             </div>
                             <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                                <Field label="Fecha de nacimiento">
+                                <Field label="Fecha de nacimiento (dd/mm/aaaa)">
                                     <input
-                                        type="date"
+                                        type="text"
                                         className={inputClass}
+                                        inputMode="numeric"
+                                        placeholder="dd/mm/aaaa"
                                         value={form.fechaNacimiento || ''}
                                         onChange={(e) => patchForm({ fechaNacimiento: e.target.value })}
                                     />

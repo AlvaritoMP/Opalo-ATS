@@ -254,6 +254,11 @@ export interface BulkProcessConfig {
     /** Plantillas Word (.docx) para generar documentos por candidato en la tabla masiva */
     documentTemplates?: BulkDocumentTemplate[];
     /**
+     * Mapeo campo de ficha complementaria → fuente (`candidate.*` o `custom.<id>`).
+     * Permite precargar el formulario público desde columnas personalizadas del proceso.
+     */
+    complementaryFichaMapping?: Partial<Record<string, string>>;
+    /**
      * Panel flotante de columnas deslizables sobre la tabla (sin scroll horizontal).
      * Por defecto incluye las columnas de fidelización.
      */

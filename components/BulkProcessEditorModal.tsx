@@ -12,7 +12,9 @@ import { PsycholaboralConfigSection } from './PsycholaboralConfigSection';
 import { PsycholaboralInventoryModal } from './PsycholaboralInventoryModal';
 import { googleDriveService } from '../lib/googleDrive';
 import { StageColorPicker } from './StageColorPicker';
+import { ComplementaryFichaMappingEditor } from './ComplementaryFichaMappingEditor';
 import { suggestStageColor, buildStageColorMaps } from '../lib/stageColors';
+import type { ComplementaryFichaMapping } from '../lib/complementaryFichaMapping';
 
 const fileToBase64 = (file: File): Promise<string> =>
     new Promise((resolve, reject) => {
@@ -904,6 +906,14 @@ export const BulkProcessEditorModal: React.FC<BulkProcessEditorModalProps> = ({ 
                                     </button>
                                 </div>
                             </div>
+
+                            <ComplementaryFichaMappingEditor
+                                customColumns={bulkConfig.customColumns || []}
+                                mapping={(bulkConfig.complementaryFichaMapping || {}) as ComplementaryFichaMapping}
+                                onChange={(complementaryFichaMapping) =>
+                                    setBulkConfig({ ...bulkConfig, complementaryFichaMapping })
+                                }
+                            />
 
                             {/* WhatsApp */}
                             <div>

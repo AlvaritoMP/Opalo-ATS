@@ -1,5 +1,6 @@
 // Edge Function pública: lookup y envío de ficha complementaria por DNI (sin login ATS).
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.49.1'
+import { buildPrefillForm } from '../_shared/complementaryFichaPrefill.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -34,22 +35,6 @@ function composeFullName(nombres?: string, apellidoPaterno?: string, apellidoMat
     .trim()
 }
 
-function parseLegacyFullName(fullName: string): {
-  nombres?: string
-  apellidoPaterno?: string
-  apellidoMaterno?: string
-} {
-  const tokens = fullName.trim().split(/\s+/).filter(Boolean)
-  if (tokens.length === 0) return {}
-  if (tokens.length === 1) return { nombres: tokens[0] }
-  if (tokens.length === 2) return { nombres: tokens[0], apellidoPaterno: tokens[1] }
-  return {
-    nombres: tokens.slice(0, -2).join(' '),
-    apellidoPaterno: tokens[tokens.length - 2],
-    apellidoMaterno: tokens[tokens.length - 1],
-  }
-}
-
 function emptyForm() {
   return {
     version: 1 as const,
@@ -60,51 +45,6 @@ function emptyForm() {
     antecedentesSalud: [] as unknown[],
     parienteEnOpalo: null as boolean | null,
     declaracionAceptada: false,
-  }
-}
-
-function mergePrefill(base: Record<string, unknown>, fromCandidate: Record<string, unknown>) {
-  const out: Record<string, unknown> = { ...emptyForm(), ...base }
-  for (const [key, value] of Object.entries(fromCandidate)) {
-    if (
-      key === 'version' ||
-      key === 'familiares' ||
-      key === 'educacion' ||
-      key === 'experienciaLaboral' ||
-      key === 'antecedentesSalud'
-    ) {
-      continue
-    }
-    const current = out[key]
-    const empty = current === undefined || current === null || current === ''
-    if (empty && value !== undefined && value !== null && value !== '') {
-      out[key] = value
-    }
-  }
-  if (!Array.isArray(out.familiares) || out.familiares.length === 0) out.familiares = [{}]
-  if (!Array.isArray(out.educacion) || out.educacion.length === 0) out.educacion = [{}]
-  if (!Array.isArray(out.experienciaLaboral) || out.experienciaLaboral.length === 0) {
-    out.experienciaLaboral = [{}]
-  }
-  if (!Array.isArray(out.antecedentesSalud)) out.antecedentesSalud = []
-  return out
-}
-
-function candidateToPrefillFields(row: Record<string, unknown>): Record<string, unknown> {
-  const name = trimText(row.name) || ''
-  const parsed = parseLegacyFullName(name)
-  return {
-    nombres: parsed.nombres,
-    apellidoPaterno: parsed.apellidoPaterno,
-    apellidoMaterno: parsed.apellidoMaterno,
-    nroDocumento: trimText(row.dni),
-    tipoDocumento: 'DNI',
-    email: trimText(row.email),
-    telefono: trimText(row.phone) || trimText(row.phone2),
-    edad: row.age != null && row.age !== '' ? String(row.age) : undefined,
-    direccion: trimText(row.address),
-    provincia: trimText(row.province),
-    distrito: trimText(row.district),
   }
 }
 
@@ -155,7 +95,7 @@ Deno.serve(async (req) => {
       const { data: rows, error } = await supabase
         .from('candidates')
         .select(
-          'id, name, dni, email, phone, phone2, age, address, province, district, process_id, archived, complementary_data, complementary_filled_at, created_at'
+          'id, name, dni, email, phone, phone2, age, address, province, district, process_id, archived, bulk_column_values, complementary_data, complementary_filled_at, created_at'
         )
         .eq('app_name', APP_NAME)
         .eq('archived', false)
@@ -177,15 +117,18 @@ Deno.serve(async (req) => {
       }
 
       const processIds = [...new Set(matches.map((m) => m.process_id).filter(Boolean))]
-      const processTitleById = new Map<string, string>()
+      const processById = new Map<string, { title: string; bulk_config?: Record<string, unknown> | null }>()
       if (processIds.length > 0) {
         const { data: processes } = await supabase
           .from('processes')
-          .select('id, title')
+          .select('id, title, bulk_config')
           .eq('app_name', APP_NAME)
           .in('id', processIds)
         for (const p of processes || []) {
-          processTitleById.set(p.id, p.title || 'Proceso')
+          processById.set(p.id, {
+            title: p.title || 'Proceso',
+            bulk_config: (p.bulk_config as Record<string, unknown>) || null,
+          })
         }
       }
 
@@ -203,7 +146,7 @@ Deno.serve(async (req) => {
             candidateId: m.id,
             name: m.name,
             processId: m.process_id,
-            processTitle: processTitleById.get(m.process_id) || 'Proceso',
+            processTitle: processById.get(m.process_id)?.title || 'Proceso',
             alreadyFilled: Boolean(m.complementary_filled_at),
             filledAt: m.complementary_filled_at || undefined,
           })),
@@ -215,11 +158,26 @@ Deno.serve(async (req) => {
         return json({ error: 'El candidato seleccionado no coincide con el documento.' }, 400)
       }
 
-      const saved =
-        selected.complementary_data && typeof selected.complementary_data === 'object'
-          ? (selected.complementary_data as Record<string, unknown>)
-          : {}
-      const form = mergePrefill(saved, candidateToPrefillFields(selected as Record<string, unknown>))
+      const processInfo = processById.get(selected.process_id as string)
+      const bulkConfig = (processInfo?.bulk_config || {}) as Record<string, unknown>
+      const customColumns = Array.isArray(bulkConfig.customColumns)
+        ? (bulkConfig.customColumns as { id: string; name: string; reportNamePart?: string }[])
+        : []
+      const savedMapping =
+        bulkConfig.complementaryFichaMapping && typeof bulkConfig.complementaryFichaMapping === 'object'
+          ? (bulkConfig.complementaryFichaMapping as Record<string, string>)
+          : undefined
+      const columnKeyAliases =
+        bulkConfig.columnKeyAliases && typeof bulkConfig.columnKeyAliases === 'object'
+          ? (bulkConfig.columnKeyAliases as Record<string, string>)
+          : undefined
+
+      const form = buildPrefillForm({
+        candidate: selected as Record<string, unknown>,
+        customColumns,
+        savedMapping,
+        columnKeyAliases,
+      })
 
       return json({
         multiple: false,
@@ -227,7 +185,7 @@ Deno.serve(async (req) => {
           candidateId: selected.id,
           name: selected.name,
           processId: selected.process_id,
-          processTitle: processTitleById.get(selected.process_id) || 'Proceso',
+          processTitle: processInfo?.title || 'Proceso',
           alreadyFilled: Boolean(selected.complementary_filled_at),
           filledAt: selected.complementary_filled_at || undefined,
           form,
