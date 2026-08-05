@@ -3,6 +3,8 @@ import ReactDOM from 'react-dom/client';
 import './src/index.css';
 import App from './App';
 import { AppErrorBoundary } from './components/AppErrorBoundary';
+import { PublicComplementaryFicha } from './components/PublicComplementaryFicha';
+import { isPublicComplementaryFichaRoute } from './lib/complementaryFicha';
 
 const rootElement = document.getElementById('root');
 if (!rootElement) {
@@ -10,10 +12,12 @@ if (!rootElement) {
 }
 
 const root = ReactDOM.createRoot(rootElement);
+const publicFicha = isPublicComplementaryFichaRoute();
+
 root.render(
   <React.StrictMode>
     <AppErrorBoundary>
-      <App />
+      {publicFicha ? <PublicComplementaryFicha /> : <App />}
     </AppErrorBoundary>
   </React.StrictMode>
 );

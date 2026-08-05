@@ -11,6 +11,7 @@ import { DiscardCandidateModal } from './DiscardCandidateModal';
 import { SendToOpsFlowModal } from './SendToOpsFlowModal';
 import { CandidateTransitRoutes } from './CandidateTransitRoutes';
 import { candidatesApi } from '../lib/api/candidates';
+import { buildPublicComplementaryFichaUrl } from '../lib/complementaryFicha';
 import JSZip from 'jszip';
 import { saveAs } from 'file-saver';
 
@@ -1008,6 +1009,29 @@ export const CandidateDetailsModal: React.FC<{ candidate: Candidate, onClose: ()
                             </button>
                         )}
                         {canEdit && (
+                            <button
+                                type="button"
+                                onClick={async () => {
+                                    if (!currentCandidate.dni) {
+                                        actions.showToast('El candidato necesita DNI para generar el enlace de ficha.', 'error', 4000);
+                                        return;
+                                    }
+                                    const url = buildPublicComplementaryFichaUrl(currentCandidate.dni);
+                                    try {
+                                        await navigator.clipboard.writeText(url);
+                                        actions.showToast('Enlace de ficha copiado', 'success', 2500);
+                                    } catch {
+                                        actions.showToast(url, 'info', 8000);
+                                    }
+                                }}
+                                className="flex items-center px-2 md:px-3 py-1.5 bg-white border border-gray-300 rounded-md shadow-sm text-xs md:text-sm font-medium text-gray-700 hover:bg-gray-50"
+                                title="Copiar enlace público de ficha complementaria"
+                            >
+                                <Copy className="w-4 h-4 md:mr-2" />
+                                <span className="hidden sm:inline">Link ficha</span>
+                            </button>
+                        )}
+                        {canEdit && (
                             <>
                                 <button
                                     onClick={handleArchiveToggle}
@@ -1152,6 +1176,17 @@ export const CandidateDetailsModal: React.FC<{ candidate: Candidate, onClose: ()
                                         {/* Selector de Etapa y Toggle de Visibilidad - Siempre visible para admin/recruiter */}
                                         {canEdit && (
                                             <div className="space-y-4 mb-6">
+                                                <div className={`p-4 rounded-lg border ${currentCandidate.complementaryFilledAt ? 'bg-green-50 border-green-200' : 'bg-amber-50 border-amber-200'}`}>
+                                                    <div className="text-sm font-medium text-gray-800">
+                                                        Ficha complementaria:{' '}
+                                                        {currentCandidate.complementaryFilledAt
+                                                            ? `enviada (${new Date(currentCandidate.complementaryFilledAt).toLocaleString()})`
+                                                            : 'pendiente'}
+                                                    </div>
+                                                    <p className="mt-1 text-xs text-gray-600">
+                                                        El candidato completa el formulario público con su DNI (sin acceso al ATS). Usa “Link ficha” para compartirle el enlace.
+                                                    </p>
+                                                </div>
                                                 {/* Selector de Etapa */}
                                                 {processStages.length > 0 && (
                                                     <div className="p-4 bg-blue-50 rounded-lg border border-blue-200">

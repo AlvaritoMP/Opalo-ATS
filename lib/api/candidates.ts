@@ -6,6 +6,7 @@ import { APP_NAME } from '../appConfig';
 import { isMissingColumnError } from '../supabaseColumnErrors';
 import { buildUploadContactLockUpdate } from '../contactLock';
 import { fetchWithRetry } from '../fetchWithRetry';
+import type { ComplementaryFichaData } from '../complementaryFicha';
 
 const CANDIDATE_PAGE_SIZE = 250;
 const CANDIDATE_MAX_ROWS = 2000;
@@ -18,6 +19,7 @@ const CANDIDATE_LIST_SELECT = `${CANDIDATE_LIST_SELECT_CORE}, application_count,
 /** Variantes de select (de más completa a mínima) si faltan migraciones en Supabase */
 function getCandidateListSelectVariants(): string[] {
     return [
+        `${CANDIDATE_LIST_SELECT}, bulk_column_values, psycholaboral_evaluation, complementary_data, complementary_filled_at`,
         `${CANDIDATE_LIST_SELECT}, bulk_column_values, psycholaboral_evaluation`,
         `${CANDIDATE_LIST_SELECT}, bulk_column_values`,
         CANDIDATE_LIST_SELECT,
@@ -31,6 +33,21 @@ function mapBulkColumnValues(dbCandidate: { bulk_column_values?: unknown }): Rec
     const raw = dbCandidate.bulk_column_values;
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
     return raw as Record<string, unknown>;
+}
+
+function mapComplementaryData(dbCandidate: {
+    complementary_data?: unknown;
+    complementary_filled_at?: string | null;
+}): Pick<Candidate, 'complementaryData' | 'complementaryFilledAt'> {
+    const raw = dbCandidate.complementary_data;
+    const complementaryData =
+        raw && typeof raw === 'object' && !Array.isArray(raw)
+            ? (raw as ComplementaryFichaData)
+            : undefined;
+    return {
+        complementaryData,
+        complementaryFilledAt: dbCandidate.complementary_filled_at || undefined,
+    };
 }
 
 async function fetchCandidatesWithSelectFallback(
@@ -226,6 +243,7 @@ function mapListCandidate(dbCandidate: any, extras: Partial<Candidate> = {}): Ca
         metadataIa: dbCandidate.metadata_ia || undefined,
         psycholaboralEvaluation: dbCandidate.psycholaboral_evaluation || undefined,
         bulkColumnValues: mapBulkColumnValues(dbCandidate),
+        ...mapComplementaryData(dbCandidate),
         ...extras,
     };
 }
@@ -363,6 +381,7 @@ async function dbToCandidate(dbCandidate: any): Promise<Candidate> {
         metadataIa: dbCandidate.metadata_ia || undefined,
         psycholaboralEvaluation: dbCandidate.psycholaboral_evaluation || undefined,
         bulkColumnValues: mapBulkColumnValues(dbCandidate),
+        ...mapComplementaryData(dbCandidate),
     };
 }
 
@@ -685,6 +704,7 @@ export const candidatesApi = {
     // OPTIMIZADO EGRESS: Selecciona solo campos necesarios
     async getById(id: string): Promise<Candidate | null> {
         const selectVariants = [
+            'id, name, email, phone, phone2, process_id, stage_id, description, avatar_url, source, salary_expectation, agreed_salary, agreed_salary_in_words, age, dni, linkedin_url, address, province, district, archived, archived_at, discarded, discard_reason, discarded_at, hire_date, google_drive_folder_id, google_drive_folder_name, visible_to_clients, offer_accepted_date, application_started_date, application_completed_date, critical_stage_reviewed_at, created_at, application_count, first_application_at, registration_origin, bulk_column_values, score_ia, metadata_ia, psycholaboral_evaluation, complementary_data, complementary_filled_at',
             'id, name, email, phone, phone2, process_id, stage_id, description, avatar_url, source, salary_expectation, agreed_salary, agreed_salary_in_words, age, dni, linkedin_url, address, province, district, archived, archived_at, discarded, discard_reason, discarded_at, hire_date, google_drive_folder_id, google_drive_folder_name, visible_to_clients, offer_accepted_date, application_started_date, application_completed_date, critical_stage_reviewed_at, created_at, application_count, first_application_at, registration_origin, bulk_column_values, score_ia, metadata_ia, psycholaboral_evaluation',
             'id, name, email, phone, phone2, process_id, stage_id, description, avatar_url, source, salary_expectation, agreed_salary, agreed_salary_in_words, age, dni, linkedin_url, address, province, district, archived, archived_at, discarded, discard_reason, discarded_at, hire_date, google_drive_folder_id, google_drive_folder_name, visible_to_clients, offer_accepted_date, application_started_date, application_completed_date, critical_stage_reviewed_at, created_at, bulk_column_values, score_ia, metadata_ia',
             'id, name, email, phone, phone2, process_id, stage_id, description, avatar_url, source, salary_expectation, agreed_salary, agreed_salary_in_words, age, dni, linkedin_url, address, province, district, archived, archived_at, discarded, discard_reason, discarded_at, hire_date, google_drive_folder_id, google_drive_folder_name, visible_to_clients, offer_accepted_date, application_started_date, application_completed_date, critical_stage_reviewed_at, created_at, bulk_column_values',

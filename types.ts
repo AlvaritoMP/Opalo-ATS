@@ -1,5 +1,7 @@
 // types.ts
 
+import type { ComplementaryFichaData } from './lib/complementaryFicha';
+
 export type StageColorId =
     | 'blue'
     | 'green'
@@ -541,6 +543,9 @@ export interface Candidate {
     psycholaboralEvaluation?: PsycholaboralEvaluation;
     /** Valores de columnas personalizadas (procesos masivos / tabla alta densidad) */
     bulkColumnValues?: Record<string, unknown>;
+    /** Ficha complementaria enviada por el candidato (formulario público) */
+    complementaryData?: ComplementaryFichaData;
+    complementaryFilledAt?: string;
 }
 
 export type UserRole = 'admin' | 'recruiter' | 'client' | 'viewer';
