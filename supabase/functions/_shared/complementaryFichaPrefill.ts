@@ -12,6 +12,76 @@ interface CustomColumn {
   dashboardSemanticField?: string;
 }
 
+const LOCKED_REQUIRED = ['nombres', 'apellidoPaterno', 'nroDocumento', 'email', 'telefono']
+
+const DEFAULT_REQUIRED = [
+  ...LOCKED_REQUIRED,
+  'apellidoMaterno',
+  'fechaNacimiento',
+  'sexo',
+  'estadoCivil',
+  'direccion',
+  'distrito',
+  'provincia',
+  'emergenciaTelefono',
+  'emergenciaParentesco',
+]
+
+const FIELD_LABELS: Record<string, string> = {
+  nombres: 'Nombres',
+  apellidoPaterno: 'Apellido paterno',
+  apellidoMaterno: 'Apellido materno',
+  fechaNacimiento: 'Fecha de nacimiento',
+  tipoDocumento: 'Tipo de documento',
+  nroDocumento: 'Nro. de documento',
+  nacionalidad: 'Nacionalidad',
+  edad: 'Edad',
+  sexo: 'Sexo',
+  estadoCivil: 'Estado civil',
+  email: 'Correo electrónico',
+  telefono: 'Teléfono',
+  tallaCamisa: 'Talla camisa',
+  tallaPantalon: 'Talla pantalón',
+  tallaCalzado: 'Talla calzado',
+  emergenciaTelefono: 'Teléfono de emergencia',
+  emergenciaParentesco: 'Parentesco (emergencia)',
+  direccion: 'Dirección',
+  distrito: 'Distrito',
+  provincia: 'Provincia',
+  departamento: 'Departamento',
+  unidadDestaque: 'Unidad de destaque',
+  puestoContrato: 'Puesto',
+  bancoSueldo: 'Banco para sueldo',
+  bancoCts: 'Banco para CTS',
+  sistemaPensionesAnterior: 'Sistema pensiones anterior',
+  sistemaPensionesDeseado: 'Sistema pensiones deseado',
+  parienteEnOpalo: 'Pariente en la empresa',
+  nombreFamiliarOpalo: 'Nombre del familiar',
+}
+
+export function resolveRequiredFields(configured?: string[] | null): string[] {
+  const set = new Set<string>(LOCKED_REQUIRED)
+  for (const key of configured && configured.length ? configured : DEFAULT_REQUIRED) {
+    if (FIELD_LABELS[key] || LOCKED_REQUIRED.includes(key)) set.add(key)
+  }
+  return [...set]
+}
+
+export function getMissingRequired(form: Record<string, unknown>, requiredKeys: string[]): string[] {
+  const missing: string[] = []
+  for (const key of requiredKeys) {
+    const value = form[key]
+    if (key === 'parienteEnOpalo') {
+      if (value !== true && value !== false) missing.push(FIELD_LABELS[key] || key)
+      continue
+    }
+    if (value === undefined || value === null || String(value).trim() === '') {
+      missing.push(FIELD_LABELS[key] || key)
+    }
+  }
+  return missing
+}
+
 function normalizeKey(name: string): string {
   return name
     .normalize('NFD')

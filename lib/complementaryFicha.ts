@@ -94,6 +94,8 @@ export interface ComplementaryPrefillPayload {
     alreadyFilled: boolean;
     filledAt?: string;
     form: ComplementaryFichaData;
+    /** Campos obligatorios del proceso (keys del formulario) */
+    requiredFields?: string[];
 }
 
 export function emptyComplementaryFicha(): ComplementaryFichaData {

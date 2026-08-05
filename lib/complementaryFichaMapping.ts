@@ -68,6 +68,69 @@ export const COMPLEMENTARY_FICHA_MAPPABLE_FIELDS: ComplementaryFichaFieldDef[] =
 
 export type ComplementaryFichaMapping = Partial<Record<ComplementaryFichaMappableKey, string>>;
 
+/**
+ * Campos siempre obligatorios (no se pueden desactivar).
+ * La declaración se valida aparte como checkbox.
+ */
+export const COMPLEMENTARY_FICHA_LOCKED_REQUIRED: ComplementaryFichaMappableKey[] = [
+    'nombres',
+    'apellidoPaterno',
+    'nroDocumento',
+    'email',
+    'telefono',
+];
+
+/** Defaults recomendados al crear/configurar un proceso (editables). */
+export const COMPLEMENTARY_FICHA_DEFAULT_REQUIRED: ComplementaryFichaMappableKey[] = [
+    ...COMPLEMENTARY_FICHA_LOCKED_REQUIRED,
+    'apellidoMaterno',
+    'fechaNacimiento',
+    'sexo',
+    'estadoCivil',
+    'direccion',
+    'distrito',
+    'provincia',
+    'emergenciaTelefono',
+    'emergenciaParentesco',
+];
+
+export function isComplementaryFieldLockedRequired(key: string): boolean {
+    return (COMPLEMENTARY_FICHA_LOCKED_REQUIRED as string[]).includes(key);
+}
+
+/** Une locked + config del proceso. */
+export function resolveComplementaryRequiredFields(
+    configured?: string[] | null
+): ComplementaryFichaMappableKey[] {
+    const set = new Set<string>(COMPLEMENTARY_FICHA_LOCKED_REQUIRED);
+    for (const key of configured || COMPLEMENTARY_FICHA_DEFAULT_REQUIRED) {
+        if (COMPLEMENTARY_FICHA_MAPPABLE_FIELDS.some((f) => f.key === key)) {
+            set.add(key);
+        }
+    }
+    return [...set] as ComplementaryFichaMappableKey[];
+}
+
+export function getMissingRequiredComplementaryFields(
+    form: Partial<ComplementaryFichaData>,
+    requiredKeys: string[]
+): string[] {
+    const missing: string[] = [];
+    for (const key of requiredKeys) {
+        const def = COMPLEMENTARY_FICHA_MAPPABLE_FIELDS.find((f) => f.key === key);
+        const label = def?.label || key;
+        const value = (form as Record<string, unknown>)[key];
+        if (key === 'parienteEnOpalo') {
+            if (value !== true && value !== false) missing.push(label);
+            continue;
+        }
+        if (value === undefined || value === null || String(value).trim() === '') {
+            missing.push(label);
+        }
+    }
+    return missing;
+}
+
 const CANDIDATE_SOURCE_OPTIONS: { id: string; label: string }[] = [
     { id: 'candidate.name', label: 'Candidato · Nombre completo' },
     { id: 'candidate.dni', label: 'Candidato · DNI' },

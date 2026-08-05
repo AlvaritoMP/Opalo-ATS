@@ -15,6 +15,7 @@ import { StageColorPicker } from './StageColorPicker';
 import { ComplementaryFichaMappingEditor } from './ComplementaryFichaMappingEditor';
 import { suggestStageColor, buildStageColorMaps } from '../lib/stageColors';
 import type { ComplementaryFichaMapping } from '../lib/complementaryFichaMapping';
+import { COMPLEMENTARY_FICHA_DEFAULT_REQUIRED } from '../lib/complementaryFichaMapping';
 
 const fileToBase64 = (file: File): Promise<string> =>
     new Promise((resolve, reject) => {
@@ -912,6 +913,14 @@ export const BulkProcessEditorModal: React.FC<BulkProcessEditorModalProps> = ({ 
                                 mapping={(bulkConfig.complementaryFichaMapping || {}) as ComplementaryFichaMapping}
                                 onChange={(complementaryFichaMapping) =>
                                     setBulkConfig({ ...bulkConfig, complementaryFichaMapping })
+                                }
+                                requiredFields={
+                                    bulkConfig.complementaryFichaRequiredFields || [
+                                        ...COMPLEMENTARY_FICHA_DEFAULT_REQUIRED,
+                                    ]
+                                }
+                                onChangeRequired={(complementaryFichaRequiredFields) =>
+                                    setBulkConfig({ ...bulkConfig, complementaryFichaRequiredFields })
                                 }
                             />
 

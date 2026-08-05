@@ -259,6 +259,11 @@ export interface BulkProcessConfig {
      */
     complementaryFichaMapping?: Partial<Record<string, string>>;
     /**
+     * Campos del formulario público marcados como obligatorios en este proceso
+     * (además de los mínimos del sistema: nombres, apellido paterno, documento, correo, teléfono, declaración).
+     */
+    complementaryFichaRequiredFields?: string[];
+    /**
      * Panel flotante de columnas deslizables sobre la tabla (sin scroll horizontal).
      * Por defecto incluye las columnas de fidelización.
      */

@@ -1,6 +1,6 @@
 // Edge Function pública: lookup y envío de ficha complementaria por DNI (sin login ATS).
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.49.1'
-import { buildPrefillForm } from '../_shared/complementaryFichaPrefill.ts'
+import { buildPrefillForm, getMissingRequired, resolveRequiredFields } from '../_shared/complementaryFichaPrefill.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -171,6 +171,11 @@ Deno.serve(async (req) => {
         bulkConfig.columnKeyAliases && typeof bulkConfig.columnKeyAliases === 'object'
           ? (bulkConfig.columnKeyAliases as Record<string, string>)
           : undefined
+      const requiredFields = resolveRequiredFields(
+        Array.isArray(bulkConfig.complementaryFichaRequiredFields)
+          ? (bulkConfig.complementaryFichaRequiredFields as string[])
+          : null
+      )
 
       const form = buildPrefillForm({
         candidate: selected as Record<string, unknown>,
@@ -188,6 +193,7 @@ Deno.serve(async (req) => {
           processTitle: processInfo?.title || 'Proceso',
           alreadyFilled: Boolean(selected.complementary_filled_at),
           filledAt: selected.complementary_filled_at || undefined,
+          requiredFields,
           form,
         },
       })
@@ -214,7 +220,7 @@ Deno.serve(async (req) => {
 
       const { data: row, error: loadError } = await supabase
         .from('candidates')
-        .select('id, dni, name, email, phone, phone2, age, address, province, district, archived')
+        .select('id, dni, name, email, phone, phone2, age, address, province, district, archived, process_id')
         .eq('id', candidateId)
         .eq('app_name', APP_NAME)
         .maybeSingle()
@@ -227,6 +233,29 @@ Deno.serve(async (req) => {
       }
       if (normalizeDni(row.dni as string) !== dniKey) {
         return json({ error: 'El documento no coincide con el candidato.' }, 400)
+      }
+
+      let requiredFields = resolveRequiredFields(null)
+      if (row.process_id) {
+        const { data: processRow } = await supabase
+          .from('processes')
+          .select('bulk_config')
+          .eq('id', row.process_id)
+          .eq('app_name', APP_NAME)
+          .maybeSingle()
+        const bulkConfig = (processRow?.bulk_config || {}) as Record<string, unknown>
+        requiredFields = resolveRequiredFields(
+          Array.isArray(bulkConfig.complementaryFichaRequiredFields)
+            ? (bulkConfig.complementaryFichaRequiredFields as string[])
+            : null
+        )
+      }
+
+      const missing = getMissingRequired(form, requiredFields)
+      if (missing.length > 0) {
+        return json({
+          error: `Completa los campos obligatorios: ${missing.join(', ')}.`,
+        }, 400)
       }
 
       const fullName =

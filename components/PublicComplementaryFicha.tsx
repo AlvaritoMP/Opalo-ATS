@@ -16,32 +16,92 @@ import {
     getDniFromPublicUrl,
     normalizeDniDigits,
 } from '../lib/complementaryFicha';
+import {
+    COMPLEMENTARY_FICHA_DEFAULT_REQUIRED,
+    getMissingRequiredComplementaryFields,
+} from '../lib/complementaryFichaMapping';
 
 type Step = 'dni' | 'pick' | 'form' | 'done';
 
-const inputClass =
-    'mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm text-sm placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500';
+type FieldStatus = 'ok' | 'missing' | 'neutral';
 
-const labelClass = 'block text-sm font-medium text-gray-700';
+function isFieldFilled(value: unknown): boolean {
+    if (typeof value === 'boolean') return true;
+    if (value === null || value === undefined) return false;
+    return String(value).trim() !== '';
+}
+
+function fieldStatus(required: boolean | undefined, value: unknown): FieldStatus {
+    if (isFieldFilled(value)) return 'ok';
+    if (required) return 'missing';
+    return 'neutral';
+}
+
+function inputClassFor(status: FieldStatus, disabled?: boolean): string {
+    const base =
+        'mt-1 block w-full px-3 py-2 rounded-md shadow-sm text-sm placeholder-gray-400 focus:outline-none focus:ring-2 transition-colors';
+    if (disabled) {
+        return `${base} border border-gray-200 bg-gray-50 text-gray-500 cursor-not-allowed`;
+    }
+    if (status === 'ok') {
+        return `${base} border-2 border-green-500 bg-green-50 text-green-950 focus:ring-green-500 focus:border-green-600`;
+    }
+    if (status === 'missing') {
+        return `${base} border-2 border-red-400 bg-red-50 text-red-950 focus:ring-red-400 focus:border-red-500`;
+    }
+    return `${base} border border-gray-300 bg-white focus:ring-blue-500 focus:border-blue-500`;
+}
+
+function labelClassFor(status: FieldStatus): string {
+    if (status === 'ok') return 'block text-sm font-medium text-green-800';
+    if (status === 'missing') return 'block text-sm font-medium text-red-700';
+    return 'block text-sm font-medium text-gray-700';
+}
+
+const inputClass = inputClassFor('neutral');
 
 const sectionClass = 'bg-white rounded-xl border border-gray-200 p-4 md:p-5 space-y-4';
 
 function Field({
     label,
     required,
+    value,
+    disabled,
     children,
 }: {
     label: string;
     required?: boolean;
-    children: React.ReactNode;
+    value?: unknown;
+    disabled?: boolean;
+    children: React.ReactElement<{ className?: string; disabled?: boolean }>;
 }) {
+    const status = disabled
+        ? isFieldFilled(value)
+            ? 'ok'
+            : 'neutral'
+        : fieldStatus(required, value);
+    const child = React.Children.only(children);
+
     return (
         <div>
-            <label className={labelClass}>
+            <label className={labelClassFor(status)}>
                 {label}
                 {required ? <span className="text-red-500"> *</span> : null}
+                {status === 'ok' ? (
+                    <span className="ml-1 text-[10px] font-semibold uppercase tracking-wide text-green-600">
+                        ok
+                    </span>
+                ) : null}
+                {status === 'missing' ? (
+                    <span className="ml-1 text-[10px] font-semibold uppercase tracking-wide text-red-500">
+                        falta
+                    </span>
+                ) : null}
             </label>
-            {children}
+            {React.cloneElement(child, {
+                className: inputClassFor(status, disabled || child.props.disabled),
+                disabled: disabled || child.props.disabled,
+            })}
         </div>
     );
 }
@@ -76,11 +136,14 @@ export const PublicComplementaryFicha: React.FC = () => {
     const [matches, setMatches] = useState<ComplementaryLookupMatch[]>([]);
     const [prefillMeta, setPrefillMeta] = useState<Omit<ComplementaryPrefillPayload, 'form'> | null>(null);
     const [form, setForm] = useState<ComplementaryFichaData>(emptyComplementaryFicha());
+    const [requiredFields, setRequiredFields] = useState<string[]>([...COMPLEMENTARY_FICHA_DEFAULT_REQUIRED]);
 
     useEffect(() => {
         const fromUrl = getDniFromPublicUrl();
         if (fromUrl) setDni(fromUrl);
     }, []);
+
+    const isReq = (key: string) => requiredFields.includes(key);
 
     const title = useMemo(() => {
         if (prefillMeta?.processTitle) return `Ficha de datos — ${prefillMeta.processTitle}`;
@@ -99,7 +162,13 @@ export const PublicComplementaryFicha: React.FC = () => {
             processTitle: payload.processTitle,
             alreadyFilled: payload.alreadyFilled,
             filledAt: payload.filledAt,
+            requiredFields: payload.requiredFields,
         });
+        setRequiredFields(
+            payload.requiredFields?.length
+                ? payload.requiredFields
+                : [...COMPLEMENTARY_FICHA_DEFAULT_REQUIRED]
+        );
         setForm({ ...emptyComplementaryFicha(), ...payload.form, version: 1 });
         setStep('form');
     };
@@ -133,6 +202,11 @@ export const PublicComplementaryFicha: React.FC = () => {
         setError('');
         if (!form.declaracionAceptada) {
             setError('Debes aceptar la declaración para enviar la ficha.');
+            return;
+        }
+        const missing = getMissingRequiredComplementaryFields(form, requiredFields);
+        if (missing.length > 0) {
+            setError(`Completa los campos obligatorios: ${missing.join(', ')}.`);
             return;
         }
         setBusy(true);
@@ -200,7 +274,7 @@ export const PublicComplementaryFicha: React.FC = () => {
 
                 {step === 'dni' && (
                     <div className={sectionClass}>
-                        <Field label="Número de documento (DNI / CE / Pasaporte)" required>
+                        <Field label="Número de documento (DNI / CE / Pasaporte)" required value={dni}>
                             <input
                                 className={inputClass}
                                 inputMode="numeric"
@@ -292,44 +366,47 @@ export const PublicComplementaryFicha: React.FC = () => {
                         <section className={sectionClass}>
                             <h2 className="text-base font-semibold text-slate-900">I. Datos personales</h2>
                             <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                                <Field label="Nombres" required>
+                                <Field label="Nombres" required={isReq('nombres')} value={form.nombres}>
                                     <input
                                         className={inputClass}
-                                        required
+                                        required={isReq('nombres')}
                                         value={form.nombres || ''}
                                         onChange={(e) => patchForm({ nombres: e.target.value })}
                                     />
                                 </Field>
-                                <Field label="Apellido paterno" required>
+                                <Field label="Apellido paterno" required={isReq('apellidoPaterno')} value={form.apellidoPaterno}>
                                     <input
                                         className={inputClass}
-                                        required
+                                        required={isReq('apellidoPaterno')}
                                         value={form.apellidoPaterno || ''}
                                         onChange={(e) => patchForm({ apellidoPaterno: e.target.value })}
                                     />
                                 </Field>
-                                <Field label="Apellido materno">
+                                <Field label="Apellido materno" required={isReq('apellidoMaterno')} value={form.apellidoMaterno}>
                                     <input
                                         className={inputClass}
+                                        required={isReq('apellidoMaterno')}
                                         value={form.apellidoMaterno || ''}
                                         onChange={(e) => patchForm({ apellidoMaterno: e.target.value })}
                                     />
                                 </Field>
                             </div>
                             <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                                <Field label="Fecha de nacimiento (dd/mm/aaaa)">
+                                <Field label="Fecha de nacimiento (dd/mm/aaaa)" required={isReq('fechaNacimiento')} value={form.fechaNacimiento}>
                                     <input
                                         type="text"
                                         className={inputClass}
                                         inputMode="numeric"
                                         placeholder="dd/mm/aaaa"
+                                        required={isReq('fechaNacimiento')}
                                         value={form.fechaNacimiento || ''}
                                         onChange={(e) => patchForm({ fechaNacimiento: e.target.value })}
                                     />
                                 </Field>
-                                <Field label="Tipo de documento">
+                                <Field label="Tipo de documento" required={isReq('tipoDocumento')} value={form.tipoDocumento}>
                                     <select
                                         className={inputClass}
+                                        required={isReq('tipoDocumento')}
                                         value={form.tipoDocumento || 'DNI'}
                                         onChange={(e) =>
                                             patchForm({
@@ -342,34 +419,37 @@ export const PublicComplementaryFicha: React.FC = () => {
                                         <option value="Pasaporte">Pasaporte</option>
                                     </select>
                                 </Field>
-                                <Field label="Nro. de documento" required>
+                                <Field label="Nro. de documento" required={isReq('nroDocumento')} value={form.nroDocumento}>
                                     <input
                                         className={inputClass}
-                                        required
+                                        required={isReq('nroDocumento')}
                                         value={form.nroDocumento || dni}
                                         onChange={(e) => patchForm({ nroDocumento: e.target.value })}
                                     />
                                 </Field>
                             </div>
                             <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-                                <Field label="Nacionalidad">
+                                <Field label="Nacionalidad" required={isReq('nacionalidad')} value={form.nacionalidad}>
                                     <input
                                         className={inputClass}
+                                        required={isReq('nacionalidad')}
                                         value={form.nacionalidad || ''}
                                         onChange={(e) => patchForm({ nacionalidad: e.target.value })}
                                     />
                                 </Field>
-                                <Field label="Edad">
+                                <Field label="Edad" required={isReq('edad')} value={form.edad}>
                                     <input
                                         className={inputClass}
                                         inputMode="numeric"
+                                        required={isReq('edad')}
                                         value={form.edad || ''}
                                         onChange={(e) => patchForm({ edad: e.target.value })}
                                     />
                                 </Field>
-                                <Field label="Sexo">
+                                <Field label="Sexo" required={isReq('sexo')} value={form.sexo}>
                                     <select
                                         className={inputClass}
+                                        required={isReq('sexo')}
                                         value={form.sexo || ''}
                                         onChange={(e) =>
                                             patchForm({ sexo: e.target.value as ComplementaryFichaData['sexo'] })
@@ -380,9 +460,10 @@ export const PublicComplementaryFicha: React.FC = () => {
                                         <option value="Femenino">Femenino</option>
                                     </select>
                                 </Field>
-                                <Field label="Estado civil">
+                                <Field label="Estado civil" required={isReq('estadoCivil')} value={form.estadoCivil}>
                                     <select
                                         className={inputClass}
+                                        required={isReq('estadoCivil')}
                                         value={form.estadoCivil || ''}
                                         onChange={(e) =>
                                             patchForm({
@@ -399,88 +480,97 @@ export const PublicComplementaryFicha: React.FC = () => {
                                 </Field>
                             </div>
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                                <Field label="Correo electrónico" required>
+                                <Field label="Correo electrónico" required={isReq('email')} value={form.email}>
                                     <input
                                         type="email"
                                         className={inputClass}
-                                        required
+                                        required={isReq('email')}
                                         value={form.email || ''}
                                         onChange={(e) => patchForm({ email: e.target.value })}
                                     />
                                 </Field>
-                                <Field label="Teléfono" required>
+                                <Field label="Teléfono" required={isReq('telefono')} value={form.telefono}>
                                     <input
                                         className={inputClass}
-                                        required
+                                        required={isReq('telefono')}
                                         value={form.telefono || ''}
                                         onChange={(e) => patchForm({ telefono: e.target.value })}
                                     />
                                 </Field>
                             </div>
                             <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                                <Field label="Talla camisa">
+                                <Field label="Talla camisa" required={isReq('tallaCamisa')} value={form.tallaCamisa}>
                                     <input
                                         className={inputClass}
+                                        required={isReq('tallaCamisa')}
                                         value={form.tallaCamisa || ''}
                                         onChange={(e) => patchForm({ tallaCamisa: e.target.value })}
                                     />
                                 </Field>
-                                <Field label="Talla pantalón">
+                                <Field label="Talla pantalón" required={isReq('tallaPantalon')} value={form.tallaPantalon}>
                                     <input
                                         className={inputClass}
+                                        required={isReq('tallaPantalon')}
                                         value={form.tallaPantalon || ''}
                                         onChange={(e) => patchForm({ tallaPantalon: e.target.value })}
                                     />
                                 </Field>
-                                <Field label="Talla calzado">
+                                <Field label="Talla calzado" required={isReq('tallaCalzado')} value={form.tallaCalzado}>
                                     <input
                                         className={inputClass}
+                                        required={isReq('tallaCalzado')}
                                         value={form.tallaCalzado || ''}
                                         onChange={(e) => patchForm({ tallaCalzado: e.target.value })}
                                     />
                                 </Field>
                             </div>
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                                <Field label="Teléfono de emergencia">
+                                <Field label="Teléfono de emergencia" required={isReq('emergenciaTelefono')} value={form.emergenciaTelefono}>
                                     <input
                                         className={inputClass}
+                                        required={isReq('emergenciaTelefono')}
                                         value={form.emergenciaTelefono || ''}
                                         onChange={(e) => patchForm({ emergenciaTelefono: e.target.value })}
                                     />
                                 </Field>
-                                <Field label="Parentesco (emergencia)">
+                                <Field label="Parentesco (emergencia)" required={isReq('emergenciaParentesco')} value={form.emergenciaParentesco}>
                                     <input
                                         className={inputClass}
+                                        required={isReq('emergenciaParentesco')}
                                         value={form.emergenciaParentesco || ''}
                                         onChange={(e) => patchForm({ emergenciaParentesco: e.target.value })}
                                     />
                                 </Field>
                             </div>
-                            <Field label="Dirección">
+                            <Field label="Dirección" required={isReq('direccion')} value={form.direccion}>
                                 <input
                                     className={inputClass}
+                                    required={isReq('direccion')}
                                     value={form.direccion || ''}
                                     onChange={(e) => patchForm({ direccion: e.target.value })}
                                 />
                             </Field>
                             <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                                <Field label="Distrito">
+                                <Field label="Distrito" required={isReq('distrito')} value={form.distrito}>
                                     <input
                                         className={inputClass}
+                                        required={isReq('distrito')}
                                         value={form.distrito || ''}
                                         onChange={(e) => patchForm({ distrito: e.target.value })}
                                     />
                                 </Field>
-                                <Field label="Provincia">
+                                <Field label="Provincia" required={isReq('provincia')} value={form.provincia}>
                                     <input
                                         className={inputClass}
+                                        required={isReq('provincia')}
                                         value={form.provincia || ''}
                                         onChange={(e) => patchForm({ provincia: e.target.value })}
                                     />
                                 </Field>
-                                <Field label="Departamento">
+                                <Field label="Departamento" required={isReq('departamento')} value={form.departamento}>
                                     <input
                                         className={inputClass}
+                                        required={isReq('departamento')}
                                         value={form.departamento || ''}
                                         onChange={(e) => patchForm({ departamento: e.target.value })}
                                     />
@@ -514,14 +604,14 @@ export const PublicComplementaryFicha: React.FC = () => {
                                         ) : null}
                                     </div>
                                     <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                                        <Field label="Nombres">
+                                        <Field label="Nombres" value={row.nombres}>
                                             <input
                                                 className={inputClass}
                                                 value={row.nombres || ''}
                                                 onChange={(e) => updateFamiliar(index, { nombres: e.target.value })}
                                             />
                                         </Field>
-                                        <Field label="Apellido paterno">
+                                        <Field label="Apellido paterno" value={row.apellidoPaterno}>
                                             <input
                                                 className={inputClass}
                                                 value={row.apellidoPaterno || ''}
@@ -530,7 +620,7 @@ export const PublicComplementaryFicha: React.FC = () => {
                                                 }
                                             />
                                         </Field>
-                                        <Field label="Apellido materno">
+                                        <Field label="Apellido materno" value={row.apellidoMaterno}>
                                             <input
                                                 className={inputClass}
                                                 value={row.apellidoMaterno || ''}
@@ -541,21 +631,21 @@ export const PublicComplementaryFicha: React.FC = () => {
                                         </Field>
                                     </div>
                                     <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                                        <Field label="Parentesco">
+                                        <Field label="Parentesco" value={row.parentesco}>
                                             <input
                                                 className={inputClass}
                                                 value={row.parentesco || ''}
                                                 onChange={(e) => updateFamiliar(index, { parentesco: e.target.value })}
                                             />
                                         </Field>
-                                        <Field label="Edad">
+                                        <Field label="Edad" value={row.edad}>
                                             <input
                                                 className={inputClass}
                                                 value={row.edad || ''}
                                                 onChange={(e) => updateFamiliar(index, { edad: e.target.value })}
                                             />
                                         </Field>
-                                        <Field label="Teléfono">
+                                        <Field label="Teléfono" value={row.telefono}>
                                             <input
                                                 className={inputClass}
                                                 value={row.telefono || ''}
@@ -566,9 +656,10 @@ export const PublicComplementaryFicha: React.FC = () => {
                                 </div>
                             ))}
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-2">
-                                <Field label="¿Pariente trabajando en la empresa?">
+                                <Field label="¿Pariente trabajando en la empresa?" required={isReq('parienteEnOpalo')} value={form.parienteEnOpalo}>
                                     <select
                                         className={inputClass}
+                                        required={isReq('parienteEnOpalo')}
                                         value={
                                             form.parienteEnOpalo === true
                                                 ? 'si'
@@ -592,9 +683,15 @@ export const PublicComplementaryFicha: React.FC = () => {
                                         <option value="no">No</option>
                                     </select>
                                 </Field>
-                                <Field label="Nombre del familiar">
+                                <Field
+                                    label="Nombre del familiar"
+                                    required={isReq('nombreFamiliarOpalo')}
+                                    value={form.nombreFamiliarOpalo}
+                                    disabled={form.parienteEnOpalo !== true}
+                                >
                                     <input
                                         className={inputClass}
+                                        required={isReq('nombreFamiliarOpalo')}
                                         value={form.nombreFamiliarOpalo || ''}
                                         onChange={(e) => patchForm({ nombreFamiliarOpalo: e.target.value })}
                                         disabled={form.parienteEnOpalo !== true}
@@ -627,14 +724,14 @@ export const PublicComplementaryFicha: React.FC = () => {
                                         ) : null}
                                     </div>
                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                                        <Field label="Nivel">
+                                        <Field label="Nivel" value={row.nivel}>
                                             <input
                                                 className={inputClass}
                                                 value={row.nivel || ''}
                                                 onChange={(e) => updateEducacion(index, { nivel: e.target.value })}
                                             />
                                         </Field>
-                                        <Field label="Institución">
+                                        <Field label="Institución" value={row.institucion}>
                                             <input
                                                 className={inputClass}
                                                 value={row.institucion || ''}
@@ -643,21 +740,21 @@ export const PublicComplementaryFicha: React.FC = () => {
                                                 }
                                             />
                                         </Field>
-                                        <Field label="Lugar">
+                                        <Field label="Lugar" value={row.lugar}>
                                             <input
                                                 className={inputClass}
                                                 value={row.lugar || ''}
                                                 onChange={(e) => updateEducacion(index, { lugar: e.target.value })}
                                             />
                                         </Field>
-                                        <Field label="Periodo">
+                                        <Field label="Periodo" value={row.periodo}>
                                             <input
                                                 className={inputClass}
                                                 value={row.periodo || ''}
                                                 onChange={(e) => updateEducacion(index, { periodo: e.target.value })}
                                             />
                                         </Field>
-                                        <Field label="Grado">
+                                        <Field label="Grado" value={row.grado}>
                                             <input
                                                 className={inputClass}
                                                 value={row.grado || ''}
@@ -699,21 +796,21 @@ export const PublicComplementaryFicha: React.FC = () => {
                                         ) : null}
                                     </div>
                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                                        <Field label="Empresa">
+                                        <Field label="Empresa" value={row.empresa}>
                                             <input
                                                 className={inputClass}
                                                 value={row.empresa || ''}
                                                 onChange={(e) => updateExperiencia(index, { empresa: e.target.value })}
                                             />
                                         </Field>
-                                        <Field label="Puesto">
+                                        <Field label="Puesto" value={row.puesto}>
                                             <input
                                                 className={inputClass}
                                                 value={row.puesto || ''}
                                                 onChange={(e) => updateExperiencia(index, { puesto: e.target.value })}
                                             />
                                         </Field>
-                                        <Field label="Fecha de ingreso">
+                                        <Field label="Fecha de ingreso" value={row.fechaIngreso}>
                                             <input
                                                 type="date"
                                                 className={inputClass}
@@ -723,7 +820,7 @@ export const PublicComplementaryFicha: React.FC = () => {
                                                 }
                                             />
                                         </Field>
-                                        <Field label="Fecha de cese">
+                                        <Field label="Fecha de cese" value={row.fechaCese}>
                                             <input
                                                 type="date"
                                                 className={inputClass}
@@ -733,7 +830,7 @@ export const PublicComplementaryFicha: React.FC = () => {
                                                 }
                                             />
                                         </Field>
-                                        <Field label="Motivo de cese">
+                                        <Field label="Motivo de cese" value={row.motivoCese}>
                                             <select
                                                 className={inputClass}
                                                 value={row.motivoCese || ''}
@@ -785,28 +882,28 @@ export const PublicComplementaryFicha: React.FC = () => {
                                         </button>
                                     </div>
                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                                        <Field label="Tipo de enfermedad">
+                                        <Field label="Tipo de enfermedad" value={row.tipoEnfermedad}>
                                             <input
                                                 className={inputClass}
                                                 value={row.tipoEnfermedad || ''}
                                                 onChange={(e) => updateSalud(index, { tipoEnfermedad: e.target.value })}
                                             />
                                         </Field>
-                                        <Field label="Edad">
+                                        <Field label="Edad" value={row.edad}>
                                             <input
                                                 className={inputClass}
                                                 value={row.edad || ''}
                                                 onChange={(e) => updateSalud(index, { edad: e.target.value })}
                                             />
                                         </Field>
-                                        <Field label="Diagnóstico">
+                                        <Field label="Diagnóstico" value={row.diagnostico}>
                                             <input
                                                 className={inputClass}
                                                 value={row.diagnostico || ''}
                                                 onChange={(e) => updateSalud(index, { diagnostico: e.target.value })}
                                             />
                                         </Field>
-                                        <Field label="Secuela">
+                                        <Field label="Secuela" value={row.secuela}>
                                             <input
                                                 className={inputClass}
                                                 value={row.secuela || ''}
@@ -821,37 +918,42 @@ export const PublicComplementaryFicha: React.FC = () => {
                         <section className={sectionClass}>
                             <h2 className="text-base font-semibold text-slate-900">VI. Datos para contratación</h2>
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                                <Field label="Unidad de destaque">
+                                <Field label="Unidad de destaque" required={isReq('unidadDestaque')} value={form.unidadDestaque}>
                                     <input
                                         className={inputClass}
+                                        required={isReq('unidadDestaque')}
                                         value={form.unidadDestaque || ''}
                                         onChange={(e) => patchForm({ unidadDestaque: e.target.value })}
                                     />
                                 </Field>
-                                <Field label="Puesto">
+                                <Field label="Puesto" required={isReq('puestoContrato')} value={form.puestoContrato}>
                                     <input
                                         className={inputClass}
+                                        required={isReq('puestoContrato')}
                                         value={form.puestoContrato || ''}
                                         onChange={(e) => patchForm({ puestoContrato: e.target.value })}
                                     />
                                 </Field>
-                                <Field label="Banco para sueldo">
+                                <Field label="Banco para sueldo" required={isReq('bancoSueldo')} value={form.bancoSueldo}>
                                     <input
                                         className={inputClass}
+                                        required={isReq('bancoSueldo')}
                                         value={form.bancoSueldo || ''}
                                         onChange={(e) => patchForm({ bancoSueldo: e.target.value })}
                                     />
                                 </Field>
-                                <Field label="Banco para CTS">
+                                <Field label="Banco para CTS" required={isReq('bancoCts')} value={form.bancoCts}>
                                     <input
                                         className={inputClass}
+                                        required={isReq('bancoCts')}
                                         value={form.bancoCts || ''}
                                         onChange={(e) => patchForm({ bancoCts: e.target.value })}
                                     />
                                 </Field>
-                                <Field label="Sistema de pensiones anterior">
+                                <Field label="Sistema de pensiones anterior" required={isReq('sistemaPensionesAnterior')} value={form.sistemaPensionesAnterior}>
                                     <select
                                         className={inputClass}
+                                        required={isReq('sistemaPensionesAnterior')}
                                         value={form.sistemaPensionesAnterior || ''}
                                         onChange={(e) =>
                                             patchForm({
@@ -865,9 +967,10 @@ export const PublicComplementaryFicha: React.FC = () => {
                                         <option value="ONP">ONP</option>
                                     </select>
                                 </Field>
-                                <Field label="Sistema de pensiones deseado">
+                                <Field label="Sistema de pensiones deseado" required={isReq('sistemaPensionesDeseado')} value={form.sistemaPensionesDeseado}>
                                     <select
                                         className={inputClass}
+                                        required={isReq('sistemaPensionesDeseado')}
                                         value={form.sistemaPensionesDeseado || ''}
                                         onChange={(e) =>
                                             patchForm({
@@ -884,14 +987,24 @@ export const PublicComplementaryFicha: React.FC = () => {
                             </div>
                         </section>
 
-                        <section className={sectionClass}>
+                        <section
+                            className={`${sectionClass} ${
+                                form.declaracionAceptada
+                                    ? 'border-green-400 bg-green-50'
+                                    : 'border-red-300 bg-red-50'
+                            }`}
+                        >
                             <h2 className="text-base font-semibold text-slate-900">VII. Declaración</h2>
                             <p className="text-xs text-slate-600 leading-relaxed">
                                 Declaro que la información brindada y los datos registrados en esta ficha son verdaderos
                                 y tienen carácter de declaración jurada. Autorizo a LA EMPRESA a tratar mis datos
                                 personales conforme a la Ley N.º 29733, Ley de protección de datos personales.
                             </p>
-                            <label className="flex items-start gap-2 text-sm text-slate-800">
+                            <label
+                                className={`flex items-start gap-2 text-sm ${
+                                    form.declaracionAceptada ? 'text-green-800' : 'text-red-800'
+                                }`}
+                            >
                                 <input
                                     type="checkbox"
                                     className="mt-1"
@@ -899,7 +1012,14 @@ export const PublicComplementaryFicha: React.FC = () => {
                                     onChange={(e) => patchForm({ declaracionAceptada: e.target.checked })}
                                     required
                                 />
-                                <span>Acepto la declaración y el tratamiento de mis datos personales.</span>
+                                <span>
+                                    Acepto la declaración y el tratamiento de mis datos personales.
+                                    {form.declaracionAceptada ? (
+                                        <span className="ml-1 text-[10px] font-semibold uppercase text-green-600">ok</span>
+                                    ) : (
+                                        <span className="ml-1 text-[10px] font-semibold uppercase text-red-500">falta</span>
+                                    )}
+                                </span>
                             </label>
                         </section>
 
