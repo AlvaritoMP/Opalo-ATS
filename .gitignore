@@ -17,6 +17,10 @@ backend/node_modules
 backend/.env
 backend/.env.local
 backend/*.log
+Opalo-ATS/backend/node_modules
+Opalo-ATS/backend/.env
+Opalo-ATS/backend/.env.local
+Opalo-ATS/backend/*.log
 
 # Environment variables (raíz también)
 .env
