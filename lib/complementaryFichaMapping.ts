@@ -35,7 +35,8 @@ export interface ComplementaryFichaFieldDef {
 
 /** Campos escalares del formulario que pueden mapearse a columnas del proceso */
 export const COMPLEMENTARY_FICHA_MAPPABLE_FIELDS: ComplementaryFichaFieldDef[] = [
-    { key: 'nombres', label: 'Nombres', group: 'Personales', aliases: ['nombres', 'nombre', 'nombrescompletos', 'givennames', 'firstname'] },
+    // No incluir "nombre completo": en procesos masivos "Nombre" = nombres propios; el completo es otro campo/export.
+    { key: 'nombres', label: 'Nombres', group: 'Personales', aliases: ['nombres', 'nombre', 'givennames', 'firstname', 'nombrespropios'] },
     { key: 'apellidoPaterno', label: 'Apellido paterno', group: 'Personales', aliases: ['apellidopaterno', 'appaterno', 'apaterno', 'apellido1', 'paternalsurname'] },
     { key: 'apellidoMaterno', label: 'Apellido materno', group: 'Personales', aliases: ['apellidomaterno', 'apmaterno', 'amaterno', 'apellido2', 'maternalsurname'] },
     { key: 'fechaNacimiento', label: 'Fecha de nacimiento', group: 'Personales', aliases: ['fechanacimiento', 'fnacimiento', 'fechanac', 'nacimiento', 'birthdate', 'dob', 'fechadenacimiento'] },
@@ -132,7 +133,8 @@ export function getMissingRequiredComplementaryFields(
 }
 
 const CANDIDATE_SOURCE_OPTIONS: { id: string; label: string }[] = [
-    { id: 'candidate.name', label: 'Candidato · Nombre completo' },
+    // Columna fija "Nombre" de la tabla de alta densidad (= candidates.name = nombres propios en masivos).
+    { id: 'candidate.name', label: 'Candidato · Nombre (columna del proceso)' },
     { id: 'candidate.dni', label: 'Candidato · DNI' },
     { id: 'candidate.email', label: 'Candidato · Email' },
     { id: 'candidate.phone', label: 'Candidato · Teléfono' },
@@ -142,6 +144,12 @@ const CANDIDATE_SOURCE_OPTIONS: { id: string; label: string }[] = [
     { id: 'candidate.province', label: 'Candidato · Provincia' },
     { id: 'candidate.district', label: 'Candidato · Distrito' },
 ];
+
+/** Columnas de exportación / nombre completo compuesto: no mapear a "Nombres". */
+export function isNombreCompletoColumnLabel(name: string): boolean {
+    const s = stripSpaces(normalizeColumnNameKey(name));
+    return /nombrecompleto|nombrescompletos|fullnamecompleto|^fullname$/.test(s);
+}
 
 export function complementaryFichaSourceOptions(customColumns: CustomColumn[]): { id: string; label: string }[] {
     return [
@@ -172,6 +180,7 @@ export function suggestSourceForFichaField(
                   ? 'paternal_surname'
                   : 'maternal_surname';
         for (const col of customColumns) {
+            if (field.key === 'nombres' && isNombreCompletoColumnLabel(col.name)) continue;
             const labelNorm = normalizeColumnNameKey(col.name);
             const part = col.reportNamePart || inferReportNamePartFromLabel(labelNorm);
             if (part === want) return `custom.${col.id}`;
@@ -179,20 +188,30 @@ export function suggestSourceForFichaField(
     }
 
     const aliasSet = new Set(field.aliases.map((a) => stripSpaces(normalizeColumnNameKey(a))));
+    // 1) Match exacto de alias (p. ej. columna "Nombre" → nombres)
     for (const col of customColumns) {
+        if (field.key === 'nombres' && isNombreCompletoColumnLabel(col.name)) continue;
         const colNorm = stripSpaces(normalizeColumnNameKey(col.name));
         if (aliasSet.has(colNorm)) return `custom.${col.id}`;
+    }
+    // 2) Match parcial solo si no es "nombre completo" ni demasiado ambiguo
+    for (const col of customColumns) {
+        if (field.key === 'nombres' && isNombreCompletoColumnLabel(col.name)) continue;
+        const colNorm = stripSpaces(normalizeColumnNameKey(col.name));
         for (const alias of field.aliases) {
             const a = stripSpaces(normalizeColumnNameKey(alias));
-            if (colNorm.includes(a) || a.includes(colNorm)) {
-                // Evitar falsos positivos muy cortos
-                if (a.length >= 4 && colNorm.length >= 4) return `custom.${col.id}`;
-            }
+            if (a.length < 4 || colNorm.length < 4) continue;
+            if (colNorm === a) return `custom.${col.id}`;
+            // Evitar que "nombre" coincida dentro de "nombrecompleto"
+            if (field.key === 'nombres' && /completo/.test(colNorm)) continue;
+            if (colNorm.includes(a) || a.includes(colNorm)) return `custom.${col.id}`;
         }
     }
 
     // Fallbacks a campos estándar del candidato
     const candidateFallback: Partial<Record<ComplementaryFichaMappableKey, string>> = {
+        // Columna fija "Nombre" del proceso masivo = nombres propios (no el compuesto).
+        nombres: 'candidate.name',
         nroDocumento: 'candidate.dni',
         email: 'candidate.email',
         telefono: 'candidate.phone',
@@ -366,10 +385,20 @@ export function buildComplementaryPrefillFromMapping(params: {
         (fromMapped as Record<string, unknown>)[field.key] = formatted;
     }
 
-    // Si no hay nombres mapeados, intentar partir el nombre completo del candidato
-    if (!fromMapped.nombres && !fromMapped.apellidoPaterno && candidate.name) {
-        const parsed = parseLegacyFullName(String(candidate.name));
-        Object.assign(fromMapped, parsed);
+    // Si faltan nombres: en masivos `candidate.name` suele ser solo nombres propios.
+    // Solo partir como "nombre completo" cuando no hay apellidos ya resueltos por mapeo.
+    if (!fromMapped.nombres && candidate.name) {
+        const hasStructuredSurnames = Boolean(
+            fromMapped.apellidoPaterno ||
+                fromMapped.apellidoMaterno ||
+                mapping.apellidoPaterno ||
+                mapping.apellidoMaterno
+        );
+        if (hasStructuredSurnames || mapping.nombres === 'candidate.name') {
+            fromMapped.nombres = String(candidate.name).trim();
+        } else if (!fromMapped.apellidoPaterno) {
+            Object.assign(fromMapped, parseLegacyFullName(String(candidate.name)));
+        }
     }
 
     // Fallbacks mínimos si el mapeo no cubrió campos estándar

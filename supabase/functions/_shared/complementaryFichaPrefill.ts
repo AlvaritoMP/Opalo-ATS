@@ -134,7 +134,7 @@ export function toDisplayDateDdMmYyyy(raw: unknown): string {
 }
 
 const FIELDS: { key: string; aliases: string[]; namePart?: string }[] = [
-  { key: 'nombres', aliases: ['nombres', 'nombre', 'firstname'], namePart: 'given_names' },
+  { key: 'nombres', aliases: ['nombres', 'nombre', 'firstname', 'nombrespropios'], namePart: 'given_names' },
   { key: 'apellidoPaterno', aliases: ['apellidopaterno', 'appaterno', 'apaterno', 'apellido1'], namePart: 'paternal_surname' },
   { key: 'apellidoMaterno', aliases: ['apellidomaterno', 'apmaterno', 'amaterno', 'apellido2'], namePart: 'maternal_surname' },
   { key: 'fechaNacimiento', aliases: ['fechanacimiento', 'fnacimiento', 'fechanac', 'nacimiento', 'birthdate', 'dob', 'fechadenacimiento'] },
@@ -167,11 +167,90 @@ const FIELDS: { key: string; aliases: string[]; namePart?: string }[] = [
 
 function inferNamePart(labelNorm: string): string | null {
   const s = strip(labelNorm);
+  if (/completo/.test(s)) return null;
   if (/(nombres|nombrepropia|givenname|firstname|^nombre$)/.test(s) && !/apellido/.test(s)) return 'given_names';
   if (/(apellidopaterno|appaterno|apaterno|paternal)/.test(s)) return 'paternal_surname';
   if (/(apellidomaterno|apmaterno|amaterno|maternal)/.test(s)) return 'maternal_surname';
   if (/^apellidos$|^apellidoscompletos$/.test(s)) return 'surnames_combined';
   return null;
+}
+
+function isNombreCompletoLabel(name: string): boolean {
+  const s = strip(normalizeKey(name));
+  return /nombrecompleto|nombrescompletos|fullnamecompleto|^fullname$/.test(s);
+}
+
+export function suggestMapping(customColumns: CustomColumn[]): FichaMapping {
+  const mapping: FichaMapping = {};
+  const used = new Set<string>();
+
+  for (const field of FIELDS) {
+    if (field.namePart) {
+      for (const col of customColumns) {
+        if (field.key === 'nombres' && isNombreCompletoLabel(col.name)) continue;
+        const labelNorm = normalizeKey(col.name);
+        const part = col.reportNamePart || inferNamePart(labelNorm);
+        if (part === field.namePart) {
+          const sid = `custom.${col.id}`;
+          if (!used.has(sid)) {
+            mapping[field.key] = sid;
+            used.add(sid);
+          }
+          break;
+        }
+      }
+    }
+    if (mapping[field.key]) continue;
+
+    const aliasSet = new Set(field.aliases.map((a) => strip(normalizeKey(a))));
+    for (const col of customColumns) {
+      if (field.key === 'nombres' && isNombreCompletoLabel(col.name)) continue;
+      const colNorm = strip(normalizeKey(col.name));
+      if (aliasSet.has(colNorm)) {
+        const sid = `custom.${col.id}`;
+        if (!used.has(sid)) {
+          mapping[field.key] = sid;
+          used.add(sid);
+        }
+        break;
+      }
+    }
+    if (mapping[field.key]) continue;
+
+    for (const col of customColumns) {
+      if (field.key === 'nombres' && isNombreCompletoLabel(col.name)) continue;
+      const colNorm = strip(normalizeKey(col.name));
+      if (field.key === 'nombres' && /completo/.test(colNorm)) continue;
+      let hit = false;
+      for (const a of aliasSet) {
+        if (a.length >= 4 && colNorm.length >= 4 && (colNorm.includes(a) || a.includes(colNorm))) {
+          hit = true;
+          break;
+        }
+      }
+      if (!hit) continue;
+      const sid = `custom.${col.id}`;
+      if (used.has(sid)) continue;
+      mapping[field.key] = sid;
+      used.add(sid);
+      break;
+    }
+  }
+
+  const fallbacks: Record<string, string> = {
+    nombres: 'candidate.name',
+    nroDocumento: 'candidate.dni',
+    email: 'candidate.email',
+    telefono: 'candidate.phone',
+    edad: 'candidate.age',
+    direccion: 'candidate.address',
+    provincia: 'candidate.province',
+    distrito: 'candidate.district',
+  };
+  for (const [k, v] of Object.entries(fallbacks)) {
+    if (!mapping[k]) mapping[k] = v;
+  }
+  return mapping;
 }
 
 function resolveColumnValue(
@@ -201,63 +280,6 @@ function resolveColumnValue(
     if (legacyName && normalizeKey(legacyName) === bare) return val;
   }
   return undefined;
-}
-
-export function suggestMapping(customColumns: CustomColumn[]): FichaMapping {
-  const mapping: FichaMapping = {};
-  const used = new Set<string>();
-
-  for (const field of FIELDS) {
-    if (field.namePart) {
-      for (const col of customColumns) {
-        const labelNorm = normalizeKey(col.name);
-        const part = col.reportNamePart || inferNamePart(labelNorm);
-        if (part === field.namePart) {
-          const sid = `custom.${col.id}`;
-          if (!used.has(sid)) {
-            mapping[field.key] = sid;
-            used.add(sid);
-          }
-          break;
-        }
-      }
-    }
-    if (mapping[field.key]) continue;
-
-    const aliasSet = new Set(field.aliases.map((a) => strip(normalizeKey(a))));
-    for (const col of customColumns) {
-      const colNorm = strip(normalizeKey(col.name));
-      let hit = aliasSet.has(colNorm);
-      if (!hit) {
-        for (const a of aliasSet) {
-          if (a.length >= 4 && colNorm.length >= 4 && (colNorm.includes(a) || a.includes(colNorm))) {
-            hit = true;
-            break;
-          }
-        }
-      }
-      if (!hit) continue;
-      const sid = `custom.${col.id}`;
-      if (used.has(sid)) continue;
-      mapping[field.key] = sid;
-      used.add(sid);
-      break;
-    }
-  }
-
-  const fallbacks: Record<string, string> = {
-    nroDocumento: 'candidate.dni',
-    email: 'candidate.email',
-    telefono: 'candidate.phone',
-    edad: 'candidate.age',
-    direccion: 'candidate.address',
-    provincia: 'candidate.province',
-    distrito: 'candidate.district',
-  };
-  for (const [k, v] of Object.entries(fallbacks)) {
-    if (!mapping[k]) mapping[k] = v;
-  }
-  return mapping;
 }
 
 function parseLegacyFullName(fullName: string) {
@@ -353,8 +375,18 @@ export function buildPrefillForm(params: {
     }
   }
 
-  if (!fromMapped.nombres && !fromMapped.apellidoPaterno && candidate.name) {
-    Object.assign(fromMapped, parseLegacyFullName(String(candidate.name)));
+  if (!fromMapped.nombres && candidate.name) {
+    const hasStructuredSurnames = Boolean(
+      fromMapped.apellidoPaterno ||
+        fromMapped.apellidoMaterno ||
+        mapping.apellidoPaterno ||
+        mapping.apellidoMaterno
+    );
+    if (hasStructuredSurnames || mapping.nombres === 'candidate.name') {
+      fromMapped.nombres = String(candidate.name).trim();
+    } else if (!fromMapped.apellidoPaterno) {
+      Object.assign(fromMapped, parseLegacyFullName(String(candidate.name)));
+    }
   }
   if (!fromMapped.nroDocumento && candidate.dni) fromMapped.nroDocumento = String(candidate.dni);
   if (!fromMapped.email && candidate.email) fromMapped.email = String(candidate.email);

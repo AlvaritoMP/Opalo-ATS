@@ -35,6 +35,45 @@ function composeFullName(nombres?: string, apellidoPaterno?: string, apellidoMat
     .trim()
 }
 
+function normalizeColumnKey(name: string): string {
+  return name
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+    .replace(/\s+/g, ' ')
+}
+
+function stripSpaces(norm: string): string {
+  return norm.replace(/\s+/g, '')
+}
+
+function isNombreCompletoLabel(name: string): boolean {
+  const s = stripSpaces(normalizeColumnKey(name))
+  return /nombrecompleto|nombrescompletos|fullnamecompleto|^fullname$/.test(s)
+}
+
+function inferNamePart(labelNorm: string): string | null {
+  const s = stripSpaces(labelNorm)
+  if (/completo/.test(s)) return null
+  if (/(nombres|nombrepropia|givenname|firstname|^nombre$)/.test(s) && !/apellido/.test(s)) return 'given_names'
+  if (/(apellidopaterno|appaterno|apaterno|paternal)/.test(s)) return 'paternal_surname'
+  if (/(apellidomaterno|apmaterno|amaterno|maternal)/.test(s)) return 'maternal_surname'
+  if (/^apellidos$|^apellidoscompletos$/.test(s)) return 'surnames_combined'
+  return null
+}
+
+function setBulkCell(
+  bulk: Record<string, unknown>,
+  col: { id: string; name: string },
+  value: unknown
+) {
+  bulk[col.id] = value
+  const bare = normalizeColumnKey(col.name).replace(/\s+/g, ' ')
+  bulk[`__name__${bare}`] = value
+}
+
 function emptyForm() {
   return {
     version: 1 as const,
@@ -221,7 +260,7 @@ Deno.serve(async (req) => {
 
       const { data: row, error: loadError } = await supabase
         .from('candidates')
-        .select('id, dni, name, email, phone, phone2, age, address, province, district, archived, process_id')
+        .select('id, dni, name, email, phone, phone2, age, address, province, district, archived, process_id, bulk_column_values')
         .eq('id', candidateId)
         .eq('app_name', APP_NAME)
         .maybeSingle()
@@ -238,15 +277,26 @@ Deno.serve(async (req) => {
 
       let requiredFields = resolveRequiredFields(null)
       let processTitle = ''
+      let isBulkProcess = false
+      let customColumns: { id: string; name: string; reportNamePart?: string }[] = []
+      let savedMapping: Record<string, string> = {}
       if (row.process_id) {
         const { data: processRow } = await supabase
           .from('processes')
-          .select('title, bulk_config')
+          .select('title, bulk_config, is_bulk_process')
           .eq('id', row.process_id)
           .eq('app_name', APP_NAME)
           .maybeSingle()
         processTitle = trimText(processRow?.title) || ''
+        isBulkProcess = processRow?.is_bulk_process === true
         const bulkConfig = (processRow?.bulk_config || {}) as Record<string, unknown>
+        customColumns = Array.isArray(bulkConfig.customColumns)
+          ? (bulkConfig.customColumns as { id: string; name: string; reportNamePart?: string }[])
+          : []
+        savedMapping =
+          bulkConfig.complementaryFichaMapping && typeof bulkConfig.complementaryFichaMapping === 'object'
+            ? (bulkConfig.complementaryFichaMapping as Record<string, string>)
+            : {}
         requiredFields = resolveRequiredFields(
           Array.isArray(bulkConfig.complementaryFichaRequiredFields)
             ? (bulkConfig.complementaryFichaRequiredFields as string[])
@@ -265,18 +315,30 @@ Deno.serve(async (req) => {
         }, 400)
       }
 
+      const nombresOnly = trimText(form.nombres) || ''
       const fullName =
         composeFullName(
-          trimText(form.nombres),
+          nombresOnly,
           trimText(form.apellidoPaterno),
           trimText(form.apellidoMaterno)
         ) || trimText(row.name) || 'Candidato'
+
+      const hasStructuredSurnames = customColumns.some((col) => {
+        const part = col.reportNamePart || inferNamePart(normalizeColumnKey(col.name))
+        return part === 'paternal_surname' || part === 'maternal_surname' || part === 'surnames_combined'
+      }) || Boolean(savedMapping.apellidoPaterno || savedMapping.apellidoMaterno)
+
+      // En masivos, la columna fija "Nombre" guarda solo nombres propios (apellidos van en columnas).
+      const useGivenNamesOnly = isBulkProcess || hasStructuredSurnames || customColumns.length > 0
+      const nameForCandidateColumn = useGivenNamesOnly
+        ? (nombresOnly || fullName)
+        : fullName
 
       const ageNum = Number(form.edad)
       const updatePayload: Record<string, unknown> = {
         complementary_data: form,
         complementary_filled_at: form.submittedAt,
-        name: fullName,
+        name: nameForCandidateColumn,
         dni: form.nroDocumento,
         email: trimText(form.email) || row.email,
         phone: trimText(form.telefono) || row.phone,
@@ -286,6 +348,50 @@ Deno.serve(async (req) => {
       }
       if (!Number.isNaN(ageNum) && ageNum > 0) {
         updatePayload.age = Math.round(ageNum)
+      }
+
+      // Escribir de vuelta columnas custom mapeadas (+ "Nombre completo" de exportación).
+      if (customColumns.length > 0) {
+        const bulk: Record<string, unknown> = {
+          ...((row.bulk_column_values && typeof row.bulk_column_values === 'object'
+            ? row.bulk_column_values
+            : {}) as Record<string, unknown>),
+        }
+        const mapping = { ...savedMapping }
+
+        for (const [fieldKey, sourceId] of Object.entries(mapping)) {
+          if (!sourceId || typeof sourceId !== 'string' || !sourceId.startsWith('custom.')) continue
+          const colId = sourceId.slice('custom.'.length)
+          const col = customColumns.find((c) => c.id === colId)
+          if (!col) continue
+
+          let value: unknown = form[fieldKey]
+          if (fieldKey === 'nombres' && isNombreCompletoLabel(col.name)) {
+            value = fullName
+          }
+          if (value === undefined || value === null || value === '') continue
+          if (typeof value === 'boolean') {
+            setBulkCell(bulk, col, value ? 'Sí' : 'No')
+          } else {
+            setBulkCell(bulk, col, String(value).trim())
+          }
+        }
+
+        for (const col of customColumns) {
+          if (!isNombreCompletoLabel(col.name)) continue
+          setBulkCell(bulk, col, fullName)
+        }
+
+        // Si hay columna custom de solo nombres (no la fija del proceso), sincronizar.
+        for (const col of customColumns) {
+          if (isNombreCompletoLabel(col.name)) continue
+          const part = col.reportNamePart || inferNamePart(normalizeColumnKey(col.name))
+          if (part === 'given_names' && nombresOnly) {
+            setBulkCell(bulk, col, nombresOnly)
+          }
+        }
+
+        updatePayload.bulk_column_values = bulk
       }
 
       const { error: updateError } = await supabase

@@ -74,6 +74,11 @@ export const ComplementaryFichaMappingEditor: React.FC<ComplementaryFichaMapping
                     <p className="text-xs text-gray-500 mt-1 max-w-xl">
                         Asocia columnas del proceso con el formulario público y marca cuáles son obligatorios
                         para el candidato. Los campos con * fijo del sistema no se pueden desactivar.
+                        {' '}
+                        <span className="text-gray-600">
+                            «Nombre (columna del proceso)» son solo nombres propios; no uses columnas
+                            «Nombre completo» (exportación) para el campo Nombres.
+                        </span>
                     </p>
                     <p className="text-xs text-gray-500 mt-1">
                         Mapeados: {mappedCount}/{COMPLEMENTARY_FICHA_MAPPABLE_FIELDS.length}
