@@ -68,6 +68,8 @@ interface AppState {
     dashboardFilters: DashboardFiltersState;
     dashboardCache: DashboardDataCache | null;
     dashboardCacheLoading: boolean;
+    /** Procesos estándar cuyos candidatos ya se cargaron bajo demanda (incluye vacíos). */
+    loadedStandardProcessIds: string[];
     loading: boolean;
     toasts: Array<{ id: string; message: string; type: 'success' | 'error' | 'loading' | 'info'; duration?: number }>;
     /** Proceso específico abierto en modo tabla embebida (layout pantalla completa) */
@@ -82,7 +84,7 @@ interface AppActions {
     deleteProcess: (processId: string) => Promise<void>;
     reloadProcesses: () => Promise<void>;
     reloadCandidates: () => Promise<void>;
-    ensureProcessCandidatesLoaded: (processId: string) => Promise<void>;
+    ensureProcessCandidatesLoaded: (processId: string, force?: boolean) => Promise<void>;
     addCandidate: (candidateData: Omit<Candidate, 'id' | 'history'>, options?: { skipGoogleDrive?: boolean; silent?: boolean }) => Promise<Candidate>;
     updateCandidate: (candidateData: Candidate, movedBy?: string) => Promise<void>;
     deleteCandidate: (candidateId: string) => Promise<void>;
@@ -514,6 +516,7 @@ const App: React.FC = () => {
         dashboardFilters: loadDashboardFilters(),
         dashboardCache: null,
         dashboardCacheLoading: false,
+        loadedStandardProcessIds: [],
         loading: true,
         toasts: [],
         processEmbeddedTableActive: false,
@@ -523,6 +526,8 @@ const App: React.FC = () => {
     const lastCorsErrorTime = useRef<number>(0);
     const CORS_ERROR_DEBOUNCE_MS = 5 * 60 * 1000; // 5 minutos
     const backgroundLoadStartedRef = useRef(false);
+    /** Evita cargas concurrentes duplicadas del mismo proceso estándar. */
+    const loadingStandardProcessIdsRef = useRef<Set<string>>(new Set());
 
     const INITIAL_LOAD_TIMEOUT_MS = 60_000;
     const BACKGROUND_LOAD_TIMEOUT_MS = 120_000;
@@ -653,10 +658,6 @@ const App: React.FC = () => {
                     }
                 }
 
-                const standardProcessIds = processes
-                    .filter(p => !p.isBulkProcess)
-                    .map(p => p.id);
-
                 const { processes: filteredProcesses } = filterByUserClients(
                     processes,
                     [],
@@ -667,7 +668,7 @@ const App: React.FC = () => {
                     ? getBulkSelectedProcessId(currentUser.id) ?? ''
                     : '';
 
-                // UI inmediata: candidatos y entrevistas en segundo plano (Nano no aguanta 2000 filas bloqueando)
+                // UI inmediata: candidatos solo al entrar a cada proceso (no precargar todos).
                 setState({
                     processes: filteredProcesses,
                     candidates: [],
@@ -683,108 +684,28 @@ const App: React.FC = () => {
                     dashboardFilters: loadDashboardFilters(currentUser?.id),
                     dashboardCache: null,
                     dashboardCacheLoading: false,
+                    loadedStandardProcessIds: [],
                     loading: false,
                     toasts: [],
+                    processEmbeddedTableActive: false,
                 });
 
-                debugLog('Shell ready — loading candidates and interviews in background');
+                debugLog('Shell ready — loading interviews in background (candidates on demand)');
 
                 if (!backgroundLoadStartedRef.current) {
                     backgroundLoadStartedRef.current = true;
-                    const capturedUser = currentUser;
-                    const capturedProcessIds = standardProcessIds;
 
                     void (async () => {
-                        const accumulated: Candidate[] = [];
-
-                        const loadCandidatesBg = runWithAbortTimeout(
-                            signal =>
-                                candidatesApi.getAllPages(
-                                    false,
-                                    capturedProcessIds,
-                                    signal,
-                                    page => {
-                                        accumulated.push(...page);
-                                        setState(s => {
-                                            const { candidates } = filterByUserClients(
-                                                s.processes,
-                                                [...accumulated],
-                                                s.currentUser
-                                            );
-                                            return { ...s, candidates };
-                                        });
-                                    }
-                                ),
-                            BACKGROUND_LOAD_TIMEOUT_MS
-                        );
-
-                        const loadInterviewsBg = loadStep(
-                            signal => interviewsApi.getForAppWindow(signal),
-                            'interviewEvents',
-                            [] as InterviewEvent[],
-                            BACKGROUND_LOAD_TIMEOUT_MS
-                        );
-
-                        const [candidatesResult, interviewsResult] = await Promise.allSettled([
-                            loadCandidatesBg,
-                            loadInterviewsBg,
-                        ]);
-
-                        let activeCandidates: Candidate[] = [];
-                        let interviewEvents: InterviewEvent[] = [];
-
-                        if (candidatesResult.status === 'fulfilled') {
-                            activeCandidates = candidatesResult.value;
-                        } else {
-                            console.warn('No se pudieron cargar candidatos en segundo plano:', candidatesResult.reason);
-                        }
-
-                        if (interviewsResult.status === 'fulfilled') {
-                            interviewEvents = interviewsResult.value;
-                        } else {
-                            console.warn('No se pudieron cargar entrevistas en segundo plano:', interviewsResult.reason);
-                        }
-
-                        let discardedCandidates: Candidate[] = [];
                         try {
-                            discardedCandidates = await candidatesApi.getDiscardedArchived();
-                        } catch (error) {
-                            console.warn('Error cargando candidatos descartados:', error);
-                        }
-
-                        const activeIds = new Set(activeCandidates.map(c => c.id));
-                        const mergedList = [
-                            ...activeCandidates,
-                            ...discardedCandidates.filter(c => !activeIds.has(c.id)),
-                        ];
-                        const { candidates: filteredCandidates } = filterByUserClients(
-                            filteredProcesses,
-                            mergedList,
-                            capturedUser
-                        );
-
-                        setState(s => ({
-                            ...s,
-                            candidates: filteredCandidates,
-                            interviewEvents,
-                        }));
-
-                        try {
-                            const enriched = await runWithAbortTimeout(
-                                signal => candidatesApi.enrichWithRelations(filteredCandidates, signal),
+                            const interviewEvents = await loadStep(
+                                signal => interviewsApi.getForAppWindow(signal),
+                                'interviewEvents',
+                                [] as InterviewEvent[],
                                 BACKGROUND_LOAD_TIMEOUT_MS
                             );
-                            setState(s => {
-                                let merged = enriched;
-                                if (s.currentUser?.allowedClientIds != null) {
-                                    const allowedProcessIds = new Set(s.processes.map(p => p.id));
-                                    merged = merged.filter(c => allowedProcessIds.has(c.processId));
-                                }
-                                return { ...s, candidates: merged };
-                            });
-                            debugLog('Candidate relations loaded in background');
+                            setState(s => ({ ...s, interviewEvents }));
                         } catch (error) {
-                            console.warn('No se pudieron cargar relaciones de candidatos en segundo plano:', error);
+                            console.warn('No se pudieron cargar entrevistas en segundo plano:', error);
                         }
                     })();
 
@@ -801,8 +722,7 @@ const App: React.FC = () => {
                             console.warn('No se pudieron cargar integraciones de formularios:', error);
                         }
                     })();
-                }
-            } catch (error) {
+                }            } catch (error) {
                 console.error('Error loading data:', error);
                 // NO usar datos de prueba como fallback - usar arrays vacíos
                 const loadedSettings = getSettings();
@@ -841,8 +761,10 @@ const App: React.FC = () => {
                     dashboardFilters: loadDashboardFilters(currentUser?.id),
                     dashboardCache: null,
                     dashboardCacheLoading: false,
+                    loadedStandardProcessIds: [],
                     loading: false,
                     toasts: [],
+                    processEmbeddedTableActive: false,
                 });
             }
         };
@@ -1161,23 +1083,34 @@ const App: React.FC = () => {
         },
         reloadCandidates: async () => {
             try {
-                const standardProcessIds = state.processes
-                    .filter(p => !p.isBulkProcess)
-                    .map(p => p.id);
+                const loadedIds = stateRef.current.loadedStandardProcessIds;
+                if (loadedIds.length === 0) {
+                    debugLog('reloadCandidates: no hay procesos estándar cargados aún');
+                    return;
+                }
+
                 const activeCandidates = await candidatesApi.getAll(
                     false,
                     false,
                     undefined,
-                    standardProcessIds.length > 0 ? standardProcessIds : undefined
+                    loadedIds
                 );
 
-                let preservedArchived: Candidate[] = [];
                 let candidatesForRelations: Candidate[] = [];
                 setState(s => {
                     const archivedCandidates = s.candidates.filter(c => c.archived === true);
                     const activeIds = new Set(activeCandidates.map(c => c.id));
-                    preservedArchived = archivedCandidates.filter(c => !activeIds.has(c.id));
-                    candidatesForRelations = [...activeCandidates, ...preservedArchived];
+                    const preservedArchived = archivedCandidates.filter(c => !activeIds.has(c.id));
+                    const otherProcessCandidates = s.candidates.filter(
+                        c =>
+                            !c.archived &&
+                            !loadedIds.includes(c.processId)
+                    );
+                    candidatesForRelations = [
+                        ...activeCandidates,
+                        ...otherProcessCandidates,
+                        ...preservedArchived,
+                    ];
                     return {
                         ...s,
                         candidates: candidatesForRelations,
@@ -1251,20 +1184,27 @@ const App: React.FC = () => {
                 }
             }
         },
-        ensureProcessCandidatesLoaded: async (processId: string) => {
-            const process = state.processes.find(p => p.id === processId);
+        ensureProcessCandidatesLoaded: async (processId: string, force = false) => {
+            const current = stateRef.current;
+            const process = current.processes.find(p => p.id === processId);
             if (process?.isBulkProcess) return;
 
-            const existing = state.candidates.filter(c => c.processId === processId && !c.archived);
-            const needsLoad = existing.length === 0;
-            const needsRelations = existing.some(
-                c =>
-                    (c.history?.length ?? 0) === 0 &&
-                    (c.postIts?.length ?? 0) === 0 &&
-                    (c.comments?.length ?? 0) === 0
-            );
+            const alreadyLoaded = current.loadedStandardProcessIds.includes(processId);
+            const existing = current.candidates.filter(c => c.processId === processId && !c.archived);
+            const needsLoad = force || !alreadyLoaded;
+            const needsRelations =
+                !force &&
+                alreadyLoaded &&
+                existing.some(
+                    c =>
+                        (c.history?.length ?? 0) === 0 &&
+                        (c.postIts?.length ?? 0) === 0 &&
+                        (c.comments?.length ?? 0) === 0
+                );
             if (!needsLoad && !needsRelations) return;
+            if (loadingStandardProcessIdsRef.current.has(processId)) return;
 
+            loadingStandardProcessIdsRef.current.add(processId);
             try {
                 const loaded = needsLoad
                     ? await candidatesApi.getByProcess(processId, false, true)
@@ -1272,10 +1212,19 @@ const App: React.FC = () => {
                 setState(s => {
                     const others = s.candidates.filter(c => c.processId !== processId);
                     const archived = s.candidates.filter(c => c.processId === processId && c.archived);
-                    return { ...s, candidates: [...others, ...loaded, ...archived] };
+                    const loadedIds = s.loadedStandardProcessIds.includes(processId)
+                        ? s.loadedStandardProcessIds
+                        : [...s.loadedStandardProcessIds, processId];
+                    return {
+                        ...s,
+                        candidates: [...others, ...loaded, ...archived],
+                        loadedStandardProcessIds: loadedIds,
+                    };
                 });
             } catch (error) {
                 console.warn(`No se pudieron cargar candidatos del proceso ${processId}:`, error);
+            } finally {
+                loadingStandardProcessIdsRef.current.delete(processId);
             }
         },
         deleteProcess: async (processId) => {
@@ -1311,6 +1260,7 @@ const App: React.FC = () => {
                     ...s,
                     processes: s.processes.filter(p => p.id !== processId),
                     candidates: s.candidates.filter(c => c.processId !== processId),
+                    loadedStandardProcessIds: s.loadedStandardProcessIds.filter(id => id !== processId),
                 }));
             } catch (error: any) {
                 console.error('Error deleting process:', error);
@@ -1373,6 +1323,12 @@ const App: React.FC = () => {
                 
                 // Recargar el candidato desde la BD para asegurar que tiene todos los datos (attachments, history, etc.)
                 let finalCandidate = newCandidate;
+                const markProcessLoaded = (s: AppState, processId: string): string[] =>
+                    s.loadedStandardProcessIds.includes(processId) ||
+                    s.processes.find(p => p.id === processId)?.isBulkProcess
+                        ? s.loadedStandardProcessIds
+                        : [...s.loadedStandardProcessIds, processId];
+
                 try {
                     const reloadedCandidate = await candidatesApi.getById(newCandidate.id);
                     if (reloadedCandidate) {
@@ -1385,20 +1341,36 @@ const App: React.FC = () => {
                                 // Reemplazar el existente
                                 const updated = [...s.candidates];
                                 updated[existingIndex] = reloadedCandidate;
-                                return { ...s, candidates: updated };
+                                return {
+                                    ...s,
+                                    candidates: updated,
+                                    loadedStandardProcessIds: markProcessLoaded(s, reloadedCandidate.processId),
+                                };
                             } else {
                                 // Agregar nuevo
-                                return { ...s, candidates: [...s.candidates, reloadedCandidate] };
+                                return {
+                                    ...s,
+                                    candidates: [...s.candidates, reloadedCandidate],
+                                    loadedStandardProcessIds: markProcessLoaded(s, reloadedCandidate.processId),
+                                };
                             }
                         });
                     } else {
                         // Si no se puede recargar, usar el que se creó
-                        setState(s => ({ ...s, candidates: [...s.candidates, newCandidate] }));
+                        setState(s => ({
+                            ...s,
+                            candidates: [...s.candidates, newCandidate],
+                            loadedStandardProcessIds: markProcessLoaded(s, newCandidate.processId),
+                        }));
                     }
                 } catch (reloadError) {
                     console.warn('Error recargando candidato después de crear, usando el retornado:', reloadError);
                     // Si falla la recarga, usar el candidato retornado
-                    setState(s => ({ ...s, candidates: [...s.candidates, newCandidate] }));
+                    setState(s => ({
+                        ...s,
+                        candidates: [...s.candidates, newCandidate],
+                        loadedStandardProcessIds: markProcessLoaded(s, newCandidate.processId),
+                    }));
                 }
                 
                 if (loadingToastId) hideToastHelper(loadingToastId);

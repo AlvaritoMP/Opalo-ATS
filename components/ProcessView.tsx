@@ -121,13 +121,21 @@ export const ProcessView: React.FC<ProcessViewProps> = ({ processId }) => {
     const [attachmentsCount, setAttachmentsCount] = useState<number | null>(null);
     const [processAttachments, setProcessAttachments] = useState<Attachment[]>([]);
     const [isLoadingAttachments, setIsLoadingAttachments] = useState(false);
+    const [candidatesLoading, setCandidatesLoading] = useState(false);
     const dragPayload = React.useRef<{ candidateId: string; isBulk: boolean; processing?: boolean } | null>(null);
 
     const process = state.processes.find(p => p.id === processId);
 
     useEffect(() => {
         if (!processId || process?.isBulkProcess) return;
-        void actions.ensureProcessCandidatesLoaded(processId);
+        let cancelled = false;
+        setCandidatesLoading(true);
+        void actions.ensureProcessCandidatesLoaded(processId).finally(() => {
+            if (!cancelled) setCandidatesLoading(false);
+        });
+        return () => {
+            cancelled = true;
+        };
     }, [processId, process?.isBulkProcess, actions]);
 
     useEffect(() => {
@@ -361,10 +369,10 @@ export const ProcessView: React.FC<ProcessViewProps> = ({ processId }) => {
                 }
             }
             
-            // Recargar candidatos después de mover todos para asegurar sincronización
-            if (candidatesToMove.length > 0 && actions.reloadCandidates && typeof actions.reloadCandidates === 'function') {
+            // Refrescar candidatos del proceso abierto (no todos los procesos)
+            if (candidatesToMove.length > 0) {
                 try {
-                    await actions.reloadCandidates();
+                    await actions.ensureProcessCandidatesLoaded(processId, true);
                 } catch (reloadError) {
                     console.warn('Error recargando candidatos después de mover (no crítico):', reloadError);
                 }
@@ -385,13 +393,10 @@ export const ProcessView: React.FC<ProcessViewProps> = ({ processId }) => {
                 }
                 try {
                     await actions.updateCandidate({ ...candidate, stageId }, movedBy);
-                    // Recargar candidatos después de mover para asegurar sincronización
-                    if (actions.reloadCandidates && typeof actions.reloadCandidates === 'function') {
-                        try {
-                            await actions.reloadCandidates();
-                        } catch (reloadError) {
-                            console.warn('Error recargando candidatos después de mover (no crítico):', reloadError);
-                        }
+                    try {
+                        await actions.ensureProcessCandidatesLoaded(processId, true);
+                    } catch (reloadError) {
+                        console.warn('Error recargando candidatos después de mover (no crítico):', reloadError);
                     }
                 } catch (error) {
                     console.error('Error moviendo candidato:', error);
@@ -633,7 +638,12 @@ export const ProcessView: React.FC<ProcessViewProps> = ({ processId }) => {
                 </div>
             )}
             <main className="flex-1 flex overflow-x-auto p-2 md:p-4 bg-gray-50/50 space-x-2 md:space-x-4 pb-4">
-                {process.stages.map(stage => (
+                {candidatesLoading && candidates.length === 0 ? (
+                    <div className="flex-1 flex items-center justify-center text-sm text-gray-500">
+                        Cargando candidatos del proceso…
+                    </div>
+                ) : (
+                process.stages.map(stage => (
                     <div
                         key={stage.id}
                         onDrop={(e) => handleDrop(e, stage.id)}
@@ -672,7 +682,8 @@ export const ProcessView: React.FC<ProcessViewProps> = ({ processId }) => {
                             }
                         </div>
                     </div>
-                ))}
+                ))
+                )}
             </main>
             {isAddCandidateOpen && <AddCandidateModal process={process} onClose={() => setIsAddCandidateOpen(false)} />}
             {isImportOpen && !process.isBulkProcess && (
@@ -681,7 +692,7 @@ export const ProcessView: React.FC<ProcessViewProps> = ({ processId }) => {
                     onClose={() => setIsImportOpen(false)}
                     onImportComplete={() => {
                         setIsImportOpen(false);
-                        void actions.reloadCandidates?.();
+                        void actions.ensureProcessCandidatesLoaded(processId, true);
                     }}
                 />
             )}

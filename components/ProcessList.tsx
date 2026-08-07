@@ -38,7 +38,7 @@ const hasCandidatesInCriticalStages = (process: Process, candidates: Candidate[]
 
 const ProcessCard: React.FC<{
     process: Process;
-    candidateCount: number;
+    candidateCount: number | null;
     criticalInfo: { hasCritical: boolean; count: number; stageNames: string[] };
     onView: () => void;
     onEdit: () => void;
@@ -53,6 +53,7 @@ const ProcessCard: React.FC<{
     // 1) Preferir siempre hiredCandidateIds (nuevo sistema de cierre de proceso)
     // 2) Si no hay hiredCandidateIds, usar candidatos con hireDate como backup
     const allProcessCandidates = state.candidates.filter(c => c.processId === process.id && !c.archived);
+    const processLoaded = state.loadedStandardProcessIds.includes(process.id);
     
     let hiredCandidates: Candidate[] = [];
     if (process.hiredCandidateIds && process.hiredCandidateIds.length > 0) {
@@ -60,11 +61,16 @@ const ProcessCard: React.FC<{
         hiredCandidates = process.hiredCandidateIds
             .map(id => allProcessCandidates.find(c => c.id === id))
             .filter((c): c is Candidate => c !== undefined);
-    } else {
+    } else if (processLoaded) {
         // Backup: candidatos con fecha de contratación (hireDate),
         // incluso si el proceso aún no está marcado como terminado.
         hiredCandidates = allProcessCandidates.filter(c => c.hireDate && c.hireDate.trim() !== '');
     }
+
+    const hiredCountFallback =
+        !processLoaded && process.hiredCandidateIds && process.hiredCandidateIds.length > 0
+            ? process.hiredCandidateIds.length
+            : 0;
 
     const statusLabels = PROCESS_STATUS_LABELS;
     const statusColors = PROCESS_STATUS_COLORS;
@@ -171,7 +177,9 @@ const ProcessCard: React.FC<{
                         <span className="font-medium text-gray-700">Candidatos:</span>
                         <div className="flex items-center">
                             <Users className="w-4 h-4 mr-1"/>
-                            <span>{candidateCount}</span>
+                            <span title={candidateCount == null ? 'Se cargan al abrir el proceso' : undefined}>
+                                {candidateCount == null ? '—' : candidateCount}
+                            </span>
                         </div>
                     </div>
                     {hiredCandidates.length > 0 && (
@@ -189,6 +197,13 @@ const ProcessCard: React.FC<{
                                         +{hiredCandidates.length - 3} más
                                     </div>
                                 )}
+                            </div>
+                        </div>
+                    )}
+                    {hiredCandidates.length === 0 && hiredCountFallback > 0 && (
+                        <div className="mt-3 pt-3 border-t border-gray-200">
+                            <div className="text-xs text-gray-500">
+                                {hiredCountFallback} contratado{hiredCountFallback === 1 ? '' : 's'} (abre el proceso para ver nombres)
                             </div>
                         </div>
                     )}
@@ -409,6 +424,7 @@ export const ProcessList: React.FC = () => {
                 {filteredProcesses.map(process => {
                     const userRole = state.currentUser?.role;
                     const isClientOrViewer = userRole === 'client' || userRole === 'viewer';
+                    const candidatesLoaded = state.loadedStandardProcessIds.includes(process.id);
                     
                     const filteredCandidates = state.candidates.filter(c => {
                         if (c.processId !== process.id || c.archived) return false;
@@ -416,14 +432,16 @@ export const ProcessList: React.FC = () => {
                         return true;
                     });
                     
-                    const criticalInfo = hasCandidatesInCriticalStages(process, filteredCandidates);
+                    const criticalInfo = candidatesLoaded
+                        ? hasCandidatesInCriticalStages(process, filteredCandidates)
+                        : { hasCritical: false, count: 0, stageNames: [] as string[] };
                     
                     return (
                         <ProcessCard
                             key={process.id}
                             process={process}
                             canEdit={canManageProcesses}
-                            candidateCount={filteredCandidates.length}
+                            candidateCount={candidatesLoaded ? filteredCandidates.length : null}
                             criticalInfo={criticalInfo}
                             onView={() => actions.setView('process-view', process.id)}
                             onEdit={() => handleEdit(process)}

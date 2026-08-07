@@ -5,7 +5,7 @@ import { userMessagesApi } from '../lib/api/userMessages';
 import type { User, UserMessage } from '../types';
 
 const STORAGE_KEY_PREFIX = 'ats_messaging_hidden_';
-const POLL_INTERVAL_MS = 15_000;
+const POLL_INTERVAL_MS = 60_000;
 
 function formatTime(iso: string): string {
     const d = new Date(iso);

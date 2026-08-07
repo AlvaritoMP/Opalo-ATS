@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import {
     Bell,
@@ -20,6 +20,50 @@ import {
     loadAlertAcknowledgements,
     saveAlertAcknowledgement,
 } from '../lib/userAlertAck';
+import { isAbortOrTimeoutError, runWithAbortTimeout } from '../lib/runWithAbortTimeout';
+
+/** Avisos no deben bloquear la UI si Supabase va lento o responde 522. */
+const ALERTS_LOAD_TIMEOUT_MS = 20_000;
+
+/** Consulta automática y modal forzado: como máximo una vez por hora. */
+const ALERTS_POLL_INTERVAL_MS = 60 * 60 * 1000;
+
+const LAST_AUTO_PROMPT_PREFIX = 'ats_alerts_last_auto_prompt_';
+const LAST_FETCH_PREFIX = 'ats_alerts_last_fetch_';
+
+function readStoredMs(key: string): number {
+    try {
+        const raw = localStorage.getItem(key);
+        const n = raw ? Number(raw) : 0;
+        return Number.isFinite(n) ? n : 0;
+    } catch {
+        return 0;
+    }
+}
+
+function writeStoredMs(key: string, value: number): void {
+    try {
+        localStorage.setItem(key, String(value));
+    } catch {
+        /* ignore */
+    }
+}
+
+function canAutoPrompt(userId: string): boolean {
+    return Date.now() - readStoredMs(`${LAST_AUTO_PROMPT_PREFIX}${userId}`) >= ALERTS_POLL_INTERVAL_MS;
+}
+
+function markAutoPromptNow(userId: string): void {
+    writeStoredMs(`${LAST_AUTO_PROMPT_PREFIX}${userId}`, Date.now());
+}
+
+function canAutoFetch(userId: string): boolean {
+    return Date.now() - readStoredMs(`${LAST_FETCH_PREFIX}${userId}`) >= ALERTS_POLL_INTERVAL_MS;
+}
+
+function markFetchNow(userId: string): void {
+    writeStoredMs(`${LAST_FETCH_PREFIX}${userId}`, Date.now());
+}
 
 const SEVERITY_STYLES = {
     urgent: {
@@ -69,61 +113,125 @@ export const UserAlertsPanel: React.FC<UserAlertsPanelProps> = ({
     );
     const [loading, setLoading] = useState(true);
     const [showModal, setShowModal] = useState(false);
+    const alertsRef = useRef(alerts);
+    alertsRef.current = alerts;
+    const acksRef = useRef(acks);
+    acksRef.current = acks;
+    const processesRef = useRef(processes);
+    processesRef.current = processes;
+    const currentUserRef = useRef(currentUser);
+    currentUserRef.current = currentUser;
 
     const pendingAlerts = useMemo(
         () => filterPendingAlerts(alerts, acks),
         [alerts, acks]
     );
 
-    const loadAlerts = useCallback(async () => {
+    const processIdsKey = useMemo(
+        () =>
+            processes
+                .map(p => p.id)
+                .sort()
+                .join(','),
+        [processes]
+    );
+
+    const loadAlerts = useCallback(async (options?: { force?: boolean }) => {
+        const force = options?.force === true;
+        const user = currentUserRef.current;
+        const procs = processesRef.current;
+
+        if (!force && !canAutoFetch(user.id)) {
+            setLoading(false);
+            return alertsRef.current;
+        }
+
         try {
-            const visible = getProcessesVisibleToUser(currentUser, processes);
+            const visible = getProcessesVisibleToUser(user, procs);
             const bulkProcessIds = visible.filter(p => p.isBulkProcess).map(p => p.id);
             const standardProcessIds = visible.filter(p => !p.isBulkProcess).map(p => p.id);
 
-            const [bulkRows, standardRows, latestBulkCreatedAt] = await Promise.all([
-                userAlertsApi.fetchBulkCandidates(bulkProcessIds, currentUser.id, currentUser.name),
-                userAlertsApi.fetchStandardCandidates(standardProcessIds, currentUser.id),
-                userAlertsApi.fetchLatestCandidateCreatedAt(bulkProcessIds),
-            ]);
+            const computed = await runWithAbortTimeout(async signal => {
+                const [bulkRows, standardRows, latestBulkCreatedAt] = await Promise.all([
+                    userAlertsApi.fetchBulkCandidates(
+                        bulkProcessIds,
+                        user.id,
+                        user.name,
+                        signal
+                    ),
+                    userAlertsApi.fetchStandardCandidates(
+                        standardProcessIds,
+                        user.id,
+                        signal
+                    ),
+                    userAlertsApi.fetchLatestCandidateCreatedAt(bulkProcessIds, signal),
+                ]);
 
-            const computed = computeUserAlerts(
-                processes,
-                bulkRows,
-                standardRows,
-                currentUser,
-                latestBulkCreatedAt
-            );
+                return computeUserAlerts(
+                    procs,
+                    bulkRows,
+                    standardRows,
+                    user,
+                    latestBulkCreatedAt
+                );
+            }, ALERTS_LOAD_TIMEOUT_MS);
+
+            markFetchNow(user.id);
             setAlerts(computed);
             return computed;
         } catch (err) {
-            console.warn('No se pudieron calcular avisos:', err);
+            if (isAbortOrTimeoutError(err)) {
+                console.warn('Avisos: timeout o cancelación al consultar Supabase');
+            } else {
+                console.warn('No se pudieron calcular avisos:', err);
+            }
             setAlerts([]);
             return [];
         } finally {
             setLoading(false);
         }
-    }, [processes, currentUser]);
+    }, []);
 
-    useEffect(() => {
-        void loadAlerts().then(computed => {
+    const maybeShowAutoModal = useCallback(
+        (computed: UserAlert[]) => {
             const currentAcks = loadAlertAcknowledgements(currentUser.id);
             const pending = filterPendingAlerts(computed, currentAcks);
-            if (pending.length > 0) setShowModal(true);
-        });
-    }, [loadAlerts, currentUser.id]);
+            if (pending.length === 0) return;
+            if (!canAutoPrompt(currentUser.id)) return;
+            markAutoPromptNow(currentUser.id);
+            setShowModal(true);
+        },
+        [currentUser.id]
+    );
 
+    // Carga / modal automáticos: tope de 1 hora (persiste aunque se recargue la página).
+    useEffect(() => {
+        if (!processIdsKey) {
+            setLoading(false);
+            return;
+        }
+        void loadAlerts().then(computed => {
+            maybeShowAutoModal(computed);
+        });
+    }, [currentUser.id, processIdsKey, loadAlerts, maybeShowAutoModal]);
+
+    // Polling horario estable (no se reinicia al confirmar avisos).
     useEffect(() => {
         const interval = setInterval(() => {
-            void loadAlerts().then(computed => {
+            void loadAlerts({ force: true }).then(computed => {
                 const sporadic = getSporadicAlerts(computed);
-                const hasNewPending = sporadic.some(a => isAlertPending(a, acks));
-                if (hasNewPending) setShowModal(true);
+                const hasNewPending = sporadic.some(a =>
+                    isAlertPending(a, acksRef.current)
+                );
+                if (!hasNewPending) return;
+                if (!canAutoPrompt(currentUser.id)) return;
+                markAutoPromptNow(currentUser.id);
+                setShowModal(true);
             });
-        }, 5 * 60 * 1000);
+        }, ALERTS_POLL_INTERVAL_MS);
 
         return () => clearInterval(interval);
-    }, [loadAlerts, acks]);
+    }, [currentUser.id, loadAlerts]);
 
     const acknowledgeAlert = (alert: UserAlert) => {
         setAcks(prev => saveAlertAcknowledgement(currentUser.id, alert, prev));
@@ -196,7 +304,7 @@ export const UserAlertsPanel: React.FC<UserAlertsPanelProps> = ({
         <>
             <button
                 onClick={() => {
-                    void loadAlerts().then(() => setShowModal(true));
+                    void loadAlerts({ force: true }).then(() => setShowModal(true));
                 }}
                 className="relative p-2 rounded-lg hover:bg-gray-100 text-gray-600 transition-colors"
                 title="Avisos"
