@@ -556,7 +556,9 @@ function applyComplementaryToSnapshot(
     }
 
     return {
-        complementary: data,
+        complementary: data
+            ? (JSON.parse(JSON.stringify(data)) as ComplementaryFichaData)
+            : undefined,
         complementaryStatus: assessment.status,
         complementaryFilledAt: assessment.filledAt,
         complementaryMissingFields:

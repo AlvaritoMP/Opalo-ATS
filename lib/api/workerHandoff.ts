@@ -9,6 +9,7 @@ import {
     ACTIVE_PACKAGE_STATUSES,
 } from '../workerHandoffFields';
 import { processesApi } from './processes';
+import { candidatesApi } from './candidates';
 import type {
     Candidate,
     Process,
@@ -19,6 +20,7 @@ import type {
     CandidateHandoffHistoryEntry,
     WorkerHandoffDeliveryStatus,
 } from '../types';
+import type { ComplementaryFichaData } from '../complementaryFicha';
 
 export interface SendWorkerHandoffInput {
     candidates: Candidate[];
@@ -28,6 +30,65 @@ export interface SendWorkerHandoffInput {
     createdByName?: string;
     /** @deprecated El snapshot siempre incluye todos los campos con valor. */
     includedFields?: string[];
+}
+
+/**
+ * Recarga desde BD complementary_data + campos base antes del snapshot.
+ * Evita enviar v3 sin ficha cuando el estado UI/listado no trae complementaryData.
+ */
+async function hydrateCandidatesForHandoff(candidates: Candidate[]): Promise<Candidate[]> {
+    return Promise.all(
+        candidates.map(async candidate => {
+            try {
+                const fresh = await candidatesApi.getById(candidate.id);
+                if (!fresh) return candidate;
+
+                // Fallback directo a columnas por si el select fallback omitió complementary_*
+                let complementaryData = fresh.complementaryData ?? candidate.complementaryData;
+                let complementaryFilledAt =
+                    fresh.complementaryFilledAt ?? candidate.complementaryFilledAt;
+
+                if (!complementaryData) {
+                    const { data: rawRow } = await supabase
+                        .from('candidates')
+                        .select('complementary_data, complementary_filled_at')
+                        .eq('id', candidate.id)
+                        .eq('app_name', APP_NAME)
+                        .maybeSingle();
+                    if (
+                        rawRow?.complementary_data &&
+                        typeof rawRow.complementary_data === 'object' &&
+                        !Array.isArray(rawRow.complementary_data)
+                    ) {
+                        complementaryData = rawRow.complementary_data as ComplementaryFichaData;
+                    }
+                    if (rawRow?.complementary_filled_at) {
+                        complementaryFilledAt = rawRow.complementary_filled_at as string;
+                    }
+                }
+
+                return {
+                    ...fresh,
+                    bulkColumnValues: {
+                        ...(fresh.bulkColumnValues || {}),
+                        ...(candidate.bulkColumnValues || {}),
+                    },
+                    complementaryData,
+                    complementaryFilledAt,
+                    attachments:
+                        fresh.attachments?.length
+                            ? fresh.attachments
+                            : candidate.attachments || fresh.attachments,
+                };
+            } catch (error) {
+                console.warn(
+                    `[handoff] No se pudo hidratar candidato ${candidate.id}; se usa estado en memoria.`,
+                    error
+                );
+                return candidate;
+            }
+        })
+    );
 }
 
 /**
@@ -284,12 +345,13 @@ export const workerHandoffApi = {
     },
 
     async sendPackage(input: SendWorkerHandoffInput): Promise<WorkerHandoffPackage> {
-        const { candidates, processes, senderNote, createdBy, createdByName } = input;
+        const { processes, senderNote, createdBy, createdByName } = input;
 
-        if (candidates.length === 0) {
+        if (input.candidates.length === 0) {
             throw new Error('Selecciona al menos un candidato para enviar.');
         }
 
+        const candidates = await hydrateCandidatesForHandoff(input.candidates);
         const processById = await ensureProcessesForHandoff(candidates, processes);
         const preparedItems: Array<{
             sourceCandidateId: string;
@@ -304,6 +366,12 @@ export const workerHandoffApi = {
             const validationError = validateSnapshotForSend(snapshot);
             if (validationError) {
                 throw new Error(`${candidate.name || 'Candidato'}: ${validationError}`);
+            }
+            if (!snapshot.complementary && candidate.complementaryData) {
+                // Defensa: nunca perder la ficha si existe en el candidato hidratado
+                snapshot.complementary = JSON.parse(
+                    JSON.stringify(candidate.complementaryData)
+                ) as typeof snapshot.complementary;
             }
             preparedItems.push({
                 sourceCandidateId: candidate.id,
