@@ -1,4 +1,5 @@
 import type { Candidate, Process, User } from '../types';
+import { isProcessActive } from './processStatus';
 import { bulkCandidatesApi } from './api/bulkCandidates';
 import { contactTrackingApi } from './api/contactTracking';
 import { interviewSchedulingApi } from './api/interviewScheduling';
@@ -45,9 +46,11 @@ export async function fetchDashboardData(
     users: User[],
     currentUser: User | null
 ): Promise<DashboardDataCache> {
-    const processMap = new Map(processes.map(p => [p.id, p]));
-    const bulkProcessIds = processes.filter(p => p.isBulkProcess).map(p => p.id);
-    const allProcessIds = processes.map(p => p.id);
+    // Stand By / cerrados: sin cargas de candidatos, contactos ni scheduling.
+    const activeProcesses = processes.filter(p => isProcessActive(p.status));
+    const processMap = new Map(activeProcesses.map(p => [p.id, p]));
+    const bulkProcessIds = activeProcesses.filter(p => p.isBulkProcess).map(p => p.id);
+    const allProcessIds = activeProcesses.map(p => p.id);
     const statsUsers = buildUserLookupForStats(users, currentUser ?? undefined);
 
     const pool: Candidate[] = [];

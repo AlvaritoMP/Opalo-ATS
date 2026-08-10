@@ -1,5 +1,5 @@
 import { supabase } from '../supabase';
-import { Process, Stage, DocumentCategory, Attachment } from '../../types';
+import { Process, ProcessStatus, Stage, DocumentCategory, Attachment } from '../../types';
 import { APP_NAME } from '../appConfig';
 import { applyStageColorsFromBulkConfig } from '../stageColors';
 import { fetchWithRetry } from '../fetchWithRetry';
@@ -305,6 +305,29 @@ const BULK_PROCESS_LIST_FIELDS =
 
 const BULK_PROCESS_FULL_FIELDS = `${BULK_PROCESS_LIST_FIELDS}, bulk_config`;
 
+export type ProcessListOptions = {
+    /**
+     * Por defecto true: solo `en_proceso`.
+     * Stand By / terminados / cancelados / truncos no deben cargar en arranque ni en segundo plano.
+     */
+    activeOnly?: boolean;
+    /** Si se define, limita a estos estados (p. ej. al filtrar Stand By). */
+    statuses?: ProcessStatus[];
+};
+
+function applyProcessStatusFilter<T extends { eq: (c: string, v: string) => T; in: (c: string, v: string[]) => T }>(
+    query: T,
+    options?: ProcessListOptions
+): T {
+    if (options?.statuses && options.statuses.length > 0) {
+        return query.in('status', options.statuses);
+    }
+    if (options?.activeOnly === false) {
+        return query;
+    }
+    return query.eq('status', 'en_proceso');
+}
+
 export const processesApi = {
     /** Conteo rápido solo desde Supabase (sin Google Drive) */
     async getAttachmentsCountDb(processId: string): Promise<number> {
@@ -410,37 +433,41 @@ export const processesApi = {
     // Obtener todos los procesos con sus stages y categorías
     // OPTIMIZADO: Carga todas las relaciones en batch en lugar de N+1 queries
     // OPTIMIZADO EGRESS: Selecciona solo campos necesarios, attachments se cargan lazy
-    async getAll(includeAttachments: boolean = false): Promise<Process[]> {
+    async getAll(includeAttachments: boolean = false, options?: ProcessListOptions): Promise<Process[]> {
         // 1. Cargar todos los procesos (solo campos necesarios para reducir egress)
         // Nota: client_id puede no existir si la migración no se ha ejecutado, por lo que lo manejamos con try-catch
         let processes: any[] = [];
         let error: any = null;
         
         try {
-            const result = await supabase
+            let query = supabase
                 .from('processes')
                 .select('id, title, description, salary_range, experience_level, seniority, flyer_url, flyer_position, service_order_code, start_date, end_date, status, vacancies, google_drive_folder_id, google_drive_folder_name, published_date, need_identified_date, client_id, is_bulk_process, bulk_config, created_at')
-                .eq('app_name', APP_NAME) // Filtrar solo procesos de esta app
-                .eq('is_bulk_process', false) // Excluir procesos masivos (se gestionan en otra sección)
+                .eq('app_name', APP_NAME)
+                .eq('is_bulk_process', false)
                 .order('created_at', { ascending: false })
-                .limit(200); // Reducir límite para reducir egress
+                .limit(200);
+            query = applyProcessStatusFilter(query as any, options) as typeof query;
+            const primary = await query;
             
             // Verificar si hubo error de columna faltante directamente aquí
-            if (result.error && (result.error.message?.includes('client_id') || result.error.message?.includes('column') || result.error.code === 'PGRST116')) {
+            if (primary.error && (primary.error.message?.includes('client_id') || primary.error.message?.includes('column') || primary.error.code === 'PGRST116')) {
                 console.warn('⚠️ Columna client_id no existe, cargando procesos sin ese campo');
-                const fallbackResult = await supabase
+                let fallbackQuery = supabase
                     .from('processes')
                     .select('id, title, description, salary_range, experience_level, seniority, flyer_url, flyer_position, service_order_code, start_date, end_date, status, vacancies, google_drive_folder_id, google_drive_folder_name, published_date, need_identified_date, is_bulk_process, bulk_config, hired_candidate_ids, closed_at, created_at')
                     .eq('app_name', APP_NAME)
                     .eq('is_bulk_process', false)
                     .order('created_at', { ascending: false })
                     .limit(200);
+                fallbackQuery = applyProcessStatusFilter(fallbackQuery as any, options) as typeof fallbackQuery;
+                const fallbackResult = await fallbackQuery;
                 
                 processes = fallbackResult.data || [];
                 error = fallbackResult.error;
             } else {
-                processes = result.data || [];
-                error = result.error;
+                processes = primary.data || [];
+                error = primary.error;
             }
         } catch (err: any) {
             error = err;
@@ -1267,19 +1294,24 @@ export const processesApi = {
     },
 
     // Obtener todos los procesos masivos (solo procesos masivos)
-    async getAllBulkProcesses(includeBulkConfig: boolean = false): Promise<Process[]> {
+    async getAllBulkProcesses(
+        includeBulkConfig: boolean = false,
+        options?: ProcessListOptions
+    ): Promise<Process[]> {
         const selectFields = includeBulkConfig ? BULK_PROCESS_FULL_FIELDS : BULK_PROCESS_LIST_FIELDS;
         let processes: any[] = [];
         let error: any = null;
         
         try {
             const result = await fetchWithRetry(async () => {
-                const response = await supabase
+                let query = supabase
                     .from('processes')
                     .select(selectFields)
                     .eq('app_name', APP_NAME)
                     .eq('is_bulk_process', true)
                     .order('created_at', { ascending: false });
+                query = applyProcessStatusFilter(query as any, options) as typeof query;
+                const response = await query;
                 if (response.error) throw response.error;
                 return response;
             });
@@ -1287,11 +1319,13 @@ export const processesApi = {
             // Verificar si hubo error de columna faltante directamente aquí
             if (result.error && (result.error.message?.includes('client_id') || result.error.message?.includes('is_bulk_process') || result.error.message?.includes('column') || result.error.code === 'PGRST116')) {
                 console.warn('⚠️ Columna client_id o is_bulk_process no existe, cargando con fallback');
-                const fallbackResult = await supabase
+                let fallbackQuery = supabase
                     .from('processes')
                     .select('id, title, description, salary_range, experience_level, seniority, flyer_url, flyer_position, service_order_code, start_date, end_date, status, vacancies, google_drive_folder_id, google_drive_folder_name, published_date, need_identified_date, bulk_config, hired_candidate_ids, closed_at, created_at')
                     .eq('app_name', APP_NAME)
                     .order('created_at', { ascending: false });
+                fallbackQuery = applyProcessStatusFilter(fallbackQuery as any, options) as typeof fallbackQuery;
+                const fallbackResult = await fallbackQuery;
                 
                 processes = fallbackResult.data || [];
                 error = fallbackResult.error;
@@ -1383,10 +1417,13 @@ export const processesApi = {
     },
 
     /** Procesos regulares + masivos (para estado global: panel, candidatos, reportes). */
-    async getAllIncludingBulk(includeAttachments: boolean = false): Promise<Process[]> {
+    async getAllIncludingBulk(
+        includeAttachments: boolean = false,
+        options?: ProcessListOptions
+    ): Promise<Process[]> {
         const [regular, bulk] = await Promise.all([
-            this.getAll(includeAttachments),
-            this.getAllBulkProcesses(false).catch(err => {
+            this.getAll(includeAttachments, options),
+            this.getAllBulkProcesses(false, options).catch(err => {
                 console.warn('⚠️ No se pudieron cargar procesos masivos:', err);
                 return [] as Process[];
             }),
@@ -1394,10 +1431,13 @@ export const processesApi = {
         return [...regular, ...bulk];
     },
 
-    /** Carga regular y masivos en serie (menor pico de I/O en arranque). */
-    async getAllIncludingBulkSequential(includeAttachments: boolean = false): Promise<Process[]> {
-        const regular = await this.getAll(includeAttachments);
-        const bulk = await this.getAllBulkProcesses(false).catch(err => {
+    /** Carga regular y masivos en serie (menor pico de I/O en arranque). Por defecto solo en_proceso. */
+    async getAllIncludingBulkSequential(
+        includeAttachments: boolean = false,
+        options?: ProcessListOptions
+    ): Promise<Process[]> {
+        const regular = await this.getAll(includeAttachments, options);
+        const bulk = await this.getAllBulkProcesses(false, options).catch(err => {
             console.warn('⚠️ No se pudieron cargar procesos masivos:', err);
             return [] as Process[];
         });

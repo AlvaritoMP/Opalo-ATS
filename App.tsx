@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useMemo, useRef } from 'react';
 import { initialProcesses, initialCandidates, initialUsers, initialSettings, initialFormIntegrations, initialInterviewEvents } from './lib/data';
-import { Process, Candidate, User, AppSettings, FormIntegration, InterviewEvent, CandidateHistory, Application, PostIt, Comment, Section, UserRole } from './types';
+import { Process, Candidate, User, AppSettings, FormIntegration, InterviewEvent, CandidateHistory, Application, PostIt, Comment, Section, UserRole, ProcessStatus } from './types';
 import { getSettings, saveSettings as saveSettingsToStorage } from './lib/settings';
 import { usersApi, processesApi, candidatesApi, postItsApi, commentsApi, interviewsApi, settingsApi, formIntegrationsApi, setCurrentUser } from './lib/api/index';
 import { isCorsError, getErrorMessage, isSupabaseConfigured } from './lib/supabase';
@@ -17,6 +17,7 @@ import {
     consumeSessionExpiredNotice,
 } from './lib/sessionActivity';
 import { runWithAbortTimeout, isAbortOrTimeoutError } from './lib/runWithAbortTimeout';
+import { isProcessActive } from './lib/processStatus';
 import {
     clearAllLocalBulkColumnValues,
     getBulkSelectedProcessId,
@@ -85,6 +86,8 @@ interface AppActions {
     reloadProcesses: () => Promise<void>;
     reloadCandidates: () => Promise<void>;
     ensureProcessCandidatesLoaded: (processId: string, force?: boolean) => Promise<void>;
+    /** Carga bajo demanda procesos de un estado no activo (p. ej. Stand By). */
+    ensureProcessesWithStatus: (status: ProcessStatus) => Promise<void>;
     addCandidate: (candidateData: Omit<Candidate, 'id' | 'history'>, options?: { skipGoogleDrive?: boolean; silent?: boolean }) => Promise<Candidate>;
     updateCandidate: (candidateData: Candidate, movedBy?: string) => Promise<void>;
     deleteCandidate: (candidateId: string) => Promise<void>;
@@ -984,15 +987,34 @@ const App: React.FC = () => {
                 // (stages, documentCategories, attachments, etc.)
                 try {
                     const reloadedProcess = await processesApi.getById(processData.id);
-                    if (reloadedProcess) {
-                        setState(s => ({ ...s, processes: s.processes.map(p => p.id === processData.id ? reloadedProcess : p) }));
-                    } else {
-                        // Si no se puede recargar, usar el actualizado
-                setState(s => ({ ...s, processes: s.processes.map(p => p.id === processData.id ? updated : p) }));
-                    }
+                    const nextProcess = reloadedProcess || updated;
+                    setState(s => {
+                        const processes = s.processes.map(p => p.id === processData.id ? nextProcess : p);
+                        if (isProcessActive(nextProcess.status)) {
+                            return { ...s, processes };
+                        }
+                        // Al pasar a Stand By / cerrado: soltar candidatos de memoria (sin cargas).
+                        return {
+                            ...s,
+                            processes,
+                            candidates: s.candidates.filter(c => c.processId !== processData.id),
+                            loadedStandardProcessIds: s.loadedStandardProcessIds.filter(id => id !== processData.id),
+                        };
+                    });
                 } catch (reloadError) {
                     console.warn('Error recargando proceso después de actualizar, usando el retornado:', reloadError);
-                    setState(s => ({ ...s, processes: s.processes.map(p => p.id === processData.id ? updated : p) }));
+                    setState(s => {
+                        const processes = s.processes.map(p => p.id === processData.id ? updated : p);
+                        if (isProcessActive(updated.status)) {
+                            return { ...s, processes };
+                        }
+                        return {
+                            ...s,
+                            processes,
+                            candidates: s.candidates.filter(c => c.processId !== processData.id),
+                            loadedStandardProcessIds: s.loadedStandardProcessIds.filter(id => id !== processData.id),
+                        };
+                    });
                 }
                 
                 hideToastHelper(loadingToastId);
@@ -1189,6 +1211,9 @@ const App: React.FC = () => {
             const process = current.processes.find(p => p.id === processId);
             if (process?.isBulkProcess) return;
 
+            // Stand By / cerrados: sin precarga automática; solo si el usuario abre el proceso (force).
+            if (!force && !isProcessActive(process?.status)) return;
+
             const alreadyLoaded = current.loadedStandardProcessIds.includes(processId);
             const existing = current.candidates.filter(c => c.processId === processId && !c.archived);
             const needsLoad = force || !alreadyLoaded;
@@ -1225,6 +1250,24 @@ const App: React.FC = () => {
                 console.warn(`No se pudieron cargar candidatos del proceso ${processId}:`, error);
             } finally {
                 loadingStandardProcessIdsRef.current.delete(processId);
+            }
+        },
+        ensureProcessesWithStatus: async (status: ProcessStatus) => {
+            if (isProcessActive(status)) return;
+            try {
+                const [regular, bulk] = await Promise.all([
+                    processesApi.getAll(false, { statuses: [status] }),
+                    processesApi.getAllBulkProcesses(false, { statuses: [status] }).catch(() => [] as Process[]),
+                ]);
+                setState(s => {
+                    const byId = new Map(s.processes.map(p => [p.id, p]));
+                    for (const p of [...regular, ...bulk]) {
+                        byId.set(p.id, p);
+                    }
+                    return { ...s, processes: Array.from(byId.values()) };
+                });
+            } catch (error) {
+                console.warn(`No se pudieron cargar procesos en estado ${status}:`, error);
             }
         },
         deleteProcess: async (processId) => {

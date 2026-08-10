@@ -228,6 +228,12 @@ export const ProcessList: React.FC = () => {
     const [isReloading, setIsReloading] = useState(false);
     
     const canManageProcesses = ['admin', 'recruiter'].includes(state.currentUser?.role as UserRole);
+
+    // Stand By / cerrados: no vienen en el arranque; se piden solo al filtrar.
+    useEffect(() => {
+        if (statusFilter === 'all' || statusFilter === 'en_proceso') return;
+        void actions.ensureProcessesWithStatus(statusFilter);
+    }, [statusFilter, actions]);
     
     // Recarga automática DESHABILITADA para reducir consumo de compute hours
     // Los usuarios pueden recargar manualmente usando el botón "Actualizar"

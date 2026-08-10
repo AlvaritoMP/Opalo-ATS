@@ -130,13 +130,15 @@ export const ProcessView: React.FC<ProcessViewProps> = ({ processId }) => {
         if (!processId || process?.isBulkProcess) return;
         let cancelled = false;
         setCandidatesLoading(true);
-        void actions.ensureProcessCandidatesLoaded(processId).finally(() => {
+        // Stand By / cerrados: solo cargan candidatos si el usuario abre el proceso.
+        const forceInactive = !isProcessActive(process?.status);
+        void actions.ensureProcessCandidatesLoaded(processId, forceInactive).finally(() => {
             if (!cancelled) setCandidatesLoading(false);
         });
         return () => {
             cancelled = true;
         };
-    }, [processId, process?.isBulkProcess, actions]);
+    }, [processId, process?.isBulkProcess, process?.status, actions]);
 
     useEffect(() => {
         setWorkMode(getProcessWorkMode(processId, state.currentUser?.id));
