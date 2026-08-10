@@ -524,6 +524,45 @@ const ApplicationCountBadge: React.FC<{
     );
 };
 
+const OpsFlowSentBadge: React.FC<{
+    sentAt?: string;
+    deliveryStatus?: BulkCandidate['opsflowDeliveryStatus'];
+}> = ({ sentAt, deliveryStatus }) => {
+    if (!sentAt) return null;
+    const when = (() => {
+        const d = new Date(sentAt);
+        if (Number.isNaN(d.getTime())) return sentAt;
+        return d.toLocaleString('es-PE', {
+            day: '2-digit',
+            month: '2-digit',
+            year: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit',
+        });
+    })();
+    const statusLabel =
+        deliveryStatus === 'failed'
+            ? 'falló entrega'
+            : deliveryStatus === 'pending'
+              ? 'pendiente'
+              : 'entregado';
+    const tone =
+        deliveryStatus === 'failed'
+            ? 'bg-red-50 text-red-700 border-red-200'
+            : deliveryStatus === 'pending'
+              ? 'bg-amber-50 text-amber-800 border-amber-200'
+              : 'bg-orange-50 text-orange-800 border-orange-200';
+    return (
+        <span
+            className={`ml-1 inline-flex shrink-0 items-center gap-0.5 text-[10px] font-semibold px-1 py-0 rounded border ${tone}`}
+            title={`Enviado a OpsFlow (${statusLabel}) · ${when}`}
+        >
+            <Package className="w-2.5 h-2.5" />
+            Ops
+        </span>
+    );
+};
+
 const MetadataTooltip: React.FC<{
     metadata: string;
     scoreIa?: number;
@@ -3105,6 +3144,8 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
     }, [actions, columnValues, candidates]);
 
     const handleOpsFlowSent = useCallback(() => {
+        const sentAt = new Date().toISOString();
+        const sentIds = new Set(opsFlowCandidates.map(c => c.id));
         for (const candidate of opsFlowCandidates) {
             logActivity('opsflow_send', {
                 candidateId: candidate.id,
@@ -3112,6 +3153,17 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                 details: { via: 'bulk_process' },
             });
         }
+        setCandidates(prev =>
+            prev.map(c =>
+                sentIds.has(c.id)
+                    ? {
+                          ...c,
+                          opsflowSentAt: sentAt,
+                          opsflowDeliveryStatus: 'delivered' as const,
+                      }
+                    : c
+            )
+        );
         setOpsFlowRefreshToken(token => token + 1);
         setSelectedIds(new Set());
     }, [opsFlowCandidates, logActivity]);
@@ -4976,11 +5028,15 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
             if (colId === 'name') {
                 return (
                     <span
-                        className="truncate text-primary-800"
+                        className="truncate text-primary-800 inline-flex items-center gap-0.5 min-w-0"
                         onDoubleClick={(e) => { e.stopPropagation(); handleStartEdit(candidate.id, 'name', displayCandidate.name); }}
                         title="Doble clic para editar"
                     >
-                        {displayCandidate.name}
+                        <span className="truncate">{displayCandidate.name}</span>
+                        <OpsFlowSentBadge
+                            sentAt={displayCandidate.opsflowSentAt}
+                            deliveryStatus={displayCandidate.opsflowDeliveryStatus}
+                        />
                     </span>
                 );
             }
@@ -6878,6 +6934,10 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                                                                         applicationCount={displayCandidate.applicationCount}
                                                                         firstApplicationAt={displayCandidate.firstApplicationAt}
                                                                         createdAt={displayCandidate.createdAt}
+                                                                    />
+                                                                    <OpsFlowSentBadge
+                                                                        sentAt={displayCandidate.opsflowSentAt}
+                                                                        deliveryStatus={displayCandidate.opsflowDeliveryStatus}
                                                                     />
                                                                 </span>
                                                             </MetadataTooltip>

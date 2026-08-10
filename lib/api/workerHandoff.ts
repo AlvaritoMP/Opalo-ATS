@@ -164,6 +164,36 @@ function mapItem(row: Record<string, unknown>): WorkerHandoffItem {
     };
 }
 
+async function markCandidatesOpsFlowSent(params: {
+    candidateIds: string[];
+    packageId: string;
+    sentAt: string;
+    deliveryStatus: WorkerHandoffDeliveryStatus;
+}): Promise<void> {
+    const ids = [...new Set(params.candidateIds.filter(Boolean))];
+    if (ids.length === 0) return;
+
+    const { error } = await supabase
+        .from('candidates')
+        .update({
+            opsflow_sent_at: params.sentAt,
+            opsflow_last_package_id: params.packageId,
+            opsflow_delivery_status: params.deliveryStatus,
+        })
+        .in('id', ids)
+        .eq('app_name', APP_NAME);
+
+    if (error && isMissingColumnError(error)) {
+        console.warn(
+            '[handoff] Falta migración MIGRATION_ADD_CANDIDATE_OPSFLOW_SENT.sql; no se marcó opsflow_sent_at.'
+        );
+        return;
+    }
+    if (error) {
+        console.warn('[handoff] No se pudo marcar candidatos enviados a OpsFlow:', error.message);
+    }
+}
+
 async function deliverToOpsflow(packageId: string): Promise<WorkerHandoffPackage> {
     const { data, error } = await supabase.functions.invoke(DELIVER_FUNCTION_NAME, {
         body: { packageId },
@@ -437,8 +467,23 @@ export const workerHandoffApi = {
             throw itemsError;
         }
 
+        const candidateIds = preparedItems.map(item => item.sourceCandidateId);
+        await markCandidatesOpsFlowSent({
+            candidateIds,
+            packageId,
+            sentAt,
+            deliveryStatus: 'pending',
+        });
+
         try {
-            return await deliverToOpsflow(packageId);
+            const delivered = await deliverToOpsflow(packageId);
+            await markCandidatesOpsFlowSent({
+                candidateIds,
+                packageId,
+                sentAt: delivered.deliveredAt || delivered.sentAt || sentAt,
+                deliveryStatus: delivered.deliveryStatus || 'delivered',
+            });
+            return delivered;
         } catch (deliveryError) {
             const message =
                 deliveryError instanceof Error
@@ -453,6 +498,12 @@ export const workerHandoffApi = {
                 .from('worker_handoff_packages')
                 .update(failedUpdate)
                 .eq('id', packageId);
+            await markCandidatesOpsFlowSent({
+                candidateIds,
+                packageId,
+                sentAt,
+                deliveryStatus: 'failed',
+            });
             throw new Error(
                 `${message} El paquete quedó registrado; puedes reintentar desde Envíos OpsFlow.`
             );

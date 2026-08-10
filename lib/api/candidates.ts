@@ -19,6 +19,7 @@ const CANDIDATE_LIST_SELECT = `${CANDIDATE_LIST_SELECT_CORE}, application_count,
 /** Variantes de select (de más completa a mínima) si faltan migraciones en Supabase */
 function getCandidateListSelectVariants(): string[] {
     return [
+        `${CANDIDATE_LIST_SELECT}, bulk_column_values, psycholaboral_evaluation, complementary_data, complementary_filled_at, opsflow_sent_at, opsflow_last_package_id, opsflow_delivery_status`,
         `${CANDIDATE_LIST_SELECT}, bulk_column_values, psycholaboral_evaluation, complementary_data, complementary_filled_at`,
         `${CANDIDATE_LIST_SELECT}, bulk_column_values, psycholaboral_evaluation`,
         `${CANDIDATE_LIST_SELECT}, bulk_column_values`,
@@ -244,6 +245,9 @@ function mapListCandidate(dbCandidate: any, extras: Partial<Candidate> = {}): Ca
         psycholaboralEvaluation: dbCandidate.psycholaboral_evaluation || undefined,
         bulkColumnValues: mapBulkColumnValues(dbCandidate),
         ...mapComplementaryData(dbCandidate),
+        opsflowSentAt: dbCandidate.opsflow_sent_at || undefined,
+        opsflowLastPackageId: dbCandidate.opsflow_last_package_id || undefined,
+        opsflowDeliveryStatus: dbCandidate.opsflow_delivery_status || undefined,
         ...extras,
     };
 }
@@ -382,6 +386,9 @@ async function dbToCandidate(dbCandidate: any): Promise<Candidate> {
         psycholaboralEvaluation: dbCandidate.psycholaboral_evaluation || undefined,
         bulkColumnValues: mapBulkColumnValues(dbCandidate),
         ...mapComplementaryData(dbCandidate),
+        opsflowSentAt: dbCandidate.opsflow_sent_at || undefined,
+        opsflowLastPackageId: dbCandidate.opsflow_last_package_id || undefined,
+        opsflowDeliveryStatus: dbCandidate.opsflow_delivery_status || undefined,
     };
 }
 

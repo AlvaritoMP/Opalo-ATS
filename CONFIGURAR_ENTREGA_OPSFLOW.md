@@ -9,6 +9,7 @@ Ejecutar en orden (si aún no lo hiciste):
 1. `MIGRATION_ADD_WORKER_HANDOFF.sql`
 2. `MIGRATION_ADD_WORKER_HANDOFF_RLS.sql`
 3. `MIGRATION_ADD_WORKER_HANDOFF_DELIVERY.sql`
+4. `MIGRATION_ADD_CANDIDATE_OPSFLOW_SENT.sql` (marca en candidatos + badge en tabla alta densidad)
 
 ## 2. Desplegar Edge Function `deliver-worker-handoff`
 

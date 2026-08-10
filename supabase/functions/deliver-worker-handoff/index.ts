@@ -142,6 +142,21 @@ Deno.serve(async (req) => {
         })
         .eq('id', packageId)
 
+      const failedIds = (items || [])
+        .map((item) => item.source_candidate_id as string | null)
+        .filter((id): id is string => Boolean(id))
+      if (failedIds.length > 0) {
+        await supabase
+          .from('candidates')
+          .update({
+            opsflow_sent_at: pkg.sent_at || now,
+            opsflow_last_package_id: packageId,
+            opsflow_delivery_status: 'failed',
+          })
+          .in('id', failedIds)
+          .eq('app_name', APP_NAME)
+      }
+
       return json(
         {
           error: 'OpsFlow delivery failed',
@@ -165,6 +180,21 @@ Deno.serve(async (req) => {
         updated_at: now,
       })
       .eq('id', packageId)
+
+    const deliveredIds = (items || [])
+      .map((item) => item.source_candidate_id as string | null)
+      .filter((id): id is string => Boolean(id))
+    if (deliveredIds.length > 0) {
+      await supabase
+        .from('candidates')
+        .update({
+          opsflow_sent_at: now,
+          opsflow_last_package_id: packageId,
+          opsflow_delivery_status: 'delivered',
+        })
+        .in('id', deliveredIds)
+        .eq('app_name', APP_NAME)
+    }
 
     return json({
       success: true,

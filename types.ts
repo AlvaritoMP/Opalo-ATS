@@ -556,6 +556,10 @@ export interface Candidate {
     /** Ficha complementaria enviada por el candidato (formulario público) */
     complementaryData?: ComplementaryFichaData;
     complementaryFilledAt?: string;
+    /** Último envío a OpsFlow (marca denormalizada para listados) */
+    opsflowSentAt?: string;
+    opsflowLastPackageId?: string;
+    opsflowDeliveryStatus?: WorkerHandoffDeliveryStatus;
 }
 
 export type UserRole = 'admin' | 'recruiter' | 'client' | 'viewer';

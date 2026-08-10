@@ -36,10 +36,12 @@ const BULK_SELECT_WITH_CREATED = `${BULK_SELECT_WITH_FIDELIZ}, created_at`;
 const BULK_SELECT_WITH_APPLICATION = `${BULK_SELECT_WITH_CREATED}, application_count, first_application_at`;
 const BULK_SELECT_WITH_REGISTRATION = `${BULK_SELECT_WITH_APPLICATION}, registration_origin, created_by, contact_lock_user_id, contact_lock_user_name, contact_lock_until, contact_lock_reason`;
 const BULK_SELECT_WITH_TRANSFER = `${BULK_SELECT_WITH_REGISTRATION}, transfer_pending_review`;
-const BULK_SELECT_FULL = `${BULK_SELECT_WITH_TRANSFER}, bulk_column_values`;
+const BULK_SELECT_WITH_OPSFLOW = `${BULK_SELECT_WITH_TRANSFER}, opsflow_sent_at, opsflow_last_package_id, opsflow_delivery_status`;
+const BULK_SELECT_FULL = `${BULK_SELECT_WITH_OPSFLOW}, bulk_column_values`;
 const BULK_EFFICIENCY_FIELDS =
     'hire_date, offer_accepted_date, application_started_date, application_completed_date';
 const BULK_SELECT_FULL_EFFICIENCY = `${BULK_SELECT_FULL}, ${BULK_EFFICIENCY_FIELDS}`;
+const BULK_SELECT_WITH_OPSFLOW_EFFICIENCY = `${BULK_SELECT_WITH_OPSFLOW}, ${BULK_EFFICIENCY_FIELDS}`;
 const BULK_SELECT_WITH_TRANSFER_EFFICIENCY = `${BULK_SELECT_WITH_TRANSFER}, ${BULK_EFFICIENCY_FIELDS}`;
 const BULK_SELECT_WITH_REGISTRATION_EFFICIENCY = `${BULK_SELECT_WITH_REGISTRATION}, ${BULK_EFFICIENCY_FIELDS}`;
 const BULK_SELECT_WITH_APPLICATION_EFFICIENCY = `${BULK_SELECT_WITH_APPLICATION}, ${BULK_EFFICIENCY_FIELDS}`;
@@ -61,6 +63,8 @@ function getBulkSelectCandidates(): string[] {
     const allVariants = [
         BULK_SELECT_FULL_EFFICIENCY,
         BULK_SELECT_FULL,
+        BULK_SELECT_WITH_OPSFLOW_EFFICIENCY,
+        BULK_SELECT_WITH_OPSFLOW,
         BULK_SELECT_WITH_TRANSFER_EFFICIENCY,
         BULK_SELECT_WITH_TRANSFER,
         BULK_SELECT_WITH_REGISTRATION_EFFICIENCY,
@@ -80,7 +84,8 @@ function getBulkSelectCandidates(): string[] {
     if (
         !cachedBulkSelect.includes('application_count') ||
         !cachedBulkSelect.includes('registration_origin') ||
-        !cachedBulkSelect.includes('transfer_pending_review')
+        !cachedBulkSelect.includes('transfer_pending_review') ||
+        !cachedBulkSelect.includes('opsflow_sent_at')
     ) {
         return allVariants;
     }
@@ -130,6 +135,10 @@ function mapBulkCandidateRow(
         offerAcceptedDate: (c.offer_accepted_date as string) || undefined,
         applicationStartedDate: (c.application_started_date as string) || undefined,
         applicationCompletedDate: (c.application_completed_date as string) || undefined,
+        opsflowSentAt: (c.opsflow_sent_at as string) || undefined,
+        opsflowLastPackageId: (c.opsflow_last_package_id as string) || undefined,
+        opsflowDeliveryStatus:
+            (c.opsflow_delivery_status as BulkCandidate['opsflowDeliveryStatus']) || undefined,
     };
 }
 
@@ -185,6 +194,10 @@ export interface BulkCandidate {
     offerAcceptedDate?: string;
     applicationStartedDate?: string;
     applicationCompletedDate?: string;
+    /** Marca denormalizada: último envío a OpsFlow */
+    opsflowSentAt?: string;
+    opsflowLastPackageId?: string;
+    opsflowDeliveryStatus?: 'pending' | 'delivered' | 'failed';
     // Campos adicionales para el drawer (se cargan bajo demanda)
     description?: string;
     attachments?: any[];
