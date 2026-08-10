@@ -23,6 +23,7 @@ const DEFAULT_REQUIRED = [
   'direccion',
   'distrito',
   'provincia',
+  'emergenciaNombre',
   'emergenciaTelefono',
   'emergenciaParentesco',
 ]
@@ -43,6 +44,7 @@ const FIELD_LABELS: Record<string, string> = {
   tallaCamisa: 'Talla camisa',
   tallaPantalon: 'Talla pantalón',
   tallaCalzado: 'Talla calzado',
+  emergenciaNombre: 'En caso de emergencia llamar a',
   emergenciaTelefono: 'Teléfono de emergencia',
   emergenciaParentesco: 'Parentesco (emergencia)',
   direccion: 'Dirección',
@@ -149,6 +151,7 @@ const FIELDS: { key: string; aliases: string[]; namePart?: string }[] = [
   { key: 'tallaCamisa', aliases: ['tallacamisa', 'camisa', 'tallapolo'] },
   { key: 'tallaPantalon', aliases: ['tallapantalon', 'pantalon'] },
   { key: 'tallaCalzado', aliases: ['tallacalzado', 'calzado', 'zapato'] },
+  { key: 'emergenciaNombre', aliases: ['encasodeemergenciallamara', 'emergencianombre', 'contactoemergencianombre', 'llamaremergencia', 'nombreemergencia', 'avisarenemergencia'] },
   { key: 'emergenciaTelefono', aliases: ['telefonoemergencia', 'contactoemergencia', 'emergencia'] },
   { key: 'emergenciaParentesco', aliases: ['parentescoemergencia', 'parentesco'] },
   { key: 'direccion', aliases: ['direccion', 'domicilio', 'address'] },

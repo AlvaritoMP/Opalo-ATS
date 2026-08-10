@@ -55,6 +55,7 @@ export interface ComplementaryFichaData {
     tallaCamisa?: string;
     tallaPantalon?: string;
     tallaCalzado?: string;
+    emergenciaNombre?: string;
     emergenciaTelefono?: string;
     emergenciaParentesco?: string;
     direccion?: string;

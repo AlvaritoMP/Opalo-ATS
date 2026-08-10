@@ -51,6 +51,7 @@ export const COMPLEMENTARY_FICHA_MAPPABLE_FIELDS: ComplementaryFichaFieldDef[] =
     { key: 'tallaCamisa', label: 'Talla camisa', group: 'Tallas', aliases: ['tallacamisa', 'camisa', 'tallapolo', 'talladepolo'] },
     { key: 'tallaPantalon', label: 'Talla pantalón', group: 'Tallas', aliases: ['tallapantalon', 'pantalon'] },
     { key: 'tallaCalzado', label: 'Talla calzado', group: 'Tallas', aliases: ['tallacalzado', 'calzado', 'tallazapato', 'zapato'] },
+    { key: 'emergenciaNombre', label: 'En caso de emergencia llamar a', group: 'Emergencia', aliases: ['encasodeemergenciallamara', 'emergencianombre', 'contactoemergencianombre', 'llamaremergencia', 'nombreemergencia', 'avisarenemergencia'] },
     { key: 'emergenciaTelefono', label: 'Teléfono de emergencia', group: 'Emergencia', aliases: ['telefonoemergencia', 'contactoemergencia', 'emergencia', 'telefonodeemergencia'] },
     { key: 'emergenciaParentesco', label: 'Parentesco (emergencia)', group: 'Emergencia', aliases: ['parentescoemergencia', 'parentesco', 'parentesco contacto'] },
     { key: 'direccion', label: 'Dirección', group: 'Ubicación', aliases: ['direccion', 'domicilio', 'address', 'direcciondedomicilio'] },
@@ -91,6 +92,7 @@ export const COMPLEMENTARY_FICHA_DEFAULT_REQUIRED: ComplementaryFichaMappableKey
     'direccion',
     'distrito',
     'provincia',
+    'emergenciaNombre',
     'emergenciaTelefono',
     'emergenciaParentesco',
 ];

@@ -531,7 +531,20 @@ export const PublicComplementaryFicha: React.FC = () => {
                                     />
                                 </Field>
                             </div>
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                                <Field
+                                    label="En caso de emergencia llamar a"
+                                    required={isReq('emergenciaNombre')}
+                                    value={form.emergenciaNombre}
+                                >
+                                    <input
+                                        className={inputClass}
+                                        required={isReq('emergenciaNombre')}
+                                        value={form.emergenciaNombre || ''}
+                                        onChange={(e) => patchForm({ emergenciaNombre: e.target.value })}
+                                        placeholder="Nombre completo del contacto"
+                                    />
+                                </Field>
                                 <Field label="Teléfono de emergencia" required={isReq('emergenciaTelefono')} value={form.emergenciaTelefono}>
                                     <input
                                         className={inputClass}
