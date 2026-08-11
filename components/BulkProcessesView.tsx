@@ -1098,7 +1098,9 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
         updates: Partial<BulkProcessConfig>,
         options?: { baseConfig?: BulkProcessConfig }
     ) => {
-        if (!process) return;
+        if (!process) {
+            throw new Error('No hay proceso activo para guardar la configuración');
+        }
 
         const base =
             options?.baseConfig ??
@@ -1107,26 +1109,60 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
 
         if (!base) {
             console.warn('[bulk] persistBulkConfig omitido: bulk_config no cargado aún');
-            return;
+            throw new Error('La configuración del proceso aún no está cargada. Espere un momento e intente de nuevo.');
         }
 
         const layoutOnlyKeys = new Set([
             'hiddenColumns', 'columnOrder', 'pinnedColumns', 'columnWidths', 'floatingColumnRail',
         ]);
+        // Actualizaciones que no tocan la estructura de columnas: no deben bloquearse
+        // cuando customColumns está vacío (p. ej. referencias rápidas en procesos sin columnas custom).
+        const metadataOnlyKeys = new Set([
+            'infoPins',
+            'quickReplies',
+            'clipboardFieldPresets',
+            'contactMessageTemplates',
+            'documentTemplates',
+            'customStats',
+            'stageColors',
+            'stageColorsByName',
+            'columnKeyAliases',
+            'whatsappEnabled',
+            'whatsappMessageTemplate',
+            'aiPrompt',
+            'scoreThreshold',
+            'autoFilterEnabled',
+            'killerQuestions',
+            'psycholaboral',
+            'idealProfile',
+            'complementaryFichaMapping',
+            'complementaryFichaRequiredFields',
+            'highDensityTableEnabled',
+        ]);
         const updateKeys = Object.keys(updates);
         const isLayoutOnlyUpdate =
             updateKeys.length > 0 && updateKeys.every(key => layoutOnlyKeys.has(key));
+        const isMetadataOnlyUpdate =
+            updateKeys.length > 0 &&
+            updateKeys.every(key => metadataOnlyKeys.has(key) || layoutOnlyKeys.has(key));
 
+        // Fusionar columnas del estado React antes del guard anti-borrado.
         const baseCustomCount = base.customColumns?.length ?? 0;
-        if (baseCustomCount === 0 && !updates.customColumns?.length && !isLayoutOnlyUpdate) {
-            console.warn('[bulk] persistBulkConfig omitido: evitar borrar columnas custom');
-            return;
-        }
-
         const baseWithColumns =
             baseCustomCount > 0 || !customColumns.length
                 ? base
                 : { ...base, customColumns };
+
+        const effectiveCustomCount = baseWithColumns.customColumns?.length ?? 0;
+        if (
+            effectiveCustomCount === 0 &&
+            !updates.customColumns?.length &&
+            !isLayoutOnlyUpdate &&
+            !isMetadataOnlyUpdate
+        ) {
+            console.warn('[bulk] persistBulkConfig omitido: evitar borrar columnas custom');
+            throw new Error('No se pudo guardar: faltan columnas personalizadas en la configuración cargada');
+        }
 
         let mergedUpdates = { ...updates };
         if (updates.customColumns) {
@@ -1996,12 +2032,31 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
 
                 const idealNorm = normalizeIdealProfileConfig(config?.idealProfile, cols, config);
                 if (idealNorm.needsPersist && idealNorm.config && config && cols.length > 0) {
-                    const repairedConfig: BulkProcessConfig = { ...config, idealProfile: idealNorm.config };
-                    void processesApi.update(processId, { bulkConfig: repairedConfig }).then(() => {
+                    const idealProfileToPersist = idealNorm.config;
+                    // Fusionar contra el config más reciente para no pisar infoPins u otros
+                    // cambios guardados mientras este write asíncrono está en vuelo.
+                    void (async () => {
+                        const latest =
+                            bulkProcessesRef.current.find(p => p.id === processId)?.bulkConfig ?? config;
+                        const repairedConfig: BulkProcessConfig = {
+                            ...latest,
+                            idealProfile: idealProfileToPersist,
+                        };
+                        await processesApi.update(processId, { bulkConfig: repairedConfig });
                         setBulkProcesses(prev =>
-                            prev.map(p => (p.id === processId ? { ...p, bulkConfig: repairedConfig } : p))
+                            prev.map(p => {
+                                if (p.id !== processId) return p;
+                                const current = p.bulkConfig ?? repairedConfig;
+                                return {
+                                    ...p,
+                                    bulkConfig: {
+                                        ...current,
+                                        idealProfile: idealProfileToPersist,
+                                    },
+                                };
+                            })
                         );
-                    });
+                    })();
                     actionsRef.current.showToast(
                         'Criterios del perfil ideal reparados tras el cambio de columnas',
                         'success',
@@ -5925,14 +5980,22 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                                     {(infoPins.length > 0 || canEditBulkInfoPins) && (
                                         <BulkInfoPinsBar
                                             pins={infoPins}
-                                            canEdit={canEditBulkInfoPins}
+                                            canEdit={canEditBulkInfoPins && !isTableBootstrapping}
                                             activePinId={activeInfoPinId}
                                             onSelectPin={pin =>
                                                 setActiveInfoPinId(prev => (prev === pin.id ? null : pin.id))
                                             }
-                                            onAddPin={() =>
-                                                setInfoPinModal({ pin: createBulkInfoPin(), isNew: true })
-                                            }
+                                            onAddPin={() => {
+                                                if (isTableBootstrapping || !process.bulkConfig) {
+                                                    actions.showToast(
+                                                        'Espere a que cargue la configuración del proceso',
+                                                        'info',
+                                                        2500
+                                                    );
+                                                    return;
+                                                }
+                                                setInfoPinModal({ pin: createBulkInfoPin(), isNew: true });
+                                            }}
                                         />
                                     )}
                                     {(quickReplies.length > 0 ||
