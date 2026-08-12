@@ -120,6 +120,8 @@ interface AppActions {
     showToast: (message: string, type: 'success' | 'error' | 'loading' | 'info', duration?: number) => string;
     hideToast: (id: string) => void;
     setProcessEmbeddedTableActive: (active: boolean) => void;
+    /** Actualiza candidatos en memoria sin llamar a la API (p. ej. tras editar en tabla embebida). */
+    patchCandidatesLocal: (patches: Array<{ id: string; patch: Partial<Candidate> }>) => void;
 }
 
 interface AppContextType {
@@ -1973,6 +1975,17 @@ const App: React.FC = () => {
         },
         setProcessEmbeddedTableActive: (active: boolean) => {
             setState(s => (s.processEmbeddedTableActive === active ? s : { ...s, processEmbeddedTableActive: active }));
+        },
+        patchCandidatesLocal: (patches) => {
+            if (!patches.length) return;
+            const byId = new Map(patches.map(p => [p.id, p.patch]));
+            setState(s => ({
+                ...s,
+                candidates: s.candidates.map(c => {
+                    const patch = byId.get(c.id);
+                    return patch ? { ...c, ...patch } : c;
+                }),
+            }));
         },
     }), [state.currentUser, state.users, state.processes]);
 

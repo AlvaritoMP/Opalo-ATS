@@ -2421,6 +2421,14 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
         setCandidates(prev => prev.map(c => c.id === candidateId ? { ...c, ...updates } : c));
     }, []);
 
+    /** En proceso estándar (tabla embebida), mantener state.candidates alineado con el tablero kanban. */
+    const syncEmbeddedStatusToApp = useCallback((
+        patches: Array<{ id: string; patch: { stageId?: string; discarded?: boolean; archived?: boolean } }>
+    ) => {
+        if (!isEmbedded || patches.length === 0) return;
+        actions.patchCandidatesLocal(patches);
+    }, [isEmbedded, actions]);
+
     /** Quita el resaltado amarillo de traslado al editar/borrar una columna del registro */
     const clearTransferHighlight = useCallback((candidateId: string) => {
         const base = candidates.find(c => c.id === candidateId);
@@ -2502,6 +2510,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                 newMap.delete(candidateId);
                 return newMap;
             });
+            syncEmbeddedStatusToApp([{ id: candidateId, patch: updates }]);
             if (updates.stageId && previousStageId && updates.stageId !== previousStageId) {
                 const stageName = process?.stages.find(s => s.id === updates.stageId)?.name;
                 actions.showToast(`Movido a: ${stageName || 'nueva etapa'}`, 'success', 2000);
@@ -2529,7 +2538,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
             loadCandidates(currentPage, true);
             actions.showToast('Error al actualizar candidato', 'error', 3000);
         }
-    }, [applyOptimisticUpdate, loadCandidates, currentPage, actions, state.currentUser?.id, state.currentUser?.name, state.currentUser?.email, process?.stages, processLastStageId, candidates, logActivity, captureCandidateStatus, pushUndo]);
+    }, [applyOptimisticUpdate, loadCandidates, currentPage, actions, state.currentUser?.id, state.currentUser?.name, state.currentUser?.email, process?.stages, processLastStageId, candidates, logActivity, captureCandidateStatus, pushUndo, syncEmbeddedStatusToApp]);
 
     const handleBulkApprove = useCallback(async () => {
         if (selectedIds.size === 0) return;
@@ -2564,6 +2573,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                     lastStageId: approveStageId,
                 }
             );
+            syncEmbeddedStatusToApp(ids.map(id => ({ id, patch: { stageId: approveStageId } })));
             if (approveStageId && state.currentUser) {
                 const actorName = state.currentUser.name || state.currentUser.email || 'Usuario';
                 const movedAt = new Date().toISOString();
@@ -2585,7 +2595,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
             loadCandidates(currentPage, true);
             actions.showToast('Error al aprobar candidatos', 'error', 3000);
         }
-    }, [selectedIds, processLastStageId, candidates, applyOptimisticUpdate, loadCandidates, currentPage, actions, logActivity, state.currentUser?.id, state.currentUser?.name, state.currentUser?.email, captureCandidateStatus, pushUndo]);
+    }, [selectedIds, processLastStageId, candidates, applyOptimisticUpdate, loadCandidates, currentPage, actions, logActivity, state.currentUser?.id, state.currentUser?.name, state.currentUser?.email, captureCandidateStatus, pushUndo, syncEmbeddedStatusToApp]);
 
     const handleBulkReject = useCallback(async () => {
         if (selectedIds.size === 0) return;
@@ -2601,6 +2611,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
         ids.forEach(id => { applyOptimisticUpdate(id, { discarded: true }); });
         try {
             await bulkCandidatesApi.updateCandidatesBatch(ids, { discarded: true, discardReason: 'Rechazado en proceso masivo' });
+            syncEmbeddedStatusToApp(ids.map(id => ({ id, patch: { discarded: true } })));
             setSelectedIds(new Set());
             actions.showToast(`${ids.length} candidatos rechazados`, 'success', 3000);
             logActivity('bulk_discard', {
@@ -2612,7 +2623,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
             loadCandidates(currentPage, true);
             actions.showToast('Error al rechazar candidatos', 'error', 3000);
         }
-    }, [selectedIds, applyOptimisticUpdate, loadCandidates, currentPage, actions, logActivity, captureCandidateStatus, pushUndo]);
+    }, [selectedIds, applyOptimisticUpdate, loadCandidates, currentPage, actions, logActivity, captureCandidateStatus, pushUndo, syncEmbeddedStatusToApp]);
 
     const handleBulkArchive = useCallback(async () => {
         if (selectedIds.size === 0) return;
@@ -2628,6 +2639,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
         ids.forEach(id => { applyOptimisticUpdate(id, { archived: true }); });
         try {
             await bulkCandidatesApi.updateCandidatesBatch(ids, { archived: true });
+            syncEmbeddedStatusToApp(ids.map(id => ({ id, patch: { archived: true } })));
             setSelectedIds(new Set());
             actions.showToast(`${ids.length} candidatos archivados`, 'success', 3000);
             logActivity('bulk_archive', {
@@ -2639,7 +2651,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
             loadCandidates(currentPage, true);
             actions.showToast('Error al archivar candidatos', 'error', 3000);
         }
-    }, [selectedIds, applyOptimisticUpdate, loadCandidates, currentPage, actions, logActivity, captureCandidateStatus, pushUndo]);
+    }, [selectedIds, applyOptimisticUpdate, loadCandidates, currentPage, actions, logActivity, captureCandidateStatus, pushUndo, syncEmbeddedStatusToApp]);
 
     const handleBulkDelete = useCallback(async () => {
         if (selectedIds.size === 0) return;
@@ -3821,12 +3833,13 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                         movedBy: state.currentUser?.id,
                         lastStageId: processLastStageId,
                     });
+                    syncEmbeddedStatusToApp([{ id: change.candidateId, patch: updates }]);
                 } catch (error) {
                     console.error('Error al deshacer estado:', error);
                 }
             }
         },
-        [applyOptimisticUpdate, state.currentUser?.id, processLastStageId]
+        [applyOptimisticUpdate, state.currentUser?.id, processLastStageId, syncEmbeddedStatusToApp]
     );
 
     const performUndo = useCallback(async () => {

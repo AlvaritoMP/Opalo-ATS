@@ -171,7 +171,9 @@ export const ProcessView: React.FC<ProcessViewProps> = ({ processId }) => {
     const exitTableMode = useCallback(() => {
         setWorkMode('kanban');
         setProcessWorkMode(processId, state.currentUser?.id, 'kanban');
-    }, [processId, state.currentUser?.id]);
+        // La tabla embebida escribe vía bulk API; recargar para que el tablero vea etapas actualizadas.
+        void actions.ensureProcessCandidatesLoaded(processId, true);
+    }, [processId, state.currentUser?.id, actions]);
 
     // Cargar conteo de attachments al montar el componente (incluyendo archivos de Google Drive)
     React.useEffect(() => {
