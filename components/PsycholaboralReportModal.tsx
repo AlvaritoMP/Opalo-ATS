@@ -18,6 +18,7 @@ import {
 } from '../lib/bulkTableColumns';
 import { captureElementToPdf, downloadPsycholaboralPdf } from '../lib/psycholaboralPdf';
 import { PsycholaboralReportDocument } from './PsycholaboralReportDocument';
+import { DateInput } from './DateInput';
 
 interface Props {
     isOpen: boolean;
@@ -255,11 +256,10 @@ export const PsycholaboralReportModal: React.FC<Props> = ({
                                 </div>
                                 <div>
                                     <label className="text-gray-500 block mb-0.5">Fecha del informe</label>
-                                    <input
-                                        type="date"
+                                    <DateInput
                                         value={evaluation.reportDate || ''}
-                                        onChange={e =>
-                                            setEvaluation({ ...evaluation, reportDate: e.target.value })
+                                        onChange={(value) =>
+                                            setEvaluation({ ...evaluation, reportDate: value })
                                         }
                                         className="w-full px-2 py-1 border rounded text-sm"
                                     />

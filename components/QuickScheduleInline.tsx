@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { X, Calendar, Clock, User, Check } from 'lucide-react';
 import { useAppState } from '../App';
+import { DateInput } from './DateInput';
 
 interface QuickScheduleInlineProps {
     candidateId: string;
@@ -67,10 +68,9 @@ export const QuickScheduleInline: React.FC<QuickScheduleInlineProps> = ({
                 <label className="block text-xs font-medium text-gray-700 mb-1">
                     Fecha <span className="text-red-500">*</span>
                 </label>
-                <input
-                    type="date"
+                <DateInput
                     value={date}
-                    onChange={(e) => setDate(e.target.value)}
+                    onChange={setDate}
                     min={today}
                     required
                     className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-primary-500 focus:border-transparent"

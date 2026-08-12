@@ -30,6 +30,7 @@ import {
 import * as XLSX from 'xlsx';
 import { useAppState } from '../App';
 import type { Process } from '../types';
+import { DateInput } from './DateInput';
 import {
     fetchFinalStageArrivals,
     fetchProcessCoverageSnapshot,
@@ -530,17 +531,15 @@ export const ProcessPerformanceModal: React.FC<ProcessPerformanceModalProps> = (
                         </label>
                         {useCustomRange && (
                             <>
-                                <input
-                                    type="date"
+                                <DateInput
                                     value={customFrom}
-                                    onChange={e => setCustomFrom(e.target.value)}
+                                    onChange={setCustomFrom}
                                     className="border border-gray-300 rounded-md px-2 py-1 text-xs"
                                 />
                                 <span className="text-gray-400">→</span>
-                                <input
-                                    type="date"
+                                <DateInput
                                     value={customTo}
-                                    onChange={e => setCustomTo(e.target.value)}
+                                    onChange={setCustomTo}
                                     className="border border-gray-300 rounded-md px-2 py-1 text-xs"
                                 />
                             </>

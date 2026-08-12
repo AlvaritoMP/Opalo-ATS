@@ -7,6 +7,7 @@ import { googleDriveService, GoogleDriveFolder } from '../lib/googleDrive';
 import { clientsApi } from '../lib/api';
 import { processesApi } from '../lib/api/processes';
 import { StageColorPicker } from './StageColorPicker';
+import { DateInput } from './DateInput';
 import { suggestStageColor } from '../lib/stageColors';
 
 interface ProcessEditorModalProps {
@@ -546,10 +547,10 @@ export const ProcessEditorModal: React.FC<ProcessEditorModalProps> = ({ process,
                             <div><label className="block text-sm font-medium text-gray-700">Rango salarial</label><input type="text" placeholder={`${state.settings?.currencySymbol || '$'}100k - ${state.settings?.currencySymbol || '$'}120k`} value={salaryRange} onChange={e => setSalaryRange(e.target.value)} className="mt-1 block w-full input"/></div>
                             <div><label className="block text-sm font-medium text-gray-700">Nivel de experiencia</label><input type="text" placeholder="Ej: 5+ años" value={experienceLevel} onChange={e => setExperienceLevel(e.target.value)} className="mt-1 block w-full input"/></div>
                             <div><label className="block text-sm font-medium text-gray-700">Seniority</label><input type="text" placeholder="Ej: Senior, Mid-Level" value={seniority} onChange={e => setSeniority(e.target.value)} className="mt-1 block w-full input"/></div>
-                            <div><label className="block text-sm font-medium text-gray-700">Fecha de inicio</label><input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="mt-1 block w-full input"/></div>
-                            <div><label className="block text-sm font-medium text-gray-700">Fecha de fin</label><input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="mt-1 block w-full input"/></div>
-                            <div><label className="block text-sm font-medium text-gray-700">Fecha de publicación de la oferta</label><input type="date" value={publishedDate} onChange={e => setPublishedDate(e.target.value)} className="mt-1 block w-full input" title="Fecha en que se publicó la oferta (para calcular Time to Hire)"/></div>
-                            <div><label className="block text-sm font-medium text-gray-700">Fecha de identificación de necesidad</label><input type="date" value={needIdentifiedDate} onChange={e => setNeedIdentifiedDate(e.target.value)} className="mt-1 block w-full input" title="Fecha en que se identificó la necesidad (para calcular Time to Fill)"/></div>
+                            <div><label className="block text-sm font-medium text-gray-700">Fecha de inicio</label><DateInput value={startDate} onChange={setStartDate} className="mt-1 block w-full input"/></div>
+                            <div><label className="block text-sm font-medium text-gray-700">Fecha de fin</label><DateInput value={endDate} onChange={setEndDate} className="mt-1 block w-full input"/></div>
+                            <div><label className="block text-sm font-medium text-gray-700">Fecha de publicación de la oferta</label><DateInput value={publishedDate} onChange={setPublishedDate} className="mt-1 block w-full input" title="Fecha en que se publicó la oferta (para calcular Time to Hire)"/></div>
+                            <div><label className="block text-sm font-medium text-gray-700">Fecha de identificación de necesidad</label><DateInput value={needIdentifiedDate} onChange={setNeedIdentifiedDate} className="mt-1 block w-full input" title="Fecha en que se identificó la necesidad (para calcular Time to Fill)"/></div>
                             <div>
                                 <label className="block text-sm font-medium text-gray-700">Estado del proceso</label>
                                 <select value={status} onChange={e => setStatus(e.target.value as ProcessStatus)} className="mt-1 block w-full input">

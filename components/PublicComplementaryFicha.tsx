@@ -21,6 +21,7 @@ import {
     getMissingRequiredComplementaryFields,
 } from '../lib/complementaryFichaMapping';
 import { bankSelectOptions } from '../lib/peruFinancialInstitutions';
+import { DateInput } from './DateInput';
 
 type Step = 'dni' | 'pick' | 'form' | 'done';
 
@@ -400,14 +401,12 @@ export const PublicComplementaryFicha: React.FC = () => {
                             </div>
                             <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                                 <Field label="Fecha de nacimiento (dd/mm/aaaa)" required={isReq('fechaNacimiento')} value={form.fechaNacimiento}>
-                                    <input
-                                        type="text"
+                                    <DateInput
+                                        outputFormat="display"
                                         className={inputClass}
-                                        inputMode="numeric"
-                                        placeholder="dd/mm/aaaa"
                                         required={isReq('fechaNacimiento')}
                                         value={form.fechaNacimiento || ''}
-                                        onChange={(e) => patchForm({ fechaNacimiento: e.target.value })}
+                                        onChange={(value) => patchForm({ fechaNacimiento: value })}
                                     />
                                 </Field>
                                 <Field label="Tipo de documento" required={isReq('tipoDocumento')} value={form.tipoDocumento}>
@@ -831,22 +830,22 @@ export const PublicComplementaryFicha: React.FC = () => {
                                             />
                                         </Field>
                                         <Field label="Fecha de ingreso" value={row.fechaIngreso}>
-                                            <input
-                                                type="date"
+                                            <DateInput
+                                                outputFormat="display"
                                                 className={inputClass}
                                                 value={row.fechaIngreso || ''}
-                                                onChange={(e) =>
-                                                    updateExperiencia(index, { fechaIngreso: e.target.value })
+                                                onChange={(value) =>
+                                                    updateExperiencia(index, { fechaIngreso: value })
                                                 }
                                             />
                                         </Field>
                                         <Field label="Fecha de cese" value={row.fechaCese}>
-                                            <input
-                                                type="date"
+                                            <DateInput
+                                                outputFormat="display"
                                                 className={inputClass}
                                                 value={row.fechaCese || ''}
-                                                onChange={(e) =>
-                                                    updateExperiencia(index, { fechaCese: e.target.value })
+                                                onChange={(value) =>
+                                                    updateExperiencia(index, { fechaCese: value })
                                                 }
                                             />
                                         </Field>

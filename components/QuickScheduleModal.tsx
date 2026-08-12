@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { X, Calendar, Clock, User } from 'lucide-react';
 import { useAppState } from '../App';
+import { DateInput } from './DateInput';
 
 interface QuickScheduleModalProps {
     isOpen: boolean;
@@ -110,10 +111,9 @@ export const QuickScheduleModal: React.FC<QuickScheduleModalProps> = ({
                         <label className="block text-sm font-medium text-gray-700 mb-1">
                             Fecha <span className="text-red-500">*</span>
                         </label>
-                        <input
-                            type="date"
+                        <DateInput
                             value={date}
-                            onChange={(e) => setDate(e.target.value)}
+                            onChange={setDate}
                             min={today}
                             required
                             className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"

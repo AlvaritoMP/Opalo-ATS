@@ -23,6 +23,7 @@ import {
     applyPsycholaboralImportPaste,
     buildPsycholaboralImportTemplateTsv,
 } from '../lib/psycholaboralImport';
+import { DateInput } from './DateInput';
 
 const LEVEL_OPTIONS: PersonalityLevel[] = ['bajo', 'promedio', 'alto'];
 
@@ -310,10 +311,9 @@ export const PsycholaboralBulkEvaluateModal: React.FC<Props> = ({
                     <label className="flex flex-col gap-0.5">
                         <span className="text-gray-600 font-medium">Fecha informe (todas las filas)</span>
                         <div className="flex gap-1">
-                            <input
-                                type="date"
+                            <DateInput
                                 value={globalReportDate}
-                                onChange={e => setGlobalReportDate(e.target.value)}
+                                onChange={setGlobalReportDate}
                                 className="border rounded px-2 py-1.5 text-xs"
                             />
                             <button
@@ -471,10 +471,9 @@ export const PsycholaboralBulkEvaluateModal: React.FC<Props> = ({
                                                 />
                                             </td>
                                             <td className="px-1 py-1">
-                                                <input
-                                                    type="date"
+                                                <DateInput
                                                     value={ev.reportDate?.split('T')[0] || ''}
-                                                    onChange={e => setReportDateRow(c.id, e.target.value)}
+                                                    onChange={(value) => setReportDateRow(c.id, value)}
                                                     className="w-[124px] px-1 py-0.5 border rounded text-[11px]"
                                                 />
                                             </td>

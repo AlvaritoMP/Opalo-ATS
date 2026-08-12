@@ -12,6 +12,7 @@ import { PsycholaboralConfigSection } from './PsycholaboralConfigSection';
 import { PsycholaboralInventoryModal } from './PsycholaboralInventoryModal';
 import { googleDriveService } from '../lib/googleDrive';
 import { StageColorPicker } from './StageColorPicker';
+import { DateInput } from './DateInput';
 import { ComplementaryFichaMappingEditor } from './ComplementaryFichaMappingEditor';
 import { suggestStageColor, buildStageColorMaps } from '../lib/stageColors';
 import type { ComplementaryFichaMapping } from '../lib/complementaryFichaMapping';
@@ -757,10 +758,9 @@ export const BulkProcessEditorModal: React.FC<BulkProcessEditorModalProps> = ({ 
                                         <label className="block text-sm font-medium text-gray-700 mb-1">
                                             Fecha de inicio del proceso
                                         </label>
-                                        <input
-                                            type="date"
+                                        <DateInput
                                             value={startDate}
-                                            onChange={(e) => setStartDate(e.target.value)}
+                                            onChange={setStartDate}
                                             className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
                                             title="Respaldo para Time to Hire si no hay fecha de publicación"
                                         />
@@ -769,10 +769,9 @@ export const BulkProcessEditorModal: React.FC<BulkProcessEditorModalProps> = ({ 
                                         <label className="block text-sm font-medium text-gray-700 mb-1">
                                             Fecha de publicación de la oferta
                                         </label>
-                                        <input
-                                            type="date"
+                                        <DateInput
                                             value={publishedDate}
-                                            onChange={(e) => setPublishedDate(e.target.value)}
+                                            onChange={setPublishedDate}
                                             className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
                                             title="Inicio del cómputo de Time to Hire"
                                         />
@@ -781,10 +780,9 @@ export const BulkProcessEditorModal: React.FC<BulkProcessEditorModalProps> = ({ 
                                         <label className="block text-sm font-medium text-gray-700 mb-1">
                                             Fecha de identificación de necesidad
                                         </label>
-                                        <input
-                                            type="date"
+                                        <DateInput
                                             value={needIdentifiedDate}
-                                            onChange={(e) => setNeedIdentifiedDate(e.target.value)}
+                                            onChange={setNeedIdentifiedDate}
                                             className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
                                             title="Inicio del cómputo de Time to Fill"
                                         />

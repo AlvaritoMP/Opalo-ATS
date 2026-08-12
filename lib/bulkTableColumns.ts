@@ -2166,6 +2166,31 @@ export function normalizeBulkDateInput(value: BulkDateInput): string {
     return formatBulkDate(value);
 }
 
+/** Convierte una fecha (DD/MM/AAAA, ISO u otros formatos soportados) a yyyy-mm-dd para API/almacenamiento. */
+export function parseBulkDateToIso(value: BulkDateInput): string {
+    const display = normalizeBulkDateInput(value);
+    if (!display) return '';
+
+    const match = display.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+    if (!match) return '';
+
+    const day = parseInt(match[1], 10);
+    const month = parseInt(match[2], 10);
+    const year = parseInt(match[3], 10);
+    const d = new Date(year, month - 1, day);
+    if (
+        isNaN(d.getTime()) ||
+        d.getFullYear() !== year ||
+        d.getMonth() !== month - 1 ||
+        d.getDate() !== day
+    ) {
+        return '';
+    }
+
+    const pad = (n: number) => String(n).padStart(2, '0');
+    return `${year}-${pad(month)}-${pad(day)}`;
+}
+
 /** Campos estándar de candidato que se normalizan en tabla masiva */
 export const BULK_TEXT_CASE_STANDARD_FIELDS = [
     'name',

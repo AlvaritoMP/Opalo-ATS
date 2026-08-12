@@ -10,6 +10,7 @@ import { SearchableSelect } from './SearchableSelect';
 import { DiscardCandidateModal } from './DiscardCandidateModal';
 import { SendToOpsFlowModal } from './SendToOpsFlowModal';
 import { CandidateTransitRoutes } from './CandidateTransitRoutes';
+import { DateInput } from './DateInput';
 import { candidatesApi } from '../lib/api/candidates';
 import { buildPublicComplementaryFichaUrl } from '../lib/complementaryFicha';
 import JSZip from 'jszip';
@@ -1137,11 +1138,12 @@ export const CandidateDetailsModal: React.FC<{ candidate: Candidate, onClose: ()
                                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                                 <div>
                                                     <label className="block text-sm font-medium text-gray-700">Fecha de contratación</label>
-                                                    <input
-                                                        type="date"
+                                                    <DateInput
                                                         name="hireDate"
                                                         value={editableCandidate.hireDate || ''}
-                                                        onChange={handleInputChange}
+                                                        onChange={(value) =>
+                                                            setEditableCandidate(prev => ({ ...prev, hireDate: value }))
+                                                        }
                                                         disabled={!canEditHireDate}
                                                         className={`mt-1 block w-full input ${!canEditHireDate ? 'bg-gray-100 cursor-not-allowed' : ''}`}
                                                     />

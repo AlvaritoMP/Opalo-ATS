@@ -50,6 +50,7 @@ import { resolveDashboardApplicationDate } from '../lib/dashboardCandidatePool';
 import type { BulkCandidateFieldExtras } from '../lib/dashboardDataLoader';
 import type { ContactSummaryCandidate } from '../lib/contactAttemptReconcile';
 import { LimaDistrictMap } from './LimaDistrictMap';
+import { DateInput } from './DateInput';
 import { normalizeDistrictLabel } from '../lib/limaDistrictMap';
 import {
     buildDashboardHiredContext,
@@ -1272,21 +1273,19 @@ export const Dashboard: React.FC = () => {
                 </div>
                 <div>
                     <label htmlFor="startDate" className="block text-sm font-medium text-gray-700 mb-1">Postulación desde</label>
-                    <input
-                        type="date"
+                    <DateInput
                         id="startDate"
                         value={dateFilter.start}
-                        onChange={(e) => setDateFilter({ start: e.target.value })}
+                        onChange={(value) => setDateFilter({ start: value })}
                         className="border-gray-300 rounded-md shadow-sm text-sm"
                     />
                 </div>
                 <div>
                     <label htmlFor="endDate" className="block text-sm font-medium text-gray-700 mb-1">Postulación hasta</label>
-                    <input
-                        type="date"
+                    <DateInput
                         id="endDate"
                         value={dateFilter.end}
-                        onChange={(e) => setDateFilter({ end: e.target.value })}
+                        onChange={(value) => setDateFilter({ end: value })}
                         className="border-gray-300 rounded-md shadow-sm text-sm"
                     />
                 </div>

@@ -3,6 +3,7 @@ import { useAppState } from '../App';
 import { InterviewEvent } from '../types';
 import { X, Calendar, Clock, User, Briefcase, FileText, Mail, Download, Plus } from 'lucide-react';
 import { downloadICSFile, sendEmailInvitations } from '../lib/calendarUtils';
+import { DateInput } from './DateInput';
 
 interface ScheduleInterviewModalProps {
     event: InterviewEvent | null;
@@ -166,7 +167,7 @@ export const ScheduleInterviewModal: React.FC<ScheduleInterviewModalProps> = ({ 
                         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                             <div className="md:col-span-1">
                                 <label htmlFor="date" className="block text-sm font-medium text-gray-700 flex items-center"><Calendar className="w-4 h-4 mr-2"/> Fecha</label>
-                                <input type="date" id="date" value={date} onChange={e => setDate(e.target.value)} required className="mt-1 block w-full input"/>
+                                <DateInput id="date" value={date} onChange={setDate} required className="mt-1 block w-full input"/>
                             </div>
                              <div className="md:col-span-1">
                                 <label htmlFor="startTime" className="block text-sm font-medium text-gray-700 flex items-center"><Clock className="w-4 h-4 mr-2"/> Hora inicio</label>
