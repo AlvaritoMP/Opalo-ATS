@@ -197,6 +197,7 @@ import {
     resolveApplicationCount,
 } from '../lib/applicationCountDisplay';
 import { openMailCompose, getMailComposeToastMessage } from '../lib/openMailto';
+import { openAttachment } from '../lib/openAttachment';
 import {
     computeProfileMatch,
     computeProfileMatchSummary,
@@ -465,16 +466,15 @@ const CandidateDrawer: React.FC<{
                                     <label className="text-sm font-medium text-gray-500">Documentos</label>
                                     <div className="mt-2 space-y-2">
                                         {displayCandidate.attachments.map((att: any) => (
-                                            <a
+                                            <button
+                                                type="button"
                                                 key={att.id}
-                                                href={att.url}
-                                                target="_blank"
-                                                rel="noopener noreferrer"
-                                                className="block p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors"
+                                                onClick={() => openAttachment(att)}
+                                                className="block w-full text-left p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors"
                                             >
                                                 <p className="text-sm font-medium text-gray-900">{att.name}</p>
                                                 <p className="text-xs text-gray-500">{att.type}</p>
-                                            </a>
+                                            </button>
                                         ))}
                                     </div>
                                 </div>

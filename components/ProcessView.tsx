@@ -22,6 +22,7 @@ import {
     type ProcessWorkMode,
 } from '../lib/processViewMode';
 import { processesApi } from '../lib/api/processes';
+import { openAttachment } from '../lib/openAttachment';
 
 interface ProcessViewProps {
     processId: string;
@@ -35,9 +36,17 @@ const ProcessAttachmentsModal: React.FC<{
     processFolderId?: string;
     googleDriveConfig?: any;
 }> = ({ processId, attachments, onClose, onLoadAttachments, processFolderId, googleDriveConfig }) => {
+    const { actions } = useAppState();
     const [isLoading, setIsLoading] = useState(false);
     const [loadedAttachments, setLoadedAttachments] = useState<Attachment[]>(attachments);
     const [hasLoaded, setHasLoaded] = useState(attachments.length > 0);
+
+    useEffect(() => {
+        if (attachments.length > 0) {
+            setLoadedAttachments(attachments);
+            setHasLoaded(true);
+        }
+    }, [attachments]);
 
     const handleLoadAttachments = async () => {
         if (hasLoaded || isLoading) return;
@@ -46,7 +55,6 @@ const ProcessAttachmentsModal: React.FC<{
             if (onLoadAttachments) {
                 await onLoadAttachments();
             } else {
-                const { processesApi } = await import('../lib/api/processes');
                 const atts = await processesApi.getAttachments(processId, processFolderId, googleDriveConfig);
                 setLoadedAttachments(atts);
             }
@@ -58,21 +66,27 @@ const ProcessAttachmentsModal: React.FC<{
         }
     };
 
-    // Cargar attachments automáticamente si no hay ninguno cargado
-    React.useEffect(() => {
+    useEffect(() => {
         if (!hasLoaded && loadedAttachments.length === 0) {
-            handleLoadAttachments();
+            void handleLoadAttachments();
         }
     }, []);
 
-    const displayAttachments = hasLoaded ? loadedAttachments : attachments;
+    const displayAttachments = loadedAttachments.length > 0 ? loadedAttachments : attachments;
+
+    const handleOpen = (att: Attachment, mode: 'view' | 'download' = 'view') => {
+        const opened = openAttachment(att, mode);
+        if (!opened) {
+            actions.showToast('No se pudo abrir el documento. Vuelve a subirlo o verifica el archivo.', 'error', 4000);
+        }
+    };
 
     return (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
             <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg">
                 <div className="p-6 border-b flex justify-between items-center">
                     <h2 className="text-xl font-bold text-gray-800">Documentos del proceso</h2>
-                    <button onClick={onClose} className="p-2 rounded-full hover:bg-gray-100">
+                    <button type="button" onClick={onClose} className="p-2 rounded-full hover:bg-gray-100">
                         <X />
                     </button>
                 </div>
@@ -82,18 +96,29 @@ const ProcessAttachmentsModal: React.FC<{
                             <p className="text-sm text-gray-500">Cargando documentos...</p>
                         </div>
                     ) : displayAttachments.length > 0 ? (
-                        displayAttachments.map(att => (
-                            <a 
-                                href={att.url} 
-                                target="_blank" 
-                                rel="noopener noreferrer" 
-                                key={att.id} 
-                                className="flex items-center p-2 rounded-md hover:bg-gray-100"
-                            >
-                                <FileText className="w-5 h-5 mr-3 text-gray-500"/>
-                                <span className="text-sm font-medium text-primary-600">{att.name}</span>
-                            </a>
-                        ))
+                        <ul className="space-y-1">
+                            {displayAttachments.map(att => (
+                                <li key={att.id} className="flex items-center gap-2 p-2 rounded-md hover:bg-gray-100">
+                                    <FileText className="w-5 h-5 text-gray-500 shrink-0"/>
+                                    <button
+                                        type="button"
+                                        onClick={() => handleOpen(att, 'view')}
+                                        className="flex-1 min-w-0 text-left text-sm font-medium text-primary-600 hover:underline truncate"
+                                        title={att.name}
+                                    >
+                                        {att.name}
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => handleOpen(att, 'download')}
+                                        className="p-1.5 rounded-md hover:bg-gray-200 shrink-0"
+                                        title="Descargar"
+                                    >
+                                        <Download className="w-4 h-4 text-gray-600" />
+                                    </button>
+                                </li>
+                            ))}
+                        </ul>
                     ) : (
                         <p className="text-sm text-gray-500 text-center">No hay documentos adjuntos para este proceso.</p>
                     )}

@@ -15,6 +15,7 @@ import { candidatesApi } from '../lib/api/candidates';
 import { buildPublicComplementaryFichaUrl } from '../lib/complementaryFicha';
 import JSZip from 'jszip';
 import { saveAs } from 'file-saver';
+import { openAttachment } from '../lib/openAttachment';
 
 const fileToBase64 = (file: File): Promise<string> => {
     return new Promise((resolve, reject) => {
@@ -1409,14 +1410,17 @@ export const CandidateDetailsModal: React.FC<{ candidate: Candidate, onClose: ()
                                                         <div className="flex-1 min-w-0">
                                                             <p className="text-sm font-medium text-gray-800 truncate">{att.name}</p>
                                                             {att.url && (
-                                                                <a 
-                                                                    href={att.url} 
-                                                                    target="_blank" 
-                                                                    rel="noopener noreferrer"
-                                                                    className="text-xs text-primary-600 hover:underline truncate block"
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => {
+                                                                        if (!openAttachment(att, 'view')) {
+                                                                            actions.showToast('No se pudo abrir el documento. Vuelve a subirlo o verifica el archivo.', 'error', 4000);
+                                                                        }
+                                                                    }}
+                                                                    className="text-xs text-primary-600 hover:underline truncate block text-left"
                                                                 >
                                                                     {att.url.startsWith('https://drive.google.com') ? 'Ver en Google Drive' : 'Ver documento'}
-                                                                </a>
+                                                                </button>
                                                             )}
                                                             {att.category && process?.documentCategories && (
                                                                 <span className="text-xs text-gray-500 mt-1 block">
@@ -1439,7 +1443,18 @@ export const CandidateDetailsModal: React.FC<{ candidate: Candidate, onClose: ()
                                                             </button>
                                                         )}
                                                         <button onClick={() => setPreviewFile(att)} className="p-1 rounded-md hover:bg-gray-200" title="Previsualizar"><Eye className="w-4 h-4 text-gray-600" /></button>
-                                                        <a href={att.url} target="_blank" rel="noopener noreferrer" className="p-1 rounded-md hover:bg-gray-200" title="Abrir"><Download className="w-4 h-4 text-gray-600" /></a>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => {
+                                                                if (!openAttachment(att, 'download')) {
+                                                                    actions.showToast('No se pudo abrir el documento. Vuelve a subirlo o verifica el archivo.', 'error', 4000);
+                                                                }
+                                                            }}
+                                                            className="p-1 rounded-md hover:bg-gray-200"
+                                                            title="Abrir"
+                                                        >
+                                                            <Download className="w-4 h-4 text-gray-600" />
+                                                        </button>
                                                         <button onClick={() => handleDeleteAttachment(att.id)} className="p-1 rounded-md hover:bg-red-100" title="Eliminar"><Trash2 className="w-4 h-4 text-red-500" /></button>
                                                     </div>
                                                 </div>
@@ -1552,14 +1567,17 @@ export const CandidateDetailsModal: React.FC<{ candidate: Candidate, onClose: ()
                                         <div className="text-center p-8">
                                             <FileText className="w-16 h-16 mx-auto text-gray-400" />
                                             <p className="mt-2 text-gray-600">No hay vista previa disponible para este tipo de archivo.</p>
-                                            <a 
-                                                href={previewFile.url} 
-                                                target="_blank" 
-                                                rel="noopener noreferrer"
+                                            <button
+                                                type="button"
+                                                onClick={() => {
+                                                    if (!openAttachment(previewFile, 'download')) {
+                                                        actions.showToast('No se pudo abrir el documento. Vuelve a subirlo o verifica el archivo.', 'error', 4000);
+                                                    }
+                                                }}
                                                 className="mt-4 inline-flex items-center px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700"
                                             >
                                                 <Download className="w-4 h-4 mr-2" /> {previewFile.url.includes('drive.google.com') ? 'Abrir en Google Drive' : `Descargar "${previewFile.name}"`}
-                                            </a>
+                                            </button>
                                         </div>
                                     )}
                                     </div>

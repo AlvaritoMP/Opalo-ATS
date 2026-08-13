@@ -17,6 +17,7 @@ import { ComplementaryFichaMappingEditor } from './ComplementaryFichaMappingEdit
 import { suggestStageColor, buildStageColorMaps } from '../lib/stageColors';
 import type { ComplementaryFichaMapping } from '../lib/complementaryFichaMapping';
 import { COMPLEMENTARY_FICHA_DEFAULT_REQUIRED } from '../lib/complementaryFichaMapping';
+import { openAttachment } from '../lib/openAttachment';
 
 const fileToBase64 = (file: File): Promise<string> =>
     new Promise((resolve, reject) => {
@@ -618,14 +619,17 @@ export const BulkProcessEditorModal: React.FC<BulkProcessEditorModalProps> = ({ 
                                                 key={att.id}
                                                 className="flex items-center justify-between gap-2 px-3 py-2 text-sm"
                                             >
-                                                <a
-                                                    href={att.url}
-                                                    target="_blank"
-                                                    rel="noopener noreferrer"
-                                                    className="text-primary-600 truncate hover:underline"
+                                                <button
+                                                    type="button"
+                                                    onClick={() => {
+                                                        if (!openAttachment(att, 'view')) {
+                                                            actions.showToast('No se pudo abrir el documento. Vuelve a subirlo o verifica el archivo.', 'error', 4000);
+                                                        }
+                                                    }}
+                                                    className="text-left text-primary-600 truncate hover:underline"
                                                 >
                                                     {att.name}
-                                                </a>
+                                                </button>
                                                 <button
                                                     type="button"
                                                     onClick={() => handleDeleteAttachment(att.id)}

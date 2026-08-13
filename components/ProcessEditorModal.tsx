@@ -9,6 +9,7 @@ import { processesApi } from '../lib/api/processes';
 import { StageColorPicker } from './StageColorPicker';
 import { DateInput } from './DateInput';
 import { suggestStageColor } from '../lib/stageColors';
+import { openAttachment } from '../lib/openAttachment';
 
 interface ProcessEditorModalProps {
     process: Process | null;
@@ -788,28 +789,34 @@ export const ProcessEditorModal: React.FC<ProcessEditorModalProps> = ({ process,
                                             <div className="flex-1 min-w-0">
                                                 <p className="text-sm font-medium text-gray-800 truncate">{att.name}</p>
                                                 {att.url && (
-                                                    <a 
-                                                        href={att.url} 
-                                                        target="_blank" 
-                                                        rel="noopener noreferrer"
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => {
+                                                            if (!openAttachment(att, 'view')) {
+                                                                actions.showToast('No se pudo abrir el documento. Vuelve a subirlo o verifica el archivo.', 'error', 4000);
+                                                            }
+                                                        }}
                                                         className="text-xs text-primary-600 hover:underline"
                                                     >
                                                         {att.url.startsWith('https://drive.google.com') ? 'Ver en Google Drive' : 'Ver documento'}
-                                                    </a>
+                                                    </button>
                                                 )}
                                             </div>
                                         </div>
                                         <div className="flex items-center space-x-2">
                                             {att.url && (
-                                                <a 
-                                                    href={att.url} 
-                                                    target="_blank" 
-                                                    rel="noopener noreferrer"
-                                                    className="p-1 rounded-md hover:bg-gray-200" 
+                                                <button
+                                                    type="button"
+                                                    onClick={() => {
+                                                        if (!openAttachment(att, 'view')) {
+                                                            actions.showToast('No se pudo abrir el documento. Vuelve a subirlo o verifica el archivo.', 'error', 4000);
+                                                        }
+                                                    }}
+                                                    className="p-1 rounded-md hover:bg-gray-200"
                                                     title="Abrir"
                                                 >
                                                     <Eye className="w-4 h-4 text-gray-600" />
-                                                </a>
+                                                </button>
                                             )}
                                             <button onClick={() => handleDeleteAttachment(att.id)} className="p-1 rounded-md hover:bg-red-100" title="Eliminar"><Trash2 className="w-4 h-4 text-red-500" /></button>
                                         </div>

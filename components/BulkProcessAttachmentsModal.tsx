@@ -2,6 +2,8 @@ import React, { useEffect, useState } from 'react';
 import { X, FileText, Download, Loader2 } from 'lucide-react';
 import { Attachment } from '../types';
 import { processesApi } from '../lib/api/processes';
+import { openAttachment } from '../lib/openAttachment';
+import { useAppState } from '../App';
 
 interface Props {
     isOpen: boolean;
@@ -22,8 +24,16 @@ export const BulkProcessAttachmentsModal: React.FC<Props> = ({
     googleDriveFolderId,
     googleDriveConfig,
 }) => {
+    const { actions } = useAppState();
     const [attachments, setAttachments] = useState<Attachment[]>(initialAttachments);
     const [loading, setLoading] = useState(false);
+
+    const handleOpen = (att: Attachment, mode: 'view' | 'download' = 'view') => {
+        const opened = openAttachment(att, mode);
+        if (!opened) {
+            actions.showToast('No se pudo abrir el documento. Vuelve a subirlo o verifica el archivo.', 'error', 4000);
+        }
+    };
 
     useEffect(() => {
         if (!isOpen || !processId) return;
@@ -74,15 +84,14 @@ export const BulkProcessAttachmentsModal: React.FC<Props> = ({
                                             </p>
                                         )}
                                     </div>
-                                    <a
-                                        href={att.url}
-                                        target="_blank"
-                                        rel="noopener noreferrer"
+                                    <button
+                                        type="button"
+                                        onClick={() => handleOpen(att, 'view')}
                                         className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-primary-600 bg-primary-50 rounded-lg hover:bg-primary-100 shrink-0"
                                     >
                                         <Download className="w-3.5 h-3.5" />
                                         Ver / Descargar
-                                    </a>
+                                    </button>
                                 </li>
                             ))}
                         </ul>
