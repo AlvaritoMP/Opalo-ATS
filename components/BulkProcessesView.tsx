@@ -143,6 +143,8 @@ import { getCellMetaStorageKey, BulkCellMeta, BulkCellMetaStore } from '../lib/b
 import { BulkCellContextMenu } from './BulkCellContextMenu';
 import { BulkProcessEditorModal } from './BulkProcessEditorModal';
 import { BulkProcessImportModal } from './BulkProcessImportModal';
+import { CvImportModal } from './CvImportModal';
+import { candidateToBulkRow } from '../lib/cvImport';
 import { BulkColumnRecoveryModal } from './BulkColumnRecoveryModal';
 import { BulkAddRowModal } from './BulkAddRowModal';
 import { BulkWhatsAppModal } from './BulkWhatsAppModal';
@@ -763,6 +765,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
     const [showProcessModal, setShowProcessModal] = useState(false);
     const [editingProcess, setEditingProcess] = useState<Process | null>(null);
     const [showImportModal, setShowImportModal] = useState(false);
+    const [showCvImportModal, setShowCvImportModal] = useState(false);
     const [importRestoreMode, setImportRestoreMode] = useState(false);
     const [showRecoveryModal, setShowRecoveryModal] = useState(false);
     const [showAddRowModal, setShowAddRowModal] = useState(false);
@@ -6241,6 +6244,15 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                                         </button>
                                         <button
                                             type="button"
+                                            onClick={() => setShowCvImportModal(true)}
+                                            className="bg-teal-600 text-white hover:bg-teal-700 transition-colors"
+                                            title="Importar candidatos desde currículums PDF"
+                                        >
+                                            <FileText className="w-4 h-4" />
+                                            Importar CVs
+                                        </button>
+                                        <button
+                                            type="button"
                                             onClick={() => {
                                                 setImportRestoreMode(true);
                                                 setShowImportModal(true);
@@ -7759,6 +7771,26 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                     rowNumber={total + 1}
                     onClose={() => setShowAddRowModal(false)}
                     onSuccess={handleAddRowSuccess}
+                />
+            )}
+
+            {showCvImportModal && process && (
+                <CvImportModal
+                    process={process}
+                    mode={process.isBulkProcess ? 'bulk' : 'standard'}
+                    bulkRowOffset={total}
+                    onClose={() => setShowCvImportModal(false)}
+                    onCreatedCandidates={created => {
+                        const rows = created.map(candidateToBulkRow);
+                        setCandidates(prev => [...rows, ...prev]);
+                        setTotal(t => t + rows.length);
+                    }}
+                    onImportComplete={() => {
+                        setShowCvImportModal(false);
+                        logActivity('import', {
+                            details: { summary: 'Importación de CVs PDF' },
+                        });
+                    }}
                 />
             )}
 

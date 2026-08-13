@@ -1,23 +1,21 @@
 import React, { useState, useRef } from 'react';
 import { useAppState } from '../App';
 import { Process, Attachment, Candidate } from '../types';
-import { X, Upload, FileText, Trash2, User } from 'lucide-react';
+import { X, Upload, FileText, Trash2, User, Wand2, Loader2 } from 'lucide-react';
 import { SearchableSelect } from './SearchableSelect';
+import { fileToBase64 } from '../lib/fileUtils';
+import {
+    buildCvAttachment,
+    findCvDocumentCategory,
+    parseCvFileForImport,
+} from '../lib/cvImport';
+import type { CvExtractedFields } from '../lib/cvFieldExtractor';
 
 interface AddCandidateModalProps {
     process: Process;
     onClose: () => void;
     onSuccess?: () => void;
 }
-
-const fileToBase64 = (file: File): Promise<string> => {
-    return new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.readAsDataURL(file);
-        reader.onload = () => resolve(reader.result as string);
-        reader.onerror = error => reject(error);
-    });
-};
 
 export const AddCandidateModal: React.FC<AddCandidateModalProps> = ({ process, onClose, onSuccess }) => {
     const { state, actions, getLabel } = useAppState();
@@ -46,6 +44,8 @@ export const AddCandidateModal: React.FC<AddCandidateModalProps> = ({ process, o
     
     const attachmentInputRef = useRef<HTMLInputElement>(null);
     const avatarInputRef = useRef<HTMLInputElement>(null);
+    const cvInputRef = useRef<HTMLInputElement>(null);
+    const [isParsingCv, setIsParsingCv] = useState(false);
     
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -116,6 +116,66 @@ export const AddCandidateModal: React.FC<AddCandidateModalProps> = ({ process, o
         setAttachments(prev => prev.filter(att => att.id !== id));
     };
     
+    const applyCvFields = (fields: CvExtractedFields) => {
+        if (fields.name) setName(fields.name);
+        if (fields.email) setEmail(fields.email);
+        if (fields.phone) setPhone(fields.phone);
+        if (fields.phone2) setPhone2(fields.phone2);
+        if (fields.dni) setDni(fields.dni);
+        if (fields.linkedinUrl) setLinkedinUrl(fields.linkedinUrl);
+        if (fields.address) setAddress(fields.address);
+        if (fields.province) {
+            setProvince(fields.province);
+            const available = state.settings?.districts?.[fields.province] || [];
+            if (fields.district && available.includes(fields.district)) {
+                setDistrict(fields.district);
+            } else if (fields.district) {
+                setDistrict(fields.district);
+            }
+        } else if (fields.district) {
+            setDistrict(fields.district);
+        }
+        if (fields.age !== undefined) setAge(fields.age);
+        if (fields.salaryExpectation) setSalaryExpectation(fields.salaryExpectation);
+        if (fields.description) setDescription(fields.description);
+    };
+
+    const handleCvAutocomplete = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        e.target.value = '';
+        if (!file) return;
+
+        setIsParsingCv(true);
+        try {
+            const parsed = await parseCvFileForImport(file, {
+                provinces: state.settings?.provinces,
+                districts: state.settings?.districts,
+            });
+            if (parsed.oversized || (parsed.error && parsed.error.startsWith('Solo se aceptan'))) {
+                actions.showToast(parsed.error || 'Archivo no válido', 'error', 5000);
+                return;
+            }
+            if (parsed.error) {
+                actions.showToast(parsed.error, 'error', 5000);
+            }
+            applyCvFields(parsed.fields);
+            const cvCategory = findCvDocumentCategory(process.documentCategories);
+            const attachment = await buildCvAttachment(file, cvCategory?.id);
+            setAttachments(prev => {
+                const withoutSame = prev.filter(a => a.name !== file.name);
+                return [...withoutSame, attachment];
+            });
+            if (!parsed.error) {
+                actions.showToast('Datos del CV aplicados. Revisa y completa si hace falta.', 'success', 3500);
+            }
+        } catch (error) {
+            const message = error instanceof Error ? error.message : 'No se pudo leer el PDF';
+            actions.showToast(message, 'error', 4000);
+        } finally {
+            setIsParsingCv(false);
+        }
+    };
+
     const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
         if (file && file.type.startsWith('image/')) {
@@ -145,6 +205,28 @@ export const AddCandidateModal: React.FC<AddCandidateModalProps> = ({ process, o
                                 <label className="block text-sm font-medium text-gray-700">Foto de perfil</label>
                                 <button type="button" onClick={() => avatarInputRef.current?.click()} className="mt-1 text-sm font-medium text-primary-600 hover:text-primary-800">Subir foto</button>
                                 <input type="file" accept="image/*" ref={avatarInputRef} onChange={handleAvatarUpload} className="hidden" />
+                            </div>
+                            <div className="ml-auto">
+                                <input
+                                    type="file"
+                                    accept="application/pdf,.pdf"
+                                    ref={cvInputRef}
+                                    onChange={handleCvAutocomplete}
+                                    className="hidden"
+                                />
+                                <button
+                                    type="button"
+                                    disabled={isParsingCv}
+                                    onClick={() => cvInputRef.current?.click()}
+                                    className="flex items-center text-sm font-medium text-teal-700 bg-teal-50 border border-teal-200 px-3 py-2 rounded-md hover:bg-teal-100 disabled:opacity-60"
+                                >
+                                    {isParsingCv ? (
+                                        <Loader2 className="w-4 h-4 mr-1.5 animate-spin" />
+                                    ) : (
+                                        <Wand2 className="w-4 h-4 mr-1.5" />
+                                    )}
+                                    {isParsingCv ? 'Leyendo CV…' : 'Autocompletar desde CV'}
+                                </button>
                             </div>
                         </div>
 

@@ -9,6 +9,7 @@ import { CloseProcessModal } from './CloseProcessModal';
 import { EndProcessModal } from './EndProcessModal';
 import { ProcessCommunicationModal } from './ProcessCommunicationModal';
 import { ProcessImportModal } from './BulkImportView';
+import { CvImportModal } from './CvImportModal';
 import { BulkProcessesView } from './BulkProcessesView';
 import { ProcessPerformanceModal } from './ProcessPerformanceModal';
 import { Attachment, UserRole, Candidate } from '../types';
@@ -141,6 +142,7 @@ export const ProcessView: React.FC<ProcessViewProps> = ({ processId }) => {
     const [isCloseProcessOpen, setIsCloseProcessOpen] = useState(false);
     const [isCommunicationOpen, setIsCommunicationOpen] = useState(false);
     const [isImportOpen, setIsImportOpen] = useState(false);
+    const [isCvImportOpen, setIsCvImportOpen] = useState(false);
     const [isPerformanceOpen, setIsPerformanceOpen] = useState(false);
     const [selectedCandidates, setSelectedCandidates] = useState<string[]>([]);
     const [attachmentsCount, setAttachmentsCount] = useState<number | null>(null);
@@ -628,6 +630,7 @@ export const ProcessView: React.FC<ProcessViewProps> = ({ processId }) => {
                                 </button>
                             )}
                             {processIsActive && !process.isBulkProcess && (
+                                <>
                                 <button
                                     onClick={() => setIsImportOpen(true)}
                                     className="flex items-center px-3 md:px-4 py-2 bg-green-600 text-white rounded-lg shadow-sm hover:bg-green-700 whitespace-nowrap"
@@ -636,6 +639,16 @@ export const ProcessView: React.FC<ProcessViewProps> = ({ processId }) => {
                                     <span className="hidden md:inline">Importar candidatos</span>
                                     <span className="md:hidden">Importar</span>
                                 </button>
+                                <button
+                                    type="button"
+                                    onClick={() => setIsCvImportOpen(true)}
+                                    className="flex items-center px-3 md:px-4 py-2 bg-teal-600 text-white rounded-lg shadow-sm hover:bg-teal-700 whitespace-nowrap"
+                                >
+                                    <FileText className="w-4 h-4 md:w-5 md:h-5 mr-1 md:mr-2" />
+                                    <span className="hidden md:inline">Importar CVs</span>
+                                    <span className="md:hidden">CVs</span>
+                                </button>
+                                </>
                             )}
                             {processIsOperational && (
                                 <button onClick={() => setIsAddCandidateOpen(true)} className="flex items-center px-3 md:px-4 py-2 bg-primary-600 text-white rounded-lg shadow-sm hover:bg-primary-700 whitespace-nowrap">
@@ -721,6 +734,17 @@ export const ProcessView: React.FC<ProcessViewProps> = ({ processId }) => {
                     onClose={() => setIsImportOpen(false)}
                     onImportComplete={() => {
                         setIsImportOpen(false);
+                        void actions.ensureProcessCandidatesLoaded(processId, true);
+                    }}
+                />
+            )}
+            {isCvImportOpen && !process.isBulkProcess && (
+                <CvImportModal
+                    process={process}
+                    mode="standard"
+                    onClose={() => setIsCvImportOpen(false)}
+                    onImportComplete={() => {
+                        setIsCvImportOpen(false);
                         void actions.ensureProcessCandidatesLoaded(processId, true);
                     }}
                 />
