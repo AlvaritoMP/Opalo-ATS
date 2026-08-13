@@ -31,6 +31,8 @@ export type CvAiEnrichment = CvExtractedFields & {
 export type CvExtractLocationOptions = {
     provinces?: string[];
     districts?: Record<string, string[]>;
+    /** Líneas en orden visual (arriba → abajo). Si viene, el nombre se busca ahí primero. */
+    visualLines?: string[];
 };
 
 const EMAIL_RE = /[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/g;
@@ -142,9 +144,47 @@ export function extractLinkedinUrl(text: string): string | undefined {
     return undefined;
 }
 
+/** Junta letras separadas tipo "J U A N   P E R E Z" → "JUAN PEREZ". */
+export function collapseLetterSpacedName(line: string): string {
+    const words = line.trim().split(/\s+/).filter(Boolean);
+    if (words.length < 4) return line.trim();
+    const single = words.filter(w => /^[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]$/.test(w)).length;
+    if (single / words.length < 0.55) return line.trim();
+
+    const groups: string[] = [];
+    let buf = '';
+    for (const w of words) {
+        if (/^[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]$/.test(w)) {
+            buf += w;
+        } else {
+            if (buf) {
+                groups.push(buf);
+                buf = '';
+            }
+            groups.push(w);
+        }
+    }
+    if (buf) groups.push(buf);
+    return groups.join(' ');
+}
+
+function normalizeNameCandidate(line: string): string {
+    let s = collapseLetterSpacedName(line.replace(/\s+/g, ' ').trim());
+    s = s.replace(/[|•·]/g, ' ').replace(/\s+/g, ' ').trim();
+    s = s.split(/\s+[-–—]\s+/)[0]?.trim() || s;
+    const pipe = s.split(/\s+\|\s+/)[0];
+    if (pipe) s = pipe.trim();
+    s = s.replace(/\s*(curriculum\s*vitae|curr[ií]culum\s*vitae|\bcv\b)\s*$/i, '').trim();
+    const labeled = s.match(/^(?:nombre(?:s)?(?:\s+completo)?|name)\s*[:\-]\s*(.+)$/i);
+    if (labeled?.[1]) s = labeled[1].trim();
+    const comma = s.match(/^([A-Za-zÁÉÍÓÚÜÑáéíóúüñ'’. \-]+),\s*([A-Za-zÁÉÍÓÚÜÑáéíóúüñ'’. \-]+)$/);
+    if (comma) s = `${comma[2].trim()} ${comma[1].trim()}`;
+    return s.replace(/\s+/g, ' ').trim();
+}
+
 function looksLikePersonName(line: string): boolean {
-    const cleaned = line.replace(/\s+/g, ' ').trim().replace(/[|•·]/g, ' ').replace(/\s+/g, ' ').trim();
-    if (cleaned.length < 5 || cleaned.length > 70) return false;
+    const cleaned = normalizeNameCandidate(line);
+    if (cleaned.length < 5 || cleaned.length > 80) return false;
     if (/[\d@/\\:]/.test(cleaned)) return false;
     if (CV_TITLE_LINE_RE.test(cleaned)) return false;
     if (GENERIC_ROLE_LINE_RE.test(cleaned)) return false;
@@ -153,28 +193,49 @@ function looksLikePersonName(line: string): boolean {
     }
     const words = cleaned.split(' ').filter(Boolean);
     if (words.length < 2 || words.length > 6) return false;
-    if (!words.every(w => NAME_WORD_RE.test(w))) return false;
+    if (!words.every(w => NAME_WORD_RE.test(w.replace(/\.$/, '')))) return false;
     const substantial = words.filter(w => !NAME_PARTICLE_RE.test(w));
     return substantial.length >= 2;
 }
 
+/** Prefijo de 2–6 palabras que parezca nombre (cuando la línea trae cargo u otros datos). */
+function nameFromLinePrefix(line: string): string | undefined {
+    const cleaned = normalizeNameCandidate(line);
+    if (looksLikePersonName(cleaned)) return cleaned;
+    const words = cleaned.split(' ').filter(Boolean);
+    for (let n = Math.min(6, words.length); n >= 2; n--) {
+        const slice = words.slice(0, n).join(' ');
+        if (looksLikePersonName(slice)) return slice;
+    }
+    return undefined;
+}
+
 /**
- * Nombre: primeras líneas, descartando “curriculum vitae” y cargos genéricos.
+ * Nombre: primeras líneas visuales, descartando “curriculum vitae” y cargos genéricos.
  * Si no hay confianza, queda vacío para que el usuario lo complete.
  */
-export function extractNameHeuristic(text: string): string | undefined {
-    const lines = text
-        .split(/\r?\n/)
+export function extractNameHeuristic(text: string, visualLines?: string[]): string | undefined {
+    const labeled = text.match(
+        /(?:^|\n)\s*(?:nombre(?:s)?(?:\s+completo)?|name)\s*[:\-]\s*([^\n]{5,80})/i
+    );
+    if (labeled?.[1]) {
+        const fromLabel = nameFromLinePrefix(labeled[1]);
+        if (fromLabel) return fromLabel;
+    }
+
+    const lines = (visualLines && visualLines.length > 0
+        ? visualLines
+        : text.split(/\r?\n/)
+    )
         .map(l => l.replace(/\s+/g, ' ').trim())
         .filter(Boolean);
 
-    const candidates: string[] = [];
-    for (const line of lines.slice(0, 20)) {
-        if (CV_TITLE_LINE_RE.test(line)) continue;
-        if (looksLikePersonName(line)) candidates.push(line);
-        if (candidates.length >= 3) break;
+    for (const line of lines.slice(0, 30)) {
+        if (CV_TITLE_LINE_RE.test(normalizeNameCandidate(line))) continue;
+        const found = nameFromLinePrefix(line);
+        if (found) return found;
     }
-    return candidates[0];
+    return undefined;
 }
 
 export function extractAge(text: string): number | undefined {
@@ -264,7 +325,7 @@ export function extractCvFields(text: string, options?: CvExtractLocationOptions
     const location = extractProvinceDistrict(text, options);
 
     const fields: CvExtractedFields = {
-        name: extractNameHeuristic(text),
+        name: extractNameHeuristic(text, options?.visualLines),
         email: emails[0],
         phone: phones[0],
         phone2: phones[1],

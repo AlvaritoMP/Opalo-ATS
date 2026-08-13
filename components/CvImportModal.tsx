@@ -2,19 +2,26 @@ import React, { useCallback, useMemo, useRef, useState } from 'react';
 import { useAppState } from '../App';
 import type { Attachment, Candidate, Process } from '../types';
 import { FileText, Loader2, Upload, X } from 'lucide-react';
+import { bulkCandidatesApi } from '../lib/api/bulkCandidates';
 import {
     buildCandidateFromCvDraft,
     buildCvAttachment,
+    buildCvPreviewColumns,
+    customValuesForStorage,
     CV_WARNING_LABELS,
     cvRowWarnings,
     findCvDocumentCategory,
     isPdfFile,
+    mapCvFieldsToCustomValues,
     parseCvFileForImport,
+    previewColumnValue,
     resolveCvCandidateSource,
     SCAN_PDF_MESSAGE,
     type CvExtractedFields,
     type CvImportMode,
+    type CvPreviewColumn,
     type CvRowWarning,
+    type CvTableLayout,
 } from '../lib/cvImport';
 
 interface CvImportModalProps {
@@ -24,6 +31,8 @@ interface CvImportModalProps {
     onImportComplete?: () => void;
     onCreatedCandidates?: (candidates: Candidate[]) => void;
     bulkRowOffset?: number;
+    /** Layout de la tabla de alta densidad: la preview usa esas columnas. */
+    tableLayout?: CvTableLayout;
 }
 
 type RowStatus = 'pending' | 'reading' | 'ready' | 'error';
@@ -37,23 +46,9 @@ interface CvImportRow {
     error?: string;
     warnLarge?: boolean;
     fields: CvExtractedFields;
+    customValues: Record<string, string>;
     attachment?: Attachment;
 }
-
-const FIELD_KEYS: { key: keyof CvExtractedFields; label: string; wide?: boolean }[] = [
-    { key: 'name', label: 'Nombre' },
-    { key: 'email', label: 'Email' },
-    { key: 'phone', label: 'Teléfono' },
-    { key: 'phone2', label: 'Tel. 2' },
-    { key: 'dni', label: 'DNI' },
-    { key: 'linkedinUrl', label: 'LinkedIn', wide: true },
-    { key: 'address', label: 'Dirección', wide: true },
-    { key: 'province', label: 'Provincia' },
-    { key: 'district', label: 'Distrito' },
-    { key: 'age', label: 'Edad' },
-    { key: 'salaryExpectation', label: 'Sueldo' },
-    { key: 'description', label: 'Resumen', wide: true },
-];
 
 function emptyFields(): CvExtractedFields {
     return {};
@@ -66,6 +61,7 @@ export const CvImportModal: React.FC<CvImportModalProps> = ({
     onImportComplete,
     onCreatedCandidates,
     bulkRowOffset = 0,
+    tableLayout,
 }) => {
     const { state, actions } = useAppState();
     const fileInputRef = useRef<HTMLInputElement>(null);
@@ -74,6 +70,10 @@ export const CvImportModal: React.FC<CvImportModalProps> = ({
     const [isImporting, setIsImporting] = useState(false);
     const [importErrors, setImportErrors] = useState<string[]>([]);
 
+    const previewColumns = useMemo(
+        () => buildCvPreviewColumns(tableLayout),
+        [tableLayout]
+    );
     const source = useMemo(
         () => resolveCvCandidateSource(state.settings?.candidateSources),
         [state.settings?.candidateSources]
@@ -116,6 +116,7 @@ export const CvImportModal: React.FC<CvImportModalProps> = ({
                 included: true,
                 status: 'pending',
                 fields: emptyFields(),
+                customValues: {},
             }));
             setRows(prev => [...prev, ...newRows]);
 
@@ -129,6 +130,7 @@ export const CvImportModal: React.FC<CvImportModalProps> = ({
                         status: 'error',
                         error: parsed.error,
                         fields: parsed.fields,
+                        customValues: mapCvFieldsToCustomValues(parsed.fields, previewColumns),
                         warnLarge: parsed.warnLarge || parsed.oversized,
                         included: false,
                     });
@@ -140,6 +142,7 @@ export const CvImportModal: React.FC<CvImportModalProps> = ({
                         status: 'ready',
                         error: scanned ? parsed.error : undefined,
                         fields: parsed.fields,
+                        customValues: mapCvFieldsToCustomValues(parsed.fields, previewColumns),
                         warnLarge: parsed.warnLarge,
                         attachment,
                         included: !scanned,
@@ -149,12 +152,13 @@ export const CvImportModal: React.FC<CvImportModalProps> = ({
                         status: 'error',
                         error: 'No se pudo adjuntar el PDF.',
                         fields: parsed.fields,
+                        customValues: mapCvFieldsToCustomValues(parsed.fields, previewColumns),
                         included: false,
                     });
                 }
             }
         },
-        [actions, cvCategory?.id, locationOptions, updateRow]
+        [actions, cvCategory?.id, locationOptions, previewColumns, updateRow]
     );
 
     const handleFiles = (list: FileList | File[] | null) => {
@@ -162,18 +166,30 @@ export const CvImportModal: React.FC<CvImportModalProps> = ({
         void processFiles(Array.from(list));
     };
 
-    const patchField = (id: string, key: keyof CvExtractedFields, value: string) => {
+    const patchPreviewColumn = (id: string, col: CvPreviewColumn, value: string) => {
         setRows(prev =>
             prev.map(r => {
                 if (r.id !== id) return r;
                 const fields = { ...r.fields };
-                if (key === 'age') {
+                const customValues = { ...r.customValues };
+                if (col.customColumnId) {
+                    customValues[col.customColumnId] = value;
+                }
+                if (col.field === 'age') {
                     const n = value.trim() === '' ? undefined : parseInt(value, 10);
                     fields.age = n !== undefined && !Number.isNaN(n) ? n : undefined;
-                } else {
-                    (fields as Record<string, unknown>)[key] = value;
+                } else if (col.field) {
+                    (fields as Record<string, unknown>)[col.field] = value;
+                    if (col.field === 'name') {
+                        const refreshed = mapCvFieldsToCustomValues(fields, previewColumns);
+                        for (const previewCol of previewColumns) {
+                            if (previewCol.customColumnId && previewCol.namePart && refreshed[previewCol.customColumnId]) {
+                                customValues[previewCol.customColumnId] = refreshed[previewCol.customColumnId];
+                            }
+                        }
+                    }
                 }
-                return { ...r, fields };
+                return { ...r, fields, customValues };
             })
         );
     };
@@ -208,9 +224,27 @@ export const CvImportModal: React.FC<CvImportModalProps> = ({
             }
             try {
                 const candidate = await actions.addCandidate(built.candidate, {
-                    skipGoogleDrive: mode === 'bulk',
+                    skipGoogleDrive: true,
                     silent: true,
                 });
+                const storedCustom = customValuesForStorage(
+                    row.customValues,
+                    tableLayout?.customColumns || []
+                );
+                if (Object.keys(storedCustom).length > 0 && candidate.id) {
+                    try {
+                        await bulkCandidatesApi.batchFillEmptyBulkColumnValues(
+                            { [candidate.id]: storedCustom },
+                            tableLayout?.customColumns || []
+                        );
+                        candidate.bulkColumnValues = {
+                            ...(candidate.bulkColumnValues || {}),
+                            ...storedCustom,
+                        };
+                    } catch (colError) {
+                        console.warn('No se pudieron guardar columnas personalizadas del CV:', colError);
+                    }
+                }
                 created.push(candidate);
                 importedIds.push(row.id);
             } catch (error) {
@@ -320,8 +354,8 @@ export const CvImportModal: React.FC<CvImportModalProps> = ({
                                     <tr className="text-left text-gray-600">
                                         <th className="px-2 py-2 font-medium whitespace-nowrap">Incluir</th>
                                         <th className="px-2 py-2 font-medium whitespace-nowrap">Archivo</th>
-                                        {FIELD_KEYS.map(col => (
-                                            <th key={col.key} className="px-2 py-2 font-medium whitespace-nowrap">
+                                        {previewColumns.map(col => (
+                                            <th key={col.id} className="px-2 py-2 font-medium whitespace-nowrap">
                                                 {col.label}
                                             </th>
                                         ))}
@@ -356,17 +390,13 @@ export const CvImportModal: React.FC<CvImportModalProps> = ({
                                                         <p className="text-red-600 mt-1 leading-snug">{row.error}</p>
                                                     )}
                                                 </td>
-                                                {FIELD_KEYS.map(col => (
-                                                    <td key={col.key} className="px-1 py-1">
+                                                {previewColumns.map(col => (
+                                                    <td key={col.id} className="px-1 py-1">
                                                         <input
-                                                            type={col.key === 'age' ? 'number' : 'text'}
-                                                            value={
-                                                                col.key === 'age'
-                                                                    ? row.fields.age ?? ''
-                                                                    : String(row.fields[col.key] ?? '')
-                                                            }
+                                                            type={col.field === 'age' ? 'number' : 'text'}
+                                                            value={previewColumnValue(col, row.fields, row.customValues)}
                                                             disabled={row.status !== 'ready' || isImporting}
-                                                            onChange={e => patchField(row.id, col.key, e.target.value)}
+                                                            onChange={e => patchPreviewColumn(row.id, col, e.target.value)}
                                                             className={`border border-gray-300 rounded px-1.5 py-1 w-full min-w-[7rem] ${
                                                                 col.wide ? 'min-w-[12rem]' : ''
                                                             }`}
@@ -397,6 +427,11 @@ export const CvImportModal: React.FC<CvImportModalProps> = ({
                         </div>
                     )}
 
+                    {tableLayout ? (
+                        <p className="text-xs text-gray-500">
+                            La vista previa usa las columnas visibles de esta tabla. Los datos se guardan en esas mismas celdas.
+                        </p>
+                    ) : null}
                     {mode === 'standard' && (
                         <p className="text-xs text-gray-500">
                             En este proceso se requiere nombre y email para crear. Completa las celdas vacías antes de confirmar.

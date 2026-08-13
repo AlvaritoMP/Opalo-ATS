@@ -7779,11 +7779,24 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                     process={process}
                     mode={process.isBulkProcess ? 'bulk' : 'standard'}
                     bulkRowOffset={total}
+                    tableLayout={{ customColumns, visibleColumns }}
                     onClose={() => setShowCvImportModal(false)}
                     onCreatedCandidates={created => {
                         const rows = created.map(candidateToBulkRow);
                         setCandidates(prev => [...rows, ...prev]);
                         setTotal(t => t + rows.length);
+                        setColumnValues(prev => {
+                            const next = { ...prev };
+                            for (const c of created) {
+                                if (c.bulkColumnValues && Object.keys(c.bulkColumnValues).length > 0) {
+                                    next[c.id] = {
+                                        ...(next[c.id] || {}),
+                                        ...c.bulkColumnValues,
+                                    };
+                                }
+                            }
+                            return next;
+                        });
                     }}
                     onImportComplete={() => {
                         setShowCvImportModal(false);
