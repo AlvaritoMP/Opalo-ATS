@@ -11,6 +11,7 @@ export interface BulkProcessConfigLike {
   customColumns?: { id: string; name: string; type: string; options?: string[] }[];
   hiddenColumns?: string[];
   columnOrder?: string[];
+  highDensityTableEnabled?: boolean;
 }
 
 const BASE_COLUMNS = [
@@ -31,8 +32,24 @@ const CHOICE_TYPES = new Set([
   'CHECKBOXES',
 ]);
 
+const SIMPLE_MAPPING_FIELDS: TallyMappingFieldDef[] = [
+  { key: 'name', label: 'Nombre' },
+  { key: 'email', label: 'Email' },
+  { key: 'phone', label: 'Teléfono' },
+  { key: 'phone2', label: 'Teléfono 2' },
+  { key: 'description', label: 'Descripción' },
+  { key: 'source', label: 'Fuente' },
+  { key: 'salary_expectation', label: 'Expectativa salarial' },
+  { key: 'dni', label: 'DNI' },
+  { key: 'linkedin_url', label: 'LinkedIn' },
+  { key: 'address', label: 'Dirección' },
+  { key: 'province', label: 'Provincia' },
+  { key: 'district', label: 'Distrito' },
+  { key: 'age', label: 'Edad' },
+];
+
 const SIMPLE_AUTO_ALIASES: Record<string, string[]> = {
-  name: ['name', 'nombre', 'nombre_completo'],
+  name: ['name', 'nombre', 'nombres', 'nombre_completo'],
   email: ['email', 'correo', 'e-mail'],
   phone: ['phone', 'telefono', 'teléfono'],
   source: ['source', 'fuente'],
@@ -50,9 +67,12 @@ const IMPORT_FIELD_ALIASES: Record<string, string> = {
 
 const CUSTOM_COLUMN_HEADER_ALIASES: Record<string, string[]> = {
   'ap paterno': ['apellido paterno', 'paterno', 'ap. paterno', 'appaterno', 'ap_paterno'],
+  'apellido paterno': ['ap paterno', 'paterno', 'ap. paterno', 'appaterno', 'ap_paterno'],
   'ap materno': ['apellido materno', 'materno', 'ap. materno', 'apmaterno', 'ap_materno'],
+  'apellido materno': ['ap materno', 'materno', 'ap. materno', 'apmaterno', 'ap_materno'],
   'f nac': ['f. nac', 'f.nac', 'f nac.', 'fecha nacimiento', 'fecha de nacimiento', 'fnac', 'fec nac', 'fec. nac'],
   experiencia: ['exp', 'experiencia laboral', 'exp laboral'],
+  disponibilidad: ['disponibilidad horaria', 'horario', 'disponibilidad de horario'],
 };
 
 export interface TallyMappingFieldDef {
@@ -145,36 +165,49 @@ function getImportHeaders(bulkConfig?: BulkProcessConfigLike): {
   return headers;
 }
 
-export function getProcessMappingFields(process: {
-  is_bulk_process?: boolean;
+function parseBulkConfig(process: {
+  is_bulk_process?: boolean | number;
+  isBulkProcess?: boolean;
   bulk_config?: BulkProcessConfigLike | string | null;
+  bulkConfig?: BulkProcessConfigLike;
+}): BulkProcessConfigLike | undefined {
+  const raw = process.bulk_config ?? process.bulkConfig;
+  if (!raw) return undefined;
+  if (typeof raw === 'string') {
+    try {
+      return JSON.parse(raw) as BulkProcessConfigLike;
+    } catch {
+      return undefined;
+    }
+  }
+  return raw;
+}
+
+function processUsesTableMapping(process: {
+  is_bulk_process?: boolean | number;
+  isBulkProcess?: boolean;
+  bulk_config?: BulkProcessConfigLike | string | null;
+  bulkConfig?: BulkProcessConfigLike;
+}): boolean {
+  const isBulk =
+    process.isBulkProcess === true ||
+    process.is_bulk_process === true ||
+    process.is_bulk_process === 1;
+  const cfg = parseBulkConfig(process);
+  return isBulk || !!(cfg?.customColumns?.length) || !!cfg?.highDensityTableEnabled;
+}
+
+export function getProcessMappingFields(process: {
+  is_bulk_process?: boolean | number;
+  isBulkProcess?: boolean;
+  bulk_config?: BulkProcessConfigLike | string | null;
+  bulkConfig?: BulkProcessConfigLike;
 }): TallyMappingFieldDef[] {
-  const isBulk = process.is_bulk_process === true || process.is_bulk_process === 1;
-  if (!isBulk) {
-    return [
-      { key: 'name', label: 'Nombre' },
-      { key: 'email', label: 'Email' },
-      { key: 'phone', label: 'Teléfono' },
-      { key: 'phone2', label: 'Teléfono 2' },
-      { key: 'description', label: 'Descripción' },
-      { key: 'source', label: 'Fuente' },
-      { key: 'salary_expectation', label: 'Expectativa salarial' },
-      { key: 'dni', label: 'DNI' },
-      { key: 'linkedin_url', label: 'LinkedIn' },
-      { key: 'address', label: 'Dirección' },
-      { key: 'province', label: 'Provincia' },
-      { key: 'district', label: 'Distrito' },
-      { key: 'age', label: 'Edad' },
-    ];
+  if (!processUsesTableMapping(process)) {
+    return [...SIMPLE_MAPPING_FIELDS];
   }
 
-  let bulkConfig: BulkProcessConfigLike | undefined;
-  if (process.bulk_config) {
-    bulkConfig =
-      typeof process.bulk_config === 'string'
-        ? JSON.parse(process.bulk_config)
-        : process.bulk_config;
-  }
+  const bulkConfig = parseBulkConfig(process);
   const customColumns = bulkConfig?.customColumns || [];
   const seen = new Set<string>();
   const fields: TallyMappingFieldDef[] = [];
@@ -187,6 +220,17 @@ export function getProcessMappingFields(process: {
       key,
       label: h.isCustom ? h.header : getColumnLabel(h.field, customColumns),
     });
+  }
+  for (const col of customColumns) {
+    const key = `custom_${col.id}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    fields.push({ key, label: col.name });
+  }
+  for (const simple of SIMPLE_MAPPING_FIELDS) {
+    if (seen.has(simple.key)) continue;
+    seen.add(simple.key);
+    fields.push(simple);
   }
   return fields;
 }
@@ -376,12 +420,19 @@ function autoMatchRefsForField(
   }
   const baseCol = BASE_COLUMNS.find((c) => c.importKey === mappingKey || c.id === mappingKey);
   if (baseCol) {
-    return [
+    const extraByKey: Record<string, string[]> = {
+      name: ['nombres', 'nombre_completo'],
+      email: ['correo', 'e-mail'],
+      phone: ['telefono', 'teléfono'],
+    };
+    const refs = new Set([
       baseCol.importKey || mappingKey,
       baseCol.label,
       baseCol.label.toLowerCase(),
       normalizeColumnNameKey(baseCol.label),
-    ];
+      ...(extraByKey[mappingKey] || extraByKey[baseCol.id] || []),
+    ]);
+    return [...refs];
   }
   if (!isBulk) return SIMPLE_AUTO_ALIASES[mappingKey] || [mappingKey];
   return [mappingKey];
@@ -491,24 +542,60 @@ function parseValueForCustomColumn(
   });
 }
 
+function composeNameFromTableColumns(
+  candidate: Record<string, unknown>,
+  bulkRaw: Record<string, unknown>,
+  customColumns: { id: string; name: string }[]
+): void {
+  let nombres = '';
+  let apP = '';
+  let apM = '';
+  for (const col of customColumns) {
+    const compact = compactColumnRef(col.name);
+    const text = bulkRaw[col.id] == null ? '' : String(bulkRaw[col.id]).trim();
+    if (!text) continue;
+    if (compact === 'nombres' || compact === 'nombre') nombres = text;
+    else if (compact.includes('apellidopaterno') || compact === 'appaterno' || compact === 'paterno') apP = text;
+    else if (compact.includes('apellidomaterno') || compact === 'apmaterno' || compact === 'materno') apM = text;
+  }
+  if (!nombres && !apP && !apM) return;
+  const given = nombres || String(candidate.name || '').trim();
+  const composed = [given, apP, apM].filter(Boolean).join(' ').replace(/\s+/g, ' ').trim();
+  if (!composed) return;
+  const current = String(candidate.name || '').trim();
+  const alreadyHasSurnames =
+    (!!apP && current.toLowerCase().includes(apP.toLowerCase())) ||
+    (!!apM && current.toLowerCase().includes(apM.toLowerCase()));
+  if (!current || current === nombres || !alreadyHasSurnames) {
+    candidate.name = composed;
+  }
+}
+
 export function buildTallyCandidateFromSubmission(
   tallyData: unknown,
   integration: { field_mapping?: string | Record<string, string> | null },
-  process: { is_bulk_process?: boolean; bulk_config?: BulkProcessConfigLike | string | null }
+  process: {
+    is_bulk_process?: boolean | number;
+    isBulkProcess?: boolean;
+    bulk_config?: BulkProcessConfigLike | string | null;
+    bulkConfig?: BulkProcessConfigLike;
+  }
 ): Record<string, unknown> {
   const index = buildTallyFieldsIndex(tallyData);
   const customMapping = parseIntegrationFieldMapping(integration);
-
-  let bulkConfig: BulkProcessConfigLike | undefined;
-  if (process.bulk_config) {
-    bulkConfig =
-      typeof process.bulk_config === 'string'
-        ? JSON.parse(process.bulk_config)
-        : process.bulk_config;
-  }
+  const bulkConfig = parseBulkConfig(process);
   const customColumns = bulkConfig?.customColumns || [];
-  const isBulk = process.is_bulk_process === true || process.is_bulk_process === 1;
+  const isBulk =
+    process.isBulkProcess === true ||
+    process.is_bulk_process === true ||
+    process.is_bulk_process === 1;
   const mappingFields = getProcessMappingFields(process);
+  const mappedKeys = new Set(mappingFields.map((f) => f.key));
+  for (const key of Object.keys(customMapping)) {
+    if (!key.startsWith('custom_') || mappedKeys.has(key)) continue;
+    mappingFields.push({ key, label: key });
+    mappedKeys.add(key);
+  }
 
   const candidate: Record<string, unknown> = {
     name: '',
@@ -595,8 +682,9 @@ export function buildTallyCandidateFromSubmission(
     candidate.source = 'Tally';
   }
 
-  if (isBulk && customColumns.length > 0) {
+  if (customColumns.length > 0) {
     syncHomonymCustomColumns(bulkRaw, customColumns, candidate);
+    composeNameFromTableColumns(candidate, bulkRaw, customColumns);
     const enriched = enrichBulkColumnValuesForStorage(bulkRaw, customColumns);
     if (Object.keys(enriched).length > 0) {
       candidate.bulk_column_values = enriched;

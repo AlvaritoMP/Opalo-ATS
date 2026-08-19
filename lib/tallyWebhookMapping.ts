@@ -258,18 +258,24 @@ function autoMatchRefsForField(
 
     const baseCol = BASE_COLUMNS.find((c) => c.importKey === mappingKey || c.id === mappingKey);
     if (baseCol) {
+        const extraByKey: Record<string, string[]> = {
+            name: ['nombres', 'nombre_completo'],
+            email: ['correo', 'e-mail'],
+            phone: ['telefono', 'teléfono'],
+        };
         const refs = new Set<string>([
             baseCol.importKey || mappingKey,
             baseCol.label,
             baseCol.label.toLowerCase(),
             normalizeColumnNameKey(baseCol.label),
+            ...(extraByKey[mappingKey] || extraByKey[baseCol.id] || []),
         ]);
         return [...refs];
     }
 
     if (!isBulk) {
         const simpleAliases: Record<string, string[]> = {
-            name: ['name', 'nombre', 'nombre_completo'],
+            name: ['name', 'nombre', 'nombres', 'nombre_completo'],
             email: ['email', 'correo', 'e-mail'],
             phone: ['phone', 'telefono', 'teléfono'],
             source: ['source', 'fuente'],
@@ -389,6 +395,35 @@ function assignStandardField(target: TallyCandidateInsert, key: string, value: s
     }
 }
 
+function composeNameFromTableColumns(
+    candidate: TallyCandidateInsert,
+    bulkRaw: Record<string, unknown>,
+    customColumns: CustomColumn[]
+): void {
+    let nombres = '';
+    let apP = '';
+    let apM = '';
+    for (const col of customColumns) {
+        const compact = compactColumnRef(col.name);
+        const text = bulkRaw[col.id] == null ? '' : String(bulkRaw[col.id]).trim();
+        if (!text) continue;
+        if (compact === 'nombres' || compact === 'nombre') nombres = text;
+        else if (compact.includes('apellidopaterno') || compact === 'appaterno' || compact === 'paterno') apP = text;
+        else if (compact.includes('apellidomaterno') || compact === 'apmaterno' || compact === 'materno') apM = text;
+    }
+    if (!nombres && !apP && !apM) return;
+    const given = nombres || (candidate.name || '').trim();
+    const composed = [given, apP, apM].filter(Boolean).join(' ').replace(/\s+/g, ' ').trim();
+    if (!composed) return;
+    const current = (candidate.name || '').trim();
+    const alreadyHasSurnames =
+        (!!apP && current.toLowerCase().includes(apP.toLowerCase())) ||
+        (!!apM && current.toLowerCase().includes(apM.toLowerCase()));
+    if (!current || current === nombres || !alreadyHasSurnames) {
+        candidate.name = composed;
+    }
+}
+
 function syncHomonymCustomColumns(
     bulkValues: Record<string, unknown>,
     customColumns: CustomColumn[],
@@ -424,6 +459,12 @@ export function buildTallyCandidateFromSubmission(
               } as Process)
             : undefined
     );
+    const mappedKeys = new Set(mappingFields.map((f) => f.key));
+    for (const key of Object.keys(customMapping)) {
+        if (!key.startsWith('custom_') || mappedKeys.has(key)) continue;
+        mappingFields.push({ key, label: key, placeholder: key });
+        mappedKeys.add(key);
+    }
 
     const candidate: TallyCandidateInsert = {
         name: '',
@@ -472,8 +513,9 @@ export function buildTallyCandidateFromSubmission(
 
     applyImportTextCaseToCandidate(candidate as Record<string, unknown>);
 
-    if (isBulk && customColumns.length > 0) {
+    if (customColumns.length > 0) {
         syncHomonymCustomColumns(bulkRaw, customColumns, candidate);
+        composeNameFromTableColumns(candidate, bulkRaw, customColumns);
         const enriched = enrichBulkColumnValuesForStorage(bulkRaw, customColumns);
         if (Object.keys(enriched).length > 0) {
             candidate.bulk_column_values = enriched;

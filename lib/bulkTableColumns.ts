@@ -943,7 +943,7 @@ export interface TallyMappingField {
 }
 
 const SIMPLE_TALLY_MAPPING_FIELDS: TallyMappingField[] = [
-    { key: 'name', label: 'Nombre', placeholder: 'nombre, name, nombre_completo' },
+    { key: 'name', label: 'Nombre', placeholder: 'nombre, nombres, name, nombre_completo' },
     { key: 'email', label: 'Email', placeholder: 'email, correo, e-mail' },
     { key: 'phone', label: 'Teléfono', placeholder: 'phone, telefono, teléfono' },
     { key: 'phone2', label: 'Teléfono 2', placeholder: 'phone2, telefono2, teléfono_secundario' },
@@ -960,7 +960,8 @@ const SIMPLE_TALLY_MAPPING_FIELDS: TallyMappingField[] = [
 
 /**
  * Campos disponibles para mapeo Tally según el proceso seleccionado.
- * Masivo: solo columnas visibles del proceso (bulkConfig). Simple: campos estándar del ATS.
+ * Si el proceso tiene columnas de tabla (masivo o normal en modo tabla), incluye esas columnas
+ * más los campos de identidad del kanban. Si no, solo campos estándar del ATS.
  */
 export function getTallyIntegrationMappingFields(process?: Process): TallyMappingField[] {
     const useBulkColumns =
@@ -969,7 +970,7 @@ export function getTallyIntegrationMappingFields(process?: Process): TallyMappin
         process?.bulkConfig?.highDensityTableEnabled;
 
     if (!useBulkColumns) {
-        return SIMPLE_TALLY_MAPPING_FIELDS;
+        return [...SIMPLE_TALLY_MAPPING_FIELDS];
     }
 
     const bulkConfig = process.bulkConfig;
@@ -1001,6 +1002,13 @@ export function getTallyIntegrationMappingFields(process?: Process): TallyMappin
             label: col.name,
             placeholder: col.name.toLowerCase(),
         });
+    }
+
+    // Campos de identidad del kanban que no están como columnas de tabla
+    for (const simple of SIMPLE_TALLY_MAPPING_FIELDS) {
+        if (seen.has(simple.key)) continue;
+        seen.add(simple.key);
+        fields.push(simple);
     }
 
     return fields;
@@ -1626,9 +1634,12 @@ export function collectPhoneMatchKeys(...phones: (string | null | undefined)[]):
 /** Alias de encabezados Excel / Tally → nombre normalizado de columna custom */
 export const CUSTOM_COLUMN_HEADER_ALIASES: Record<string, string[]> = {
     'ap paterno': ['apellido paterno', 'paterno', 'ap. paterno', 'appaterno', 'ap_paterno'],
+    'apellido paterno': ['ap paterno', 'paterno', 'ap. paterno', 'appaterno', 'ap_paterno'],
     'ap materno': ['apellido materno', 'materno', 'ap. materno', 'apmaterno', 'ap_materno'],
+    'apellido materno': ['ap materno', 'materno', 'ap. materno', 'apmaterno', 'ap_materno'],
     'f nac': ['f. nac', 'f.nac', 'f nac.', 'fecha nacimiento', 'fecha de nacimiento', 'fnac', 'fec nac', 'fec. nac'],
     'experiencia': ['exp', 'experiencia laboral', 'exp laboral'],
+    'disponibilidad': ['disponibilidad horaria', 'horario', 'disponibilidad de horario'],
     'edad': ['age'],
 };
 

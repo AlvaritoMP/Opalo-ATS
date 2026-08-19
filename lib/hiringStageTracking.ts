@@ -1,4 +1,4 @@
-import type { CandidateHistory, Process, User } from '../types';
+import type { Candidate, CandidateHistory, Process, ProcessStatus, User } from '../types';
 
 export const HIRED_STAGE_USER_COLUMN_ID = 'hiredStageUser';
 
@@ -33,6 +33,36 @@ export function resolveHiringStageId(process?: Pick<Process, 'stages'> | null): 
     if (!stages?.length) return null;
     const byName = stages.find(s => HIRED_STAGE_NAME_PATTERN.test(s.name.trim()));
     return byName?.id ?? stages[stages.length - 1].id;
+}
+
+/**
+ * Candidatos que la tarjeta del proceso debe mostrar como contratados.
+ * Solo cuenta quien está ahora en la etapa de contratación (igual que kanban/tablero).
+ * hireDate o hiredCandidateIds no bastan: alguien puede haber vuelto a Screening.
+ */
+export function getHiredCandidatesForProcessCard(
+    process: Pick<Process, 'id' | 'status' | 'stages' | 'hiredCandidateIds'>,
+    candidates: Candidate[],
+    processLoaded: boolean
+): { hiredCandidates: Candidate[]; hiredCountFallback: number } {
+    const hiringStageId = resolveHiringStageId(process);
+    if (!processLoaded) {
+        const closed = (process.status as ProcessStatus | undefined) === 'terminado';
+        const fallback =
+            closed && process.hiredCandidateIds && process.hiredCandidateIds.length > 0
+                ? process.hiredCandidateIds.length
+                : 0;
+        return { hiredCandidates: [], hiredCountFallback: fallback };
+    }
+
+    const hiredCandidates = candidates.filter(c =>
+        c.processId === process.id &&
+        !c.archived &&
+        !c.discarded &&
+        !!hiringStageId &&
+        c.stageId === hiringStageId
+    );
+    return { hiredCandidates, hiredCountFallback: 0 };
 }
 
 export function resolveHistoryUserName(

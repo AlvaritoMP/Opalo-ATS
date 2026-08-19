@@ -5,6 +5,7 @@ import {
     filterTallyFieldMapping,
     getTallyIntegrationMappingFields,
     normalizeTallyFieldMapping,
+    type TallyMappingField,
 } from '../lib/bulkTableColumns';
 import { processesApi } from '../lib/api/processes';
 import { X, Copy, ChevronDown, ChevronUp, Settings, RefreshCw } from 'lucide-react';
@@ -89,6 +90,15 @@ export const FormEditorModal: React.FC<FormIntegrationModalProps> = ({ integrati
         [fieldMapping]
     );
 
+    const identityFields = useMemo(
+        () => candidateFields.filter(f => !f.key.startsWith('custom_')),
+        [candidateFields]
+    );
+    const tableOnlyFields = useMemo(
+        () => candidateFields.filter(f => f.key.startsWith('custom_')),
+        [candidateFields]
+    );
+
     // ¿La config del proceso actual ya cargó desde BD? Solo entonces los campos son fiables.
     const isLinkedProcessLoaded = linkedProcess?.id === processId;
 
@@ -168,6 +178,45 @@ export const FormEditorModal: React.FC<FormIntegrationModalProps> = ({ integrati
         actions.showToast('URL del webhook copiada al portapapeles', 'success', 2000);
     };
 
+    const stopSpaceScrollInInputs = (e: React.KeyboardEvent) => {
+        const tag = (e.target as HTMLElement).tagName;
+        if (tag !== 'INPUT' && tag !== 'TEXTAREA') return;
+        e.stopPropagation();
+        if (e.key === ' ') {
+            e.nativeEvent.stopImmediatePropagation();
+        }
+    };
+
+    const renderMappingField = (field: TallyMappingField) => (
+        <div key={field.key} className="space-y-1">
+            <label className="block text-xs font-semibold text-gray-700">
+                {field.label} <span className="text-gray-400 font-normal">→</span>
+            </label>
+            <input
+                type="text"
+                autoComplete="off"
+                spellCheck={false}
+                value={fieldMapping[field.key] ?? ''}
+                onChange={e => {
+                    const v = e.target.value;
+                    setFieldMapping(prev => {
+                        const next = { ...prev };
+                        if (v) next[field.key] = v;
+                        else delete next[field.key];
+                        return next;
+                    });
+                }}
+                onKeyDown={stopSpaceScrollInInputs}
+                onKeyDownCapture={stopSpaceScrollInInputs}
+                placeholder={field.placeholder}
+                className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+            />
+            <p className="text-xs text-gray-500">
+                Label exacto del campo en Tally (respete mayúsculas y espacios)
+            </p>
+        </div>
+    );
+
     if (showWebhook && !isEditing) {
          return (
              <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
@@ -199,15 +248,6 @@ export const FormEditorModal: React.FC<FormIntegrationModalProps> = ({ integrati
              </div>
          );
     }
-    
-    const stopSpaceScrollInInputs = (e: React.KeyboardEvent) => {
-        const tag = (e.target as HTMLElement).tagName;
-        if (tag !== 'INPUT' && tag !== 'TEXTAREA') return;
-        e.stopPropagation();
-        if (e.key === ' ') {
-            e.nativeEvent.stopImmediatePropagation();
-        }
-    };
 
     return (
          <div
@@ -337,13 +377,14 @@ export const FormEditorModal: React.FC<FormIntegrationModalProps> = ({ integrati
                                             ¿Cómo funciona el mapeo?
                                         </p>
                                         <p className="text-xs text-blue-800">
-                                            Si los nombres de tus campos en Tally son diferentes a los estándar, 
-                                            puedes mapearlos aquí. Por ejemplo, si en Tally tu campo se llama 
-                                            <strong> &quot;Nombre Completo del Candidato&quot;</strong> en lugar de <strong>&quot;name&quot;</strong>, 
-                                            ingresa ese nombre exacto en el campo correspondiente de abajo.
+                                            El kanban muestra los campos de identidad del candidato (nombre, email, teléfono…).
+                                            El modo tabla muestra esos mismos campos <strong>más las columnas propias del proceso</strong>
+                                            (Apellido paterno, Experiencia, Disponibilidad, etc.). El dato de cada pregunta de Tally
+                                            debe mapearse a la columna de tabla correspondiente: ahí es donde se guarda y se ve.
                                         </p>
                                         <p className="text-xs text-blue-800">
-                                            <strong>Deja en blanco</strong> para usar el mapeo automático.
+                                            Si el label en Tally coincide con el nombre de la columna, puede dejarlo en blanco
+                                            (mapeo automático). Si no coincide, escriba el label exacto de la pregunta.
                                         </p>
                                         <p className="text-xs text-blue-700 font-medium pt-1">
                                             {candidateFields.length} campos del proceso — desplázate para ver todos
@@ -358,11 +399,15 @@ export const FormEditorModal: React.FC<FormIntegrationModalProps> = ({ integrati
                                                 <RefreshCw className={`w-3.5 h-3.5 ${isLoadingProcess ? 'animate-spin' : ''}`} />
                                                 Actualizar campos del proceso
                                             </button>
-                                            {selectedProcessDetails?.isBulkProcess && (
+                                            {selectedProcessDetails?.isBulkProcess ? (
                                                 <span className="text-xs text-blue-700">
                                                     Proceso masivo: se cargan columnas nuevas desde la configuración actual
                                                 </span>
-                                            )}
+                                            ) : tableOnlyFields.length > 0 ? (
+                                                <span className="text-xs text-blue-700">
+                                                    Proceso normal: las columnas de tabla se rellenan igual que en un proceso masivo
+                                                </span>
+                                            ) : null}
                                         </div>
                                         {unmappedFieldCount > 0 && (
                                             <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded px-2 py-1.5">
@@ -376,36 +421,30 @@ export const FormEditorModal: React.FC<FormIntegrationModalProps> = ({ integrati
                                         style={{ maxHeight: 'min(50vh, 420px)' }}
                                         onKeyDownCapture={stopSpaceScrollInInputs}
                                     >
-                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 p-2 bg-white rounded border border-blue-100">
-                                            {candidateFields.map(field => (
-                                                <div key={field.key} className="space-y-1">
-                                                    <label className="block text-xs font-semibold text-gray-700">
-                                                        {field.label} <span className="text-gray-400 font-normal">→</span>
-                                                    </label>
-                                                <input
-                                                    type="text"
-                                                    autoComplete="off"
-                                                    spellCheck={false}
-                                                    value={fieldMapping[field.key] ?? ''}
-                                                    onChange={e => {
-                                                        const v = e.target.value;
-                                                        setFieldMapping(prev => {
-                                                            const next = { ...prev };
-                                                            if (v) next[field.key] = v;
-                                                            else delete next[field.key];
-                                                            return next;
-                                                        });
-                                                    }}
-                                                    onKeyDown={stopSpaceScrollInInputs}
-                                                    onKeyDownCapture={stopSpaceScrollInInputs}
-                                                    placeholder={field.placeholder}
-                                                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
-                                                />
-                                                <p className="text-xs text-gray-500">
-                                                    Label exacto del campo en Tally (respete mayúsculas y espacios)
-                                                </p>
+                                        <div className="space-y-4 p-2 bg-white rounded border border-blue-100">
+                                            {identityFields.length > 0 && (
+                                                <div>
+                                                    <p className="text-xs font-semibold text-gray-800 mb-2">
+                                                        Kanban y tabla — identidad del candidato
+                                                    </p>
+                                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                                        {identityFields.map(renderMappingField)}
+                                                    </div>
                                                 </div>
-                                            ))}
+                                            )}
+                                            {tableOnlyFields.length > 0 && (
+                                                <div>
+                                                    <p className="text-xs font-semibold text-gray-800 mb-1">
+                                                        Solo modo tabla — columnas del proceso
+                                                    </p>
+                                                    <p className="text-xs text-gray-500 mb-2">
+                                                        Estos datos no aparecen en las tarjetas del kanban; se guardan en las columnas de la tabla.
+                                                    </p>
+                                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                                        {tableOnlyFields.map(renderMappingField)}
+                                                    </div>
+                                                </div>
+                                            )}
                                         </div>
                                     </div>
                                     {Object.keys(fieldMapping).length > 0 && (

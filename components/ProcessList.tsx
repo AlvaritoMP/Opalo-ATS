@@ -4,6 +4,7 @@ import { Plus, MoreVertical, Eye, Edit, Trash2, Users, RefreshCw, Copy, Search, 
 import { ProcessEditorModal } from './ProcessEditorModal';
 import { Process, UserRole, ProcessStatus, Candidate } from '../types';
 import { PROCESS_STATUS_LABELS, PROCESS_STATUS_COLORS, isProcessActive } from '../lib/processStatus';
+import { getHiredCandidatesForProcessCard } from '../lib/hiringStageTracking';
 import { processesApi } from '../lib/api/processes';
 
 // Función utility para detectar si un proceso tiene candidatos en etapas críticas (no revisados)
@@ -49,28 +50,12 @@ const ProcessCard: React.FC<{
     const [dropdownOpen, setDropdownOpen] = useState(false);
     const { state } = useAppState();
 
-    // Obtener información de candidatos contratados
-    // 1) Preferir siempre hiredCandidateIds (nuevo sistema de cierre de proceso)
-    // 2) Si no hay hiredCandidateIds, usar candidatos con hireDate como backup
-    const allProcessCandidates = state.candidates.filter(c => c.processId === process.id && !c.archived);
     const processLoaded = state.loadedStandardProcessIds.includes(process.id);
-    
-    let hiredCandidates: Candidate[] = [];
-    if (process.hiredCandidateIds && process.hiredCandidateIds.length > 0) {
-        // Usar el nuevo sistema de hiredCandidateIds
-        hiredCandidates = process.hiredCandidateIds
-            .map(id => allProcessCandidates.find(c => c.id === id))
-            .filter((c): c is Candidate => c !== undefined);
-    } else if (processLoaded) {
-        // Backup: candidatos con fecha de contratación (hireDate),
-        // incluso si el proceso aún no está marcado como terminado.
-        hiredCandidates = allProcessCandidates.filter(c => c.hireDate && c.hireDate.trim() !== '');
-    }
-
-    const hiredCountFallback =
-        !processLoaded && process.hiredCandidateIds && process.hiredCandidateIds.length > 0
-            ? process.hiredCandidateIds.length
-            : 0;
+    const { hiredCandidates, hiredCountFallback } = getHiredCandidatesForProcessCard(
+        process,
+        state.candidates,
+        processLoaded
+    );
 
     const statusLabels = PROCESS_STATUS_LABELS;
     const statusColors = PROCESS_STATUS_COLORS;
