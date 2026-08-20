@@ -10,6 +10,7 @@ import {
     parseCvFileForImport,
 } from '../lib/cvImport';
 import type { CvExtractedFields } from '../lib/cvFieldExtractor';
+import { composeIdentityFullName, parseLegacyFullName, validateRequiredIdentity } from '../lib/candidateIdentity';
 
 interface AddCandidateModalProps {
     process: Process;
@@ -25,7 +26,9 @@ export const AddCandidateModal: React.FC<AddCandidateModalProps> = ({ process, o
             : ['LinkedIn', 'Referencia', 'Sitio web', 'Otro'];
         return sources[0] || 'Otro';
     };
-    const [name, setName] = useState('');
+    const [nombres, setNombres] = useState('');
+    const [apellidoPaterno, setApellidoPaterno] = useState('');
+    const [apellidoMaterno, setApellidoMaterno] = useState('');
     const [email, setEmail] = useState('');
     const [phone, setPhone] = useState('');
     const [phone2, setPhone2] = useState('');
@@ -55,9 +58,23 @@ export const AddCandidateModal: React.FC<AddCandidateModalProps> = ({ process, o
             return;
         }
 
+        const identityError = validateRequiredIdentity({
+            nombres,
+            apellidoPaterno,
+            apellidoMaterno,
+            dni,
+        });
+        if (identityError) {
+            alert(identityError);
+            return;
+        }
+
         try {
             await actions.addCandidate({
-                name,
+                name: composeIdentityFullName({ nombres, apellidoPaterno, apellidoMaterno }),
+                nombres: nombres.trim(),
+                apellidoPaterno: apellidoPaterno.trim(),
+                apellidoMaterno: apellidoMaterno.trim() || undefined,
                 email,
                 phone,
                 phone2,
@@ -117,7 +134,16 @@ export const AddCandidateModal: React.FC<AddCandidateModalProps> = ({ process, o
     };
     
     const applyCvFields = (fields: CvExtractedFields) => {
-        if (fields.name) setName(fields.name);
+        if (fields.nombres || fields.apellidoPaterno || fields.apellidoMaterno) {
+            if (fields.nombres) setNombres(fields.nombres);
+            if (fields.apellidoPaterno) setApellidoPaterno(fields.apellidoPaterno);
+            if (fields.apellidoMaterno) setApellidoMaterno(fields.apellidoMaterno);
+        } else if (fields.name) {
+            const parsed = parseLegacyFullName(fields.name);
+            setNombres(parsed.nombres || '');
+            setApellidoPaterno(parsed.apellidoPaterno || '');
+            setApellidoMaterno(parsed.apellidoMaterno || '');
+        }
         if (fields.email) setEmail(fields.email);
         if (fields.phone) setPhone(fields.phone);
         if (fields.phone2) setPhone2(fields.phone2);
@@ -230,7 +256,10 @@ export const AddCandidateModal: React.FC<AddCandidateModalProps> = ({ process, o
                             </div>
                         </div>
 
-                        <div><label className="block text-sm font-medium text-gray-700">Nombre completo</label><input type="text" value={name} onChange={e => setName(e.target.value)} required className="mt-1 block w-full input"/></div>
+                        <div><label className="block text-sm font-medium text-gray-700">Nombres *</label><input type="text" value={nombres} onChange={e => setNombres(e.target.value)} required className="mt-1 block w-full input"/></div>
+                        <div><label className="block text-sm font-medium text-gray-700">Apellido Paterno *</label><input type="text" value={apellidoPaterno} onChange={e => setApellidoPaterno(e.target.value)} required className="mt-1 block w-full input"/></div>
+                        <div><label className="block text-sm font-medium text-gray-700">Apellido Materno</label><input type="text" value={apellidoMaterno} onChange={e => setApellidoMaterno(e.target.value)} className="mt-1 block w-full input"/></div>
+                        <div><label className="block text-sm font-medium text-gray-700">DNI *</label><input type="text" value={dni} onChange={e => setDni(e.target.value)} required className="mt-1 block w-full input"/></div>
                         <div><label className="block text-sm font-medium text-gray-700">Correo electrónico</label><input type="email" value={email} onChange={e => setEmail(e.target.value)} required className="mt-1 block w-full input"/></div>
                         
                         <div className="md:col-span-2"><label className="block text-sm font-medium text-gray-700">Resumen / descripción</label><textarea rows={2} value={description} onChange={e => setDescription(e.target.value)} className="mt-1 block w-full input" /></div>
@@ -238,7 +267,7 @@ export const AddCandidateModal: React.FC<AddCandidateModalProps> = ({ process, o
                         <div><label className="block text-sm font-medium text-gray-700">Teléfono</label><input type="tel" value={phone} onChange={e => setPhone(e.target.value)} className="mt-1 block w-full input"/></div>
                         <div><label className="block text-sm font-medium text-gray-700">Teléfono 2</label><input type="tel" value={phone2} onChange={e => setPhone2(e.target.value)} className="mt-1 block w-full input" placeholder="Opcional"/></div>
                         <div><label className="block text-sm font-medium text-gray-700">Edad</label><input type="number" value={age} onChange={e => setAge(e.target.value === '' ? '' : parseInt(e.target.value, 10))} className="mt-1 block w-full input"/></div>
-                        <div><label className="block text-sm font-medium text-gray-700">DNI</label><input type="text" value={dni} onChange={e => setDni(e.target.value)} className="mt-1 block w-full input"/></div>
+                        <div><label className="block text-sm font-medium text-gray-700">Teléfono 2</label><input type="tel" value={phone2} onChange={e => setPhone2(e.target.value)} className="mt-1 block w-full input" placeholder="Opcional"/></div>
                         <div><label className="block text-sm font-medium text-gray-700">Dirección / ciudad</label><input type="text" value={address} onChange={e => setAddress(e.target.value)} placeholder="Ej: Ciudad de México" className="mt-1 block w-full input"/></div>
                         <div>
                             <SearchableSelect

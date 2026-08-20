@@ -4,6 +4,7 @@ import { X, Loader2, ListPlus } from 'lucide-react';
 import { Candidate, Process } from '../types';
 import { BulkCandidate } from '../lib/api/bulkCandidates';
 import { resolveBulkCandidateEmail } from '../lib/bulkTableColumns';
+import { composeIdentityFullName, validateRequiredIdentity } from '../lib/candidateIdentity';
 
 interface BulkAddRowModalProps {
     process: Process;
@@ -17,6 +18,9 @@ function candidateToBulkRow(c: Candidate): BulkCandidate {
     return {
         id: c.id,
         name: c.name || '',
+        nombres: c.nombres,
+        apellidoPaterno: c.apellidoPaterno,
+        apellidoMaterno: c.apellidoMaterno,
         email: c.email,
         phone: c.phone,
         dni: c.dni,
@@ -50,7 +54,9 @@ export const BulkAddRowModal: React.FC<BulkAddRowModalProps> = ({
         return sources[0] || 'Otro';
     };
 
-    const [name, setName] = useState('');
+    const [nombres, setNombres] = useState('');
+    const [apellidoPaterno, setApellidoPaterno] = useState('');
+    const [apellidoMaterno, setApellidoMaterno] = useState('');
     const [dni, setDni] = useState('');
     const [email, setEmail] = useState('');
     const [phone, setPhone] = useState('');
@@ -59,11 +65,21 @@ export const BulkAddRowModal: React.FC<BulkAddRowModalProps> = ({
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
-        const trimmedName = name.trim();
-        if (!trimmedName) {
-            actions.showToast('Indique al menos el nombre', 'error', 3000);
+        const identityError = validateRequiredIdentity({
+            nombres,
+            apellidoPaterno,
+            apellidoMaterno,
+            dni,
+        });
+        if (identityError) {
+            actions.showToast(identityError, 'error', 3000);
             return;
         }
+        const trimmedName = composeIdentityFullName({
+            nombres,
+            apellidoPaterno,
+            apellidoMaterno,
+        });
 
         const firstStageId = process.stages[0]?.id;
         if (!firstStageId) {
@@ -87,6 +103,9 @@ export const BulkAddRowModal: React.FC<BulkAddRowModalProps> = ({
             const created = await actions.addCandidate(
                 {
                     name: trimmedName,
+                    nombres: nombres.trim(),
+                    apellidoPaterno: apellidoPaterno.trim(),
+                    apellidoMaterno: apellidoMaterno.trim() || undefined,
                     email: resolvedEmail,
                     phone: trimmedPhone || undefined,
                     dni: trimmedDni || undefined,
@@ -139,24 +158,45 @@ export const BulkAddRowModal: React.FC<BulkAddRowModalProps> = ({
                             Campos básicos para crear la fila en la tabla. El resto puede completarse directamente en la grilla.
                         </p>
                         <div>
-                            <label className="block text-sm font-medium text-gray-700">Nombre *</label>
+                            <label className="block text-sm font-medium text-gray-700">Nombres *</label>
                             <input
                                 type="text"
-                                value={name}
-                                onChange={e => setName(e.target.value)}
+                                value={nombres}
+                                onChange={e => setNombres(e.target.value)}
                                 required
                                 autoFocus
                                 className="mt-1 block w-full bulk-add-row-input"
-                                placeholder="Nombre del candidato"
                             />
                         </div>
                         <div className="grid grid-cols-2 gap-3">
                             <div>
-                                <label className="block text-sm font-medium text-gray-700">DNI</label>
+                                <label className="block text-sm font-medium text-gray-700">Apellido Paterno *</label>
+                                <input
+                                    type="text"
+                                    value={apellidoPaterno}
+                                    onChange={e => setApellidoPaterno(e.target.value)}
+                                    required
+                                    className="mt-1 block w-full bulk-add-row-input"
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700">Apellido Materno</label>
+                                <input
+                                    type="text"
+                                    value={apellidoMaterno}
+                                    onChange={e => setApellidoMaterno(e.target.value)}
+                                    className="mt-1 block w-full bulk-add-row-input"
+                                />
+                            </div>
+                        </div>
+                        <div className="grid grid-cols-2 gap-3">
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700">DNI *</label>
                                 <input
                                     type="text"
                                     value={dni}
                                     onChange={e => setDni(e.target.value)}
+                                    required
                                     className="mt-1 block w-full bulk-add-row-input"
                                 />
                             </div>

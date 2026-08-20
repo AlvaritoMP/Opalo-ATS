@@ -185,6 +185,9 @@ export function candidateToBulkRow(c: Candidate): BulkCandidate {
 
 const CV_FIELD_KEYS: (keyof CvExtractedFields)[] = [
     'name',
+    'nombres',
+    'apellidoPaterno',
+    'apellidoMaterno',
     'email',
     'phone',
     'phone2',
@@ -297,11 +300,11 @@ export function buildCvPreviewColumns(tableLayout?: CvTableLayout): CvPreviewCol
         }
     }
 
-    if (!cols.some(c => c.field === 'name')) {
-        cols.unshift({ id: 'name', label: 'Nombre', field: 'name' });
+    if (!cols.some(c => c.field === 'nombres' || c.field === 'name' || c.namePart === 'given_names')) {
+        cols.unshift({ id: 'nombres', label: 'Nombres', field: 'nombres' });
     }
     if (!cols.some(c => c.field === 'email')) {
-        const nameIdx = cols.findIndex(c => c.field === 'name');
+        const nameIdx = cols.findIndex(c => c.field === 'nombres' || c.field === 'name');
         cols.splice(nameIdx + 1, 0, { id: 'email', label: 'Email', field: 'email' });
     }
     return cols;

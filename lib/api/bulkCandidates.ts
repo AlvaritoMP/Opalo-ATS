@@ -17,9 +17,13 @@ import { readScopedChannelSummaryFromRow } from '../trackingScopeConfig';
 import type { ChannelContactSummary } from '../contactChannelConfig';
 import { buildInterviewMapFromRows } from '../bulkInterviewUtils';
 import { isMissingColumnError } from '../supabaseColumnErrors';
+import { identityFieldsToDb, identityFromDbRow } from '../candidateIdentity';
+import { hydrateCandidateIdentity } from '../workerNameParts';
 
 /** Select mínimo — siempre disponible */
 const BULK_SELECT_BASE =
+    'id, name, nombres, apellido_paterno, apellido_materno, email, phone, dni, age, source, province, district, score_ia, metadata_ia, stage_id, process_id, last_whatsapp_interaction_at';
+const BULK_SELECT_BASE_NO_IDENTITY =
     'id, name, email, phone, dni, age, source, province, district, score_ia, metadata_ia, stage_id, process_id, last_whatsapp_interaction_at';
 
 const BULK_SELECT_WITH_CONTACT = `${BULK_SELECT_BASE}, contact_status, contact_attempt_count, contact_last_attempt_at, contact_last_user_name,
@@ -80,16 +84,21 @@ function getBulkSelectCandidates(): string[] {
         BULK_SELECT_BASE_EFFICIENCY,
         BULK_SELECT_BASE,
     ];
-    if (!cachedBulkSelect) return allVariants;
+    const withoutIdentity = allVariants.map(s =>
+        s.replace('nombres, apellido_paterno, apellido_materno, ', '')
+    );
+    const combined = [...allVariants, ...withoutIdentity.filter(s => !allVariants.includes(s))];
+    if (!cachedBulkSelect) return combined;
     if (
         !cachedBulkSelect.includes('application_count') ||
         !cachedBulkSelect.includes('registration_origin') ||
         !cachedBulkSelect.includes('transfer_pending_review') ||
-        !cachedBulkSelect.includes('opsflow_sent_at')
+        !cachedBulkSelect.includes('opsflow_sent_at') ||
+        !cachedBulkSelect.includes('apellido_paterno')
     ) {
-        return allVariants;
+        return combined;
     }
-    return [cachedBulkSelect, ...allVariants.filter(v => v !== cachedBulkSelect)];
+    return [cachedBulkSelect, ...combined.filter(v => v !== cachedBulkSelect)];
 }
 
 function mapBulkCandidateRow(
@@ -97,9 +106,16 @@ function mapBulkCandidateRow(
     nextInterviews: Map<string, { start: string; interviewerId: string; eventId: string }>
 ): BulkCandidate {
     const nextInterview = nextInterviews.get(c.id as string);
+    const identity = hydrateCandidateIdentity({
+        ...identityFromDbRow(c),
+        bulkColumnValues: (c.bulk_column_values as Record<string, unknown>) || undefined,
+    });
     return {
         id: c.id as string,
-        name: c.name as string,
+        name: identity.name,
+        nombres: identity.nombres,
+        apellidoPaterno: identity.apellidoPaterno,
+        apellidoMaterno: identity.apellidoMaterno,
         email: (c.email as string) || undefined,
         phone: (c.phone as string) || undefined,
         dni: (c.dni as string) || undefined,
@@ -153,6 +169,9 @@ function isBulkColumnValuesWriteSupported(): boolean {
 export interface BulkCandidate {
     id: string;
     name: string;
+    nombres?: string;
+    apellidoPaterno?: string;
+    apellidoMaterno?: string;
     phone?: string;
     email?: string;
     dni?: string;
@@ -542,6 +561,9 @@ export const bulkCandidatesApi = {
      */
     async patchFields(candidateId: string, updates: {
         name?: string | null;
+        nombres?: string | null;
+        apellidoPaterno?: string | null;
+        apellidoMaterno?: string | null;
         email?: string | null;
         phone?: string | null;
         dni?: string | null;
@@ -551,7 +573,25 @@ export const bulkCandidatesApi = {
         lastWhatsAppInteractionAt?: string | null;
     }): Promise<void> {
         const dbUpdates: Record<string, string | null> = {};
-        if (updates.name !== undefined) dbUpdates.name = updates.name ?? '';
+        if (
+            updates.nombres !== undefined ||
+            updates.apellidoPaterno !== undefined ||
+            updates.apellidoMaterno !== undefined
+        ) {
+            Object.assign(
+                dbUpdates,
+                identityFieldsToDb({
+                    nombres: updates.nombres === undefined ? undefined : updates.nombres || '',
+                    apellidoPaterno:
+                        updates.apellidoPaterno === undefined ? undefined : updates.apellidoPaterno || '',
+                    apellidoMaterno:
+                        updates.apellidoMaterno === undefined ? undefined : updates.apellidoMaterno || '',
+                    name: updates.name ?? undefined,
+                })
+            );
+        } else if (updates.name !== undefined) {
+            dbUpdates.name = updates.name ?? '';
+        }
         if (updates.email !== undefined) dbUpdates.email = updates.email;
         if (updates.phone !== undefined) dbUpdates.phone = updates.phone || null;
         if (updates.dni !== undefined) dbUpdates.dni = updates.dni || null;

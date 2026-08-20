@@ -142,6 +142,14 @@ const autoFillCandidateData = (
         'NOMBRE': candidate.name,
         'candidato': candidate.name,
         'Candidato': candidate.name,
+        'nombres': candidate.nombres || '',
+        'Nombres': candidate.nombres || '',
+        'apellidoPaterno': candidate.apellidoPaterno || '',
+        'ApellidoPaterno': candidate.apellidoPaterno || '',
+        'apellido paterno': candidate.apellidoPaterno || '',
+        'apellidoMaterno': candidate.apellidoMaterno || '',
+        'ApellidoMaterno': candidate.apellidoMaterno || '',
+        'apellido materno': candidate.apellidoMaterno || '',
         
         // Email
         'candidateEmail': candidate.email || '',

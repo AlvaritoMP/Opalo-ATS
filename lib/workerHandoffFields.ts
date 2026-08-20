@@ -8,6 +8,7 @@ import {
 } from './bulkTableColumns';
 import { extractRouteCostTotal } from './routeCostStorage';
 import { resolveStructuredWorkerNameParts, composeWorkerFullName } from './workerNameParts';
+import { isIdentityCustomColumn } from './candidateIdentity';
 import type { ComplementaryFichaData } from './complementaryFicha';
 import {
     COMPLEMENTARY_FICHA_MAPPABLE_FIELDS,
@@ -17,7 +18,7 @@ import {
 
 const BULK_NAME_KEY_PREFIX = '__name__';
 
-export const SNAPSHOT_VERSION = 3;
+export const SNAPSHOT_VERSION = 4;
 export const TARGET_APP = 'OpsFlow';
 export const DEFAULT_HANDOFF_PURPOSE = 'presentation' as const;
 
@@ -38,6 +39,9 @@ export const WORKER_HANDOFF_FIELD_GROUPS: WorkerHandoffFieldGroup[] = [
         id: 'identity',
         label: 'Identidad',
         fields: [
+            { key: 'nombres', label: 'Nombres' },
+            { key: 'apellidoPaterno', label: 'Apellido paterno' },
+            { key: 'apellidoMaterno', label: 'Apellido materno' },
             { key: 'fullName', label: 'Nombre completo' },
             { key: 'dni', label: 'DNI' },
             { key: 'email', label: 'Email' },
@@ -212,6 +216,9 @@ const FIELD_CATALOG: Record<string, FieldExtractor> = {
 };
 
 const IDENTITY_EXTRACTORS: Record<string, (candidate: Candidate) => unknown> = {
+    nombres: candidate => candidate.nombres,
+    apellidoPaterno: candidate => candidate.apellidoPaterno,
+    apellidoMaterno: candidate => candidate.apellidoMaterno,
     fullName: candidate => candidate.name,
     dni: candidate => candidate.dni,
     email: candidate => candidate.email,
@@ -286,6 +293,7 @@ function collectCustomColumnFields(
     for (const col of customColumns) {
         if (!col?.id || !col.name?.trim()) continue;
         if (col.type === 'route') continue;
+        if (isIdentityCustomColumn(col)) continue;
 
         const raw = resolveColumnValueFromRow(row, col, legacyIdToName);
         const serialized = serializeCustomColumnValue(col, raw);
@@ -593,6 +601,16 @@ export function buildWorkerSnapshot(
                 identity.fullName = composed;
                 includedFieldKeys.push(key);
                 fieldLabels[key] = CATALOG_FIELD_LABELS[key] || 'Nombre completo';
+            }
+            continue;
+        }
+
+        if (key === 'nombres' || key === 'apellidoPaterno' || key === 'apellidoMaterno') {
+            const text = nameParts[key];
+            if (text) {
+                identity[key] = text;
+                includedFieldKeys.push(key);
+                if (CATALOG_FIELD_LABELS[key]) fieldLabels[key] = CATALOG_FIELD_LABELS[key];
             }
             continue;
         }

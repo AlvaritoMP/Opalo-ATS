@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { X, Plus, Trash2 } from 'lucide-react';
 import { CustomColumn, PsycholaboralReportNamePart, DashboardSemanticField, DASHBOARD_SEMANTIC_FIELD_OPTIONS } from '../types';
+import { identityColumnIdFromLabel } from '../lib/candidateIdentity';
 
 interface AddColumnModalProps {
     isOpen: boolean;
@@ -90,6 +91,11 @@ export const AddColumnModal: React.FC<AddColumnModalProps> = ({
                 alert('Agregue al menos una opción para la lista desplegable');
                 return;
             }
+        }
+
+        if (identityColumnIdFromLabel(name.trim())) {
+            alert('Nombres, Apellido Paterno, Apellido Materno y DNI ya son columnas de sistema en todos los procesos. No hace falta crearlas como personalizadas.');
+            return;
         }
 
         if (type === 'route' && !routeDestination.trim()) {

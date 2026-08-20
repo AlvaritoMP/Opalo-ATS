@@ -6,9 +6,13 @@
  */
 
 import { applyImportTextCaseToCandidate } from './importTextCase';
+import { parseLegacyFullName } from './candidateIdentity';
 
 export type CvExtractedFields = {
     name?: string;
+    nombres?: string;
+    apellidoPaterno?: string;
+    apellidoMaterno?: string;
     email?: string;
     phone?: string;
     phone2?: string;
@@ -338,6 +342,12 @@ export function extractCvFields(text: string, options?: CvExtractLocationOptions
         salaryExpectation: extractSalaryExpectation(text),
         description: extractDescription(text),
     };
+    if (fields.name) {
+        const parsed = parseLegacyFullName(fields.name);
+        fields.nombres = parsed.nombres;
+        fields.apellidoPaterno = parsed.apellidoPaterno;
+        fields.apellidoMaterno = parsed.apellidoMaterno;
+    }
 
     applyImportTextCaseToCandidate(fields);
     return fields;

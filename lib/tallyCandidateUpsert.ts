@@ -50,6 +50,9 @@ function ensureTallyCandidateEmail(candidate: TallyCandidateInsert): void {
 
 const STANDARD_MERGE_KEYS = [
     'name',
+    'nombres',
+    'apellido_paterno',
+    'apellido_materno',
     'email',
     'phone',
     'phone2',
@@ -175,6 +178,16 @@ function buildMergeUpdatePayload(
         }
     }
 
+    const nombres = String(update.nombres ?? incoming.nombres ?? existing.nombres ?? '').trim();
+    const apellidoPaterno = String(
+        update.apellido_paterno ?? incoming.apellido_paterno ?? existing.apellido_paterno ?? ''
+    ).trim();
+    const apellidoMaterno = String(
+        update.apellido_materno ?? incoming.apellido_materno ?? existing.apellido_materno ?? ''
+    ).trim();
+    const composedName = [nombres, apellidoPaterno, apellidoMaterno].filter(Boolean).join(' ');
+    if (composedName) update.name = composedName;
+
     const mergedBulk = mergeBulkColumnValues(
         existing.bulk_column_values as Record<string, unknown> | undefined,
         incoming.bulk_column_values,
@@ -239,6 +252,9 @@ export async function processTallyCandidateUpsert(
             const fallbackPayload = { ...updatePayload };
             delete fallbackPayload.application_count;
             delete fallbackPayload.first_application_at;
+            delete fallbackPayload.nombres;
+            delete fallbackPayload.apellido_paterno;
+            delete fallbackPayload.apellido_materno;
             ({ data, error: updateError } = await applyUpdate(fallbackPayload, 'id'));
         }
 
@@ -289,6 +305,23 @@ export async function processTallyCandidateUpsert(
         })
         .select('id, application_count')
         .single());
+
+    if (insertError && isMissingColumnError(insertError)) {
+        const stripped = { ...baseInsert } as Record<string, unknown>;
+        delete stripped.nombres;
+        delete stripped.apellido_paterno;
+        delete stripped.apellido_materno;
+        ({ data: created, error: insertError } = await supabase
+            .from('candidates')
+            .insert({
+                ...stripped,
+                first_application_at: nowIso,
+                application_count: 1,
+                registration_origin: 'formulario',
+            })
+            .select('id, application_count')
+            .single());
+    }
 
     if (insertError && isMissingColumnError(insertError)) {
         ({ data: created, error: insertError } = await supabase

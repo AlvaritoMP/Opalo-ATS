@@ -7,6 +7,8 @@ import { isMissingColumnError } from '../supabaseColumnErrors';
 import { buildUploadContactLockUpdate } from '../contactLock';
 import { fetchWithRetry } from '../fetchWithRetry';
 import type { ComplementaryFichaData } from '../complementaryFicha';
+import { identityFieldsToDb, identityFromDbRow } from '../candidateIdentity';
+import { hydrateCandidateIdentity } from '../workerNameParts';
 
 const CANDIDATE_PAGE_SIZE = 250;
 const CANDIDATE_MAX_ROWS = 2000;
@@ -16,9 +18,16 @@ const CANDIDATE_LIST_SELECT_CORE =
 
 const CANDIDATE_LIST_SELECT = `${CANDIDATE_LIST_SELECT_CORE}, application_count, first_application_at, registration_origin`;
 
+const IDENTITY_SELECT_COLS = 'nombres, apellido_paterno, apellido_materno';
+
+function withIdentitySelect(fields: string): string {
+    if (fields.includes('apellido_paterno')) return fields;
+    return fields.replace('id, name,', `id, name, ${IDENTITY_SELECT_COLS},`);
+}
+
 /** Variantes de select (de más completa a mínima) si faltan migraciones en Supabase */
 function getCandidateListSelectVariants(): string[] {
-    return [
+    const base = [
         `${CANDIDATE_LIST_SELECT}, bulk_column_values, psycholaboral_evaluation, complementary_data, complementary_filled_at, opsflow_sent_at, opsflow_last_package_id, opsflow_delivery_status`,
         `${CANDIDATE_LIST_SELECT}, bulk_column_values, psycholaboral_evaluation, complementary_data, complementary_filled_at`,
         `${CANDIDATE_LIST_SELECT}, bulk_column_values, psycholaboral_evaluation`,
@@ -28,6 +37,7 @@ function getCandidateListSelectVariants(): string[] {
         CANDIDATE_LIST_SELECT_CORE,
         'id, name, email, phone, phone2, process_id, stage_id, description, avatar_url, source, salary_expectation, agreed_salary, agreed_salary_in_words, age, dni, linkedin_url, address, province, district, archived, archived_at, discarded, discard_reason, discarded_at, hire_date, google_drive_folder_id, google_drive_folder_name, visible_to_clients, offer_accepted_date, application_started_date, application_completed_date, critical_stage_reviewed_at, created_at',
     ];
+    return [...base.map(withIdentitySelect), ...base];
 }
 
 function mapBulkColumnValues(dbCandidate: { bulk_column_values?: unknown }): Record<string, unknown> | undefined {
@@ -193,10 +203,34 @@ function mapCandidatesWithRelations(data: any[], maps: RelationMaps): Candidate[
     );
 }
 
+function mapIdentityFields(dbCandidate: any): Pick<
+    Candidate,
+    'name' | 'nombres' | 'apellidoPaterno' | 'apellidoMaterno'
+> {
+    const fromDb = identityFromDbRow(dbCandidate as Record<string, unknown>);
+    const hydrated = hydrateCandidateIdentity({
+        name: fromDb.name,
+        nombres: fromDb.nombres,
+        apellidoPaterno: fromDb.apellidoPaterno,
+        apellidoMaterno: fromDb.apellidoMaterno,
+        bulkColumnValues: mapBulkColumnValues(dbCandidate),
+    });
+    return {
+        name: hydrated.name,
+        nombres: hydrated.nombres,
+        apellidoPaterno: hydrated.apellidoPaterno,
+        apellidoMaterno: hydrated.apellidoMaterno,
+    };
+}
+
 function mapListCandidate(dbCandidate: any, extras: Partial<Candidate> = {}): Candidate {
+    const identity = mapIdentityFields(dbCandidate);
     return {
         id: dbCandidate.id,
-        name: dbCandidate.name,
+        name: identity.name,
+        nombres: identity.nombres,
+        apellidoPaterno: identity.apellidoPaterno,
+        apellidoMaterno: identity.apellidoMaterno,
         email: dbCandidate.email,
         phone: dbCandidate.phone,
         phone2: dbCandidate.phone2,
@@ -317,9 +351,13 @@ async function dbToCandidate(dbCandidate: any): Promise<Candidate> {
             })),
     }));
 
+    const identity = mapIdentityFields(dbCandidate);
     return {
         id: dbCandidate.id,
-        name: dbCandidate.name,
+        name: identity.name,
+        nombres: identity.nombres,
+        apellidoPaterno: identity.apellidoPaterno,
+        apellidoMaterno: identity.apellidoMaterno,
         email: dbCandidate.email,
         phone: dbCandidate.phone,
         phone2: dbCandidate.phone2,
@@ -395,7 +433,23 @@ async function dbToCandidate(dbCandidate: any): Promise<Candidate> {
 // Convertir de tipo de aplicación a DB
 function candidateToDb(candidate: Partial<Candidate>): any {
     const dbCandidate: any = {};
-    if (candidate.name !== undefined) dbCandidate.name = candidate.name;
+    if (
+        candidate.nombres !== undefined ||
+        candidate.apellidoPaterno !== undefined ||
+        candidate.apellidoMaterno !== undefined
+    ) {
+        Object.assign(
+            dbCandidate,
+            identityFieldsToDb({
+                nombres: candidate.nombres,
+                apellidoPaterno: candidate.apellidoPaterno,
+                apellidoMaterno: candidate.apellidoMaterno,
+                name: candidate.name,
+            })
+        );
+    } else if (candidate.name !== undefined) {
+        dbCandidate.name = candidate.name;
+    }
     if (candidate.email !== undefined) dbCandidate.email = candidate.email;
     if (candidate.phone !== undefined) dbCandidate.phone = candidate.phone;
     if (candidate.phone2 !== undefined) dbCandidate.phone2 = candidate.phone2;
@@ -716,7 +770,7 @@ export const candidatesApi = {
             'id, name, email, phone, phone2, process_id, stage_id, description, avatar_url, source, salary_expectation, agreed_salary, agreed_salary_in_words, age, dni, linkedin_url, address, province, district, archived, archived_at, discarded, discard_reason, discarded_at, hire_date, google_drive_folder_id, google_drive_folder_name, visible_to_clients, offer_accepted_date, application_started_date, application_completed_date, critical_stage_reviewed_at, created_at, bulk_column_values, score_ia, metadata_ia',
             'id, name, email, phone, phone2, process_id, stage_id, description, avatar_url, source, salary_expectation, agreed_salary, agreed_salary_in_words, age, dni, linkedin_url, address, province, district, archived, archived_at, discarded, discard_reason, discarded_at, hire_date, google_drive_folder_id, google_drive_folder_name, visible_to_clients, offer_accepted_date, application_started_date, application_completed_date, critical_stage_reviewed_at, created_at, bulk_column_values',
             'id, name, email, phone, phone2, process_id, stage_id, description, avatar_url, source, salary_expectation, agreed_salary, agreed_salary_in_words, age, dni, linkedin_url, address, province, district, archived, archived_at, discarded, discard_reason, discarded_at, hire_date, google_drive_folder_id, google_drive_folder_name, visible_to_clients, offer_accepted_date, application_started_date, application_completed_date, critical_stage_reviewed_at, created_at',
-        ];
+        ].flatMap(fields => [withIdentitySelect(fields), fields]);
 
         let data: any = null;
         let lastError: { code?: string; message?: string } | null = null;

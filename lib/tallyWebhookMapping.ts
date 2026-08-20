@@ -25,6 +25,9 @@ export interface TallyWebhookProcessRow {
 
 export interface TallyCandidateInsert {
     name: string;
+    nombres?: string;
+    apellido_paterno?: string;
+    apellido_materno?: string;
     email: string;
     phone: string;
     phone2: string;
@@ -266,7 +269,22 @@ function autoMatchRefsForField(
     const baseCol = BASE_COLUMNS.find((c) => c.importKey === mappingKey || c.id === mappingKey);
     if (baseCol) {
         const extraByKey: Record<string, string[]> = {
-            name: ['nombres', 'nombre_completo'],
+            nombres: ['nombres'],
+            apellidoPaterno: [
+                'apellido_paterno',
+                'apellido paterno',
+                'ap paterno',
+                'ap. paterno',
+                'paterno',
+            ],
+            apellidoMaterno: [
+                'apellido_materno',
+                'apellido materno',
+                'ap materno',
+                'ap. materno',
+                'materno',
+            ],
+            name: ['nombre_completo', 'nombre completo'],
             email: ['correo', 'e-mail'],
             phone: ['telefono', 'teléfono'],
         };
@@ -282,7 +300,10 @@ function autoMatchRefsForField(
 
     if (!isBulk) {
         const simpleAliases: Record<string, string[]> = {
-            name: ['name', 'nombre', 'nombres', 'nombre_completo'],
+            nombres: ['nombres'],
+            apellido_paterno: ['apellido paterno', 'ap paterno', 'ap. paterno', 'paterno'],
+            apellido_materno: ['apellido materno', 'ap materno', 'ap. materno', 'materno'],
+            name: ['name', 'nombre_completo', 'nombre completo'],
             email: ['email', 'correo', 'e-mail'],
             phone: ['phone', 'telefono', 'teléfono'],
             source: ['source', 'fuente'],
@@ -400,6 +421,17 @@ function parseValueForCustomColumn(raw: string, col: CustomColumn): unknown {
 function assignStandardField(target: TallyCandidateInsert, key: string, value: string): void {
     if (!value) return;
     switch (key) {
+        case 'nombres':
+            target.nombres = value;
+            break;
+        case 'apellido_paterno':
+        case 'apellidoPaterno':
+            target.apellido_paterno = value;
+            break;
+        case 'apellido_materno':
+        case 'apellidoMaterno':
+            target.apellido_materno = value;
+            break;
         case 'name':
             target.name = value;
             break;
@@ -444,33 +476,66 @@ function assignStandardField(target: TallyCandidateInsert, key: string, value: s
     }
 }
 
-function composeNameFromTableColumns(
+function givenNamesFromTableColumns(
+    bulkRaw: Record<string, unknown>,
+    customColumns: CustomColumn[]
+): string {
+    let nombres = '';
+    let nombre = '';
+    for (const col of customColumns) {
+        const compact = compactColumnRef(col.name);
+        if (compact.includes('completo') || compact.includes('apellid')) continue;
+        const text = bulkRaw[col.id] == null ? '' : String(bulkRaw[col.id]).trim();
+        if (!text) continue;
+        if (compact === 'nombres') nombres = text;
+        else if (compact === 'nombre') nombre = text;
+    }
+    return nombres || nombre;
+}
+
+function applyCanonicalIdentityFromForm(
     candidate: TallyCandidateInsert,
     bulkRaw: Record<string, unknown>,
     customColumns: CustomColumn[]
 ): void {
-    let nombres = '';
-    let apP = '';
-    let apM = '';
+    const givenFromCols = givenNamesFromTableColumns(bulkRaw, customColumns);
+    let apP = (candidate.apellido_paterno || '').trim();
+    let apM = (candidate.apellido_materno || '').trim();
     for (const col of customColumns) {
         const compact = compactColumnRef(col.name);
         const text = bulkRaw[col.id] == null ? '' : String(bulkRaw[col.id]).trim();
         if (!text) continue;
-        if (compact === 'nombres' || compact === 'nombre') nombres = text;
-        else if (compact.includes('apellidopaterno') || compact === 'appaterno' || compact === 'paterno') apP = text;
-        else if (compact.includes('apellidomaterno') || compact === 'apmaterno' || compact === 'materno') apM = text;
+        if (!apP && (compact.includes('apellidopaterno') || compact === 'appaterno' || compact === 'paterno')) {
+            apP = text;
+        } else if (!apM && (compact.includes('apellidomaterno') || compact === 'apmaterno' || compact === 'materno')) {
+            apM = text;
+        }
     }
-    if (!nombres && !apP && !apM) return;
-    const given = nombres || (candidate.name || '').trim();
-    const composed = [given, apP, apM].filter(Boolean).join(' ').replace(/\s+/g, ' ').trim();
-    if (!composed) return;
-    const current = (candidate.name || '').trim();
-    const alreadyHasSurnames =
-        (!!apP && current.toLowerCase().includes(apP.toLowerCase())) ||
-        (!!apM && current.toLowerCase().includes(apM.toLowerCase()));
-    if (!current || current === nombres || !alreadyHasSurnames) {
-        candidate.name = composed;
+
+    let nombres = (candidate.nombres || '').trim() || givenFromCols;
+    const mappedFull = (candidate.name || '').trim();
+
+    if (!nombres && mappedFull) {
+        const parsed = mappedFull.trim().split(/\s+/).filter(Boolean);
+        if (!apP && !apM && parsed.length >= 2) {
+            if (parsed.length === 2) {
+                nombres = parsed[0];
+                apP = parsed[1];
+            } else {
+                nombres = parsed.slice(0, -2).join(' ');
+                apP = parsed[parsed.length - 2];
+                apM = parsed[parsed.length - 1];
+            }
+        } else {
+            nombres = mappedFull;
+        }
     }
+
+    if (nombres) candidate.nombres = nombres;
+    if (apP) candidate.apellido_paterno = apP;
+    if (apM) candidate.apellido_materno = apM;
+    const composed = [nombres, apP, apM].filter(Boolean).join(' ').replace(/\s+/g, ' ').trim();
+    if (composed) candidate.name = composed;
 }
 
 function syncHomonymCustomColumns(
@@ -517,6 +582,9 @@ export function buildTallyCandidateFromSubmission(
 
     const candidate: TallyCandidateInsert = {
         name: '',
+        nombres: '',
+        apellido_paterno: '',
+        apellido_materno: '',
         email: '',
         phone: '',
         phone2: '',
@@ -565,7 +633,9 @@ export function buildTallyCandidateFromSubmission(
     if (customColumns.length > 0) {
         fillEmptyCustomColumnsFromTally(bulkRaw, customColumns, index, customMapping);
         syncHomonymCustomColumns(bulkRaw, customColumns, candidate);
-        composeNameFromTableColumns(candidate, bulkRaw, customColumns);
+    }
+    applyCanonicalIdentityFromForm(candidate, bulkRaw, customColumns);
+    if (customColumns.length > 0) {
         const enriched = enrichBulkColumnValuesForStorage(bulkRaw, customColumns);
         if (Object.keys(enriched).length > 0) {
             candidate.bulk_column_values = enriched;

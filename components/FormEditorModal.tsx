@@ -377,10 +377,10 @@ export const FormEditorModal: React.FC<FormIntegrationModalProps> = ({ integrati
                                             ¿Cómo funciona el mapeo?
                                         </p>
                                         <p className="text-xs text-blue-800">
-                                            El kanban muestra los campos de identidad del candidato (nombre, email, teléfono…).
-                                            El modo tabla muestra esos mismos campos <strong>más las columnas propias del proceso</strong>
-                                            (Apellido paterno, Experiencia, Disponibilidad, etc.). El dato de cada pregunta de Tally
-                                            debe mapearse a la columna de tabla correspondiente: ahí es donde se guarda y se ve.
+                                            El kanban y la tabla usan los mismos campos de identidad
+                                            (Nombres, Apellido Paterno, Apellido Materno, DNI, email, teléfono…).
+                                            El nombre completo se arma siempre sumando las tres partes de nombre.
+                                            El modo tabla muestra esos campos más las columnas propias del proceso.
                                         </p>
                                         <p className="text-xs text-blue-800">
                                             Si el label en Tally coincide con el nombre de la columna, puede dejarlo en blanco

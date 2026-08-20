@@ -47,6 +47,13 @@ import {
     type HiredStageActor,
 } from '../lib/hiringStageTracking';
 import {
+    GIVEN_NAMES_COLUMN_ID,
+    IDENTITY_COLUMN_LABELS,
+    buildIdentityFieldPatch,
+    isIdentityNameColumnId,
+    isIdentitySystemColumnId,
+} from '../lib/candidateIdentity';
+import {
     formatRegistrationOrigin,
     REGISTRATION_ORIGIN_BADGE_CLASS,
     REGISTRATION_ORIGIN_COLUMN_ID,
@@ -793,7 +800,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
     const [showTemplateModal, setShowTemplateModal] = useState(false);
     const [showColumnConfig, setShowColumnConfig] = useState(false);
     const [hiddenColumns, setHiddenColumns] = useState<string[]>([]);
-    const [pinnedColumns, setPinnedColumns] = useState<string[]>(['name']);
+    const [pinnedColumns, setPinnedColumns] = useState<string[]>([GIVEN_NAMES_COLUMN_ID]);
     const [columnWidths, setColumnWidths] = useState<Record<string, number>>({});
     const columnWidthsRef = useRef<Record<string, number>>({});
     const resizeSessionRef = useRef<{ colId: string; startX: number; startWidth: number } | null>(null);
@@ -3709,6 +3716,21 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
         const updates: Record<string, string | null> = {
             [field]: trimmed === '' ? null : trimmed,
         };
+        if (isIdentityNameColumnId(field)) {
+            const identityPatch = buildIdentityFieldPatch(
+                {
+                    nombres: candidate?.nombres,
+                    apellidoPaterno: candidate?.apellidoPaterno,
+                    apellidoMaterno: candidate?.apellidoMaterno,
+                },
+                field,
+                trimmed
+            );
+            updates.nombres = identityPatch.nombres ?? '';
+            updates.apellidoPaterno = identityPatch.apellidoPaterno ?? '';
+            updates.apellidoMaterno = identityPatch.apellidoMaterno ?? '';
+            updates.name = identityPatch.name || '';
+        }
 
         if (!isUndoingRef.current) {
             pushUndo({
@@ -3759,16 +3781,35 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
 
             const value = rawValue.trim();
             const patchValue: string | null = value === '' ? null : value;
-            applyOptimisticUpdate(candidateId, { [colId]: value || undefined } as Partial<BulkCandidate>);
+            let patch: Record<string, string | null> = { [colId]: patchValue };
+            if (isIdentityNameColumnId(colId)) {
+                const current = candidates.find(c => c.id === candidateId);
+                const identityPatch = buildIdentityFieldPatch(
+                    {
+                        nombres: current?.nombres,
+                        apellidoPaterno: current?.apellidoPaterno,
+                        apellidoMaterno: current?.apellidoMaterno,
+                    },
+                    colId,
+                    value
+                );
+                patch = {
+                    nombres: identityPatch.nombres ?? '',
+                    apellidoPaterno: identityPatch.apellidoPaterno ?? '',
+                    apellidoMaterno: identityPatch.apellidoMaterno ?? '',
+                    name: identityPatch.name || '',
+                };
+            }
+            applyOptimisticUpdate(candidateId, patch as Partial<BulkCandidate>);
             if (colId === 'source' || colId === 'province' || colId === 'district') {
                 syncCustomFieldFromStandard(candidateId, colId, value);
             }
-            bulkCandidatesApi.patchFields(candidateId, { [colId]: patchValue }).catch(error => {
+            bulkCandidatesApi.patchFields(candidateId, patch).catch(error => {
                 console.error('Error pegando valor:', error);
                 actions.showToast('Error al guardar cambios', 'error', 3000);
             });
         },
-        [customColumns, applyOptimisticUpdate, syncCustomFieldFromStandard, handleColumnValueChange, actions, clearTransferHighlight]
+        [customColumns, candidates, applyOptimisticUpdate, syncCustomFieldFromStandard, handleColumnValueChange, actions, clearTransferHighlight]
     );
 
     const restoreCellSnapshot = useCallback(
@@ -4055,6 +4096,10 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
 
     const toggleColumnVisibility = async (colId: string) => {
         const isHiding = !hiddenColumns.includes(colId);
+        if (isHiding && isIdentitySystemColumnId(colId)) {
+            actions.showToast('Nombres, apellidos y DNI son columnas de sistema y no se pueden ocultar.', 'info', 3500);
+            return;
+        }
         const previousHidden = hiddenColumns;
         const newHidden = isHiding
             ? [...hiddenColumns, colId]
@@ -4618,8 +4663,17 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
 
             switch (sortColumn) {
                 case 'name':
-                    valueA = (candidateA.name || '').toLowerCase();
-                    valueB = (candidateB.name || '').toLowerCase();
+                case 'nombres':
+                    valueA = (candidateA.nombres || candidateA.name || '').toLowerCase();
+                    valueB = (candidateB.nombres || candidateB.name || '').toLowerCase();
+                    break;
+                case 'apellidoPaterno':
+                    valueA = (candidateA.apellidoPaterno || '').toLowerCase();
+                    valueB = (candidateB.apellidoPaterno || '').toLowerCase();
+                    break;
+                case 'apellidoMaterno':
+                    valueA = (candidateA.apellidoMaterno || '').toLowerCase();
+                    valueB = (candidateB.apellidoMaterno || '').toLowerCase();
                     break;
                 case 'dni':
                     valueA = (candidateA.dni || '').toLowerCase();
@@ -4747,6 +4801,15 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
             const displayCandidate = optimistic ? { ...candidate, ...optimistic } : candidate;
 
             if (columnFilters.name && !displayCandidate.name.toLowerCase().includes(columnFilters.name.toLowerCase())) {
+                return false;
+            }
+            if (columnFilters.nombres && !(displayCandidate.nombres || '').toLowerCase().includes(columnFilters.nombres.toLowerCase())) {
+                return false;
+            }
+            if (columnFilters.apellidoPaterno && !(displayCandidate.apellidoPaterno || '').toLowerCase().includes(columnFilters.apellidoPaterno.toLowerCase())) {
+                return false;
+            }
+            if (columnFilters.apellidoMaterno && !(displayCandidate.apellidoMaterno || '').toLowerCase().includes(columnFilters.apellidoMaterno.toLowerCase())) {
                 return false;
             }
             if (columnFilters.dni && !(displayCandidate.dni || '').toLowerCase().includes(columnFilters.dni.toLowerCase())) {
@@ -5096,18 +5159,27 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                 );
             }
 
-            if (colId === 'name') {
+            if (isIdentityNameColumnId(colId) || colId === 'name') {
+                const fieldKey = isIdentityNameColumnId(colId) ? colId : 'nombres';
+                const currentValue =
+                    fieldKey === 'nombres'
+                        ? displayCandidate.nombres || (colId === 'name' ? displayCandidate.name : '') || ''
+                        : fieldKey === 'apellidoPaterno'
+                          ? displayCandidate.apellidoPaterno || ''
+                          : displayCandidate.apellidoMaterno || '';
                 return (
                     <span
                         className="truncate text-primary-800 inline-flex items-center gap-0.5 min-w-0"
-                        onDoubleClick={(e) => { e.stopPropagation(); handleStartEdit(candidate.id, 'name', displayCandidate.name); }}
+                        onDoubleClick={(e) => { e.stopPropagation(); handleStartEdit(candidate.id, fieldKey, currentValue); }}
                         title="Doble clic para editar"
                     >
-                        <span className="truncate">{displayCandidate.name}</span>
-                        <OpsFlowSentBadge
-                            sentAt={displayCandidate.opsflowSentAt}
-                            deliveryStatus={displayCandidate.opsflowDeliveryStatus}
-                        />
+                        <span className="truncate">{currentValue || '-'}</span>
+                        {fieldKey === 'nombres' && (
+                            <OpsFlowSentBadge
+                                sentAt={displayCandidate.opsflowSentAt}
+                                deliveryStatus={displayCandidate.opsflowDeliveryStatus}
+                            />
+                        )}
                     </span>
                 );
             }
@@ -6189,9 +6261,10 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                                                                 <label className="flex items-center gap-2 flex-1 cursor-pointer min-w-0">
                                                                     <input
                                                                         type="checkbox"
-                                                                        checked={!hiddenColumns.includes(colId)}
+                                                                        checked={!hiddenColumns.includes(colId) || isIdentitySystemColumnId(colId)}
+                                                                        disabled={isIdentitySystemColumnId(colId)}
                                                                         onChange={() => toggleColumnVisibility(colId)}
-                                                                        className="w-3.5 h-3.5 text-primary-600 rounded focus:ring-primary-500"
+                                                                        className="w-3.5 h-3.5 text-primary-600 rounded focus:ring-primary-500 disabled:opacity-60"
                                                                     />
                                                                     <span className="text-xs text-gray-700 truncate" title={colName}>{colName}</span>
                                                                 </label>
@@ -6586,15 +6659,17 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                                         className: `${COMPACT_TH_CLASS} cursor-move transition-colors bg-gray-50`,
                                     };
 
-                                    if (colId === 'name') {
+                                    if (isIdentityNameColumnId(colId) || colId === 'name') {
+                                        const fieldKey = isIdentityNameColumnId(colId) ? colId : 'nombres';
+                                        const label = IDENTITY_COLUMN_LABELS[fieldKey] || 'Nombres';
                                         return (
                                             <BulkTh colId={colId} headerProps={commonProps} style={thStyle()} onResizeStart={handleColumnResizeStart}>
                                                 <div className="flex flex-col gap-1">
-                                                    <button onClick={() => handleSort('name')} className="flex items-center gap-1 hover:text-primary-600 transition-colors">
-                                                        <span>Nombre</span>
-                                                        {sortColumn === 'name' ? (sortDirection === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />) : <div className="w-3 h-3 opacity-30"><ArrowUp className="w-3 h-3" /></div>}
+                                                    <button onClick={() => handleSort(fieldKey)} className="flex items-center gap-1 hover:text-primary-600 transition-colors">
+                                                        <span>{label}</span>
+                                                        {sortColumn === fieldKey ? (sortDirection === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />) : <div className="w-3 h-3 opacity-30"><ArrowUp className="w-3 h-3" /></div>}
                                                     </button>
-                                                    <input type="text" placeholder="Filtrar..." value={columnFilterDraft.name || ''} onChange={(e) => setColumnFilterDraft(prev => ({ ...prev, name: e.target.value }))} className="text-xs px-2 py-1 border border-gray-300 rounded focus:ring-1 focus:ring-primary-500 focus:border-primary-500 font-normal normal-case" onClick={(e) => e.stopPropagation()} />
+                                                    <input type="text" placeholder="Filtrar..." value={columnFilterDraft[fieldKey] || ''} onChange={(e) => setColumnFilterDraft(prev => ({ ...prev, [fieldKey]: e.target.value }))} className="text-xs px-2 py-1 border border-gray-300 rounded focus:ring-1 focus:ring-primary-500 focus:border-primary-500 font-normal normal-case" onClick={(e) => e.stopPropagation()} />
                                                 </div>
                                             </BulkTh>
                                         );
@@ -6998,26 +7073,33 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                                             />
                                         </td>
                                         {visibleColumns.map(colId => {
-                                            if (colId === 'name') {
+                                            if (isIdentityNameColumnId(colId) || colId === 'name') {
+                                                const fieldKey = isIdentityNameColumnId(colId) ? colId : 'nombres';
+                                                const currentValue =
+                                                    fieldKey === 'nombres'
+                                                        ? displayCandidate.nombres || (colId === 'name' ? displayCandidate.name : '') || ''
+                                                        : fieldKey === 'apellidoPaterno'
+                                                          ? displayCandidate.apellidoPaterno || ''
+                                                          : displayCandidate.apellidoMaterno || '';
                                                 return (
-                                                    <td key="name" {...tdProps(candidate.id, 'name')}>
-                                                        {renderCellCommentIndicator(candidate.id, 'name')}
-                                                        {editingCell?.candidateId === candidate.id && editingCell?.field === 'name' ? (
+                                                    <td key={colId} {...tdProps(candidate.id, fieldKey)}>
+                                                        {renderCellCommentIndicator(candidate.id, fieldKey)}
+                                                        {editingCell?.candidateId === candidate.id && editingCell?.field === fieldKey ? (
                                                             <BulkTableEditInput
                                                                 initialValue={editingCell.initialValue}
                                                                 className="w-full px-1 py-0.5 text-xs border border-primary-500 rounded focus:ring-1 focus:ring-primary-500"
-                                                                onSave={v => handleSaveEdit(candidate.id, 'name', v)}
+                                                                onSave={v => handleSaveEdit(candidate.id, fieldKey, v)}
                                                                 onCancel={handleCancelEdit}
                                                             />
-                                                        ) : (
+                                                        ) : fieldKey === 'nombres' ? (
                                                             <MetadataTooltip metadata={displayCandidate.metadataIa || ''} scoreIa={scoreIaColumnVisible ? displayCandidate.scoreIa : undefined}>
                                                                 <span className="inline-flex items-center gap-0.5 min-w-0">
                                                                     <span
                                                                         className="cursor-pointer hover:underline decoration-dotted truncate text-primary-800 hover:text-primary-900"
                                                                         onClick={(e) => { e.stopPropagation(); openDrawer(candidate, 'contactology'); }}
-                                                                        onDoubleClick={(e) => { e.stopPropagation(); handleStartEdit(candidate.id, 'name', displayCandidate.name); }}
-                                                                        title="Clic: historial de contactología · Doble clic: editar nombre"
-                                                                    >{displayCandidate.name}</span>
+                                                                        onDoubleClick={(e) => { e.stopPropagation(); handleStartEdit(candidate.id, fieldKey, currentValue); }}
+                                                                        title="Clic: historial de contactología · Doble clic: editar"
+                                                                    >{currentValue || '-'}</span>
                                                                     <ApplicationCountBadge
                                                                         applicationCount={displayCandidate.applicationCount}
                                                                         firstApplicationAt={displayCandidate.firstApplicationAt}
@@ -7029,6 +7111,12 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                                                                     />
                                                                 </span>
                                                             </MetadataTooltip>
+                                                        ) : (
+                                                            <span
+                                                                className="cursor-pointer hover:underline decoration-dotted truncate text-gray-700"
+                                                                onDoubleClick={(e) => { e.stopPropagation(); handleStartEdit(candidate.id, fieldKey, currentValue); }}
+                                                                title="Doble clic para editar"
+                                                            >{currentValue || '-'}</span>
                                                         )}
                                                     </td>
                                                 );

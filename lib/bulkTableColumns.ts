@@ -11,6 +11,16 @@ import { readBulkTableTemplatesCache } from './bulkTableTemplates';
 import { extractRouteCostTotal } from './routeCostStorage';
 import { ensureFloatingColumnsHidden, resolveFloatingColumnIds } from './bulkFloatingColumns';
 import { BULK_DOCUMENTS_COLUMN_ID } from './bulkDocumentData';
+import {
+    DNI_COLUMN_ID,
+    GIVEN_NAMES_COLUMN_ID,
+    IDENTITY_SYSTEM_COLUMN_IDS,
+    ensureIdentityColumnsInOrder,
+    hideIdentityDuplicateCustomColumns,
+    isIdentityCustomColumn,
+    isIdentitySystemColumnId,
+    remapPinnedIdentityColumnIds,
+} from './candidateIdentity';
 
 const BULK_NAME_KEY_PREFIX = '__name__';
 
@@ -765,8 +775,10 @@ export interface BaseColumn {
 }
 
 export const BASE_COLUMNS: BaseColumn[] = [
-    { id: 'name', label: 'Nombre', importKey: 'name' },
-    { id: 'dni', label: 'DNI', importKey: 'dni' },
+    { id: GIVEN_NAMES_COLUMN_ID, label: 'Nombres', importKey: 'nombres' },
+    { id: 'apellidoPaterno', label: 'Apellido Paterno', importKey: 'apellidoPaterno' },
+    { id: 'apellidoMaterno', label: 'Apellido Materno', importKey: 'apellidoMaterno' },
+    { id: DNI_COLUMN_ID, label: 'DNI', importKey: 'dni' },
     { id: 'email', label: 'Email', importKey: 'email' },
     { id: 'contactEmail', label: 'Correo' },
     { id: 'scoreIa', label: 'Score IA' },
@@ -798,6 +810,9 @@ export const CHECKBOX_COL_WIDTH = 32;
 
 export const COLUMN_WIDTHS: Record<string, number> = {
     name: 130,
+    nombres: 130,
+    apellidoPaterno: 120,
+    apellidoMaterno: 120,
     dni: 72,
     email: 140,
     scoreIa: 64,
@@ -895,7 +910,20 @@ export function getStickyColumnStyle(
 
 export const IMPORT_FIELD_ALIASES: Record<string, string> = {
     name: 'name',
-    nombre: 'name',
+    'nombre completo': 'name',
+    nombrecompleto: 'name',
+    nombres: 'nombres',
+    nombre: 'nombres',
+    apellidopaterno: 'apellidoPaterno',
+    'apellido paterno': 'apellidoPaterno',
+    'ap paterno': 'apellidoPaterno',
+    'ap. paterno': 'apellidoPaterno',
+    paterno: 'apellidoPaterno',
+    apellidomaterno: 'apellidoMaterno',
+    'apellido materno': 'apellidoMaterno',
+    'ap materno': 'apellidoMaterno',
+    'ap. materno': 'apellidoMaterno',
+    materno: 'apellidoMaterno',
     email: 'email',
     correo: 'email',
     phone: 'phone',
@@ -943,7 +971,10 @@ export interface TallyMappingField {
 }
 
 const SIMPLE_TALLY_MAPPING_FIELDS: TallyMappingField[] = [
-    { key: 'name', label: 'Nombre', placeholder: 'nombre, nombres, name, nombre_completo' },
+    { key: 'nombres', label: 'Nombres', placeholder: 'nombres' },
+    { key: 'apellidoPaterno', label: 'Apellido Paterno', placeholder: 'apellido paterno, ap paterno' },
+    { key: 'apellidoMaterno', label: 'Apellido Materno', placeholder: 'apellido materno, ap materno' },
+    { key: 'name', label: 'Nombre completo (un solo campo Tally)', placeholder: 'nombre_completo' },
     { key: 'email', label: 'Email', placeholder: 'email, correo, e-mail' },
     { key: 'phone', label: 'Teléfono', placeholder: 'phone, telefono, teléfono' },
     { key: 'phone2', label: 'Teléfono 2', placeholder: 'phone2, telefono2, teléfono_secundario' },
@@ -994,6 +1025,7 @@ export function getTallyIntegrationMappingFields(process?: Process): TallyMappin
 
     // Incluir columnas custom del proceso aunque aún no estén en columnOrder o estén ocultas
     for (const col of customColumns) {
+        if (isIdentityCustomColumn(col)) continue;
         const key = `custom_${col.id}`;
         if (seen.has(key)) continue;
         seen.add(key);
@@ -1019,6 +1051,8 @@ export function normalizeTallyFieldMapping(mapping: FieldMapping = {}): FieldMap
     const legacyToSnake: Record<string, string> = {
         salaryExpectation: 'salary_expectation',
         linkedinUrl: 'linkedin_url',
+        apellido_paterno: 'apellidoPaterno',
+        apellido_materno: 'apellidoMaterno',
     };
     const out: FieldMapping = { ...mapping };
     for (const [oldKey, newKey] of Object.entries(legacyToSnake)) {
@@ -1085,7 +1119,9 @@ export function buildVisibleColumnIds(
 ): string[] {
     const hidden = new Set(hiddenColumns);
     return columnOrder.filter(colId => {
-        if (!colId || hidden.has(colId)) return false;
+        if (!colId) return false;
+        if (isIdentitySystemColumnId(colId)) return true;
+        if (hidden.has(colId)) return false;
         if (colId.startsWith('custom_')) {
             const bare = colId.slice('custom_'.length);
             return customColumns.some(c => c.id === bare);
@@ -1207,8 +1243,10 @@ export function remapPinnedColumnIds(
     bulkConfig: BulkProcessConfig | undefined,
     customColumns: CustomColumn[] = []
 ): string[] {
-    const remapped = remapHiddenColumnIds(pinnedColumns, bulkConfig, customColumns);
-    return remapped.length > 0 ? remapped : ['name'];
+    const remapped = remapPinnedIdentityColumnIds(
+        remapHiddenColumnIds(pinnedColumns, bulkConfig, customColumns)
+    );
+    return remapped.length > 0 ? remapped : [GIVEN_NAMES_COLUMN_ID];
 }
 
 /** ¿El layout guardado usa IDs custom antiguos distintos a los actuales? */
@@ -1262,19 +1300,21 @@ export function resolveColumnOrder(
         for (const id of getCustomColumnIds(customColumns)) {
             if (!present.has(id)) ordered.push(id);
         }
-        return ordered;
+        return ensureIdentityColumnsInOrder(ordered);
     }
 
-    return allIds;
+    return ensureIdentityColumnsInOrder(allIds);
 }
 
-/** Orden inicial: columnas custom justo después de "name" (típico en procesos masivos). */
+/** Orden inicial: columnas custom justo después de las de identidad. */
 export function buildInitialBulkColumnOrder(customColumns: CustomColumn[] = []): string[] {
     const customIds = getCustomColumnIds(customColumns);
-    const nameIdx = DEFAULT_COLUMN_ORDER.indexOf('name');
-    if (nameIdx < 0) return [...DEFAULT_COLUMN_ORDER, ...customIds];
-    const before = DEFAULT_COLUMN_ORDER.slice(0, nameIdx + 1);
-    const after = DEFAULT_COLUMN_ORDER.slice(nameIdx + 1);
+    const lastIdentityIdx = Math.max(
+        ...IDENTITY_SYSTEM_COLUMN_IDS.map(id => DEFAULT_COLUMN_ORDER.indexOf(id))
+    );
+    if (lastIdentityIdx < 0) return [...DEFAULT_COLUMN_ORDER, ...customIds];
+    const before = DEFAULT_COLUMN_ORDER.slice(0, lastIdentityIdx + 1);
+    const after = DEFAULT_COLUMN_ORDER.slice(lastIdentityIdx + 1);
     return [...before, ...customIds, ...after];
 }
 
@@ -1289,14 +1329,31 @@ export function ensureBulkTableLayoutConfig(
     if (!config.columnOrder?.length) {
         config.columnOrder = buildInitialBulkColumnOrder(customColumns);
         needsPersist = true;
+    } else {
+        const withIdentity = ensureIdentityColumnsInOrder(config.columnOrder);
+        if (JSON.stringify(withIdentity) !== JSON.stringify(config.columnOrder)) {
+            config.columnOrder = withIdentity;
+            needsPersist = true;
+        }
     }
     // No persistir hiddenColumns vacío: borraría la config guardada y mostraría todas las columnas.
     if (config.hiddenColumns == null) {
         config.hiddenColumns = [];
     }
-    if (!config.pinnedColumns?.length) {
-        config.pinnedColumns = ['name'];
+    const identityHidden = hideIdentityDuplicateCustomColumns(config.hiddenColumns, customColumns);
+    if (JSON.stringify(identityHidden) !== JSON.stringify(config.hiddenColumns)) {
+        config.hiddenColumns = identityHidden;
         needsPersist = true;
+    }
+    if (!config.pinnedColumns?.length) {
+        config.pinnedColumns = [GIVEN_NAMES_COLUMN_ID];
+        needsPersist = true;
+    } else {
+        const pinned = remapPinnedIdentityColumnIds(config.pinnedColumns);
+        if (JSON.stringify(pinned) !== JSON.stringify(config.pinnedColumns)) {
+            config.pinnedColumns = pinned;
+            needsPersist = true;
+        }
     }
 
     const floatingIds = resolveFloatingColumnIds(config);
@@ -1579,11 +1636,11 @@ export function getImportHeaders(
     const headers: { header: string; field: string; isCustom: boolean; columnId?: string }[] = [];
 
     columnOrder.forEach(colId => {
-        if (hiddenColumns.has(colId)) return;
+        if (hiddenColumns.has(colId) && !isIdentitySystemColumnId(colId)) return;
 
         if (colId.startsWith('custom_')) {
             const customCol = customColumns.find(c => c.id === colId.replace('custom_', ''));
-            if (customCol) {
+            if (customCol && !isIdentityCustomColumn(customCol)) {
                 headers.push({
                     header: customCol.name,
                     field: customCol.name,
@@ -2312,7 +2369,7 @@ export function isPasteEditableColumn(colId: string, customColumns: CustomColumn
         if (col?.type === 'route' || col?.type === 'route_cost') return false;
         return true;
     }
-    return ['name', 'dni', 'email', 'phone', 'source', 'province', 'district'].includes(colId);
+    return ['name', 'nombres', 'apellidoPaterno', 'apellidoMaterno', 'dni', 'email', 'phone', 'source', 'province', 'district'].includes(colId);
 }
 
 /** Formato: "lun 15/05/2026 14:30" */

@@ -305,6 +305,11 @@ function parseLegacyFullName(fullName: string): {
 
 export interface ComplementaryPrefillCandidateRow {
     name?: string | null;
+    nombres?: string | null;
+    apellidoPaterno?: string | null;
+    apellidoMaterno?: string | null;
+    apellido_paterno?: string | null;
+    apellido_materno?: string | null;
     dni?: string | null;
     email?: string | null;
     phone?: string | null;
@@ -329,6 +334,9 @@ function resolveMappedRawValue(
         const field = sourceId.slice('candidate.'.length);
         const map: Record<string, unknown> = {
             name: candidate.name,
+            nombres: candidate.nombres,
+            apellidoPaterno: candidate.apellidoPaterno || candidate.apellido_paterno,
+            apellidoMaterno: candidate.apellidoMaterno || candidate.apellido_materno,
             dni: candidate.dni,
             email: candidate.email,
             phone: candidate.phone,
@@ -404,6 +412,13 @@ export function buildComplementaryPrefillFromMapping(params: {
     }
 
     // Fallbacks mínimos si el mapeo no cubrió campos estándar
+    if (!fromMapped.nombres && candidate.nombres) fromMapped.nombres = String(candidate.nombres);
+    if (!fromMapped.apellidoPaterno && (candidate.apellidoPaterno || candidate.apellido_paterno)) {
+        fromMapped.apellidoPaterno = String(candidate.apellidoPaterno || candidate.apellido_paterno);
+    }
+    if (!fromMapped.apellidoMaterno && (candidate.apellidoMaterno || candidate.apellido_materno)) {
+        fromMapped.apellidoMaterno = String(candidate.apellidoMaterno || candidate.apellido_materno);
+    }
     if (!fromMapped.nroDocumento && candidate.dni) fromMapped.nroDocumento = String(candidate.dni);
     if (!fromMapped.email && candidate.email) fromMapped.email = String(candidate.email);
     if (!fromMapped.telefono && (candidate.phone || candidate.phone2)) {

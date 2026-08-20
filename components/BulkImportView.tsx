@@ -36,9 +36,15 @@ const parseCSVLine = (line: string): string[] => {
 type ParsedCandidate = Omit<Candidate, 'id' | 'history' | 'processId' | 'stageId' | 'attachments'>;
 
 const KEY_MAPPING: Record<string, string> = {
-    'name': 'name',
-    'nombre': 'name',
-    'email': 'email',
+    nombres: 'nombres',
+    nombre: 'nombres',
+    'nombre completo': 'name',
+    name: 'name',
+    apellidopaterno: 'apellidoPaterno',
+    'apellido paterno': 'apellidoPaterno',
+    apellidomaterno: 'apellidoMaterno',
+    'apellido materno': 'apellidoMaterno',
+    email: 'email',
     'correo': 'email',
     'phone': 'phone',
     'teléfono': 'phone',
@@ -72,6 +78,19 @@ const KEY_MAPPING: Record<string, string> = {
     'distrito': 'district',
 };
 
+function finalizeImportedIdentity(candidate: Record<string, unknown>): ParsedCandidate {
+    const nombres = String(candidate.nombres || '').trim();
+    const apellidoPaterno = String(candidate.apellidoPaterno || '').trim();
+    const apellidoMaterno = String(candidate.apellidoMaterno || '').trim();
+    if (nombres || apellidoPaterno || apellidoMaterno) {
+        candidate.nombres = nombres || undefined;
+        candidate.apellidoPaterno = apellidoPaterno || undefined;
+        candidate.apellidoMaterno = apellidoMaterno || undefined;
+        candidate.name = [nombres, apellidoPaterno, apellidoMaterno].filter(Boolean).join(' ');
+    }
+    return candidate as ParsedCandidate;
+}
+
 const parseCSV = (csvText: string): ParsedCandidate[] => {
     const lines = csvText.split('\n').filter(line => line.trim() !== '');
     if (lines.length < 2) return [];
@@ -92,7 +111,7 @@ const parseCSV = (csvText: string): ParsedCandidate[] => {
                 candidate[header] = cleanValue;
             }
         });
-        candidates.push(candidate as ParsedCandidate);
+        candidates.push(finalizeImportedIdentity(candidate));
     }
     return candidates;
 };
@@ -122,23 +141,25 @@ const parseExcel = (data: ArrayBuffer): ParsedCandidate[] => {
                 }
             }
         });
-        candidates.push(candidate as ParsedCandidate);
+        candidates.push(finalizeImportedIdentity(candidate));
     });
     
     return candidates;
 };
 
 const TEMPLATE_HEADERS = [
-    'name', 'email', 'phone', 'phone2', 'description', 'source',
-    'salaryExpectation', 'agreedSalary', 'age', 'dni', 'linkedinUrl',
+    'nombres', 'apellidoPaterno', 'apellidoMaterno', 'dni', 'email', 'phone', 'phone2', 'description', 'source',
+    'salaryExpectation', 'agreedSalary', 'age', 'linkedinUrl',
     'address', 'province', 'district',
 ];
 
 const TEMPLATE_EXAMPLE: Record<string, string> = {
-    name: 'Juan Pérez',
+    nombres: 'Juan',
+    apellidoPaterno: 'Pérez',
+    apellidoMaterno: 'García',
+    dni: '12345678',
     email: 'juan.perez@example.com',
     phone: '987654321',
-    dni: '12345678',
     province: 'LIMA',
     district: 'MIRAFLORES',
 };

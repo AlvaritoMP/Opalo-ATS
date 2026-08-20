@@ -50,11 +50,14 @@
       "sourceCandidateId": "00000000-0000-4000-8000-000000000001",
       "sourceProcessId": "00000000-0000-4000-8000-000000000002",
       "sourceApp": "Opalo ATS",
-      "snapshotVersion": 3,
+      "snapshotVersion": 4,
       "purpose": "presentation",
       "complementaryStatus": "complete",
       "complementaryFilledAt": "2026-08-05T17:00:00.000Z",
       "includedFieldKeys": [
+        "nombres",
+        "apellidoPaterno",
+        "apellidoMaterno",
         "fullName",
         "dni",
         "email",
@@ -68,6 +71,9 @@
         "sexo"
       ],
       "fieldLabels": {
+        "nombres": "Nombres",
+        "apellidoPaterno": "Apellido paterno",
+        "apellidoMaterno": "Apellido materno",
         "fullName": "Nombre completo",
         "dni": "DNI",
         "email": "Email",

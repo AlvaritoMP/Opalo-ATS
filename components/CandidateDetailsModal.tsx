@@ -16,6 +16,7 @@ import { buildPublicComplementaryFichaUrl } from '../lib/complementaryFicha';
 import JSZip from 'jszip';
 import { saveAs } from 'file-saver';
 import { openAttachment } from '../lib/openAttachment';
+import { composeIdentityFullName } from '../lib/candidateIdentity';
 
 const fileToBase64 = (file: File): Promise<string> => {
     return new Promise((resolve, reject) => {
@@ -420,10 +421,20 @@ export const CandidateDetailsModal: React.FC<{ candidate: Candidate, onClose: ()
 
     const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
         const { name, value } = e.target;
-        setEditableCandidate(prev => ({
-            ...prev,
-            [name]: e.target.type === 'number' && value !== '' ? parseInt(value, 10) : value
-        }));
+        setEditableCandidate(prev => {
+            const next = {
+                ...prev,
+                [name]: e.target.type === 'number' && value !== '' ? parseInt(value, 10) : value
+            };
+            if (name === 'nombres' || name === 'apellidoPaterno' || name === 'apellidoMaterno') {
+                next.name = composeIdentityFullName({
+                    nombres: next.nombres,
+                    apellidoPaterno: next.apellidoPaterno,
+                    apellidoMaterno: next.apellidoMaterno,
+                });
+            }
+            return next;
+        });
     };
 
     const handleProvinceChange = (newProvince: string) => {
@@ -1099,7 +1110,10 @@ export const CandidateDetailsModal: React.FC<{ candidate: Candidate, onClose: ()
                                         {/* Edit Form */}
                                         <div className="space-y-4">
                                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                                                <div><label className="block text-sm font-medium text-gray-700">Nombre completo</label><input type="text" name="name" value={editableCandidate.name} onChange={handleInputChange} className="mt-1 block w-full input"/></div>
+                                                <div><label className="block text-sm font-medium text-gray-700">Nombres *</label><input type="text" name="nombres" value={editableCandidate.nombres || ''} onChange={handleInputChange} required className="mt-1 block w-full input"/></div>
+                                                <div><label className="block text-sm font-medium text-gray-700">Apellido Paterno *</label><input type="text" name="apellidoPaterno" value={editableCandidate.apellidoPaterno || ''} onChange={handleInputChange} required className="mt-1 block w-full input"/></div>
+                                                <div><label className="block text-sm font-medium text-gray-700">Apellido Materno</label><input type="text" name="apellidoMaterno" value={editableCandidate.apellidoMaterno || ''} onChange={handleInputChange} className="mt-1 block w-full input"/></div>
+                                                <div><label className="block text-sm font-medium text-gray-700">Nombre completo</label><input type="text" value={editableCandidate.name} readOnly className="mt-1 block w-full input bg-gray-50 text-gray-600" title="Se arma con Nombres + Apellido Paterno + Apellido Materno"/></div>
                                                 <div><label className="block text-sm font-medium text-gray-700">Correo</label><input type="email" name="email" value={editableCandidate.email} onChange={handleInputChange} className="mt-1 block w-full input"/></div>
                                                 <div><label className="block text-sm font-medium text-gray-700">Teléfono</label><input type="tel" name="phone" value={editableCandidate.phone || ''} onChange={handleInputChange} className="mt-1 block w-full input"/></div>
                                                 <div><label className="block text-sm font-medium text-gray-700">Teléfono 2</label><input type="tel" name="phone2" value={editableCandidate.phone2 || ''} onChange={handleInputChange} className="mt-1 block w-full input" placeholder="Opcional"/></div>

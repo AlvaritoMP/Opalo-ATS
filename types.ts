@@ -500,7 +500,12 @@ export interface Comment {
 
 export interface Candidate {
     id: string;
+    /** Nombre completo derivado: nombres + apellidoPaterno + apellidoMaterno. */
     name: string;
+    /** Nombres de pila (campo de sistema transversal). */
+    nombres?: string;
+    apellidoPaterno?: string;
+    apellidoMaterno?: string;
     email: string;
     phone?: string;
     phone2?: string; // Segundo número de teléfono
