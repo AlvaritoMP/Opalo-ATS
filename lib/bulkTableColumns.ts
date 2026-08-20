@@ -19,6 +19,7 @@ import {
     hideIdentityDuplicateCustomColumns,
     isIdentityCustomColumn,
     isIdentitySystemColumnId,
+    migrateIdentityTallyFieldMapping,
     remapPinnedIdentityColumnIds,
 } from './candidateIdentity';
 
@@ -974,14 +975,14 @@ const SIMPLE_TALLY_MAPPING_FIELDS: TallyMappingField[] = [
     { key: 'nombres', label: 'Nombres', placeholder: 'nombres' },
     { key: 'apellidoPaterno', label: 'Apellido Paterno', placeholder: 'apellido paterno, ap paterno' },
     { key: 'apellidoMaterno', label: 'Apellido Materno', placeholder: 'apellido materno, ap materno' },
-    { key: 'name', label: 'Nombre completo (un solo campo Tally)', placeholder: 'nombre_completo' },
+    { key: 'dni', label: 'DNI', placeholder: 'dni, documento, documento_identidad' },
+    { key: 'name', label: 'Nombre completo (legado: un solo campo Tally)', placeholder: 'nombre_completo' },
     { key: 'email', label: 'Email', placeholder: 'email, correo, e-mail' },
     { key: 'phone', label: 'Teléfono', placeholder: 'phone, telefono, teléfono' },
     { key: 'phone2', label: 'Teléfono 2', placeholder: 'phone2, telefono2, teléfono_secundario' },
     { key: 'description', label: 'Descripción', placeholder: 'description, descripcion, notas' },
     { key: 'source', label: 'Fuente', placeholder: 'source, fuente, origen' },
     { key: 'salary_expectation', label: 'Expectativa salarial', placeholder: 'salary_expectation, expectativa_salarial' },
-    { key: 'dni', label: 'DNI', placeholder: 'dni, documento, documento_identidad' },
     { key: 'linkedin_url', label: 'LinkedIn', placeholder: 'linkedin_url, linkedin, perfil_linkedin' },
     { key: 'address', label: 'Dirección', placeholder: 'address, direccion, dirección' },
     { key: 'province', label: 'Provincia', placeholder: 'province, provincia' },
@@ -1073,6 +1074,25 @@ export function filterTallyFieldMapping(
         Object.entries(mapping).filter(([key]) => allowedKeys.has(key))
     );
 }
+
+/**
+ * Reasigna custom_* de identidad a campos de sistema y luego descarta claves
+ * que ya no existen en el proceso. Así un guardado del formulario no borra
+ * mapeos viejos de Nombres / apellidos / DNI.
+ */
+export function migrateAndFilterTallyFieldMapping(
+    mapping: FieldMapping,
+    allowedKeys: Set<string>,
+    customColumns: CustomColumn[] = []
+): FieldMapping {
+    const migrated = migrateIdentityTallyFieldMapping(
+        normalizeTallyFieldMapping(mapping),
+        customColumns
+    );
+    return filterTallyFieldMapping(migrated, allowedKeys);
+}
+
+export { migrateIdentityTallyFieldMapping };
 
 export {
     isImportTextAllCaps,

@@ -84,6 +84,9 @@ export const CandidateCard: React.FC<CandidateCardProps> = ({ candidate, isSelec
                             )}
                             <div className="flex-1 min-w-0">
                                 <p className="font-semibold text-sm text-gray-800 truncate">{candidate.name}</p>
+                                {candidate.dni && (
+                                    <p className="text-[11px] text-gray-500 truncate">DNI {candidate.dni}</p>
+                                )}
                                 <p className="text-xs text-gray-500 truncate">{candidate.email}</p>
                             </div>
                             <div className="flex items-center gap-1">

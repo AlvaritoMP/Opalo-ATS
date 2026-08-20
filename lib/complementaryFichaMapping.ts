@@ -12,7 +12,7 @@ import {
     resolveColumnValueFromRow,
 } from './bulkTableColumns';
 import type { BulkProcessConfig } from '../types';
-import { inferReportNamePartFromLabel } from './psycholaboralUtils';
+import { canonicalIdentityMappingKeyFromCustomColumn } from './candidateIdentity';
 
 export type ComplementaryFichaMappableKey = Exclude<
     keyof ComplementaryFichaData,
@@ -135,8 +135,10 @@ export function getMissingRequiredComplementaryFields(
 }
 
 const CANDIDATE_SOURCE_OPTIONS: { id: string; label: string }[] = [
-    // Columna fija "Nombre" de la tabla de alta densidad (= candidates.name = nombres propios en masivos).
-    { id: 'candidate.name', label: 'Candidato · Nombre (columna del proceso)' },
+    { id: 'candidate.nombres', label: 'Candidato · Nombres' },
+    { id: 'candidate.apellidoPaterno', label: 'Candidato · Apellido Paterno' },
+    { id: 'candidate.apellidoMaterno', label: 'Candidato · Apellido Materno' },
+    { id: 'candidate.name', label: 'Candidato · Nombre completo (compuesto)' },
     { id: 'candidate.dni', label: 'Candidato · DNI' },
     { id: 'candidate.email', label: 'Candidato · Email' },
     { id: 'candidate.phone', label: 'Candidato · Teléfono' },
@@ -173,47 +175,32 @@ export function suggestSourceForFichaField(
     field: ComplementaryFichaFieldDef,
     customColumns: CustomColumn[]
 ): string {
-    // Nombre estructurado vía reportNamePart / inferencia
-    if (field.key === 'nombres' || field.key === 'apellidoPaterno' || field.key === 'apellidoMaterno') {
-        const want =
-            field.key === 'nombres'
-                ? 'given_names'
-                : field.key === 'apellidoPaterno'
-                  ? 'paternal_surname'
-                  : 'maternal_surname';
-        for (const col of customColumns) {
-            if (field.key === 'nombres' && isNombreCompletoColumnLabel(col.name)) continue;
-            const labelNorm = normalizeColumnNameKey(col.name);
-            const part = col.reportNamePart || inferReportNamePartFromLabel(labelNorm);
-            if (part === want) return `custom.${col.id}`;
-        }
-    }
+    // Identidad de sistema: no sugerir columnas personalizadas homónimas.
+    if (field.key === 'nombres') return 'candidate.nombres';
+    if (field.key === 'apellidoPaterno') return 'candidate.apellidoPaterno';
+    if (field.key === 'apellidoMaterno') return 'candidate.apellidoMaterno';
 
     const aliasSet = new Set(field.aliases.map((a) => stripSpaces(normalizeColumnNameKey(a))));
-    // 1) Match exacto de alias (p. ej. columna "Nombre" → nombres)
+    // 1) Match exacto de alias
     for (const col of customColumns) {
-        if (field.key === 'nombres' && isNombreCompletoColumnLabel(col.name)) continue;
+        if (canonicalIdentityMappingKeyFromCustomColumn(col)) continue;
         const colNorm = stripSpaces(normalizeColumnNameKey(col.name));
         if (aliasSet.has(colNorm)) return `custom.${col.id}`;
     }
-    // 2) Match parcial solo si no es "nombre completo" ni demasiado ambiguo
+    // 2) Match parcial solo si no es demasiado ambiguo
     for (const col of customColumns) {
-        if (field.key === 'nombres' && isNombreCompletoColumnLabel(col.name)) continue;
+        if (canonicalIdentityMappingKeyFromCustomColumn(col)) continue;
         const colNorm = stripSpaces(normalizeColumnNameKey(col.name));
         for (const alias of field.aliases) {
             const a = stripSpaces(normalizeColumnNameKey(alias));
             if (a.length < 4 || colNorm.length < 4) continue;
             if (colNorm === a) return `custom.${col.id}`;
-            // Evitar que "nombre" coincida dentro de "nombrecompleto"
-            if (field.key === 'nombres' && /completo/.test(colNorm)) continue;
             if (colNorm.includes(a) || a.includes(colNorm)) return `custom.${col.id}`;
         }
     }
 
     // Fallbacks a campos estándar del candidato
     const candidateFallback: Partial<Record<ComplementaryFichaMappableKey, string>> = {
-        // Columna fija "Nombre" del proceso masivo = nombres propios (no el compuesto).
-        nombres: 'candidate.name',
         nroDocumento: 'candidate.dni',
         email: 'candidate.email',
         telefono: 'candidate.phone',
@@ -241,13 +228,47 @@ export function suggestComplementaryFichaMapping(
     return mapping;
 }
 
+function fichaKeyForIdentityColumn(
+    canonical: 'nombres' | 'apellidoPaterno' | 'apellidoMaterno' | 'dni'
+): ComplementaryFichaMappableKey {
+    return canonical === 'dni' ? 'nroDocumento' : canonical;
+}
+
+function systemSourceForIdentityColumn(
+    canonical: 'nombres' | 'apellidoPaterno' | 'apellidoMaterno' | 'dni'
+): string {
+    return canonical === 'dni' ? 'candidate.dni' : `candidate.${canonical}`;
+}
+
+/** Reasigna mapeos de ficha que apuntaban a columnas custom de identidad o a candidate.name. */
+export function migrateIdentityFichaMapping(
+    saved: ComplementaryFichaMapping = {},
+    customColumns: CustomColumn[] = []
+): ComplementaryFichaMapping {
+    const out: ComplementaryFichaMapping = { ...saved };
+    if (out.nombres === 'candidate.name') {
+        out.nombres = 'candidate.nombres';
+    }
+    for (const col of customColumns) {
+        const canonical = canonicalIdentityMappingKeyFromCustomColumn(col);
+        if (!canonical) continue;
+        const fichaKey = fichaKeyForIdentityColumn(canonical);
+        const customSource = `custom.${col.id}`;
+        if (out[fichaKey] === customSource) {
+            out[fichaKey] = systemSourceForIdentityColumn(canonical);
+        }
+    }
+    return out;
+}
+
 /** Une mapeo guardado con sugerencias para campos aún vacíos. */
 export function resolveComplementaryFichaMapping(
     saved: ComplementaryFichaMapping | undefined,
     customColumns: CustomColumn[]
 ): ComplementaryFichaMapping {
     const suggested = suggestComplementaryFichaMapping(customColumns);
-    return { ...suggested, ...(saved || {}) };
+    const migrated = migrateIdentityFichaMapping(saved || {}, customColumns);
+    return { ...suggested, ...migrated };
 }
 
 /** Convierte fechas varias a dd/mm/yyyy para el formulario. */
@@ -395,29 +416,33 @@ export function buildComplementaryPrefillFromMapping(params: {
         (fromMapped as Record<string, unknown>)[field.key] = formatted;
     }
 
-    // Si faltan nombres: en masivos `candidate.name` suele ser solo nombres propios.
-    // Solo partir como "nombre completo" cuando no hay apellidos ya resueltos por mapeo.
-    if (!fromMapped.nombres && candidate.name) {
-        const hasStructuredSurnames = Boolean(
-            fromMapped.apellidoPaterno ||
-                fromMapped.apellidoMaterno ||
-                mapping.apellidoPaterno ||
-                mapping.apellidoMaterno
-        );
-        if (hasStructuredSurnames || mapping.nombres === 'candidate.name') {
-            fromMapped.nombres = String(candidate.name).trim();
-        } else if (!fromMapped.apellidoPaterno) {
-            Object.assign(fromMapped, parseLegacyFullName(String(candidate.name)));
-        }
-    }
-
-    // Fallbacks mínimos si el mapeo no cubrió campos estándar
+    // Identidad de sistema: si el mapeo no cubrió (o apuntaba a candidate.name legado),
+    // usar las partes del candidato. `name` ahora es siempre el compuesto.
     if (!fromMapped.nombres && candidate.nombres) fromMapped.nombres = String(candidate.nombres);
     if (!fromMapped.apellidoPaterno && (candidate.apellidoPaterno || candidate.apellido_paterno)) {
         fromMapped.apellidoPaterno = String(candidate.apellidoPaterno || candidate.apellido_paterno);
     }
     if (!fromMapped.apellidoMaterno && (candidate.apellidoMaterno || candidate.apellido_materno)) {
         fromMapped.apellidoMaterno = String(candidate.apellidoMaterno || candidate.apellido_materno);
+    }
+
+    for (const col of customColumns) {
+        const canonical = canonicalIdentityMappingKeyFromCustomColumn(col);
+        if (!canonical) continue;
+        const fichaKey = canonical === 'dni' ? 'nroDocumento' : canonical;
+        if ((fromMapped as Record<string, unknown>)[fichaKey]) continue;
+        const raw = resolveColumnValueFromRow(
+            candidate.bulk_column_values || {},
+            col,
+            legacyIdToName
+        );
+        const text = trimText(raw);
+        if (!text) continue;
+        (fromMapped as Record<string, unknown>)[fichaKey] = text;
+    }
+
+    if (!fromMapped.nombres && candidate.name && !fromMapped.apellidoPaterno && !fromMapped.apellidoMaterno) {
+        Object.assign(fromMapped, parseLegacyFullName(String(candidate.name)));
     }
     if (!fromMapped.nroDocumento && candidate.dni) fromMapped.nroDocumento = String(candidate.dni);
     if (!fromMapped.email && candidate.email) fromMapped.email = String(candidate.email);

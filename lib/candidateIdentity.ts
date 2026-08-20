@@ -130,14 +130,53 @@ export function isIdentityCustomColumn(col: {
     name?: string;
     reportNamePart?: string | null;
 }): boolean {
-    if (
-        col.reportNamePart === 'given_names' ||
-        col.reportNamePart === 'paternal_surname' ||
-        col.reportNamePart === 'maternal_surname'
-    ) {
-        return true;
+    return canonicalIdentityMappingKeyFromCustomColumn(col) != null;
+}
+
+/**
+ * Columna personalizada histórica de Nombres / apellidos / DNI → campo de sistema.
+ * No crea columnas nuevas: reusa la identidad canónica del candidato.
+ */
+export function canonicalIdentityMappingKeyFromCustomColumn(col: {
+    id?: string;
+    name?: string;
+    reportNamePart?: string | null;
+}): IdentitySystemColumnId | null {
+    if (col.reportNamePart === 'given_names') return 'nombres';
+    if (col.reportNamePart === 'paternal_surname') return 'apellidoPaterno';
+    if (col.reportNamePart === 'maternal_surname') return 'apellidoMaterno';
+    return identityColumnIdFromLabel(col.name || '');
+}
+
+/**
+ * Reasigna mapeos Tally guardados en `custom_<uuid>` (o snake_case) a las claves
+ * de sistema `nombres` / `apellidoPaterno` / `apellidoMaterno` / `dni`.
+ * Conserva `name` como legado: un solo campo Tally de nombre completo.
+ */
+export function migrateIdentityTallyFieldMapping(
+    mapping: Record<string, string> = {},
+    customColumns: Array<{ id: string; name?: string; reportNamePart?: string | null }> = []
+): Record<string, string> {
+    const out: Record<string, string> = { ...mapping };
+    if (out.apellido_paterno && !out.apellidoPaterno) {
+        out.apellidoPaterno = out.apellido_paterno;
+        delete out.apellido_paterno;
     }
-    return identityColumnIdFromLabel(col.name || '') != null;
+    if (out.apellido_materno && !out.apellidoMaterno) {
+        out.apellidoMaterno = out.apellido_materno;
+        delete out.apellido_materno;
+    }
+    for (const col of customColumns) {
+        const canonical = canonicalIdentityMappingKeyFromCustomColumn(col);
+        if (!canonical) continue;
+        const customKey = `custom_${col.id}`;
+        const val = typeof out[customKey] === 'string' ? out[customKey].trim() : '';
+        if (val && !String(out[canonical] || '').trim()) {
+            out[canonical] = val;
+        }
+        delete out[customKey];
+    }
+    return out;
 }
 
 /**

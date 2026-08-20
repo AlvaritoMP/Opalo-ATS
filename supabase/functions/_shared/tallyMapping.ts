@@ -8,7 +8,7 @@ import { normalizeImportTextCase } from './importTextCase.ts';
 const BULK_NAME_KEY_PREFIX = '__name__';
 
 export interface BulkProcessConfigLike {
-  customColumns?: { id: string; name: string; type: string; options?: string[] }[];
+  customColumns?: { id: string; name: string; type: string; options?: string[]; reportNamePart?: string | null }[];
   hiddenColumns?: string[];
   columnOrder?: string[];
   highDensityTableEnabled?: boolean;
@@ -36,16 +36,16 @@ const CHOICE_TYPES = new Set([
 
 const SIMPLE_MAPPING_FIELDS: TallyMappingFieldDef[] = [
   { key: 'nombres', label: 'Nombres' },
-  { key: 'apellido_paterno', label: 'Apellido Paterno' },
-  { key: 'apellido_materno', label: 'Apellido Materno' },
-  { key: 'name', label: 'Nombre completo (un solo campo Tally)' },
+  { key: 'apellidoPaterno', label: 'Apellido Paterno' },
+  { key: 'apellidoMaterno', label: 'Apellido Materno' },
+  { key: 'dni', label: 'DNI' },
+  { key: 'name', label: 'Nombre completo (legado: un solo campo Tally)' },
   { key: 'email', label: 'Email' },
   { key: 'phone', label: 'Teléfono' },
   { key: 'phone2', label: 'Teléfono 2' },
   { key: 'description', label: 'Descripción' },
   { key: 'source', label: 'Fuente' },
   { key: 'salary_expectation', label: 'Expectativa salarial' },
-  { key: 'dni', label: 'DNI' },
   { key: 'linkedin_url', label: 'LinkedIn' },
   { key: 'address', label: 'Dirección' },
   { key: 'province', label: 'Provincia' },
@@ -55,8 +55,8 @@ const SIMPLE_MAPPING_FIELDS: TallyMappingFieldDef[] = [
 
 const SIMPLE_AUTO_ALIASES: Record<string, string[]> = {
   nombres: ['nombres'],
-  apellido_paterno: ['apellido paterno', 'ap paterno', 'ap. paterno', 'paterno'],
-  apellido_materno: ['apellido materno', 'ap materno', 'ap. materno', 'materno'],
+  apellidoPaterno: ['apellido paterno', 'ap paterno', 'ap. paterno', 'paterno', 'apellido_paterno'],
+  apellidoMaterno: ['apellido materno', 'ap materno', 'ap. materno', 'materno', 'apellido_materno'],
   name: ['name', 'nombre_completo', 'nombre completo'],
   email: ['email', 'correo', 'e-mail'],
   phone: ['phone', 'telefono', 'teléfono'],
@@ -99,6 +99,68 @@ function normalizeColumnNameKey(name: string): string {
 
 function compactColumnRef(name: string): string {
   return normalizeColumnNameKey(name).replace(/\s+/g, '');
+}
+
+function identityColumnIdFromLabel(label: string): 'nombres' | 'apellidoPaterno' | 'apellidoMaterno' | 'dni' | null {
+  const n = normalizeColumnNameKey(label);
+  if (!n) return null;
+  if (
+    n === 'dni' ||
+    n === 'nro documento' ||
+    n === 'nro. documento' ||
+    n === 'numero de documento' ||
+    n === 'documento de identidad'
+  ) {
+    return 'dni';
+  }
+  if (/completo/.test(n)) return null;
+  const compact = n.replace(/\s+/g, '');
+  if (compact === 'nombres' || compact === 'nombre' || compact === 'nombrespropios') return 'nombres';
+  if (compact.includes('apellidopaterno') || compact === 'appaterno' || compact === 'paterno') {
+    return 'apellidoPaterno';
+  }
+  if (compact.includes('apellidomaterno') || compact === 'apmaterno' || compact === 'materno') {
+    return 'apellidoMaterno';
+  }
+  return null;
+}
+
+function canonicalIdentityMappingKeyFromCustomColumn(col: {
+  name?: string;
+  reportNamePart?: string | null;
+}): 'nombres' | 'apellidoPaterno' | 'apellidoMaterno' | 'dni' | null {
+  if (col.reportNamePart === 'given_names') return 'nombres';
+  if (col.reportNamePart === 'paternal_surname') return 'apellidoPaterno';
+  if (col.reportNamePart === 'maternal_surname') return 'apellidoMaterno';
+  return identityColumnIdFromLabel(col.name || '');
+}
+
+function isIdentityCustomColumn(col: { name?: string; reportNamePart?: string | null }): boolean {
+  return canonicalIdentityMappingKeyFromCustomColumn(col) != null;
+}
+
+function migrateIdentityTallyFieldMapping(
+  mapping: Record<string, string> = {},
+  customColumns: { id: string; name?: string; reportNamePart?: string | null }[] = []
+): Record<string, string> {
+  const out: Record<string, string> = { ...mapping };
+  if (out.apellido_paterno && !out.apellidoPaterno) {
+    out.apellidoPaterno = out.apellido_paterno;
+    delete out.apellido_paterno;
+  }
+  if (out.apellido_materno && !out.apellidoMaterno) {
+    out.apellidoMaterno = out.apellido_materno;
+    delete out.apellido_materno;
+  }
+  for (const col of customColumns) {
+    const canonical = canonicalIdentityMappingKeyFromCustomColumn(col);
+    if (!canonical) continue;
+    const customKey = `custom_${col.id}`;
+    const val = typeof out[customKey] === 'string' ? out[customKey].trim() : '';
+    if (val && !String(out[canonical] || '').trim()) out[canonical] = val;
+    delete out[customKey];
+  }
+  return out;
 }
 
 function bulkColumnNameKey(name: string): string {
@@ -155,7 +217,7 @@ function getImportHeaders(bulkConfig?: BulkProcessConfigLike): {
     if (hiddenColumns.has(colId)) return;
     if (colId.startsWith('custom_')) {
       const customCol = customColumns.find((c) => c.id === colId.replace('custom_', ''));
-      if (customCol) {
+      if (customCol && !isIdentityCustomColumn(customCol)) {
         headers.push({
           header: customCol.name,
           field: customCol.name,
@@ -230,6 +292,7 @@ export function getProcessMappingFields(process: {
     });
   }
   for (const col of customColumns) {
+    if (isIdentityCustomColumn(col)) continue;
     const key = `custom_${col.id}`;
     if (seen.has(key)) continue;
     seen.add(key);
@@ -598,58 +661,56 @@ function parseValueForCustomColumn(
   });
 }
 
-function givenNamesFromTableColumns(
+function identityPartsFromTableColumns(
   bulkRaw: Record<string, unknown>,
-  customColumns: { id: string; name: string }[]
-): string {
+  customColumns: { id: string; name: string; reportNamePart?: string | null }[]
+): { nombres: string; apellidoPaterno: string; apellidoMaterno: string; dni: string } {
   let nombres = '';
-  let nombre = '';
+  let apellidoPaterno = '';
+  let apellidoMaterno = '';
+  let dni = '';
   for (const col of customColumns) {
-    const compact = compactColumnRef(col.name);
-    if (compact.includes('completo') || compact.includes('apellid')) continue;
+    const canonical = canonicalIdentityMappingKeyFromCustomColumn(col);
+    if (!canonical) continue;
     const text = bulkRaw[col.id] == null ? '' : String(bulkRaw[col.id]).trim();
     if (!text) continue;
-    if (compact === 'nombres') nombres = text;
-    else if (compact === 'nombre') nombre = text;
+    if (canonical === 'nombres' && !nombres) nombres = text;
+    else if (canonical === 'apellidoPaterno' && !apellidoPaterno) apellidoPaterno = text;
+    else if (canonical === 'apellidoMaterno' && !apellidoMaterno) apellidoMaterno = text;
+    else if (canonical === 'dni' && !dni) dni = text;
   }
-  return nombres || nombre;
+  return { nombres, apellidoPaterno, apellidoMaterno, dni };
 }
 
 function applyCanonicalIdentityFromForm(
   candidate: Record<string, unknown>,
   bulkRaw: Record<string, unknown>,
-  customColumns: { id: string; name: string }[]
+  customColumns: { id: string; name: string; reportNamePart?: string | null }[],
+  isBulk: boolean
 ): void {
-  const givenFromCols = givenNamesFromTableColumns(bulkRaw, customColumns);
-  let apP = String(candidate.apellido_paterno || '').trim();
-  let apM = String(candidate.apellido_materno || '').trim();
-  for (const col of customColumns) {
-    const compact = compactColumnRef(col.name);
-    const text = bulkRaw[col.id] == null ? '' : String(bulkRaw[col.id]).trim();
-    if (!text) continue;
-    if (!apP && (compact.includes('apellidopaterno') || compact === 'appaterno' || compact === 'paterno')) {
-      apP = text;
-    } else if (!apM && (compact.includes('apellidomaterno') || compact === 'apmaterno' || compact === 'materno')) {
-      apM = text;
-    }
-  }
+  const fromCols = identityPartsFromTableColumns(bulkRaw, customColumns);
+  let apP = String(candidate.apellido_paterno || '').trim() || fromCols.apellidoPaterno;
+  let apM = String(candidate.apellido_materno || '').trim() || fromCols.apellidoMaterno;
+  let nombres = String(candidate.nombres || '').trim() || fromCols.nombres;
+  if (!String(candidate.dni || '').trim() && fromCols.dni) candidate.dni = fromCols.dni;
 
-  let nombres = String(candidate.nombres || '').trim() || givenFromCols;
   const mappedFull = String(candidate.name || '').trim();
 
   if (!nombres && mappedFull) {
-    const parsed = mappedFull.trim().split(/\s+/).filter(Boolean);
-    if (!apP && !apM && parsed.length >= 2) {
-      if (parsed.length === 2) {
+    if (apP || apM || isBulk) {
+      nombres = mappedFull;
+    } else {
+      const parsed = mappedFull.trim().split(/\s+/).filter(Boolean);
+      if (parsed.length === 1) {
+        nombres = parsed[0];
+      } else if (parsed.length === 2) {
         nombres = parsed[0];
         apP = parsed[1];
-      } else {
+      } else if (parsed.length >= 3) {
         nombres = parsed.slice(0, -2).join(' ');
         apP = parsed[parsed.length - 2];
         apM = parsed[parsed.length - 1];
       }
-    } else {
-      nombres = mappedFull;
     }
   }
 
@@ -671,9 +732,12 @@ export function buildTallyCandidateFromSubmission(
   }
 ): Record<string, unknown> {
   const index = buildTallyFieldsIndex(tallyData);
-  const customMapping = parseIntegrationFieldMapping(integration);
   const bulkConfig = parseBulkConfig(process);
   const customColumns = bulkConfig?.customColumns || [];
+  const customMapping = migrateIdentityTallyFieldMapping(
+    parseIntegrationFieldMapping(integration),
+    customColumns
+  );
   const isBulk =
     process.isBulkProcess === true ||
     process.is_bulk_process === true ||
@@ -789,7 +853,7 @@ export function buildTallyCandidateFromSubmission(
     fillEmptyCustomColumnsFromTally(bulkRaw, customColumns, index, customMapping);
     syncHomonymCustomColumns(bulkRaw, customColumns, candidate);
   }
-  applyCanonicalIdentityFromForm(candidate, bulkRaw, customColumns);
+  applyCanonicalIdentityFromForm(candidate, bulkRaw, customColumns, !!isBulk);
   if (customColumns.length > 0) {
     const enriched = enrichBulkColumnValuesForStorage(bulkRaw, customColumns);
     if (Object.keys(enriched).length > 0) {

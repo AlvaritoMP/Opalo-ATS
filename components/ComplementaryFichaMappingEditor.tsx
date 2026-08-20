@@ -76,8 +76,9 @@ export const ComplementaryFichaMappingEditor: React.FC<ComplementaryFichaMapping
                         para el candidato. Los campos con * fijo del sistema no se pueden desactivar.
                         {' '}
                         <span className="text-gray-600">
-                            «Nombre (columna del proceso)» son solo nombres propios; no uses columnas
-                            «Nombre completo» (exportación) para el campo Nombres.
+                            Nombres, apellidos y DNI se toman de la identidad del candidato
+                            (la misma de procesos masivos). No hace falta mapear columnas
+                            personalizadas homónimas.
                         </span>
                     </p>
                     <p className="text-xs text-gray-500 mt-1">

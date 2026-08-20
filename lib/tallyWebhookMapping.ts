@@ -14,6 +14,10 @@ import {
     type TallyMappingField,
 } from './bulkTableColumns';
 import { applyImportTextCaseToCandidate, normalizeImportTextCase } from './importTextCase';
+import {
+    canonicalIdentityMappingKeyFromCustomColumn,
+    migrateIdentityTallyFieldMapping,
+} from './candidateIdentity';
 
 export interface TallyWebhookProcessRow {
     id?: string;
@@ -476,58 +480,58 @@ function assignStandardField(target: TallyCandidateInsert, key: string, value: s
     }
 }
 
-function givenNamesFromTableColumns(
+function identityPartsFromTableColumns(
     bulkRaw: Record<string, unknown>,
     customColumns: CustomColumn[]
-): string {
+): { nombres: string; apellidoPaterno: string; apellidoMaterno: string; dni: string } {
     let nombres = '';
-    let nombre = '';
+    let apellidoPaterno = '';
+    let apellidoMaterno = '';
+    let dni = '';
     for (const col of customColumns) {
-        const compact = compactColumnRef(col.name);
-        if (compact.includes('completo') || compact.includes('apellid')) continue;
+        const canonical = canonicalIdentityMappingKeyFromCustomColumn(col);
+        if (!canonical) continue;
         const text = bulkRaw[col.id] == null ? '' : String(bulkRaw[col.id]).trim();
         if (!text) continue;
-        if (compact === 'nombres') nombres = text;
-        else if (compact === 'nombre') nombre = text;
+        if (canonical === 'nombres' && !nombres) nombres = text;
+        else if (canonical === 'apellidoPaterno' && !apellidoPaterno) apellidoPaterno = text;
+        else if (canonical === 'apellidoMaterno' && !apellidoMaterno) apellidoMaterno = text;
+        else if (canonical === 'dni' && !dni) dni = text;
     }
-    return nombres || nombre;
+    return { nombres, apellidoPaterno, apellidoMaterno, dni };
 }
 
 function applyCanonicalIdentityFromForm(
     candidate: TallyCandidateInsert,
     bulkRaw: Record<string, unknown>,
-    customColumns: CustomColumn[]
+    customColumns: CustomColumn[],
+    isBulk: boolean
 ): void {
-    const givenFromCols = givenNamesFromTableColumns(bulkRaw, customColumns);
-    let apP = (candidate.apellido_paterno || '').trim();
-    let apM = (candidate.apellido_materno || '').trim();
-    for (const col of customColumns) {
-        const compact = compactColumnRef(col.name);
-        const text = bulkRaw[col.id] == null ? '' : String(bulkRaw[col.id]).trim();
-        if (!text) continue;
-        if (!apP && (compact.includes('apellidopaterno') || compact === 'appaterno' || compact === 'paterno')) {
-            apP = text;
-        } else if (!apM && (compact.includes('apellidomaterno') || compact === 'apmaterno' || compact === 'materno')) {
-            apM = text;
-        }
-    }
+    const fromCols = identityPartsFromTableColumns(bulkRaw, customColumns);
+    let apP = (candidate.apellido_paterno || '').trim() || fromCols.apellidoPaterno;
+    let apM = (candidate.apellido_materno || '').trim() || fromCols.apellidoMaterno;
+    let nombres = (candidate.nombres || '').trim() || fromCols.nombres;
+    if (!candidate.dni?.trim() && fromCols.dni) candidate.dni = fromCols.dni;
 
-    let nombres = (candidate.nombres || '').trim() || givenFromCols;
     const mappedFull = (candidate.name || '').trim();
 
     if (!nombres && mappedFull) {
-        const parsed = mappedFull.trim().split(/\s+/).filter(Boolean);
-        if (!apP && !apM && parsed.length >= 2) {
-            if (parsed.length === 2) {
+        // En masivos, `name` solía ser solo nombres propios (junto a columnas de apellidos).
+        // En procesos normales clásicos, `name` era el nombre completo en un solo campo Tally.
+        if (apP || apM || isBulk) {
+            nombres = mappedFull;
+        } else {
+            const parsed = mappedFull.trim().split(/\s+/).filter(Boolean);
+            if (parsed.length === 1) {
+                nombres = parsed[0];
+            } else if (parsed.length === 2) {
                 nombres = parsed[0];
                 apP = parsed[1];
-            } else {
+            } else if (parsed.length >= 3) {
                 nombres = parsed.slice(0, -2).join(' ');
                 apP = parsed[parsed.length - 2];
                 apM = parsed[parsed.length - 1];
             }
-        } else {
-            nombres = mappedFull;
         }
     }
 
@@ -562,8 +566,11 @@ export function buildTallyCandidateFromSubmission(
 ): TallyCandidateInsert {
     const process = normalizeWebhookProcess(processRow);
     const index = buildTallyFieldsIndex(tallyData);
-    const customMapping = parseIntegrationFieldMapping(integration);
     const customColumns = process?.bulkConfig?.customColumns || [];
+    const customMapping = migrateIdentityTallyFieldMapping(
+        parseIntegrationFieldMapping(integration),
+        customColumns
+    );
     const isBulk = !!process?.isBulkProcess;
     const mappingFields: TallyMappingField[] = getTallyIntegrationMappingFields(
         process
@@ -634,7 +641,7 @@ export function buildTallyCandidateFromSubmission(
         fillEmptyCustomColumnsFromTally(bulkRaw, customColumns, index, customMapping);
         syncHomonymCustomColumns(bulkRaw, customColumns, candidate);
     }
-    applyCanonicalIdentityFromForm(candidate, bulkRaw, customColumns);
+    applyCanonicalIdentityFromForm(candidate, bulkRaw, customColumns, isBulk);
     if (customColumns.length > 0) {
         const enriched = enrichBulkColumnValuesForStorage(bulkRaw, customColumns);
         if (Object.keys(enriched).length > 0) {

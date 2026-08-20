@@ -178,19 +178,57 @@ function inferNamePart(labelNorm: string): string | null {
   return null;
 }
 
-function isNombreCompletoLabel(name: string): boolean {
-  const s = strip(normalizeKey(name));
-  return /nombrecompleto|nombrescompletos|fullnamecompleto|^fullname$/.test(s);
+function identityColumnIdFromLabel(label: string): 'nombres' | 'apellidoPaterno' | 'apellidoMaterno' | 'dni' | null {
+  const n = normalizeKey(label);
+  if (!n) return null;
+  if (n === 'dni' || n === 'nro documento' || n === 'nro. documento' || n === 'numero de documento' || n === 'documento de identidad') {
+    return 'dni';
+  }
+  if (/completo/.test(n)) return null;
+  const compact = strip(n);
+  if (compact === 'nombres' || compact === 'nombre' || compact === 'nombrespropios') return 'nombres';
+  if (compact.includes('apellidopaterno') || compact === 'appaterno' || compact === 'paterno') return 'apellidoPaterno';
+  if (compact.includes('apellidomaterno') || compact === 'apmaterno' || compact === 'materno') return 'apellidoMaterno';
+  return null;
+}
+
+function canonicalIdentityMappingKeyFromCustomColumn(col: CustomColumn): 'nombres' | 'apellidoPaterno' | 'apellidoMaterno' | 'dni' | null {
+  if (col.reportNamePart === 'given_names') return 'nombres';
+  if (col.reportNamePart === 'paternal_surname') return 'apellidoPaterno';
+  if (col.reportNamePart === 'maternal_surname') return 'apellidoMaterno';
+  return identityColumnIdFromLabel(col.name || '');
+}
+
+function migrateIdentityFichaMapping(saved: FichaMapping = {}, customColumns: CustomColumn[] = []): FichaMapping {
+  const out: FichaMapping = { ...saved };
+  if (out.nombres === 'candidate.name') out.nombres = 'candidate.nombres';
+  for (const col of customColumns) {
+    const canonical = canonicalIdentityMappingKeyFromCustomColumn(col);
+    if (!canonical) continue;
+    const fichaKey = canonical === 'dni' ? 'nroDocumento' : canonical;
+    const customSource = `custom.${col.id}`;
+    if (out[fichaKey] === customSource) {
+      out[fichaKey] = canonical === 'dni' ? 'candidate.dni' : `candidate.${canonical}`;
+    }
+  }
+  return out;
 }
 
 export function suggestMapping(customColumns: CustomColumn[]): FichaMapping {
   const mapping: FichaMapping = {};
   const used = new Set<string>();
 
+  mapping.nombres = 'candidate.nombres';
+  mapping.apellidoPaterno = 'candidate.apellidoPaterno';
+  mapping.apellidoMaterno = 'candidate.apellidoMaterno';
+
   for (const field of FIELDS) {
+    if (field.key === 'nombres' || field.key === 'apellidoPaterno' || field.key === 'apellidoMaterno') {
+      continue;
+    }
     if (field.namePart) {
       for (const col of customColumns) {
-        if (field.key === 'nombres' && isNombreCompletoLabel(col.name)) continue;
+        if (canonicalIdentityMappingKeyFromCustomColumn(col)) continue;
         const labelNorm = normalizeKey(col.name);
         const part = col.reportNamePart || inferNamePart(labelNorm);
         if (part === field.namePart) {
@@ -207,7 +245,7 @@ export function suggestMapping(customColumns: CustomColumn[]): FichaMapping {
 
     const aliasSet = new Set(field.aliases.map((a) => strip(normalizeKey(a))));
     for (const col of customColumns) {
-      if (field.key === 'nombres' && isNombreCompletoLabel(col.name)) continue;
+      if (canonicalIdentityMappingKeyFromCustomColumn(col)) continue;
       const colNorm = strip(normalizeKey(col.name));
       if (aliasSet.has(colNorm)) {
         const sid = `custom.${col.id}`;
@@ -221,9 +259,8 @@ export function suggestMapping(customColumns: CustomColumn[]): FichaMapping {
     if (mapping[field.key]) continue;
 
     for (const col of customColumns) {
-      if (field.key === 'nombres' && isNombreCompletoLabel(col.name)) continue;
+      if (canonicalIdentityMappingKeyFromCustomColumn(col)) continue;
       const colNorm = strip(normalizeKey(col.name));
-      if (field.key === 'nombres' && /completo/.test(colNorm)) continue;
       let hit = false;
       for (const a of aliasSet) {
         if (a.length >= 4 && colNorm.length >= 4 && (colNorm.includes(a) || a.includes(colNorm))) {
@@ -241,7 +278,6 @@ export function suggestMapping(customColumns: CustomColumn[]): FichaMapping {
   }
 
   const fallbacks: Record<string, string> = {
-    nombres: 'candidate.name',
     nroDocumento: 'candidate.dni',
     email: 'candidate.email',
     telefono: 'candidate.phone',
@@ -345,7 +381,10 @@ export function buildPrefillForm(params: {
   processTitle?: string;
 }): Record<string, unknown> {
   const { candidate, customColumns } = params;
-  const mapping = { ...suggestMapping(customColumns), ...(params.savedMapping || {}) };
+  const mapping = migrateIdentityFichaMapping(
+    { ...suggestMapping(customColumns), ...(params.savedMapping || {}) },
+    customColumns
+  );
   const legacyIdToName: Record<string, string> = { ...(params.columnKeyAliases || {}) };
   for (const col of customColumns) legacyIdToName[col.id] = col.name;
 
@@ -358,7 +397,9 @@ export function buildPrefillForm(params: {
     let raw: unknown;
     if (sourceId.startsWith('candidate.')) {
       const f = sourceId.slice('candidate.'.length);
-      raw = candidate[f];
+      if (f === 'apellidoPaterno') raw = candidate.apellidoPaterno ?? candidate.apellido_paterno;
+      else if (f === 'apellidoMaterno') raw = candidate.apellidoMaterno ?? candidate.apellido_materno;
+      else raw = candidate[f];
     } else if (sourceId.startsWith('custom.')) {
       const colId = sourceId.slice('custom.'.length);
       const col = customColumns.find((c) => c.id === colId);
@@ -378,18 +419,25 @@ export function buildPrefillForm(params: {
     }
   }
 
-  if (!fromMapped.nombres && candidate.name) {
-    const hasStructuredSurnames = Boolean(
-      fromMapped.apellidoPaterno ||
-        fromMapped.apellidoMaterno ||
-        mapping.apellidoPaterno ||
-        mapping.apellidoMaterno
-    );
-    if (hasStructuredSurnames || mapping.nombres === 'candidate.name') {
-      fromMapped.nombres = String(candidate.name).trim();
-    } else if (!fromMapped.apellidoPaterno) {
-      Object.assign(fromMapped, parseLegacyFullName(String(candidate.name)));
-    }
+  if (!fromMapped.nombres && candidate.nombres) fromMapped.nombres = String(candidate.nombres);
+  if (!fromMapped.apellidoPaterno && (candidate.apellidoPaterno || candidate.apellido_paterno)) {
+    fromMapped.apellidoPaterno = String(candidate.apellidoPaterno || candidate.apellido_paterno);
+  }
+  if (!fromMapped.apellidoMaterno && (candidate.apellidoMaterno || candidate.apellido_materno)) {
+    fromMapped.apellidoMaterno = String(candidate.apellidoMaterno || candidate.apellido_materno);
+  }
+  for (const col of customColumns) {
+    const canonical = canonicalIdentityMappingKeyFromCustomColumn(col);
+    if (!canonical) continue;
+    const fichaKey = canonical === 'dni' ? 'nroDocumento' : canonical;
+    if (fromMapped[fichaKey]) continue;
+    const raw = resolveColumnValue(row, col, legacyIdToName);
+    const text = trimText(raw);
+    if (!text) continue;
+    fromMapped[fichaKey] = text;
+  }
+  if (!fromMapped.nombres && candidate.name && !fromMapped.apellidoPaterno && !fromMapped.apellidoMaterno) {
+    Object.assign(fromMapped, parseLegacyFullName(String(candidate.name)));
   }
   if (!fromMapped.nroDocumento && candidate.dni) fromMapped.nroDocumento = String(candidate.dni);
   if (!fromMapped.email && candidate.email) fromMapped.email = String(candidate.email);

@@ -2,13 +2,17 @@ import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react'
 import { useAppState } from '../App';
 import { FormIntegration, Process, FieldMapping } from '../types';
 import {
-    filterTallyFieldMapping,
     getTallyIntegrationMappingFields,
+    migrateAndFilterTallyFieldMapping,
+    migrateIdentityTallyFieldMapping,
     normalizeTallyFieldMapping,
     type TallyMappingField,
 } from '../lib/bulkTableColumns';
 import { processesApi } from '../lib/api/processes';
 import { X, Copy, ChevronDown, ChevronUp, Settings, RefreshCw } from 'lucide-react';
+
+const IDENTITY_MAPPING_KEYS = new Set(['nombres', 'apellidoPaterno', 'apellidoMaterno', 'dni']);
+const EMPTY_CUSTOM_COLUMNS: NonNullable<Process['bulkConfig']>['customColumns'] = [];
 
 interface FormIntegrationModalProps {
     integration: FormIntegration | null; // null = crear nueva, objeto = editar existente
@@ -81,7 +85,7 @@ export const FormEditorModal: React.FC<FormIntegrationModalProps> = ({ integrati
     );
 
     const unmappedFieldCount = useMemo(
-        () => candidateFields.filter(f => !(fieldMapping[f.key] ?? '').trim()).length,
+        () => candidateFields.filter(f => f.key !== 'name' && !(fieldMapping[f.key] ?? '').trim()).length,
         [candidateFields, fieldMapping]
     );
 
@@ -91,16 +95,45 @@ export const FormEditorModal: React.FC<FormIntegrationModalProps> = ({ integrati
     );
 
     const identityFields = useMemo(
-        () => candidateFields.filter(f => !f.key.startsWith('custom_')),
+        () => candidateFields.filter(f => IDENTITY_MAPPING_KEYS.has(f.key)),
+        [candidateFields]
+    );
+    const legacyFullNameField = useMemo(
+        () => candidateFields.find(f => f.key === 'name'),
+        [candidateFields]
+    );
+    const otherStandardFields = useMemo(
+        () => candidateFields.filter(f => !f.key.startsWith('custom_') && !IDENTITY_MAPPING_KEYS.has(f.key) && f.key !== 'name'),
         [candidateFields]
     );
     const tableOnlyFields = useMemo(
         () => candidateFields.filter(f => f.key.startsWith('custom_')),
         [candidateFields]
     );
+    const customColumnsForMapping = selectedProcessDetails?.bulkConfig?.customColumns ?? EMPTY_CUSTOM_COLUMNS;
 
     // ¿La config del proceso actual ya cargó desde BD? Solo entonces los campos son fiables.
     const isLinkedProcessLoaded = linkedProcess?.id === processId;
+
+    // Reasigna mapeos históricos (custom_* de Nombres/apellidos/DNI) a la identidad de sistema.
+    useEffect(() => {
+        if (!isLinkedProcessLoaded) return;
+        setFieldMapping(prev => {
+            const next = migrateIdentityTallyFieldMapping(
+                normalizeTallyFieldMapping(prev),
+                customColumnsForMapping
+            );
+            const prevKeys = Object.keys(prev);
+            const nextKeys = Object.keys(next);
+            if (
+                prevKeys.length === nextKeys.length &&
+                nextKeys.every(key => prev[key] === next[key])
+            ) {
+                return prev;
+            }
+            return next;
+        });
+    }, [isLinkedProcessLoaded, processId, customColumnsForMapping]);
 
     // Solo purgar mapeos cuando el USUARIO cambia a otro proceso (no en la carga inicial ni
     // durante la recarga asíncrona), y únicamente con la config ya cargada para evitar borrar
@@ -110,19 +143,24 @@ export const FormEditorModal: React.FC<FormIntegrationModalProps> = ({ integrati
         if (previousProcessIdRef.current === processId) return;
         if (!isLinkedProcessLoaded) return;
         previousProcessIdRef.current = processId;
-        setFieldMapping(prev => filterTallyFieldMapping(prev, allowedFieldKeys));
-    }, [processId, isLinkedProcessLoaded, allowedFieldKeys]);
+        setFieldMapping(prev =>
+            migrateAndFilterTallyFieldMapping(prev, allowedFieldKeys, customColumnsForMapping)
+        );
+    }, [processId, isLinkedProcessLoaded, allowedFieldKeys, customColumnsForMapping]);
 
     const buildFieldMappingPayload = (): FieldMapping | undefined => {
         const trimmed: FieldMapping = {};
         for (const [key, val] of Object.entries(fieldMapping)) {
-            // Conservar la clave si el proceso aún no cargó (no podemos validar todavía) o si
-            // pertenece a los campos válidos del proceso. Así no se pierden mapeos existentes.
-            if (isLinkedProcessLoaded && !allowedFieldKeys.has(key)) continue;
             const t = typeof val === 'string' ? val.trim() : '';
             if (t) trimmed[key] = t;
         }
-        const normalized = normalizeTallyFieldMapping(trimmed);
+        const migrated = migrateIdentityTallyFieldMapping(
+            normalizeTallyFieldMapping(trimmed),
+            customColumnsForMapping
+        );
+        const normalized = isLinkedProcessLoaded
+            ? migrateAndFilterTallyFieldMapping(migrated, allowedFieldKeys, customColumnsForMapping)
+            : migrated;
         return Object.keys(normalized).length > 0 ? normalized : undefined;
     };
 
@@ -377,14 +415,17 @@ export const FormEditorModal: React.FC<FormIntegrationModalProps> = ({ integrati
                                             ¿Cómo funciona el mapeo?
                                         </p>
                                         <p className="text-xs text-blue-800">
-                                            El kanban y la tabla usan los mismos campos de identidad
-                                            (Nombres, Apellido Paterno, Apellido Materno, DNI, email, teléfono…).
-                                            El nombre completo se arma siempre sumando las tres partes de nombre.
-                                            El modo tabla muestra esos campos más las columnas propias del proceso.
+                                            La identidad del candidato es la misma en toda la app: Nombres,
+                                            Apellido Paterno, Apellido Materno y DNI. No hay que crear columnas
+                                            nuevas; si el formulario ya mapeaba esas preguntas a columnas
+                                            personalizadas o a un único «Nombre completo», esos labels se
+                                            reasignan solos a estos cuatro campos.
                                         </p>
                                         <p className="text-xs text-blue-800">
-                                            Si el label en Tally coincide con el nombre de la columna, puede dejarlo en blanco
-                                            (mapeo automático). Si no coincide, escriba el label exacto de la pregunta.
+                                            El nombre que se ve en tarjetas y listados es la suma de las tres
+                                            partes. Si el label en Tally coincide con el nombre del campo, puede
+                                            dejarlo en blanco (mapeo automático). Si no coincide, escriba el
+                                            label exacto de la pregunta.
                                         </p>
                                         <p className="text-xs text-blue-700 font-medium pt-1">
                                             {candidateFields.length} campos del proceso — desplázate para ver todos
@@ -424,11 +465,38 @@ export const FormEditorModal: React.FC<FormIntegrationModalProps> = ({ integrati
                                         <div className="space-y-4 p-2 bg-white rounded border border-blue-100">
                                             {identityFields.length > 0 && (
                                                 <div>
-                                                    <p className="text-xs font-semibold text-gray-800 mb-2">
-                                                        Kanban y tabla — identidad del candidato
+                                                    <p className="text-xs font-semibold text-gray-800 mb-1">
+                                                        Identidad del candidato (kanban y tabla)
+                                                    </p>
+                                                    <p className="text-xs text-gray-500 mb-2">
+                                                        Misma estructura que en procesos masivos. El nombre completo se arma solo.
                                                     </p>
                                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                                                         {identityFields.map(renderMappingField)}
+                                                    </div>
+                                                </div>
+                                            )}
+                                            {legacyFullNameField && (
+                                                <div>
+                                                    <p className="text-xs font-semibold text-gray-800 mb-1">
+                                                        Legado — un solo campo de nombre en Tally
+                                                    </p>
+                                                    <p className="text-xs text-gray-500 mb-2">
+                                                        Solo si el formulario original tenía «Nombre completo» y no Nombres + apellidos.
+                                                        Si ya mapeó las tres partes, deje este campo vacío.
+                                                    </p>
+                                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                                        {renderMappingField(legacyFullNameField)}
+                                                    </div>
+                                                </div>
+                                            )}
+                                            {otherStandardFields.length > 0 && (
+                                                <div>
+                                                    <p className="text-xs font-semibold text-gray-800 mb-2">
+                                                        Otros campos del candidato
+                                                    </p>
+                                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                                        {otherStandardFields.map(renderMappingField)}
                                                     </div>
                                                 </div>
                                             )}
@@ -438,7 +506,8 @@ export const FormEditorModal: React.FC<FormIntegrationModalProps> = ({ integrati
                                                         Solo modo tabla — columnas del proceso
                                                     </p>
                                                     <p className="text-xs text-gray-500 mb-2">
-                                                        Estos datos no aparecen en las tarjetas del kanban; se guardan en las columnas de la tabla.
+                                                        Columnas propias del proceso, distintas de la identidad. No hace falta
+                                                        mapear de nuevo Nombres, apellidos o DNI aquí.
                                                     </p>
                                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                                                         {tableOnlyFields.map(renderMappingField)}
