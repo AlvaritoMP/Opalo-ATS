@@ -43,6 +43,7 @@ export interface TallyCandidateInsert {
 type TallyFieldRow = {
     key?: string;
     label?: string;
+    title?: string;
     type?: string;
     value?: unknown;
     options?: { id?: string; text?: string; label?: string }[];
@@ -144,7 +145,7 @@ export function buildTallyFieldsIndex(tallyData: unknown): TallyFieldsIndex {
         if (!text) continue;
 
         const key = (field.key || '').trim();
-        const label = (field.label || '').trim();
+        const label = (field.label || field.title || '').trim();
         const refs = new Set<string>();
 
         if (key) {
@@ -182,7 +183,11 @@ function isRefUsed(index: TallyFieldsIndex, ref: string): boolean {
 }
 
 /** Busca valor por nombre/key configurado en el mapeo */
-export function lookupTallyValue(index: TallyFieldsIndex, tallyFieldRef: string): string {
+export function lookupTallyValue(
+    index: TallyFieldsIndex,
+    tallyFieldRef: string,
+    allowReuse = false
+): string {
     const trimmed = tallyFieldRef.trim();
     if (!trimmed) return '';
 
@@ -194,8 +199,8 @@ export function lookupTallyValue(index: TallyFieldsIndex, tallyFieldRef: string)
 
     for (const c of candidates) {
         if (index.byRef[c] !== undefined && index.byRef[c] !== '') {
-            if (!isRefUsed(index, c)) {
-                markRefUsed(index, trimmed);
+            if (allowReuse || !isRefUsed(index, c)) {
+                if (!allowReuse) markRefUsed(index, trimmed);
                 return index.byRef[c];
             }
         }
@@ -203,8 +208,8 @@ export function lookupTallyValue(index: TallyFieldsIndex, tallyFieldRef: string)
 
     const normTarget = normalizeColumnNameKey(trimmed);
     for (const [k, v] of Object.entries(index.byRef)) {
-        if (normalizeColumnNameKey(k) === normTarget && v !== '' && !isRefUsed(index, k)) {
-            markRefUsed(index, trimmed);
+        if (normalizeColumnNameKey(k) === normTarget && v !== '' && (allowReuse || !isRefUsed(index, k))) {
+            if (!allowReuse) markRefUsed(index, trimmed);
             return v;
         }
     }
@@ -216,11 +221,13 @@ export function parseIntegrationFieldMapping(integration: {
 }): FieldMapping {
     if (!integration.field_mapping) return {};
     try {
-        if (typeof integration.field_mapping === 'string') {
-            return normalizeTallyFieldMapping(JSON.parse(integration.field_mapping));
+        let raw: unknown = integration.field_mapping;
+        if (typeof raw === 'string') {
+            raw = JSON.parse(raw);
+            if (typeof raw === 'string') raw = JSON.parse(raw);
         }
-        if (typeof integration.field_mapping === 'object') {
-            return normalizeTallyFieldMapping(integration.field_mapping as FieldMapping);
+        if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+            return normalizeTallyFieldMapping(raw as FieldMapping);
         }
     } catch {
         /* ignore */
@@ -306,6 +313,27 @@ function shouldRejectSourceAutoMatch(
     return names.some((n) => normalizeColumnNameKey(n) === normVal);
 }
 
+function resolveCustomMappingRef(
+    mappingKey: string,
+    customMapping: FieldMapping,
+    customColumns: CustomColumn[]
+): string {
+    const direct = customMapping[mappingKey];
+    if (typeof direct === 'string' && direct.trim()) return direct.trim();
+    if (!mappingKey.startsWith('custom_')) return '';
+    const colId = mappingKey.replace('custom_', '');
+    const col = customColumns.find((c) => c.id === colId);
+    if (!col) return '';
+    const nameNorm = normalizeColumnNameKey(col.name);
+    const nameCompact = compactColumnRef(col.name);
+    for (const [k, v] of Object.entries(customMapping)) {
+        if (typeof v !== 'string' || !v.trim()) continue;
+        if (k.startsWith('custom_')) continue;
+        if (normalizeColumnNameKey(k) === nameNorm || compactColumnRef(k) === nameCompact) return v.trim();
+    }
+    return '';
+}
+
 function getMappedValue(
     mappingKey: string,
     index: TallyFieldsIndex,
@@ -315,8 +343,9 @@ function getMappedValue(
     integration?: { field_mapping?: string | FieldMapping | null; form_name?: string; formName?: string },
     tallyData?: unknown
 ): string {
-    if (customMapping[mappingKey]) {
-        return lookupTallyValue(index, customMapping[mappingKey]);
+    const mappedRef = resolveCustomMappingRef(mappingKey, customMapping, customColumns);
+    if (mappedRef) {
+        return lookupTallyValue(index, mappedRef, true);
     }
 
     for (const ref of autoMatchRefsForField(mappingKey, customColumns, isBulk)) {
@@ -328,6 +357,26 @@ function getMappedValue(
         return v;
     }
     return '';
+}
+
+function fillEmptyCustomColumnsFromTally(
+    bulkRaw: Record<string, unknown>,
+    customColumns: CustomColumn[],
+    index: TallyFieldsIndex,
+    customMapping: FieldMapping
+): void {
+    for (const col of customColumns) {
+        if (bulkRaw[col.id] !== undefined && bulkRaw[col.id] !== '') continue;
+        const mappedRef = resolveCustomMappingRef(`custom_${col.id}`, customMapping, customColumns);
+        let raw = mappedRef ? lookupTallyValue(index, mappedRef, true) : '';
+        if (!raw) {
+            for (const ref of autoMatchRefsForField(`custom_${col.id}`, customColumns, true)) {
+                raw = lookupTallyValue(index, ref, true);
+                if (raw) break;
+            }
+        }
+        if (raw) bulkRaw[col.id] = parseValueForCustomColumn(raw, col);
+    }
 }
 
 function parseValueForCustomColumn(raw: string, col: CustomColumn): unknown {
@@ -514,6 +563,7 @@ export function buildTallyCandidateFromSubmission(
     applyImportTextCaseToCandidate(candidate as Record<string, unknown>);
 
     if (customColumns.length > 0) {
+        fillEmptyCustomColumnsFromTally(bulkRaw, customColumns, index, customMapping);
         syncHomonymCustomColumns(bulkRaw, customColumns, candidate);
         composeNameFromTableColumns(candidate, bulkRaw, customColumns);
         const enriched = enrichBulkColumnValuesForStorage(bulkRaw, customColumns);
