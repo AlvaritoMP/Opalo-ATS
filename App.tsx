@@ -88,6 +88,8 @@ interface AppActions {
     ensureProcessCandidatesLoaded: (processId: string, force?: boolean) => Promise<void>;
     /** Carga bajo demanda procesos de un estado no activo (p. ej. Stand By). */
     ensureProcessesWithStatus: (status: ProcessStatus) => Promise<void>;
+    /** Asegura que Stand By / cerrados también estén en el listado (sin precargar candidatos). */
+    ensureAllProcessesLoaded: () => Promise<void>;
     addCandidate: (candidateData: Omit<Candidate, 'id' | 'history'>, options?: { skipGoogleDrive?: boolean; silent?: boolean }) => Promise<Candidate>;
     updateCandidate: (candidateData: Candidate, movedBy?: string) => Promise<void>;
     deleteCandidate: (candidateId: string) => Promise<void>;
@@ -1270,6 +1272,23 @@ const App: React.FC = () => {
                 });
             } catch (error) {
                 console.warn(`No se pudieron cargar procesos en estado ${status}:`, error);
+            }
+        },
+        ensureAllProcessesLoaded: async () => {
+            try {
+                const [regular, bulk] = await Promise.all([
+                    processesApi.getAll(false, { activeOnly: false }),
+                    processesApi.getAllBulkProcesses(false, { activeOnly: false }).catch(() => [] as Process[]),
+                ]);
+                setState(s => {
+                    const byId = new Map(s.processes.map(p => [p.id, p]));
+                    for (const p of [...regular, ...bulk]) {
+                        byId.set(p.id, p);
+                    }
+                    return { ...s, processes: Array.from(byId.values()) };
+                });
+            } catch (error) {
+                console.warn('No se pudieron cargar todos los procesos:', error);
             }
         },
         deleteProcess: async (processId) => {

@@ -307,8 +307,10 @@ const BULK_PROCESS_FULL_FIELDS = `${BULK_PROCESS_LIST_FIELDS}, bulk_config`;
 
 export type ProcessListOptions = {
     /**
-     * Por defecto true: solo `en_proceso`.
-     * Stand By / terminados / cancelados / truncos no deben cargar en arranque ni en segundo plano.
+     * Si es true, solo `en_proceso`.
+     * Por defecto false: todos los estados se listan (Stand By, cancelados, etc.)
+     * para poder reactivarlos o cerrarlos. Alertas e indicadores siguen usando
+     * `isProcessActive` y no deben cargar candidatos de procesos inactivos.
      */
     activeOnly?: boolean;
     /** Si se define, limita a estos estados (p. ej. al filtrar Stand By). */
@@ -322,10 +324,10 @@ function applyProcessStatusFilter<T extends { eq: (c: string, v: string) => T; i
     if (options?.statuses && options.statuses.length > 0) {
         return query.in('status', options.statuses);
     }
-    if (options?.activeOnly === false) {
-        return query;
+    if (options?.activeOnly === true) {
+        return query.eq('status', 'en_proceso');
     }
-    return query.eq('status', 'en_proceso');
+    return query;
 }
 
 export const processesApi = {
@@ -446,7 +448,7 @@ export const processesApi = {
                 .eq('app_name', APP_NAME)
                 .eq('is_bulk_process', false)
                 .order('created_at', { ascending: false })
-                .limit(200);
+                .limit(500);
             query = applyProcessStatusFilter(query as any, options) as typeof query;
             const primary = await query;
             
@@ -459,7 +461,7 @@ export const processesApi = {
                     .eq('app_name', APP_NAME)
                     .eq('is_bulk_process', false)
                     .order('created_at', { ascending: false })
-                    .limit(200);
+                    .limit(500);
                 fallbackQuery = applyProcessStatusFilter(fallbackQuery as any, options) as typeof fallbackQuery;
                 const fallbackResult = await fallbackQuery;
                 
@@ -1431,7 +1433,7 @@ export const processesApi = {
         return [...regular, ...bulk];
     },
 
-    /** Carga regular y masivos en serie (menor pico de I/O en arranque). Por defecto solo en_proceso. */
+    /** Carga regular y masivos en serie (menor pico de I/O en arranque). Incluye todos los estados. */
     async getAllIncludingBulkSequential(
         includeAttachments: boolean = false,
         options?: ProcessListOptions

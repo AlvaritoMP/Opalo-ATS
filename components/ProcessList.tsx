@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useAppState } from '../App';
-import { Plus, MoreVertical, Eye, Edit, Trash2, Users, RefreshCw, Copy, Search, X, AlertTriangle } from 'lucide-react';
+import { Plus, MoreVertical, Eye, Edit, Trash2, Users, RefreshCw, Copy, Search, X, AlertTriangle, PlayCircle } from 'lucide-react';
 import { ProcessEditorModal } from './ProcessEditorModal';
 import { Process, UserRole, ProcessStatus, Candidate } from '../types';
 import { PROCESS_STATUS_LABELS, PROCESS_STATUS_COLORS, isProcessActive } from '../lib/processStatus';
@@ -45,8 +45,9 @@ const ProcessCard: React.FC<{
     onEdit: () => void;
     onDelete: () => void;
     onDuplicate: () => void;
+    onReactivate?: () => void;
     canEdit: boolean;
-}> = ({ process, candidateCount, criticalInfo, onView, onEdit, onDelete, onDuplicate, canEdit }) => {
+}> = ({ process, candidateCount, criticalInfo, onView, onEdit, onDelete, onDuplicate, onReactivate, canEdit }) => {
     const [dropdownOpen, setDropdownOpen] = useState(false);
     const { state } = useAppState();
 
@@ -97,6 +98,11 @@ const ProcessCard: React.FC<{
                         <button onClick={(e) => { e.preventDefault(); e.stopPropagation(); setDropdownOpen(false); onEdit(); }} className="w-full text-left flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
                                             <Edit className="w-4 h-4 mr-3" /> Editar
                                         </button>
+                        {!isProcessActive(process.status) && onReactivate && (
+                        <button onClick={(e) => { e.preventDefault(); e.stopPropagation(); setDropdownOpen(false); onReactivate(); }} className="w-full text-left flex items-center px-4 py-2 text-sm text-primary-700 hover:bg-primary-50">
+                                            <PlayCircle className="w-4 h-4 mr-3" /> Reactivar a En Proceso
+                                        </button>
+                        )}
                         <button onClick={(e) => { e.preventDefault(); e.stopPropagation(); setDropdownOpen(false); onDuplicate(); }} className="w-full text-left flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
                                             <Copy className="w-4 h-4 mr-3" /> Duplicar
                                         </button>
@@ -214,9 +220,13 @@ export const ProcessList: React.FC = () => {
     
     const canManageProcesses = ['admin', 'recruiter'].includes(state.currentUser?.role as UserRole);
 
-    // Stand By / cerrados: no vienen en el arranque; se piden solo al filtrar.
+    // Stand By / cerrados deben verse en "Todos"; se piden al listar o al filtrar por estado.
     useEffect(() => {
-        if (statusFilter === 'all' || statusFilter === 'en_proceso') return;
+        if (statusFilter === 'en_proceso') return;
+        if (statusFilter === 'all') {
+            void actions.ensureAllProcessesLoaded();
+            return;
+        }
         void actions.ensureProcessesWithStatus(statusFilter);
     }, [statusFilter, actions]);
     
@@ -294,6 +304,14 @@ export const ProcessList: React.FC = () => {
         }
     };
 
+    const handleReactivate = async (process: Process) => {
+        try {
+            await actions.updateProcess({ ...process, status: 'en_proceso' });
+        } catch (error) {
+            console.error('Error al reactivar proceso:', error);
+        }
+    };
+
     const statusFilters: { id: ProcessStatus | 'all'; label: string }[] = [
         { id: 'all', label: 'Todos' },
         { id: 'en_proceso', label: 'En Proceso' },
@@ -303,11 +321,24 @@ export const ProcessList: React.FC = () => {
         { id: 'trunco', label: 'Trunco' },
     ];
 
+    const regularProcesses = useMemo(
+        () => state.processes.filter(process => !process.isBulkProcess),
+        [state.processes]
+    );
+
+    const statusCounts = useMemo(() => {
+        const counts: Record<string, number> = { all: regularProcesses.length };
+        for (const process of regularProcesses) {
+            const status = process.status || 'en_proceso';
+            counts[status] = (counts[status] || 0) + 1;
+        }
+        return counts;
+    }, [regularProcesses]);
+
     // Filtrar procesos por estado y búsqueda
     const filteredProcesses = useMemo(() => {
-        let filtered = state.processes.filter(process =>
-            !process.isBulkProcess &&
-            (statusFilter === 'all' ? true : (process.status || 'en_proceso') === statusFilter)
+        let filtered = regularProcesses.filter(process =>
+            statusFilter === 'all' ? true : (process.status || 'en_proceso') === statusFilter
         );
 
         // Aplicar filtro de búsqueda si hay un término
@@ -331,7 +362,7 @@ export const ProcessList: React.FC = () => {
         }
 
         return filtered;
-    }, [state.processes, statusFilter, searchQuery]);
+    }, [regularProcesses, statusFilter, searchQuery]);
 
     return (
         <div className="p-4 md:p-8 overflow-y-auto h-full">
@@ -389,7 +420,7 @@ export const ProcessList: React.FC = () => {
                 )}
             </div>
 
-            <div className="flex flex-wrap items-center gap-2 mb-6">
+            <div className="flex flex-wrap items-center gap-2 mb-2">
                 {statusFilters.map(filter => (
                     <button
                         key={filter.id}
@@ -397,9 +428,15 @@ export const ProcessList: React.FC = () => {
                         className={`px-3 py-1.5 rounded-full text-sm font-medium border ${statusFilter === filter.id ? 'bg-primary-600 text-white border-primary-600' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'}`}
                     >
                         {filter.label}
+                        <span className={`ml-1 ${statusFilter === filter.id ? 'text-white/80' : 'text-gray-400'}`}>
+                            ({statusCounts[filter.id] || 0})
+                        </span>
                     </button>
                 ))}
             </div>
+            <p className="text-xs text-gray-500 mb-6">
+                Stand By, cancelados y demás estados siguen visibles para reactivarlos o cerrarlos. No generan alertas ni cuentan en indicadores hasta volver a En Proceso.
+            </p>
 
             {filteredProcesses.length === 0 ? (
                 <div className="text-center py-12 bg-white rounded-xl border border-gray-200">
@@ -438,6 +475,9 @@ export const ProcessList: React.FC = () => {
                             onEdit={() => handleEdit(process)}
                             onDuplicate={() => handleDuplicate(process)}
                             onDelete={() => handleDelete(process.id)}
+                            onReactivate={canManageProcesses && !isProcessActive(process.status)
+                                ? () => handleReactivate(process)
+                                : undefined}
                         />
                     );
                 })}

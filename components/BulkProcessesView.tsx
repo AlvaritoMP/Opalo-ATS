@@ -76,10 +76,11 @@ import {
 } from '../lib/bulkConfigBackup';
 import { useDebouncedValue } from '../lib/useDebouncedValue';
 import { fetchWithRetry } from '../lib/fetchWithRetry';
-import { Check, X, Loader2, Send, Archive, Search, ChevronDown, ChevronUp, Plus, Edit, Trash2, ArrowLeft, MessageCircle, Phone, Upload, Download, Filter, Mail, Calendar, Settings, ArrowUp, ArrowDown, Pin, FileText, BookOpen, Paperclip, ClipboardList, ListPlus, RefreshCw, HardDrive, CaseSensitive, Package, History, Target, BarChart3, UserCheck, Coins, Bus, Undo2, ArrowRightLeft, LayoutGrid, LineChart, ClipboardCopy } from 'lucide-react';
+import { Check, X, Loader2, Send, Archive, Search, ChevronDown, ChevronUp, Plus, Edit, Trash2, ArrowLeft, MessageCircle, Phone, Upload, Download, Filter, Mail, Calendar, Settings, ArrowUp, ArrowDown, Pin, FileText, BookOpen, Paperclip, ClipboardList, ListPlus, RefreshCw, HardDrive, CaseSensitive, Package, History, Target, BarChart3, UserCheck, Coins, Bus, Undo2, ArrowRightLeft, LayoutGrid, LineChart, ClipboardCopy, PlayCircle } from 'lucide-react';
 import { BulkCandidateTimeline } from './BulkCandidateTimeline';
 import { BulkContactologyHistory } from './BulkContactologyHistory';
-import { Process, CustomColumn, BulkProcessConfig, Candidate, IdealProfileConfig, BulkProcessStatChart, BulkInfoPin, BulkQuickReply, BulkClipboardFieldPreset } from '../types';
+import { Process, ProcessStatus, CustomColumn, BulkProcessConfig, Candidate, IdealProfileConfig, BulkProcessStatChart, BulkInfoPin, BulkQuickReply, BulkClipboardFieldPreset } from '../types';
+import { PROCESS_STATUS_LABELS, isProcessActive } from '../lib/processStatus';
 import { candidatesApi } from '../lib/api/candidates';
 import {
     BASE_COLUMNS,
@@ -761,6 +762,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
         if (fromApp) return fromApp;
         return getBulkSelectedProcessId(state.currentUser?.id) ?? '';
     });
+    const [statusFilter, setStatusFilter] = useState<ProcessStatus | 'all'>('all');
     const [selectedStage, setSelectedStage] = useState<string>('');
     const [searchInput, setSearchInput] = useState('');
     const debouncedSearch = useDebouncedValue(searchInput, 300);
@@ -907,6 +909,20 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
         if (!selectedProcess) return undefined;
         return bulkProcesses.find(p => p.id === selectedProcess);
     }, [selectedProcess, bulkProcesses]);
+
+    const visibleBulkProcesses = useMemo(() => {
+        if (statusFilter === 'all') return bulkProcesses;
+        return bulkProcesses.filter(p => (p.status || 'en_proceso') === statusFilter);
+    }, [bulkProcesses, statusFilter]);
+
+    const bulkStatusCounts = useMemo(() => {
+        const counts: Record<string, number> = { all: bulkProcesses.length };
+        for (const p of bulkProcesses) {
+            const status = p.status || 'en_proceso';
+            counts[status] = (counts[status] || 0) + 1;
+        }
+        return counts;
+    }, [bulkProcesses]);
 
     const psycholaboralActive = useMemo(
         () => isPsycholaboralEnabled(process?.bulkConfig?.psycholaboral),
@@ -3301,6 +3317,15 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
         } catch (error: any) {
             console.error('Error eliminando proceso:', error);
             actions.showToast(`Error: ${error.message || 'Error desconocido'}`, 'error', 5000);
+        }
+    };
+
+    const handleReactivateProcess = async (target: Process) => {
+        try {
+            await actions.updateProcess({ ...target, status: 'en_proceso' });
+            setBulkProcesses(prev => prev.map(p => p.id === target.id ? { ...p, status: 'en_proceso' } : p));
+        } catch (error) {
+            console.error('Error al reactivar proceso masivo:', error);
         }
     };
 
@@ -5967,7 +5992,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                             <h1 className="text-2xl font-bold text-gray-900">Procesos Masivos</h1>
                             <div className="flex items-center gap-4">
                                 <div className="text-sm text-gray-500">
-                                    {bulkProcesses.length} procesos
+                                    {visibleBulkProcesses.length} de {bulkProcesses.length} procesos
                                 </div>
                                 <button
                                     onClick={handleCreateProcess}
@@ -5978,6 +6003,30 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                                 </button>
                             </div>
                         </div>
+                        <div className="flex flex-wrap items-center gap-2 mt-3">
+                            {([
+                                { id: 'all' as const, label: 'Todos' },
+                                ...Object.entries(PROCESS_STATUS_LABELS).map(([id, label]) => ({
+                                    id: id as ProcessStatus,
+                                    label,
+                                })),
+                            ]).map(filter => (
+                                <button
+                                    key={filter.id}
+                                    type="button"
+                                    onClick={() => setStatusFilter(filter.id)}
+                                    className={`px-3 py-1.5 rounded-full text-sm font-medium border ${statusFilter === filter.id ? 'bg-primary-600 text-white border-primary-600' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'}`}
+                                >
+                                    {filter.label}
+                                    <span className={`ml-1 ${statusFilter === filter.id ? 'text-white/80' : 'text-gray-400'}`}>
+                                        ({bulkStatusCounts[filter.id] || 0})
+                                    </span>
+                                </button>
+                            ))}
+                        </div>
+                        <p className="text-xs text-gray-500 mt-2">
+                            Stand By y cancelados siguen visibles. No generan alertas ni cuentan en indicadores hasta reactivarlos a En Proceso.
+                        </p>
                     </div>
                     <div className="flex-1 min-h-0 overflow-y-auto p-4">
                         {isLoadingProcesses ? (
@@ -5995,9 +6044,13 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                                     Crear Primer Proceso Masivo
                                 </button>
                             </div>
+                        ) : visibleBulkProcesses.length === 0 ? (
+                            <div className="text-center py-12 border-2 border-dashed border-gray-300 rounded-lg">
+                                <p className="text-gray-500">No hay procesos masivos en este estado.</p>
+                            </div>
                         ) : (
                             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                                {bulkProcesses.map(p => (
+                                {visibleBulkProcesses.map(p => (
                                     <BulkProcessCard
                                         key={p.id}
                                         process={p}
@@ -6141,6 +6194,17 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                                             <Settings className="w-4 h-4" />
                                             Editar Proceso
                                         </button>
+                                        {!isProcessActive(process.status) && (
+                                            <button
+                                                type="button"
+                                                onClick={() => void handleReactivateProcess(process)}
+                                                className="bg-primary-600 text-white hover:bg-primary-700 transition-colors"
+                                                title="Volver a En Proceso para reactivar alertas e indicadores"
+                                            >
+                                                <PlayCircle className="w-4 h-4" />
+                                                Reactivar a En Proceso
+                                            </button>
+                                        )}
                                         <button
                                             type="button"
                                             onClick={() => {

@@ -18,7 +18,8 @@ export const PROCESS_STATUS_COLORS: Record<ProcessStatus, string> = {
 
 /**
  * Solo `en_proceso` genera cargas automáticas (alertas, dashboard, precargas).
- * Stand By / terminados / cancelados / truncos no deben disparar trabajo en segundo plano.
+ * Stand By / terminados / cancelados / truncos siguen visibles en listados
+ * para reactivarlos o cerrarlos, pero no disparan trabajo en segundo plano.
  */
 export function isProcessActive(status: ProcessStatus | undefined): boolean {
     return (status || 'en_proceso') === 'en_proceso';

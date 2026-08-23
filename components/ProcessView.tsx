@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useAppState } from '../App';
 import { CandidateCard } from './CandidateCard';
-import { Plus, Edit, Briefcase, DollarSign, BarChart, Clock, Paperclip, X, FileText, ClipboardList, Tag, Users, ArrowLeft, CheckCircle, Mail, MessageCircle, Download, FileUp, Table2, LineChart } from 'lucide-react';
+import { Plus, Edit, Briefcase, DollarSign, BarChart, Clock, Paperclip, X, FileText, ClipboardList, Tag, Users, ArrowLeft, CheckCircle, Mail, MessageCircle, Download, FileUp, Table2, LineChart, PlayCircle } from 'lucide-react';
 import { AddCandidateModal } from './AddCandidateModal';
 import { ProcessEditorModal } from './ProcessEditorModal';
 import { BulkLetterModal } from './BulkLetterModal';
@@ -13,7 +13,7 @@ import { CvImportModal } from './CvImportModal';
 import { BulkProcessesView } from './BulkProcessesView';
 import { ProcessPerformanceModal } from './ProcessPerformanceModal';
 import { Attachment, UserRole, Candidate } from '../types';
-import { PROCESS_STATUS_LABELS, PROCESS_STATUS_COLORS, isProcessActive, isProcessEnded, isProcessOperational } from '../lib/processStatus';
+import { PROCESS_STATUS_LABELS, PROCESS_STATUS_COLORS, isProcessActive, isProcessOperational } from '../lib/processStatus';
 import * as XLSX from 'xlsx';
 import { openMailCompose, getMailComposeToastMessage } from '../lib/openMailto';
 import {
@@ -518,9 +518,16 @@ export const ProcessView: React.FC<ProcessViewProps> = ({ processId }) => {
 
     const currentStatus = process.status || 'en_proceso';
     const processIsActive = isProcessActive(process.status);
-    const processIsEnded = isProcessEnded(process.status);
     const processIsOperational = isProcessOperational(process.status);
     const totalVacancies = process.vacancies ?? 0;
+
+    const handleReactivate = async () => {
+        try {
+            await actions.updateProcess({ ...process, status: 'en_proceso' });
+        } catch (error) {
+            console.error('Error al reactivar proceso:', error);
+        }
+    };
 
     return (
         <div className="flex flex-col h-full">
@@ -617,6 +624,16 @@ export const ProcessView: React.FC<ProcessViewProps> = ({ processId }) => {
                             <button onClick={() => setIsProcessEditorOpen(true)} className="flex items-center px-3 md:px-4 py-2 bg-white border border-gray-300 rounded-md shadow-sm text-xs md:text-sm font-medium text-gray-700 hover:bg-gray-50 whitespace-nowrap">
                                 <Edit className="w-4 h-4 mr-1 md:mr-2"/> <span className="hidden md:inline">Editar proceso</span> <span className="md:hidden">Editar</span>
                             </button>
+                            {!processIsActive && (
+                                <button
+                                    type="button"
+                                    onClick={() => void handleReactivate()}
+                                    className="flex items-center px-3 md:px-4 py-2 bg-primary-600 text-white rounded-md shadow-sm hover:bg-primary-700 text-xs md:text-sm font-medium whitespace-nowrap"
+                                    title="Volver a estado En Proceso para reactivar alertas e indicadores"
+                                >
+                                    <PlayCircle className="w-4 h-4 mr-1 md:mr-2"/> <span className="hidden md:inline">Reactivar a En Proceso</span> <span className="md:hidden">Reactivar</span>
+                                </button>
+                            )}
                             {supportsHighDensityTableView(process) && (
                                 <button
                                     type="button"
@@ -668,15 +685,18 @@ export const ProcessView: React.FC<ProcessViewProps> = ({ processId }) => {
                     <InfoChip icon={Users} text={`Vacantes: ${totalVacancies}`} />
                 </div>
             </header>
-            {processIsEnded && (
+            {!processIsActive && (
                 <div className={`px-4 py-3 border-b text-sm ${
                     process.status === 'cancelado' ? 'bg-red-50 border-red-200 text-red-900' :
                     process.status === 'trunco' ? 'bg-orange-50 border-orange-200 text-orange-900' :
+                    process.status === 'standby' ? 'bg-yellow-50 border-yellow-200 text-yellow-900' :
                     'bg-gray-50 border-gray-200 text-gray-800'
                 }`}>
+                    {process.status === 'standby' && 'Este proceso está en Stand By. Sigue visible para reactivarlo o cancelarlo, pero no genera alertas ni cuenta en indicadores.'}
                     {process.status === 'cancelado' && 'Este proceso está cancelado. No hay acciones pendientes hasta reactivarlo en estado En Proceso.'}
                     {process.status === 'trunco' && 'Este proceso está trunco (facturación parcial). No hay acciones pendientes hasta reactivarlo en estado En Proceso.'}
                     {process.status === 'terminado' && 'Este proceso está terminado. Puedes consultar los candidatos contratados desde el botón de gestión.'}
+                    {canManageProcess && ' Usa «Reactivar a En Proceso» o Editar para cambiar el estado.'}
                 </div>
             )}
             <main className="flex-1 flex overflow-x-auto p-2 md:p-4 bg-gray-50/50 space-x-2 md:space-x-4 pb-4">
