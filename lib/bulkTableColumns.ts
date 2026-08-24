@@ -15,8 +15,11 @@ import {
     DNI_COLUMN_ID,
     GIVEN_NAMES_COLUMN_ID,
     IDENTITY_SYSTEM_COLUMN_IDS,
+    canonicalIdentityMappingKeyFromCustomColumn,
+    composeIdentityFullName,
     ensureIdentityColumnsInOrder,
     hideIdentityDuplicateCustomColumns,
+    identityColumnIdFromLabel,
     isIdentityCustomColumn,
     isIdentitySystemColumnId,
     migrateIdentityTallyFieldMapping,
@@ -2279,13 +2282,29 @@ export function parseBulkDateToIso(value: BulkDateInput): string {
     return `${year}-${pad(month)}-${pad(day)}`;
 }
 
+/** Partes de identidad (columnas Nombres / apellidos). El nombre completo se deriva de estas. */
+export const BULK_TEXT_CASE_IDENTITY_FIELDS = [
+    'nombres',
+    'apellidoPaterno',
+    'apellidoMaterno',
+] as const;
+
 /** Campos estándar de candidato que se normalizan en tabla masiva */
 export const BULK_TEXT_CASE_STANDARD_FIELDS = [
     'name',
+    ...BULK_TEXT_CASE_IDENTITY_FIELDS,
     'source',
     'province',
     'district',
 ] as const;
+
+type BulkTextCaseStandardField = (typeof BULK_TEXT_CASE_STANDARD_FIELDS)[number];
+
+function identityFieldFromNameKey(key: string): string | undefined {
+    const label = key.slice(BULK_NAME_KEY_PREFIX.length);
+    const id = identityColumnIdFromLabel(label);
+    return id && id !== 'dni' ? id : undefined;
+}
 
 /** Normaliza mayúsculas palabra a palabra en celdas de texto */
 export function normalizeTextCaseCellValue(
@@ -2313,7 +2332,9 @@ export function repairTextCaseColumnValues(
             if (col.type === 'number' || col.type === 'date' || col.type === 'checkbox') continue;
             const raw = resolveColumnValueFromRow(row, col, legacyIdToName);
             if (typeof raw !== 'string' || !raw.trim()) continue;
+            const identityField = canonicalIdentityMappingKeyFromCustomColumn(col);
             const fixed = normalizeImportTextCase(raw, {
+                field: identityField && identityField !== 'dni' ? identityField : undefined,
                 columnType: col.type,
                 selectOptions: col.options,
             });
@@ -2326,7 +2347,11 @@ export function repairTextCaseColumnValues(
 
         for (const [key, val] of Object.entries(row)) {
             if (!key.startsWith(BULK_NAME_KEY_PREFIX) || typeof val !== 'string' || !val.trim()) continue;
-            const fixed = normalizeImportTextCase(val, { columnType: 'text' });
+            const identityField = identityFieldFromNameKey(key);
+            const fixed = normalizeImportTextCase(val, {
+                field: identityField,
+                columnType: 'text',
+            });
             if (fixed !== val) {
                 row[key] = fixed;
                 changed = true;
@@ -2339,17 +2364,58 @@ export function repairTextCaseColumnValues(
     return { repaired: changed ? repaired : columnValues, changed };
 }
 
-/** Calcula parches de campos estándar del candidato (name, source, etc.) */
+/** Calcula parches de campos estándar del candidato (nombres, apellidos, name, source, etc.) */
 export function buildStandardFieldTextCasePatch(
-    candidate: { name?: string; source?: string; province?: string; district?: string }
-): Partial<Record<(typeof BULK_TEXT_CASE_STANDARD_FIELDS)[number], string>> {
-    const patch: Partial<Record<(typeof BULK_TEXT_CASE_STANDARD_FIELDS)[number], string>> = {};
-    for (const field of BULK_TEXT_CASE_STANDARD_FIELDS) {
+    candidate: Partial<Record<BulkTextCaseStandardField, string | undefined>>
+): Partial<Record<BulkTextCaseStandardField, string>> {
+    const patch: Partial<Record<BulkTextCaseStandardField, string>> = {};
+
+    const identityNext: Partial<Record<(typeof BULK_TEXT_CASE_IDENTITY_FIELDS)[number], string>> = {};
+    let hasIdentityParts = false;
+    let identityChanged = false;
+
+    for (const field of BULK_TEXT_CASE_IDENTITY_FIELDS) {
+        const val = candidate[field];
+        if (typeof val !== 'string' || !val.trim()) continue;
+        hasIdentityParts = true;
+        const fixed = normalizeImportTextCase(val, { field });
+        identityNext[field] = fixed;
+        if (fixed !== val) identityChanged = true;
+    }
+
+    if (hasIdentityParts) {
+        if (identityChanged) {
+            // Incluir todas las partes presentes para que `name` se recomponga sin perder apellidos.
+            for (const field of BULK_TEXT_CASE_IDENTITY_FIELDS) {
+                const nextVal = identityNext[field];
+                if (typeof nextVal === 'string' && nextVal.trim()) {
+                    patch[field] = nextVal;
+                }
+            }
+        }
+        const composed = composeIdentityFullName({
+            nombres: identityNext.nombres ?? candidate.nombres,
+            apellidoPaterno: identityNext.apellidoPaterno ?? candidate.apellidoPaterno,
+            apellidoMaterno: identityNext.apellidoMaterno ?? candidate.apellidoMaterno,
+        });
+        if (composed && (identityChanged || composed !== (candidate.name || '').trim())) {
+            patch.name = composed;
+        }
+    } else {
+        const val = candidate.name;
+        if (typeof val === 'string' && val.trim()) {
+            const fixed = normalizeImportTextCase(val, { field: 'name' });
+            if (fixed !== val) patch.name = fixed;
+        }
+    }
+
+    for (const field of ['source', 'province', 'district'] as const) {
         const val = candidate[field];
         if (typeof val !== 'string' || !val.trim()) continue;
         const fixed = normalizeImportTextCase(val, { field });
         if (fixed !== val) patch[field] = fixed;
     }
+
     return patch;
 }
 
