@@ -3,6 +3,10 @@ import { createClient } from '@supabase/supabase-js';
 import { applyImportTextCaseToCandidate } from '../../../../lib/importTextCase.js';
 import { buildTallyCandidateFromSubmission } from '../../../../lib/tallyWebhookMapping.js';
 import { processTallyCandidateUpsert } from '../../../../lib/tallyCandidateUpsert.js';
+import {
+    composeCandidateFullName,
+    notifyMattermostNewCandidate,
+} from '../../../../lib/mattermostNewCandidate.js';
 
 console.log('🔵 Cargando módulo webhooks.js...');
 
@@ -112,7 +116,7 @@ router.post('/tally/:webhookId', async (req, res) => {
         // 2. Obtener el proceso asociado
         const { data: process, error: processError } = await supabase
             .from('processes')
-            .select('id, is_bulk_process, bulk_config')
+            .select('id, title, is_bulk_process, bulk_config')
             .eq('id', integration.process_id)
             .eq('app_name', integration.app_name)
             .maybeSingle();
@@ -213,6 +217,14 @@ router.post('/tally/:webhookId', async (req, res) => {
                 ? `✅ Re-postulación #${upsertResult.applicationCount}: ${candidate.id}`
                 : `✅ Candidato creado: ${candidate.id} - ${candidate.name || candidate.email}`
         );
+
+        if (!upsertResult.isReapplication) {
+            await notifyMattermostNewCandidate(process.env.MATTERMOST_WEBHOOK_URL, {
+                fullName: composeCandidateFullName(candidate),
+                position: process.title || '',
+                district: candidate.district || candidateData.district || '',
+            });
+        }
 
         console.log(`🎉 Webhook procesado exitosamente - Candidato: ${candidate.id}`);
 

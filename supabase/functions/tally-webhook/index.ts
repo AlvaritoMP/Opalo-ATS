@@ -3,6 +3,10 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.49.1'
 import { applyImportTextCaseToCandidate } from '../_shared/importTextCase.ts'
 import { buildTallyCandidateFromSubmission } from '../_shared/tallyMapping.ts'
 import { processTallyCandidateUpsert } from '../_shared/tallyCandidateUpsert.ts'
+import {
+  composeCandidateFullName,
+  notifyMattermostNewCandidate,
+} from '../_shared/mattermostNewCandidate.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -74,7 +78,7 @@ Deno.serve(async (req) => {
 
     const { data: process, error: processError } = await supabase
       .from('processes')
-      .select('id, is_bulk_process, bulk_config')
+      .select('id, title, is_bulk_process, bulk_config')
       .eq('id', integration.process_id)
       .eq('app_name', integration.app_name)
       .maybeSingle()
@@ -127,6 +131,15 @@ Deno.serve(async (req) => {
         ? `✅ Re-postulación #${upsertResult.applicationCount}: ${upsertResult.candidateId}`
         : `✅ Candidato creado: ${upsertResult.candidateId}`
     )
+
+    if (!upsertResult.isReapplication) {
+      await notifyMattermostNewCandidate(Deno.env.get('MATTERMOST_WEBHOOK_URL'), {
+        fullName: composeCandidateFullName(candidateData),
+        position: process.title || '',
+        district: candidateData.district || '',
+      })
+    }
+
     return json({
       success: true,
       candidateId: upsertResult.candidateId,
