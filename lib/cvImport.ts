@@ -11,7 +11,7 @@ import {
     resolveBulkCandidateEmail,
 } from './bulkTableColumns';
 import { BULK_DOCUMENTS_COLUMN_ID } from './bulkDocumentData';
-import { parseLegacyFullName } from './workerNameParts';
+import { composeIdentityFullName, parseLegacyFullName } from './candidateIdentity';
 import {
     inferReportNamePartFromLabel,
     normalizeColumnHeaderForMatching,
@@ -96,6 +96,72 @@ export function isValidCandidateEmail(email?: string): boolean {
     return !!email && EMAIL_REGEX.test(email.trim());
 }
 
+/** Resuelve nombres/apellidos y el nombre completo a partir del draft del CV. */
+export function resolveCvIdentity(fields: CvExtractedFields): {
+    name: string;
+    nombres?: string;
+    apellidoPaterno?: string;
+    apellidoMaterno?: string;
+} {
+    const nombres = (fields.nombres || '').trim();
+    const apellidoPaterno = (fields.apellidoPaterno || '').trim();
+    const apellidoMaterno = (fields.apellidoMaterno || '').trim();
+    if (nombres || apellidoPaterno || apellidoMaterno) {
+        return {
+            nombres: nombres || undefined,
+            apellidoPaterno: apellidoPaterno || undefined,
+            apellidoMaterno: apellidoMaterno || undefined,
+            name: composeIdentityFullName({ nombres, apellidoPaterno, apellidoMaterno }),
+        };
+    }
+    const parsed = parseLegacyFullName((fields.name || '').trim());
+    return {
+        ...parsed,
+        name: composeIdentityFullName(parsed) || (fields.name || '').trim(),
+    };
+}
+
+/** Mantiene `name` y las partes de identidad alineadas tras una edición en preview. */
+export function syncCvIdentityFields(
+    fields: CvExtractedFields,
+    changed?: keyof CvExtractedFields
+): CvExtractedFields {
+    if (changed === 'name') {
+        const parsed = parseLegacyFullName((fields.name || '').trim());
+        fields.nombres = parsed.nombres;
+        fields.apellidoPaterno = parsed.apellidoPaterno;
+        fields.apellidoMaterno = parsed.apellidoMaterno;
+        fields.name = composeIdentityFullName(parsed) || (fields.name || '').trim();
+        return fields;
+    }
+    const identity = resolveCvIdentity(fields);
+    fields.nombres = identity.nombres;
+    fields.apellidoPaterno = identity.apellidoPaterno;
+    fields.apellidoMaterno = identity.apellidoMaterno;
+    fields.name = identity.name;
+    return fields;
+}
+
+export function applyNamePartToFields(
+    fields: CvExtractedFields,
+    part: PsycholaboralReportNamePart,
+    value: string
+): CvExtractedFields {
+    const trimmed = value.trim();
+    if (part === 'given_names') {
+        fields.nombres = trimmed;
+    } else if (part === 'paternal_surname') {
+        fields.apellidoPaterno = trimmed;
+    } else if (part === 'maternal_surname') {
+        fields.apellidoMaterno = trimmed;
+    } else if (part === 'surnames_combined') {
+        const tokens = trimmed.split(/\s+/).filter(Boolean);
+        fields.apellidoPaterno = tokens[0] || '';
+        fields.apellidoMaterno = tokens.slice(1).join(' ');
+    }
+    return syncCvIdentityFields(fields);
+}
+
 export function buildCandidateFromCvDraft(opts: {
     process: Process;
     fields: CvExtractedFields;
@@ -109,7 +175,8 @@ export function buildCandidateFromCvDraft(opts: {
         return { error: 'Este proceso no tiene etapas configuradas.' };
     }
 
-    const name = (opts.fields.name || '').trim();
+    const identity = resolveCvIdentity(opts.fields);
+    const name = identity.name;
     const emailRaw = (opts.fields.email || '').trim();
     const phone = (opts.fields.phone || '').trim() || undefined;
     const dni = (opts.fields.dni || '').trim() || undefined;
@@ -133,6 +200,9 @@ export function buildCandidateFromCvDraft(opts: {
 
     const draft: Record<string, unknown> = {
         name,
+        nombres: identity.nombres,
+        apellidoPaterno: identity.apellidoPaterno,
+        apellidoMaterno: identity.apellidoMaterno,
         email,
         phone,
         phone2: (opts.fields.phone2 || '').trim() || undefined,
@@ -153,6 +223,13 @@ export function buildCandidateFromCvDraft(opts: {
     };
 
     applyImportTextCaseToCandidate(draft);
+    if (draft.nombres || draft.apellidoPaterno || draft.apellidoMaterno) {
+        draft.name = composeIdentityFullName({
+            nombres: String(draft.nombres || ''),
+            apellidoPaterno: String(draft.apellidoPaterno || ''),
+            apellidoMaterno: String(draft.apellidoMaterno || ''),
+        });
+    }
     return {
         candidate: draft as Omit<Candidate, 'id' | 'history'>,
         usedPlaceholder,
@@ -163,6 +240,9 @@ export function candidateToBulkRow(c: Candidate): BulkCandidate {
     return {
         id: c.id,
         name: c.name || '',
+        nombres: c.nombres,
+        apellidoPaterno: c.apellidoPaterno,
+        apellidoMaterno: c.apellidoMaterno,
         email: c.email,
         phone: c.phone,
         dni: c.dni,
@@ -312,15 +392,17 @@ export function buildCvPreviewColumns(tableLayout?: CvTableLayout): CvPreviewCol
 
 export function namePartValue(
     part: PsycholaboralReportNamePart,
-    name?: string
+    name?: string,
+    fields?: CvExtractedFields
 ): string {
-    if (!name?.trim()) return '';
-    const parsed = parseLegacyFullName(name);
-    if (part === 'given_names') return parsed.nombres || '';
-    if (part === 'paternal_surname') return parsed.apellidoPaterno || '';
-    if (part === 'maternal_surname') return parsed.apellidoMaterno || '';
+    const identity = fields
+        ? resolveCvIdentity(fields)
+        : parseLegacyFullName(name || '');
+    if (part === 'given_names') return identity.nombres || '';
+    if (part === 'paternal_surname') return identity.apellidoPaterno || '';
+    if (part === 'maternal_surname') return identity.apellidoMaterno || '';
     if (part === 'surnames_combined') {
-        return [parsed.apellidoPaterno, parsed.apellidoMaterno].filter(Boolean).join(' ');
+        return [identity.apellidoPaterno, identity.apellidoMaterno].filter(Boolean).join(' ');
     }
     return '';
 }
@@ -333,7 +415,7 @@ export function previewColumnValue(
     if (col.customColumnId && customValues?.[col.customColumnId] !== undefined) {
         return customValues[col.customColumnId];
     }
-    if (col.namePart) return namePartValue(col.namePart, fields.name);
+    if (col.namePart) return namePartValue(col.namePart, fields.name, fields);
     if (col.field === 'age') return fields.age != null ? String(fields.age) : '';
     if (col.field) return String(fields[col.field] ?? '');
     return '';
@@ -347,7 +429,7 @@ export function mapCvFieldsToCustomValues(
     for (const col of columns) {
         if (!col.customColumnId) continue;
         if (col.namePart) {
-            const v = namePartValue(col.namePart, fields.name);
+            const v = namePartValue(col.namePart, fields.name, fields);
             if (v) out[col.customColumnId] = v;
             continue;
         }
@@ -382,7 +464,7 @@ export function cvRowWarnings(opts: {
 }): CvRowWarning[] {
     const warnings: CvRowWarning[] = [];
     if (opts.error === SCAN_PDF_MESSAGE) warnings.push('scannedPdf');
-    if (!(opts.fields.name || '').trim()) warnings.push('missingName');
+    if (!resolveCvIdentity(opts.fields).name) warnings.push('missingName');
     const email = (opts.fields.email || '').trim();
     if (!isValidCandidateEmail(email)) {
         warnings.push(opts.mode === 'bulk' ? 'placeholderEmail' : 'missingEmail');

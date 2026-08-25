@@ -4,6 +4,7 @@ import type { Attachment, Candidate, Process } from '../types';
 import { FileText, Loader2, Upload, X } from 'lucide-react';
 import { bulkCandidatesApi } from '../lib/api/bulkCandidates';
 import {
+    applyNamePartToFields,
     buildCandidateFromCvDraft,
     buildCvAttachment,
     buildCvPreviewColumns,
@@ -17,6 +18,7 @@ import {
     previewColumnValue,
     resolveCvCandidateSource,
     SCAN_PDF_MESSAGE,
+    syncCvIdentityFields,
     type CvExtractedFields,
     type CvImportMode,
     type CvPreviewColumn,
@@ -175,15 +177,27 @@ export const CvImportModal: React.FC<CvImportModalProps> = ({
                 if (col.customColumnId) {
                     customValues[col.customColumnId] = value;
                 }
-                if (col.field === 'age') {
+                if (col.namePart) {
+                    applyNamePartToFields(fields, col.namePart, value);
+                } else if (col.field === 'age') {
                     const n = value.trim() === '' ? undefined : parseInt(value, 10);
                     fields.age = n !== undefined && !Number.isNaN(n) ? n : undefined;
                 } else if (col.field) {
                     (fields as Record<string, unknown>)[col.field] = value;
-                    if (col.field === 'name') {
-                        const refreshed = mapCvFieldsToCustomValues(fields, previewColumns);
-                        for (const previewCol of previewColumns) {
-                            if (previewCol.customColumnId && previewCol.namePart && refreshed[previewCol.customColumnId]) {
+                    if (
+                        col.field === 'name' ||
+                        col.field === 'nombres' ||
+                        col.field === 'apellidoPaterno' ||
+                        col.field === 'apellidoMaterno'
+                    ) {
+                        syncCvIdentityFields(fields, col.field);
+                    }
+                }
+                if (col.namePart || col.field === 'name' || col.field === 'nombres' || col.field === 'apellidoPaterno' || col.field === 'apellidoMaterno') {
+                    const refreshed = mapCvFieldsToCustomValues(fields, previewColumns);
+                    for (const previewCol of previewColumns) {
+                        if (previewCol.customColumnId && (previewCol.namePart || previewCol.field === 'nombres' || previewCol.field === 'apellidoPaterno' || previewCol.field === 'apellidoMaterno' || previewCol.field === 'name')) {
+                            if (refreshed[previewCol.customColumnId] !== undefined) {
                                 customValues[previewCol.customColumnId] = refreshed[previewCol.customColumnId];
                             }
                         }
