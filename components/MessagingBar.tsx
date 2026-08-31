@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { MessageCircle, X, ChevronUp, ChevronDown, Send, Minimize2 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { userMessagesApi } from '../lib/api/userMessages';
+import { logUserActivitySafe } from '../lib/api/userActivity';
 import type { User, UserMessage } from '../types';
 
 const STORAGE_KEY_PREFIX = 'ats_messaging_hidden_';
@@ -241,6 +242,14 @@ export const MessagingBar: React.FC<MessagingBarProps> = ({
             );
             setMessages(prev => [...prev, sent]);
             setDraft('');
+            const partnerName = userNameById.get(activePartnerId);
+            logUserActivitySafe({
+                userId: currentUser.id,
+                userName: currentUser.name,
+                category: 'messaging',
+                action: 'send_message',
+                summary: partnerName ? `Envió un mensaje a ${partnerName}` : 'Envió un mensaje',
+            });
         } catch (err) {
             const message =
                 err instanceof Error ? err.message : 'No se pudo enviar el mensaje';

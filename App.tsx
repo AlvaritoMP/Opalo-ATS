@@ -2,7 +2,8 @@ import React, { createContext, useContext, useState, useEffect, useMemo, useRef 
 import { initialProcesses, initialCandidates, initialUsers, initialSettings, initialFormIntegrations, initialInterviewEvents } from './lib/data';
 import { Process, Candidate, User, AppSettings, FormIntegration, InterviewEvent, CandidateHistory, Application, PostIt, Comment, Section, UserRole, ProcessStatus } from './types';
 import { getSettings, saveSettings as saveSettingsToStorage } from './lib/settings';
-import { usersApi, processesApi, candidatesApi, postItsApi, commentsApi, interviewsApi, settingsApi, formIntegrationsApi, setCurrentUser } from './lib/api/index';
+import { usersApi, processesApi, candidatesApi, postItsApi, commentsApi, interviewsApi, settingsApi, formIntegrationsApi, setCurrentUser, logUserActivitySafe, logUserActivityAwait } from './lib/api/index';
+import { navigationActivityForView, type UserActivityCategory } from './lib/userActivity';
 import { isCorsError, getErrorMessage, isSupabaseConfigured } from './lib/supabase';
 import { googleDriveService } from './lib/googleDrive';
 import { debugLog } from './lib/debugLog';
@@ -36,6 +37,7 @@ import { ProcessView } from './components/ProcessView';
 import { ReportsView } from './components/ReportsView';
 import { Settings } from './components/Settings';
 import { Users } from './components/Users';
+import { UserActivityView } from './components/UserActivityView';
 import { Candidates as CandidatesView } from './components/Candidates';
 import { Forms } from './components/Forms';
 import { CalendarView } from './components/CalendarView';
@@ -48,7 +50,7 @@ import { Letters } from './components/Letters';
 import { ToastContainer } from './components/Toast';
 import { MessagingBar } from './components/MessagingBar';
 import { UserAlertsPanel } from './components/UserAlertsPanel';
-import { LayoutDashboard, Briefcase, FileText, Settings as SettingsIcon, Users as UsersIcon, ChevronsLeft, ChevronsRight, BarChart2, Calendar, LogOut, X, Archive, RefreshCw, Menu, Grid3x3, Send, Brain } from 'lucide-react';
+import { LayoutDashboard, Briefcase, FileText, Settings as SettingsIcon, Users as UsersIcon, ChevronsLeft, ChevronsRight, BarChart2, Calendar, LogOut, X, Archive, RefreshCw, Menu, Grid3x3, Send, Brain, Activity } from 'lucide-react';
 import { CandidateComparator } from './components/CandidateComparator';
 
 
@@ -298,16 +300,22 @@ const getVisibleSections = (user: User | null): Section[] => {
         sections = [...user.visibleSections];
     } else {
         const defaultSections: Record<UserRole, Section[]> = {
-            admin: ['dashboard', 'intelligence', 'processes', 'archived', 'candidates', 'forms', 'letters', 'calendar', 'reports', 'compare', 'bulk-processes', 'opsflow-handoffs', 'users', 'settings'],
+            admin: ['dashboard', 'intelligence', 'processes', 'archived', 'candidates', 'forms', 'letters', 'calendar', 'reports', 'compare', 'bulk-processes', 'opsflow-handoffs', 'user-activity', 'users', 'settings'],
             recruiter: ['dashboard', 'processes', 'archived', 'candidates', 'forms', 'letters', 'calendar', 'reports', 'compare', 'bulk-processes', 'opsflow-handoffs'],
             client: ['dashboard', 'processes', 'candidates', 'calendar', 'reports', 'compare'],
             viewer: ['dashboard', 'processes', 'candidates', 'calendar', 'reports']
         };
         sections = defaultSections[user.role] || [];
     }
-    // Admin siempre tiene Inteligencia (supervisión ejecutiva), aunque su lista guardada sea anterior
+    // Admin siempre tiene Inteligencia y Actividad de usuarios
     if (user.role === 'admin' && !sections.includes('intelligence')) {
         sections = [...sections, 'intelligence'];
+    }
+    if (user.role === 'admin' && !sections.includes('user-activity')) {
+        sections = [...sections, 'user-activity'];
+    }
+    if (user.role !== 'admin') {
+        sections = sections.filter(s => s !== 'user-activity');
     }
     return sections;
 };
@@ -411,6 +419,7 @@ const Sidebar: React.FC = () => {
             </nav>
             <div className="p-2 border-t space-y-2">
                  <div className="p-2">
+                    {canSeeSection('user-activity') && <NavItem icon={Activity} label={getLabel('sidebar_user_activity', 'Actividad')} view="user-activity" currentView={state.view.type} setView={actions.setView} isCollapsed={isCollapsed} />}
                     {canSeeSection('users') && <NavItem icon={UsersIcon} label={getLabel('sidebar_users', 'Usuarios')} view="users" currentView={state.view.type} setView={actions.setView} isCollapsed={isCollapsed} />}
                     {canSeeSection('settings') && <NavItem icon={SettingsIcon} label={getLabel('sidebar_settings', 'Configuración')} view="settings" currentView={state.view.type} setView={actions.setView} isCollapsed={isCollapsed} />}
                 </div>
@@ -618,6 +627,16 @@ const App: React.FC = () => {
 
                 let sessionUserId = getStoredUserId();
                 if (sessionUserId && isSessionExpired()) {
+                    const expiredUser = users.find(u => u.id === sessionUserId);
+                    if (expiredUser) {
+                        await logUserActivityAwait({
+                            userId: expiredUser.id,
+                            userName: expiredUser.name,
+                            category: 'session',
+                            action: 'session_timeout',
+                            summary: 'Sesión cerrada por inactividad',
+                        });
+                    }
                     expireSessionDueToInactivity();
                     sessionUserId = null;
                 } else if (sessionUserId) {
@@ -799,6 +818,27 @@ const App: React.FC = () => {
     const stateRef = useRef(state);
     stateRef.current = state;
 
+    const trackActivity = (
+        category: UserActivityCategory,
+        action: string,
+        summary: string,
+        details?: Record<string, unknown>,
+        actor?: { id: string; name: string },
+    ) => {
+        const user = actor || (stateRef.current.currentUser
+            ? { id: stateRef.current.currentUser.id, name: stateRef.current.currentUser.name }
+            : null);
+        if (!user) return;
+        logUserActivitySafe({
+            userId: user.id,
+            userName: user.name,
+            category,
+            action,
+            summary,
+            details,
+        });
+    };
+
     const actions: AppActions = useMemo(() => ({
         login: async (email, password) => {
             try {
@@ -806,6 +846,13 @@ const App: React.FC = () => {
                 if (user) {
                     establishSession(user.id);
                     await setCurrentUser(user.id);
+                    await logUserActivityAwait({
+                        userId: user.id,
+                        userName: user.name,
+                        category: 'session',
+                        action: 'login',
+                        summary: 'Inició sesión',
+                    });
                     window.location.reload(); // Recargar para filtrar datos según el usuario
                     return true;
                 }
@@ -816,6 +863,13 @@ const App: React.FC = () => {
                 const user = state.users.find(u => u.email.toLowerCase() === email.toLowerCase());
                 if (user && user.password === password) {
                     establishSession(user.id);
+                    await logUserActivityAwait({
+                        userId: user.id,
+                        userName: user.name,
+                        category: 'session',
+                        action: 'login',
+                        summary: 'Inició sesión',
+                    });
                     window.location.reload(); // Recargar para filtrar datos según el usuario
                     return true;
                 }
@@ -823,10 +877,25 @@ const App: React.FC = () => {
             }
         },
         logout: () => {
-            clearStoredSession();
-            window.location.reload(); // Recargar para limpiar datos en memoria
+            const user = stateRef.current.currentUser;
+            const finish = () => {
+                clearStoredSession();
+                window.location.reload();
+            };
+            if (user) {
+                void logUserActivityAwait({
+                    userId: user.id,
+                    userName: user.name,
+                    category: 'session',
+                    action: 'logout',
+                    summary: 'Cerró sesión',
+                }).finally(finish);
+                return;
+            }
+            finish();
         },
         setView: (type, payload) => {
+            const prev = stateRef.current.view;
             setState(s => {
                 // Si se está navegando a un proceso específico, guardar como último proceso visto
                 if (type === 'process-view' && payload) {
@@ -847,6 +916,23 @@ const App: React.FC = () => {
                 }
                 return { ...s, view: { type, payload } };
             });
+            const nextType = type === 'processes' && payload !== null && stateRef.current.lastViewedProcessId
+                ? (stateRef.current.processes.some(p => p.id === stateRef.current.lastViewedProcessId) ? 'process-view' : 'processes')
+                : type;
+            if (prev.type !== nextType || prev.payload !== payload) {
+                const nav = navigationActivityForView(nextType);
+                if (nav) {
+                    const processTitle = nextType === 'process-view'
+                        ? stateRef.current.processes.find(p => p.id === (payload || stateRef.current.lastViewedProcessId))?.title
+                        : undefined;
+                    trackActivity(
+                        'navigation',
+                        nav.action,
+                        processTitle ? `Abrió el proceso ${processTitle}` : nav.summary,
+                        processTitle ? { processTitle } : undefined,
+                    );
+                }
+            }
         },
         setLastViewedBulkProcessId: (processId) => {
             setState(s => {
@@ -907,6 +993,7 @@ const App: React.FC = () => {
                 
                 saveSettingsToStorage(updatedSettings); // Backup local
                 setState(s => ({ ...s, settings: updatedSettings }));
+                trackActivity('settings', 'save_settings', 'Actualizó la configuración');
                 console.log('✅ Settings actualizados en el estado:', updatedSettings.googleDrive);
             } catch (error) {
                 console.error('Error saving settings:', error);
@@ -962,6 +1049,7 @@ const App: React.FC = () => {
                 
                 hideToastHelper(loadingToastId);
                 showToastHelper('Proceso creado exitosamente', 'success');
+                trackActivity('processes', 'create_process', `Creó el proceso ${newProcess.title || ''}`.trim(), { processTitle: newProcess.title });
                 
                 return newProcess;
             } catch (error: any) {
@@ -1023,6 +1111,7 @@ const App: React.FC = () => {
                 
                 hideToastHelper(loadingToastId);
                 showToastHelper('Proceso actualizado exitosamente', 'success');
+                trackActivity('processes', 'update_process', `Actualizó el proceso ${processData.title || ''}`.trim());
             } catch (error: any) {
                 console.error('Error updating process:', error);
                 hideToastHelper(loadingToastId);
@@ -1299,6 +1388,7 @@ const App: React.FC = () => {
                 // Eliminar en la base de datos PRIMERO (esto también eliminará candidatos y relaciones)
                 await processesApi.delete(processId);
                 console.log(`✅ Proceso eliminado de la base de datos: ${processId}`);
+                trackActivity('processes', 'delete_process', `Eliminó el proceso ${processToDelete?.title || ''}`.trim());
                 
                 // Eliminar carpeta de Google Drive si existe (después de eliminar en BD)
                 if (processToDelete?.googleDriveFolderId) {
@@ -1439,6 +1529,7 @@ const App: React.FC = () => {
                 
                 if (loadingToastId) hideToastHelper(loadingToastId);
                 if (!silent) showToastHelper('Candidato creado exitosamente', 'success');
+                trackActivity('candidates', 'create_candidate', `Registró al candidato ${finalCandidate.name || ''}`.trim(), { candidateName: finalCandidate.name });
                 
                 // Retornar el candidato final para que pueda ser usado por quien llama
                 return finalCandidate;
@@ -1486,6 +1577,19 @@ const App: React.FC = () => {
                 }
                 
                 const updated = await candidatesApi.update(updatedCandidateData.id, updatedCandidateData, movedBy || state.currentUser?.name || 'System');
+                const previous = currentCandidate;
+                const stageChanged = previous && previous.stageId !== updated.stageId;
+                const processChanged = previous && previous.processId !== updated.processId;
+                trackActivity(
+                    'candidates',
+                    processChanged ? 'transfer_candidate' : stageChanged ? 'change_stage' : 'edit_candidate',
+                    processChanged
+                        ? `Trasladó a ${updated.name}`
+                        : stageChanged
+                            ? `Cambió de etapa a ${updated.name}`
+                            : `Editó a ${updated.name}`,
+                    { candidateName: updated.name },
+                );
                 // Actualizar candidato en el estado, preservando si está archivado
                 setState(s => {
                     const existingIndex = s.candidates.findIndex(c => c.id === candidateData.id);
@@ -1523,6 +1627,8 @@ const App: React.FC = () => {
         deleteCandidate: async (candidateId) => {
             try {
                 await candidatesApi.delete(candidateId);
+                const deletedName = stateRef.current.candidates.find(c => c.id === candidateId)?.name;
+                trackActivity('candidates', 'delete_candidate', `Eliminó al candidato ${deletedName || ''}`.trim(), { candidateName: deletedName });
                 setState(s => ({ ...s, candidates: s.candidates.filter(c => c.id !== candidateId) }));
             } catch (error: any) {
                 console.error('Error deleting candidate:', error);
@@ -1616,6 +1722,7 @@ const App: React.FC = () => {
                 const newUser = await usersApi.create(userData);
                 setState(s => ({ ...s, users: [...s.users, newUser] }));
                 showToastHelper('Usuario creado correctamente', 'success', 3000);
+                trackActivity('users', 'create_user', `Creó al usuario ${newUser.name}`);
             } catch (error: any) {
                 console.error('Error adding user:', error);
                 const errorMessage = error?.message || 'No se pudo guardar el usuario en la base de datos.';
@@ -1628,6 +1735,7 @@ const App: React.FC = () => {
                 const updated = await usersApi.update(userData.id, userData);
                 setState(s => ({ ...s, users: s.users.map(u => u.id === userData.id ? updated : u) }));
                 showToastHelper('Usuario actualizado correctamente', 'success', 3000);
+                trackActivity('users', 'update_user', `Actualizó al usuario ${updated.name}`);
             } catch (error: any) {
                 console.error('Error updating user:', error);
                 const errorMessage = error?.message || 'No se pudo actualizar el usuario en la base de datos.';
@@ -1640,6 +1748,8 @@ const App: React.FC = () => {
                 console.log('Deleting user:', userId);
                 await usersApi.delete(userId);
                 console.log('User deleted successfully from Supabase');
+                const deletedName = stateRef.current.users.find(u => u.id === userId)?.name;
+                trackActivity('users', 'delete_user', `Eliminó al usuario ${deletedName || ''}`.trim());
                 // Actualizar estado local
                 setState(s => ({ ...s, users: s.users.filter(u => u.id !== userId) }));
             } catch (error) {
@@ -1656,6 +1766,7 @@ const App: React.FC = () => {
                 const newIntegration = await formIntegrationsApi.create(integrationData);
                 setState(s => ({ ...s, formIntegrations: [...s.formIntegrations, newIntegration] }));
                 showToastHelper('Integración creada exitosamente', 'success', 3000);
+                trackActivity('settings', 'create_form', 'Creó una integración de formulario');
                 return newIntegration;
             } catch (error: any) {
                 console.error('Error creating form integration:', error);
@@ -1702,6 +1813,7 @@ const App: React.FC = () => {
             try {
                 const newEvent = await interviewsApi.create(eventData, state.currentUser?.id);
                 setState(s => ({ ...s, interviewEvents: [...s.interviewEvents, newEvent] }));
+                trackActivity('calendar', 'schedule_interview', 'Agendó una entrevista');
                 const { interviewSchedulingApi } = await import('./lib/api/interviewScheduling');
                 void interviewSchedulingApi.recordScheduled(newEvent, actor, processId);
                 return newEvent;
@@ -1772,6 +1884,8 @@ const App: React.FC = () => {
         addPostIt: async (candidateId, postItData) => {
             try {
                 const newPostIt = await postItsApi.create(candidateId, postItData);
+                const candidateName = stateRef.current.candidates.find(c => c.id === candidateId)?.name;
+                trackActivity('comments', 'add_note', `Añadió una nota${candidateName ? ` a ${candidateName}` : ''}`, { candidateName });
                 setState(s => {
                     const candidate = s.candidates.find(c => c.id === candidateId);
                     if (!candidate) return s;
@@ -1815,6 +1929,8 @@ const App: React.FC = () => {
         addComment: async (candidateId, commentData) => {
             try {
                 const newComment = await commentsApi.create(candidateId, commentData);
+                const candidateName = stateRef.current.candidates.find(c => c.id === candidateId)?.name;
+                trackActivity('comments', 'add_comment', `Comentó${candidateName ? ` a ${candidateName}` : ''}`, { candidateName });
                 setState(s => {
                     const candidate = s.candidates.find(c => c.id === candidateId);
                     if (!candidate) return s;
@@ -1858,6 +1974,7 @@ const App: React.FC = () => {
         archiveCandidate: async (candidateId) => {
             try {
                 const updated = await candidatesApi.archive(candidateId);
+                trackActivity('candidates', 'archive_candidate', `Archivó a ${updated.name}`, { candidateName: updated.name });
                 setState(s => ({ ...s, candidates: s.candidates.map(c => c.id === candidateId ? updated : c) }));
             } catch (error: any) {
                 console.error('Error archiving candidate:', error);
@@ -1877,6 +1994,7 @@ const App: React.FC = () => {
         restoreCandidate: async (candidateId) => {
             try {
                 const updated = await candidatesApi.restore(candidateId);
+                trackActivity('candidates', 'restore_candidate', `Restauró a ${updated.name}`, { candidateName: updated.name });
                 setState(s => ({ ...s, candidates: s.candidates.map(c => c.id === candidateId ? updated : c) }));
             } catch (error: any) {
                 console.error('Error restoring candidate:', error);
@@ -1927,6 +2045,7 @@ const App: React.FC = () => {
                 });
                 hideToastHelper(loadingToastId);
                 showToastHelper('Candidato descartado y archivado exitosamente', 'success', 3000);
+                trackActivity('candidates', 'discard_candidate', `Descartó a ${updated.name}`, { candidateName: updated.name });
             } catch (error: any) {
                 console.error('Error discarding candidate:', error);
                 hideToastHelper(loadingToastId);
@@ -2031,8 +2150,22 @@ const App: React.FC = () => {
 
         const intervalId = window.setInterval(() => {
             if (isSessionExpired()) {
-                expireSessionDueToInactivity();
-                window.location.reload();
+                const user = stateRef.current.currentUser;
+                const finish = () => {
+                    expireSessionDueToInactivity();
+                    window.location.reload();
+                };
+                if (user) {
+                    void logUserActivityAwait({
+                        userId: user.id,
+                        userName: user.name,
+                        category: 'session',
+                        action: 'session_timeout',
+                        summary: 'Sesión cerrada por inactividad',
+                    }).finally(finish);
+                    return;
+                }
+                finish();
             }
         }, 60_000);
 
@@ -2087,7 +2220,8 @@ const App: React.FC = () => {
                 'settings': 'settings',
                 'bulk-import': 'bulk-import',
                 'bulk-processes': 'bulk-processes',
-                'opsflow-handoffs': 'opsflow-handoffs'
+                'opsflow-handoffs': 'opsflow-handoffs',
+                'user-activity': 'user-activity',
             };
             
             const requiredSection = viewSectionMap[state.view.type];
@@ -2116,6 +2250,7 @@ const App: React.FC = () => {
             case 'candidates': return <CandidatesView />;
             case 'compare': return <CandidateComparator />;
             case 'users': return <Users />;
+            case 'user-activity': return <UserActivityView />;
             case 'settings': return <Settings />;
             case 'bulk-import': return <BulkImportView />;
             case 'bulk-processes': return null;

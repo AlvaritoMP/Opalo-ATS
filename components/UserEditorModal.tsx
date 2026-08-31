@@ -106,7 +106,7 @@ const DEFAULT_ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
 
 // Secciones visibles por defecto según rol
 const DEFAULT_ROLE_SECTIONS: Record<UserRole, Section[]> = {
-    admin: ['dashboard', 'intelligence', 'processes', 'archived', 'candidates', 'forms', 'letters', 'calendar', 'reports', 'compare', 'bulk-processes', 'opsflow-handoffs', 'users', 'settings'],
+    admin: ['dashboard', 'intelligence', 'processes', 'archived', 'candidates', 'forms', 'letters', 'calendar', 'reports', 'compare', 'bulk-processes', 'opsflow-handoffs', 'user-activity', 'users', 'settings'],
     recruiter: ['dashboard', 'processes', 'archived', 'candidates', 'forms', 'letters', 'calendar', 'reports', 'compare', 'bulk-processes', 'opsflow-handoffs'],
     client: ['dashboard', 'processes', 'candidates', 'calendar', 'reports', 'compare'],
     viewer: ['dashboard', 'processes', 'candidates', 'calendar', 'reports']
@@ -126,6 +126,7 @@ const SECTION_LABELS: Record<Section, string> = {
     'bulk-import': 'Importación Masiva',
     'bulk-processes': 'Procesos Masivos',
     'opsflow-handoffs': 'Envíos OpsFlow',
+    'user-activity': 'Actividad de usuarios',
     'users': 'Usuarios',
     'settings': 'Configuración'
 };
@@ -572,7 +573,9 @@ export const UserEditorModal: React.FC<UserEditorModalProps> = ({ user, onClose 
                                 <div className="space-y-2 border rounded-lg p-3 bg-gray-50">
                                     <p className="text-xs text-gray-600 mb-2">Selecciona las secciones que este usuario puede ver en el menú:</p>
                                     <div className="grid grid-cols-2 gap-2">
-                                        {(Object.keys(SECTION_LABELS) as Section[]).map(section => (
+                                        {(Object.keys(SECTION_LABELS) as Section[])
+                                            .filter(section => section !== 'user-activity' || role === 'admin')
+                                            .map(section => (
                                             <label 
                                                 key={section} 
                                                 className="flex items-center gap-2 p-2 hover:bg-white rounded cursor-pointer border border-gray-200"

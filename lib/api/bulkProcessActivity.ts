@@ -1,5 +1,7 @@
 import { supabase } from '../supabase';
 import { APP_NAME } from '../appConfig';
+import { logUserActivitySafe } from './userActivity';
+import { categoryForBulkAction, summaryForBulkAction } from '../userActivity';
 
 export type BulkActivityActionType =
     | 'cell_edit'
@@ -107,6 +109,19 @@ export const bulkProcessActivityApi = {
 
         if (error) {
             console.warn('No se pudo registrar actividad del proceso masivo:', error.message);
+        } else if (input.userId || input.userName) {
+            logUserActivitySafe({
+                userId: input.userId,
+                userName: input.userName,
+                category: categoryForBulkAction(input.actionType),
+                action: input.actionType,
+                summary: summaryForBulkAction(input.actionType, input.candidateName),
+                details: {
+                    processId: input.processId,
+                    candidateName: input.candidateName,
+                    fieldName: input.fieldName,
+                },
+            });
         }
     },
 

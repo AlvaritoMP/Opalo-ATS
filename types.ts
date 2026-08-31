@@ -711,6 +711,7 @@ export type Section =
     | 'bulk-processes'
     | 'opsflow-handoffs'
     | 'intelligence'
+    | 'user-activity'
     | 'users' 
     | 'settings';
 

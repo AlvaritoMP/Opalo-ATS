@@ -16,6 +16,7 @@ export * from './formIntegrations';
 export * from './workerHandoff';
 export * from './userMessages';
 export * from './userAlerts';
+export * from './userActivity';
 export { bulkTableTemplatesApi } from './bulkTableTemplates';
 
 // Exportar funciones helper de Supabase

@@ -176,7 +176,7 @@ DECLARE
 
         'interview_events', 'form_integrations', 'app_settings', 'clients',
 
-        'bulk_process_activity_log', 'user_messages'
+        'bulk_process_activity_log', 'user_messages', 'user_activity_log'
 
     ];
 
