@@ -7,6 +7,7 @@ import {
     REGISTRATION_ORIGIN_COLUMN_ID,
 } from './candidateRegistrationOrigin';
 import { APP_NAME } from './appConfig';
+import { trySetLocalStorageItem } from './localStorageQuota';
 import { readBulkTableTemplatesCache } from './bulkTableTemplates';
 import { extractRouteCostTotal } from './routeCostStorage';
 import { ensureFloatingColumnsHidden, resolveFloatingColumnIds } from './bulkFloatingColumns';
@@ -553,13 +554,9 @@ export function scanLocalColumnBackups(
 
 /** Escritura segura en localStorage (evita crash por QuotaExceededError) */
 export function safeLocalStorageSetItem(key: string, value: string): boolean {
-    try {
-        localStorage.setItem(key, value);
-        return true;
-    } catch (error) {
-        console.warn(`localStorage quota exceeded for key ${key}`, error);
-        return false;
-    }
+    const ok = trySetLocalStorageItem(key, value);
+    if (!ok) console.warn(`localStorage quota exceeded for key ${key}`);
+    return ok;
 }
 
 /** Elimina TODAS las claves bulkColumnValues_* del navegador (datos viven en Supabase) */

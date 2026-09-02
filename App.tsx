@@ -16,7 +16,9 @@ import {
     expireSessionDueToInactivity,
     touchSessionActivity,
     consumeSessionExpiredNotice,
+    SESSION_STORAGE_QUOTA_ERROR,
 } from './lib/sessionActivity';
+import { freeLocalStorageQuota, isQuotaExceededError } from './lib/localStorageQuota';
 import { runWithAbortTimeout, isAbortOrTimeoutError } from './lib/runWithAbortTimeout';
 import { isProcessActive } from './lib/processStatus';
 import {
@@ -216,11 +218,26 @@ const LoginPage: React.FC = () => {
         e.preventDefault();
         setError('');
         setIsLoggingIn(true);
-        const success = await actions.login(email, password);
-        if (!success) {
-            setError('Invalid credentials. Please try again.');
+        try {
+            const success = await actions.login(email, password);
+            if (!success) {
+                setError('Invalid credentials. Please try again.');
+            }
+        } catch (err) {
+            const message = err instanceof Error ? err.message : '';
+            if (message === SESSION_STORAGE_QUOTA_ERROR || isQuotaExceededError(err)) {
+                setError('El almacenamiento del navegador está lleno. Limpia la caché local e intenta de nuevo.');
+            } else {
+                setError('No se pudo iniciar sesión. Intenta de nuevo.');
+            }
+        } finally {
+            setIsLoggingIn(false);
         }
-        setIsLoggingIn(false);
+    };
+
+    const handleClearLocalCache = () => {
+        freeLocalStorageQuota({ preserveSession: false });
+        window.location.reload();
     };
 
     return (
@@ -281,6 +298,13 @@ const LoginPage: React.FC = () => {
                                 {isLoggingIn ? 'Signing In...' : 'Sign In'}
                             </button>
                         </div>
+                        <button
+                            type="button"
+                            onClick={handleClearLocalCache}
+                            className="w-full text-xs text-gray-500 hover:text-gray-700 underline"
+                        >
+                            Limpiar caché local del navegador
+                        </button>
                     </form>
                 </div>
             </div>
@@ -841,37 +865,36 @@ const App: React.FC = () => {
 
     const actions: AppActions = useMemo(() => ({
         login: async (email, password) => {
+            const persistAndEnter = async (user: User) => {
+                if (!establishSession(user.id)) {
+                    throw new Error(SESSION_STORAGE_QUOTA_ERROR);
+                }
+                await setCurrentUser(user.id);
+                await logUserActivityAwait({
+                    userId: user.id,
+                    userName: user.name,
+                    category: 'session',
+                    action: 'login',
+                    summary: 'Inició sesión',
+                });
+                window.location.reload();
+                return true;
+            };
             try {
                 const user = await usersApi.login(email, password);
                 if (user) {
-                    establishSession(user.id);
-                    await setCurrentUser(user.id);
-                    await logUserActivityAwait({
-                        userId: user.id,
-                        userName: user.name,
-                        category: 'session',
-                        action: 'login',
-                        summary: 'Inició sesión',
-                    });
-                    window.location.reload(); // Recargar para filtrar datos según el usuario
-                    return true;
+                    return await persistAndEnter(user);
                 }
                 return false;
             } catch (error) {
+                if (error instanceof Error && error.message === SESSION_STORAGE_QUOTA_ERROR) {
+                    throw error;
+                }
                 console.error('Login error:', error);
                 // Fallback a búsqueda local
                 const user = state.users.find(u => u.email.toLowerCase() === email.toLowerCase());
                 if (user && user.password === password) {
-                    establishSession(user.id);
-                    await logUserActivityAwait({
-                        userId: user.id,
-                        userName: user.name,
-                        category: 'session',
-                        action: 'login',
-                        summary: 'Inició sesión',
-                    });
-                    window.location.reload(); // Recargar para filtrar datos según el usuario
-                    return true;
+                    return await persistAndEnter(user);
                 }
                 return false;
             }

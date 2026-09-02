@@ -73,6 +73,21 @@ export function isUserActivityCategory(value: string): value is UserActivityCate
     return (USER_ACTIVITY_CATEGORIES as readonly string[]).includes(value);
 }
 
+export function normalizeActivityUserName(name: string): string {
+    return name.trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+export function eventBelongsToUser(
+    event: { userId?: string; userName?: string },
+    user: { id: string; name: string },
+): boolean {
+    if (event.userId && event.userId === user.id) return true;
+    if (event.userName && normalizeActivityUserName(event.userName) === normalizeActivityUserName(user.name)) {
+        return true;
+    }
+    return false;
+}
+
 type BulkActionType = string;
 
 export function categoryForBulkAction(actionType: BulkActionType): UserActivityCategory {

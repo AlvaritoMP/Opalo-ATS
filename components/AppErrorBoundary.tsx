@@ -1,4 +1,5 @@
 import React from 'react';
+import { freeLocalStorageQuota, isQuotaExceededError } from '../lib/localStorageQuota';
 
 interface AppErrorBoundaryState {
     error: Error | null;
@@ -22,10 +23,7 @@ export class AppErrorBoundary extends React.Component<
         const { error } = this.state;
         if (!error) return this.props.children;
 
-        const isQuota =
-            error.name === 'QuotaExceededError' ||
-            error.message.includes('QuotaExceededError') ||
-            error.message.includes('exceeded the quota');
+        const isQuota = isQuotaExceededError(error);
 
         return (
             <div className="min-h-screen flex items-center justify-center bg-gray-50 p-6">
@@ -42,12 +40,7 @@ export class AppErrorBoundary extends React.Component<
                         type="button"
                         onClick={() => {
                             try {
-                                const keys: string[] = [];
-                                for (let i = 0; i < localStorage.length; i++) {
-                                    const k = localStorage.key(i);
-                                    if (k?.startsWith('bulkColumnValues_')) keys.push(k);
-                                }
-                                keys.forEach(k => localStorage.removeItem(k));
+                                freeLocalStorageQuota({ preserveSession: false });
                             } catch {
                                 /* ignore */
                             }

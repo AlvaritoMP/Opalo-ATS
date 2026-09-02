@@ -1,12 +1,26 @@
+import { trySetLocalStorageItem } from './localStorageQuota';
+
 export const SESSION_USER_KEY = 'ats_pro_user';
 export const SESSION_ACTIVITY_KEY = 'ats_pro_last_activity';
 export const SESSION_EXPIRED_NOTICE_KEY = 'ats_session_expired_notice';
+export const SESSION_STORAGE_QUOTA_ERROR = 'SESSION_STORAGE_QUOTA';
 
 /** 1 hora de inactividad antes de cerrar sesión automáticamente */
 export const SESSION_INACTIVITY_MS = 60 * 60 * 1000;
 
 export function getStoredUserId(): string | null {
-    return localStorage.getItem(SESSION_USER_KEY);
+    const raw = localStorage.getItem(SESSION_USER_KEY);
+    if (!raw) return null;
+    const trimmed = raw.trim();
+    if (trimmed.startsWith('{')) {
+        try {
+            const parsed = JSON.parse(trimmed) as { id?: unknown };
+            if (typeof parsed?.id === 'string' && parsed.id) return parsed.id;
+        } catch {
+            /* valor legado que no es JSON de usuario */
+        }
+    }
+    return raw;
 }
 
 export function getSessionActivityAt(): number | null {
@@ -17,7 +31,7 @@ export function getSessionActivityAt(): number | null {
 }
 
 export function touchSessionActivity(now = Date.now()): void {
-    localStorage.setItem(SESSION_ACTIVITY_KEY, String(now));
+    trySetLocalStorageItem(SESSION_ACTIVITY_KEY, String(now));
 }
 
 /** Sesiones previas sin marca de actividad: iniciar el reloj desde ahora (no expulsar al desplegar). */
@@ -35,9 +49,11 @@ export function isSessionExpired(now = Date.now()): boolean {
     return now - last > SESSION_INACTIVITY_MS;
 }
 
-export function establishSession(userId: string): void {
-    localStorage.setItem(SESSION_USER_KEY, userId);
-    touchSessionActivity();
+/** Persiste el id de sesión. Si el almacenamiento está lleno, libera caché y reintenta. */
+export function establishSession(userId: string): boolean {
+    const savedUser = trySetLocalStorageItem(SESSION_USER_KEY, userId);
+    const savedActivity = trySetLocalStorageItem(SESSION_ACTIVITY_KEY, String(Date.now()));
+    return savedUser && savedActivity;
 }
 
 export function clearStoredSession(): void {

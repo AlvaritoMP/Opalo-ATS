@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
     Activity,
     Clock,
@@ -11,6 +11,7 @@ import {
 import { useAppState } from '../App';
 import { userActivityApi, type UserActivityEvent } from '../lib/api/userActivity';
 import {
+    eventBelongsToUser,
     formatActivityDateTime,
     formatActivityRelative,
     formatActivityTime,
@@ -52,6 +53,20 @@ function periodStartIso(period: PeriodKey): string {
     return `${key}T00:00:00-05:00`;
 }
 
+const PERIOD_LABELS: Record<PeriodKey, string> = {
+    today: 'hoy',
+    '7d': 'los últimos 7 días',
+    '30d': 'los últimos 30 días',
+};
+
+function mergeEvents(primary: UserActivityEvent[], extra: UserActivityEvent[]): UserActivityEvent[] {
+    const byId = new Map<string, UserActivityEvent>();
+    for (const event of [...primary, ...extra]) byId.set(event.id, event);
+    return [...byId.values()].sort(
+        (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+    );
+}
+
 function initials(name: string): string {
     return name
         .split(' ')
@@ -81,6 +96,11 @@ export const UserActivityView: React.FC = () => {
     const [categoryFilter, setCategoryFilter] = useState<UserActivityCategory | ''>('');
     const [search, setSearch] = useState('');
     const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
+    const [selectedHistory, setSelectedHistory] = useState<UserActivityEvent[] | null>(null);
+    const [historyLoading, setHistoryLoading] = useState(false);
+
+    const usersRef = useRef(state.users);
+    usersRef.current = state.users;
 
     const load = useCallback(async () => {
         setLoading(true);
@@ -92,8 +112,19 @@ export const UserActivityView: React.FC = () => {
                 setEvents([]);
                 return;
             }
-            const data = await userActivityApi.getSince(periodStartIso(period));
-            setEvents(data);
+            const sinceIso = periodStartIso(period);
+            const data = await userActivityApi.getSince(sinceIso);
+            const missing = usersRef.current.filter(user => !data.some(event => eventBelongsToUser(event, user)));
+            if (missing.length === 0) {
+                setEvents(data);
+            } else {
+                const extras = await userActivityApi.getLatestForUsers(
+                    missing.map(user => ({ id: user.id, name: user.name })),
+                    sinceIso,
+                    80,
+                );
+                setEvents(mergeEvents(data, extras));
+            }
         } catch (err: unknown) {
             const msg = err instanceof Error ? err.message : 'Error desconocido';
             setLoadError(msg.includes('schema cache') || msg.includes('Could not find')
@@ -109,19 +140,56 @@ export const UserActivityView: React.FC = () => {
         void load();
     }, [load]);
 
+    useEffect(() => {
+        if (!selectedUserId || !available) {
+            setSelectedHistory(null);
+            setHistoryLoading(false);
+            return;
+        }
+        const user = usersRef.current.find(u => u.id === selectedUserId);
+        if (!user) {
+            setSelectedHistory(null);
+            return;
+        }
+        let cancelled = false;
+        setSelectedHistory(null);
+        setHistoryLoading(true);
+        void userActivityApi.getForUser({
+            userId: user.id,
+            userName: user.name,
+            sinceIso: periodStartIso(period),
+        }).then(rows => {
+            if (cancelled) return;
+            setSelectedHistory(rows);
+            if (rows.length > 0) {
+                setEvents(prev => mergeEvents(prev, rows));
+            }
+        }).catch(() => {
+            if (!cancelled) setSelectedHistory([]);
+        }).finally(() => {
+            if (!cancelled) setHistoryLoading(false);
+        });
+        return () => {
+            cancelled = true;
+        };
+    }, [selectedUserId, period, available]);
+
     const filteredEvents = useMemo(() => {
         return events.filter(event => {
-            if (userFilter && event.userId !== userFilter && event.userName !== userFilter) return false;
+            if (userFilter) {
+                const filterUser = state.users.find(u => u.id === userFilter);
+                if (filterUser ? !eventBelongsToUser(event, filterUser) : event.userId !== userFilter) return false;
+            }
             if (categoryFilter && event.category !== categoryFilter) return false;
             return true;
         });
-    }, [events, userFilter, categoryFilter]);
+    }, [events, userFilter, categoryFilter, state.users]);
 
     const summaries = useMemo<UserActivitySummary[]>(() => {
         const now = Date.now();
         return state.users
             .map(user => {
-                const userEvents = events.filter(e => e.userId === user.id || (!e.userId && e.userName === user.name));
+                const userEvents = events.filter(e => eventBelongsToUser(e, user));
                 const logins = userEvents.filter(e => e.category === 'session' && e.action === 'login');
                 const lastLogin = logins[0];
                 const lastInteraction = userEvents.find(e => !(e.category === 'session' && e.action === 'login')) || userEvents[0];
@@ -154,10 +222,17 @@ export const UserActivityView: React.FC = () => {
             });
     }, [state.users, events, search, userFilter]);
 
+    const selectedUser = state.users.find(u => u.id === selectedUserId);
+
     const selectedEvents = useMemo(() => {
+        const applyCategory = (rows: UserActivityEvent[]) => (
+            categoryFilter ? rows.filter(e => e.category === categoryFilter) : rows
+        );
         if (!selectedUserId) return filteredEvents;
-        return filteredEvents.filter(e => e.userId === selectedUserId || e.userName === state.users.find(u => u.id === selectedUserId)?.name);
-    }, [filteredEvents, selectedUserId, state.users]);
+        if (selectedHistory) return applyCategory(selectedHistory);
+        if (!selectedUser) return [];
+        return applyCategory(events.filter(e => eventBelongsToUser(e, selectedUser)));
+    }, [filteredEvents, selectedUserId, selectedUser, selectedHistory, categoryFilter, events]);
 
     const groupedTimeline = useMemo(() => {
         const groups: { key: string; label: string; items: UserActivityEvent[] }[] = [];
@@ -199,8 +274,6 @@ export const UserActivityView: React.FC = () => {
             </div>
         );
     }
-
-    const selectedUser = state.users.find(u => u.id === selectedUserId);
 
     return (
         <div className="p-4 md:p-8 h-full flex flex-col overflow-hidden gap-4">
@@ -393,6 +466,11 @@ export const UserActivityView: React.FC = () => {
                         <div className="flex items-center text-sm font-medium text-gray-700">
                             <Filter className="w-4 h-4 mr-2" />
                             {selectedUser ? `Historial de ${selectedUser.name}` : 'Historial del periodo'}
+                            {selectedEvents.length > 0 && (
+                                <span className="ml-2 text-xs font-normal text-gray-500">
+                                    ({selectedEvents.length} evento{selectedEvents.length === 1 ? '' : 's'} · {PERIOD_LABELS[period]})
+                                </span>
+                            )}
                         </div>
                         {selectedUser && (
                             <button onClick={() => setSelectedUserId(null)} className="text-xs text-primary-600 hover:underline">
@@ -401,13 +479,15 @@ export const UserActivityView: React.FC = () => {
                         )}
                     </div>
                     <div className="overflow-y-auto flex-1 p-4 space-y-6">
-                        {loading && selectedEvents.length === 0 ? (
+                        {(loading && selectedEvents.length === 0) || (selectedUser && historyLoading && selectedHistory === null) ? (
                             <p className="text-sm text-gray-500">Cargando historial…</p>
                         ) : selectedEvents.length === 0 ? (
                             <p className="text-sm text-gray-500">
-                                {available
-                                    ? 'Aún no hay actividad registrada en este filtro. Los ingresos e interacciones se guardan a partir de ahora.'
-                                    : 'No hay datos hasta ejecutar la migración.'}
+                                {!available
+                                    ? 'No hay datos hasta ejecutar la migración.'
+                                    : selectedUser
+                                        ? `No hay actividad de ${selectedUser.name} en ${PERIOD_LABELS[period]}.${period === 'today' ? ' Si busca lo de ayer, cambie el periodo a 7 días.' : ''}`
+                                        : 'Aún no hay actividad registrada en este filtro.'}
                             </p>
                         ) : (
                             groupedTimeline.map(group => (
