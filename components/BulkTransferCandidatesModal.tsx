@@ -40,7 +40,8 @@ export const BulkTransferCandidatesModal: React.FC<BulkTransferCandidatesModalPr
         [bulkProcesses, sourceProcess.id]
     );
 
-    const [mode, setMode] = useState<BulkCandidateTransferMode>('duplicate');
+    const [mode, setMode] = useState<BulkCandidateTransferMode>('move');
+    const [keepSourceActive, setKeepSourceActive] = useState(false);
     const [targetProcessId, setTargetProcessId] = useState('');
     const [targetStageId, setTargetStageId] = useState('');
     const [busy, setBusy] = useState(false);
@@ -76,6 +77,12 @@ export const BulkTransferCandidatesModal: React.FC<BulkTransferCandidatesModalPr
                 'Dejarán de aparecer en el proceso actual.'
             );
             if (!ok) return;
+        } else if (!keepSourceActive) {
+            const ok = window.confirm(
+                `¿Copiar ${candidates.length} candidato(s) a «${targetProcess?.title}» y archivar el original en este proceso?\n\n` +
+                'El registro de origen dejará de estar vigente aquí.'
+            );
+            if (!ok) return;
         }
 
         setBusy(true);
@@ -87,6 +94,7 @@ export const BulkTransferCandidatesModal: React.FC<BulkTransferCandidatesModalPr
                 targetProcessId,
                 targetStageId,
                 mode,
+                archiveSource: mode === 'duplicate' && !keepSourceActive,
                 sourceConfig: sourceProcess.bulkConfig,
                 targetConfig: targetProcess?.bulkConfig,
                 movedBy: userName || userId,
@@ -103,7 +111,11 @@ export const BulkTransferCandidatesModal: React.FC<BulkTransferCandidatesModalPr
                 return;
             }
 
-            const actionLabel = mode === 'move' ? 'movido(s)' : 'duplicado(s)';
+            const actionLabel = mode === 'move'
+                ? 'movido(s)'
+                : keepSourceActive
+                    ? 'copiado(s)'
+                    : 'copiado(s) y el original archivado';
             if (result.failed.length > 0) {
                 onNotify(
                     `${result.success} ${actionLabel}, ${result.failed.length} con error`,
@@ -161,27 +173,6 @@ export const BulkTransferCandidatesModal: React.FC<BulkTransferCandidatesModalPr
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                                 <label
                                     className={`flex items-start gap-2 p-3 rounded-lg border cursor-pointer ${
-                                        mode === 'duplicate'
-                                            ? 'border-indigo-500 bg-indigo-50'
-                                            : 'border-gray-200 hover:bg-gray-50'
-                                    }`}
-                                >
-                                    <input
-                                        type="radio"
-                                        name="transfer-mode"
-                                        checked={mode === 'duplicate'}
-                                        onChange={() => setMode('duplicate')}
-                                        className="mt-1"
-                                    />
-                                    <span>
-                                        <span className="block text-sm font-medium">Duplicar</span>
-                                        <span className="block text-xs text-gray-500 mt-0.5">
-                                            Copia al otro proceso; el original permanece aquí.
-                                        </span>
-                                    </span>
-                                </label>
-                                <label
-                                    className={`flex items-start gap-2 p-3 rounded-lg border cursor-pointer ${
                                         mode === 'move'
                                             ? 'border-indigo-500 bg-indigo-50'
                                             : 'border-gray-200 hover:bg-gray-50'
@@ -195,9 +186,30 @@ export const BulkTransferCandidatesModal: React.FC<BulkTransferCandidatesModalPr
                                         className="mt-1"
                                     />
                                     <span>
-                                        <span className="block text-sm font-medium">Mover</span>
+                                        <span className="block text-sm font-medium">Mover (recomendado)</span>
                                         <span className="block text-xs text-gray-500 mt-0.5">
-                                            Cambia de proceso; desaparece de la lista actual.
+                                            Traslada al otro proceso y sale de esta lista.
+                                        </span>
+                                    </span>
+                                </label>
+                                <label
+                                    className={`flex items-start gap-2 p-3 rounded-lg border cursor-pointer ${
+                                        mode === 'duplicate'
+                                            ? 'border-indigo-500 bg-indigo-50'
+                                            : 'border-gray-200 hover:bg-gray-50'
+                                    }`}
+                                >
+                                    <input
+                                        type="radio"
+                                        name="transfer-mode"
+                                        checked={mode === 'duplicate'}
+                                        onChange={() => setMode('duplicate')}
+                                        className="mt-1"
+                                    />
+                                    <span>
+                                        <span className="block text-sm font-medium">Copiar</span>
+                                        <span className="block text-xs text-gray-500 mt-0.5">
+                                            Crea un registro nuevo en el destino. El original se archiva aquí, salvo que indiques lo contrario.
                                         </span>
                                     </span>
                                 </label>
@@ -208,9 +220,37 @@ export const BulkTransferCandidatesModal: React.FC<BulkTransferCandidatesModalPr
                             <div className="flex gap-2 p-3 rounded-lg bg-amber-50 border border-amber-200 text-amber-900 text-xs">
                                 <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
                                 <span>
-                                    Los candidatos movidos ya no estarán en este proceso. Se conservan
+                                    Los candidatos movidos ya no estarán vigentes en este proceso. Se conservan
                                     columnas personalizadas con el mismo nombre en el destino.
                                 </span>
+                            </div>
+                        )}
+
+                        {mode === 'duplicate' && (
+                            <div className="space-y-2">
+                                <div className="flex gap-2 p-3 rounded-lg bg-amber-50 border border-amber-200 text-amber-900 text-xs">
+                                    <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+                                    <span>
+                                        Si el original queda activo aquí y en el destino con el mismo DNI, la ficha
+                                        complementaria puede guardarse en el registro equivocado.
+                                    </span>
+                                </div>
+                                <label className="flex items-start gap-2 p-3 rounded-lg border border-gray-200 text-sm">
+                                    <input
+                                        type="checkbox"
+                                        checked={keepSourceActive}
+                                        onChange={e => setKeepSourceActive(e.target.checked)}
+                                        className="mt-0.5"
+                                    />
+                                    <span>
+                                        <span className="block font-medium text-gray-800">
+                                            Dejar el original activo en este proceso
+                                        </span>
+                                        <span className="block text-xs text-gray-500 mt-0.5">
+                                            Úsalo solo si debe seguir postulando aquí y en el otro proceso a la vez.
+                                        </span>
+                                    </span>
+                                </label>
                             </div>
                         )}
 
@@ -255,7 +295,7 @@ export const BulkTransferCandidatesModal: React.FC<BulkTransferCandidatesModalPr
                         )}
 
                         <p className="text-xs text-gray-500">
-                            Se copian datos básicos (nombre, contacto, DNI, etc.) y columnas
+                            Se copian datos básicos (nombre, contacto, DNI, ficha complementaria) y columnas
                             personalizadas cuyo nombre coincida en el proceso destino.
                         </p>
 
@@ -285,7 +325,7 @@ export const BulkTransferCandidatesModal: React.FC<BulkTransferCandidatesModalPr
                             ) : (
                                 <ArrowRightLeft className="w-4 h-4" />
                             )}
-                            {mode === 'move' ? 'Mover' : 'Duplicar'}
+                            {mode === 'move' ? 'Mover' : keepSourceActive ? 'Copiar y dejar original' : 'Copiar y archivar original'}
                         </button>
                     </div>
                 </form>

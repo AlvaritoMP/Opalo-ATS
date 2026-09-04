@@ -12,6 +12,8 @@ import {
 import { isMissingColumnError } from '../supabaseColumnErrors';
 
 const TRANSFER_SELECT_VARIANTS = [
+    'id, name, nombres, apellido_paterno, apellido_materno, email, phone, phone2, dni, age, source, province, district, description, salary_expectation, agreed_salary, linkedin_url, address, score_ia, metadata_ia, psycholaboral_evaluation, complementary_data, complementary_filled_at, stage_id, process_id, bulk_column_values, registration_origin, transfer_pending_review',
+    'id, name, nombres, apellido_paterno, apellido_materno, email, phone, phone2, dni, age, source, province, district, description, salary_expectation, agreed_salary, linkedin_url, address, score_ia, metadata_ia, complementary_data, complementary_filled_at, stage_id, process_id, bulk_column_values, registration_origin, transfer_pending_review',
     'id, name, email, phone, phone2, dni, age, source, province, district, description, salary_expectation, agreed_salary, linkedin_url, address, score_ia, metadata_ia, stage_id, process_id, bulk_column_values, registration_origin, transfer_pending_review',
     'id, name, email, phone, phone2, dni, age, source, province, district, description, salary_expectation, agreed_salary, linkedin_url, address, score_ia, metadata_ia, stage_id, process_id, bulk_column_values, registration_origin',
     'id, name, email, phone, dni, age, source, province, district, description, score_ia, metadata_ia, stage_id, process_id, bulk_column_values',
@@ -29,12 +31,45 @@ async function setTransferPendingReview(candidateId: string, value: boolean): Pr
     }
 }
 
+async function archiveSourceCandidate(candidateId: string): Promise<void> {
+    const now = new Date().toISOString();
+    const { error } = await supabase
+        .from('candidates')
+        .update({
+            archived: true,
+            archived_at: now,
+            transfer_pending_review: false,
+        })
+        .eq('id', candidateId)
+        .eq('app_name', APP_NAME);
+    if (error) {
+        if (isMissingColumnError(error)) {
+            const { error: retryError } = await supabase
+                .from('candidates')
+                .update({ archived: true, archived_at: now })
+                .eq('id', candidateId)
+                .eq('app_name', APP_NAME);
+            if (retryError) throw retryError;
+            return;
+        }
+        throw error;
+    }
+}
+
+function existingBulkValues(row: Record<string, unknown>): Record<string, unknown> {
+    const raw = row.bulk_column_values;
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
+    return { ...(raw as Record<string, unknown>) };
+}
+
 export interface BulkCandidateTransferParams {
     candidateIds: string[];
     sourceProcessId: string;
     targetProcessId: string;
     targetStageId: string;
     mode: BulkCandidateTransferMode;
+    /** Si mode es duplicate: archivar el registro de origen para que no quede vigente. */
+    archiveSource?: boolean;
     sourceConfig?: BulkProcessConfig;
     targetConfig?: BulkProcessConfig;
     movedBy?: string;
@@ -86,6 +121,7 @@ async function moveOneCandidate(
         params.sourceConfig,
         targetColumns
     );
+    const mergedBulk = { ...existingBulkValues(row), ...remapped };
 
     const update: Record<string, unknown> = {
         process_id: params.targetProcessId,
@@ -97,15 +133,17 @@ async function moveOneCandidate(
         transfer_pending_review: true,
     };
 
-    if (Object.keys(remapped).length > 0) {
-        update.bulk_column_values = remapped;
+    if (Object.keys(mergedBulk).length > 0) {
+        update.bulk_column_values = mergedBulk;
     }
 
-    const { error } = await supabase
+    const { data: moved, error } = await supabase
         .from('candidates')
         .update(update)
         .eq('id', id)
-        .eq('app_name', APP_NAME);
+        .eq('app_name', APP_NAME)
+        .eq('process_id', params.sourceProcessId)
+        .select('id');
 
     if (error) {
         if (!isMissingColumnError(error)) throw error;
@@ -119,17 +157,22 @@ async function moveOneCandidate(
             discarded_at: null,
             archived_at: null,
         };
-        const { error: retryError } = await supabase
+        const { data: retried, error: retryError } = await supabase
             .from('candidates')
             .update(retryUpdate)
             .eq('id', id)
-            .eq('app_name', APP_NAME);
+            .eq('app_name', APP_NAME)
+            .eq('process_id', params.sourceProcessId)
+            .select('id');
         if (retryError) throw retryError;
+        if (!retried?.length) {
+            throw new Error('El candidato ya no está en el proceso de origen.');
+        }
 
-        if (Object.keys(remapped).length > 0) {
+        if (Object.keys(mergedBulk).length > 0) {
             const { error: bulkErr } = await supabase
                 .from('candidates')
-                .update({ bulk_column_values: remapped })
+                .update({ bulk_column_values: mergedBulk })
                 .eq('id', id)
                 .eq('app_name', APP_NAME);
             if (bulkErr && !isMissingColumnError(bulkErr)) {
@@ -137,6 +180,8 @@ async function moveOneCandidate(
             }
         }
         await setTransferPendingReview(id, true);
+    } else if (!moved?.length) {
+        throw new Error('El candidato ya no está en el proceso de origen.');
     }
 
     await supabase.from('candidate_history').insert({
@@ -177,8 +222,14 @@ async function duplicateOneCandidate(
     const patch: Record<string, unknown> = {
         transfer_pending_review: true,
     };
+    if (row.nombres != null) patch.nombres = row.nombres;
+    if (row.apellido_paterno != null) patch.apellido_paterno = row.apellido_paterno;
+    if (row.apellido_materno != null) patch.apellido_materno = row.apellido_materno;
     if (row.score_ia != null) patch.score_ia = row.score_ia;
     if (row.metadata_ia) patch.metadata_ia = row.metadata_ia;
+    if (row.psycholaboral_evaluation) patch.psycholaboral_evaluation = row.psycholaboral_evaluation;
+    if (row.complementary_data) patch.complementary_data = row.complementary_data;
+    if (row.complementary_filled_at) patch.complementary_filled_at = row.complementary_filled_at;
     if (Object.keys(remapped).length > 0) {
         patch.bulk_column_values = remapped;
     }
@@ -244,6 +295,9 @@ export async function transferBulkCandidates(
             } else {
                 const newId = await duplicateOneCandidate(row, params, i);
                 createdIds.push(newId);
+                if (params.archiveSource !== false) {
+                    await archiveSourceCandidate(id);
+                }
             }
             success++;
         } catch (err: unknown) {

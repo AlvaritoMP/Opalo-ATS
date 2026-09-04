@@ -63,18 +63,27 @@ export function extractBulkColumnValuesFromRow(
     return result;
 }
 
+function textOrUndefined(value: unknown): string | undefined {
+    if (value === null || value === undefined) return undefined;
+    const text = String(value).trim();
+    return text || undefined;
+}
+
 export function buildDuplicateCandidatePayload(
     row: Record<string, unknown>,
     targetProcessId: string,
     targetStageId: string,
     rowIndex: number
 ): Omit<Candidate, 'id' | 'history'> {
+    const nombres = textOrUndefined(row.nombres);
+    const apellidoPaterno = textOrUndefined(row.apellido_paterno);
+    const apellidoMaterno = textOrUndefined(row.apellido_materno);
     const name = String(row.name || '').trim() || 'Sin nombre';
-    const dni = (row.dni as string) || undefined;
-    const phone = (row.phone as string) || undefined;
-    const rawEmail = (row.email as string) || undefined;
+    const dni = textOrUndefined(row.dni);
+    const phone = textOrUndefined(row.phone);
+    const rawEmail = textOrUndefined(row.email);
 
-    let email = rawEmail?.trim() || '';
+    let email = rawEmail || '';
     if (!email || !email.includes('@')) {
         const slug = (dni || phone || `${rowIndex + 1}`).replace(/\W/g, '').slice(0, 24);
         email = `sin-email-${slug}-${Date.now()}@bulk.local`;
@@ -82,22 +91,25 @@ export function buildDuplicateCandidatePayload(
 
     return {
         name,
+        nombres,
+        apellidoPaterno,
+        apellidoMaterno,
         email,
         phone,
-        phone2: (row.phone2 as string) || undefined,
+        phone2: textOrUndefined(row.phone2),
         processId: targetProcessId,
         stageId: targetStageId,
-        description: (row.description as string) || undefined,
+        description: textOrUndefined(row.description),
         attachments: [],
-        source: (row.source as string) || undefined,
-        salaryExpectation: (row.salary_expectation as string) || undefined,
-        agreedSalary: (row.agreed_salary as string) || undefined,
+        source: textOrUndefined(row.source),
+        salaryExpectation: textOrUndefined(row.salary_expectation),
+        agreedSalary: textOrUndefined(row.agreed_salary),
         age: row.age != null ? Number(row.age) : undefined,
         dni,
-        linkedinUrl: (row.linkedin_url as string) || undefined,
-        address: (row.address as string) || undefined,
-        province: (row.province as string) || undefined,
-        district: (row.district as string) || undefined,
+        linkedinUrl: textOrUndefined(row.linkedin_url),
+        address: textOrUndefined(row.address),
+        province: textOrUndefined(row.province),
+        district: textOrUndefined(row.district),
         discarded: false,
         archived: false,
         registrationOrigin: 'masivo',

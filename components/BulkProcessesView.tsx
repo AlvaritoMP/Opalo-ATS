@@ -2720,7 +2720,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
         setActivityLogRefreshToken(t => t + 1);
         await loadCandidates(currentPage, true);
 
-        const verb = result.mode === 'move' ? 'movido(s)' : 'duplicado(s)';
+        const verb = result.mode === 'move' ? 'movido(s)' : 'copiado(s)';
         actions.showToast(
             `${result.success} candidato(s) ${verb} a «${result.targetProcessTitle}»`,
             'success',
