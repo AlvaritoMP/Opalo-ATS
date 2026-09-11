@@ -20,6 +20,7 @@ import {
 } from './lib/sessionActivity';
 import { freeLocalStorageQuota, isQuotaExceededError } from './lib/localStorageQuota';
 import { runWithAbortTimeout, isAbortOrTimeoutError } from './lib/runWithAbortTimeout';
+import { toUuidOrNull } from './lib/uuid';
 import { isProcessActive } from './lib/processStatus';
 import {
     clearAllLocalBulkColumnValues,
@@ -1599,7 +1600,8 @@ const App: React.FC = () => {
                     };
                 }
                 
-                const updated = await candidatesApi.update(updatedCandidateData.id, updatedCandidateData, movedBy || state.currentUser?.name || 'System');
+                const actorId = toUuidOrNull(movedBy) || state.currentUser?.id;
+                const updated = await candidatesApi.update(updatedCandidateData.id, updatedCandidateData, actorId);
                 const previous = currentCandidate;
                 const stageChanged = previous && previous.stageId !== updated.stageId;
                 const processChanged = previous && previous.processId !== updated.processId;
@@ -1678,7 +1680,7 @@ const App: React.FC = () => {
             }
 
             const firstStageId = targetProcess.stages[0].id;
-            const movedBy = state.currentUser?.name || 'System';
+            const movedBy = state.currentUser?.id;
 
             try {
                 // Actualizar en la base de datos usando updateCandidate

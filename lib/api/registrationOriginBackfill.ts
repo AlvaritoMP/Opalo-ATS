@@ -30,7 +30,8 @@ export async function backfillRegistrationOriginsForProcess(
             .select('candidate_id')
             .eq('process_id', processId)
             .eq('app_name', APP_NAME)
-            .eq('action_type', 'add_row');
+            .eq('action_type', 'add_row')
+            .limit(5000);
 
         if (!actErr) {
             for (const row of activityRows || []) {

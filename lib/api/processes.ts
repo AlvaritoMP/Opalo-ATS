@@ -1311,7 +1311,8 @@ export const processesApi = {
                     .select(selectFields)
                     .eq('app_name', APP_NAME)
                     .eq('is_bulk_process', true)
-                    .order('created_at', { ascending: false });
+                    .order('created_at', { ascending: false })
+                    .limit(500);
                 query = applyProcessStatusFilter(query as any, options) as typeof query;
                 const response = await query;
                 if (response.error) throw response.error;
@@ -1325,7 +1326,8 @@ export const processesApi = {
                     .from('processes')
                     .select('id, title, description, salary_range, experience_level, seniority, flyer_url, flyer_position, service_order_code, start_date, end_date, status, vacancies, google_drive_folder_id, google_drive_folder_name, published_date, need_identified_date, bulk_config, hired_candidate_ids, closed_at, created_at')
                     .eq('app_name', APP_NAME)
-                    .order('created_at', { ascending: false });
+                    .order('created_at', { ascending: false })
+                    .limit(500);
                 fallbackQuery = applyProcessStatusFilter(fallbackQuery as any, options) as typeof fallbackQuery;
                 const fallbackResult = await fallbackQuery;
                 

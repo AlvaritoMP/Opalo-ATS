@@ -1,5 +1,6 @@
 import { supabase } from '../supabase';
 import { APP_NAME } from '../appConfig';
+import { toUuidOrNull } from '../uuid';
 import type { CustomColumn } from '../../types';
 import {
     enrichBulkColumnValuesForStorage,
@@ -550,7 +551,7 @@ export const bulkCandidatesApi = {
                 candidate_id: candidateId,
                 stage_id: updates.stageId,
                 moved_at: new Date().toISOString(),
-                moved_by: context.movedBy || null,
+                moved_by: toUuidOrNull(context.movedBy),
                 app_name: APP_NAME,
             });
         }
@@ -733,7 +734,7 @@ export const bulkCandidatesApi = {
                         candidate_id: candidateId,
                         stage_id: updates.stageId,
                         moved_at: now,
-                        moved_by: context.movedBy || null,
+                        moved_by: toUuidOrNull(context.movedBy),
                         app_name: APP_NAME,
                     };
                 })

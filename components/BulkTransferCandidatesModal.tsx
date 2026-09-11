@@ -97,7 +97,7 @@ export const BulkTransferCandidatesModal: React.FC<BulkTransferCandidatesModalPr
                 archiveSource: mode === 'duplicate' && !keepSourceActive,
                 sourceConfig: sourceProcess.bulkConfig,
                 targetConfig: targetProcess?.bulkConfig,
-                movedBy: userName || userId,
+                movedBy: userId,
                 createdBy: userId,
                 createdByName: userName,
                 onProgress: (done, total) => setProgress({ done, total }),

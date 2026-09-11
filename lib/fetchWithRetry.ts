@@ -17,6 +17,15 @@ export function isTransientFetchError(error: unknown): boolean {
     const msg = `${error instanceof Error ? error.message : String(error)}`.toLowerCase();
     const code = (error as { code?: string; status?: number })?.code?.toLowerCase() ?? '';
     const status = (error as { status?: number })?.status;
+    // Timeout de SQL (57014) o 500 de PostgREST: reintentar satura más la BD.
+    if (
+        code === '57014' ||
+        status === 500 ||
+        msg.includes('canceling statement') ||
+        msg.includes('statement timeout')
+    ) {
+        return false;
+    }
     if (status && status >= 502 && status <= 504) return true;
     return TRANSIENT_PATTERNS.some(p => msg.includes(p) || code.includes(p));
 }

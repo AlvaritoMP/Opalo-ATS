@@ -357,7 +357,7 @@ export const ProcessView: React.FC<ProcessViewProps> = ({ processId }) => {
         dragPayload.current.processing = true;
         const { candidateId, isBulk } = dragPayload.current;
 
-        const movedBy = state.currentUser?.name || 'System';
+        const movedBy = state.currentUser?.id;
 
         try {
             if (isBulk && selectedCandidates.length > 0) {

@@ -9,6 +9,7 @@ import { fetchWithRetry } from '../fetchWithRetry';
 import type { ComplementaryFichaData } from '../complementaryFicha';
 import { identityFieldsToDb, identityFromDbRow } from '../candidateIdentity';
 import { hydrateCandidateIdentity } from '../workerNameParts';
+import { toUuidOrNull } from '../uuid';
 
 const CANDIDATE_PAGE_SIZE = 250;
 const CANDIDATE_MAX_ROWS = 2000;
@@ -910,7 +911,7 @@ export const candidatesApi = {
                 candidate_id: data.id,
                 stage_id: candidateData.stageId,
                 moved_at: new Date().toISOString(),
-                moved_by: createdBy || null,
+                moved_by: toUuidOrNull(createdBy),
                 app_name: APP_NAME, // Asegurar que siempre se asigne el app_name
             });
         }
@@ -1114,7 +1115,7 @@ export const candidatesApi = {
                 candidate_id: id,
                 stage_id: candidateData.stageId,
                 moved_at: new Date().toISOString(),
-                moved_by: movedBy || null,
+                moved_by: toUuidOrNull(movedBy),
             });
             
             // Verificar si la nueva etapa es crítica para resetear criticalStageReviewedAt

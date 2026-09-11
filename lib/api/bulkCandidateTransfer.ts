@@ -10,6 +10,7 @@ import {
     type BulkCandidateTransferMode,
 } from '../bulkCandidateTransfer';
 import { isMissingColumnError } from '../supabaseColumnErrors';
+import { toUuidOrNull } from '../uuid';
 
 const TRANSFER_SELECT_VARIANTS = [
     'id, name, nombres, apellido_paterno, apellido_materno, email, phone, phone2, dni, age, source, province, district, description, salary_expectation, agreed_salary, linkedin_url, address, score_ia, metadata_ia, psycholaboral_evaluation, complementary_data, complementary_filled_at, stage_id, process_id, bulk_column_values, registration_origin, transfer_pending_review',
@@ -188,7 +189,7 @@ async function moveOneCandidate(
         candidate_id: id,
         stage_id: params.targetStageId,
         moved_at: new Date().toISOString(),
-        moved_by: params.movedBy || null,
+        moved_by: toUuidOrNull(params.movedBy),
         app_name: APP_NAME,
     });
 }
