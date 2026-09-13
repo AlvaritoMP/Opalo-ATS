@@ -1,12 +1,12 @@
 import express from 'express';
 import { createClient } from '@supabase/supabase-js';
-import { applyImportTextCaseToCandidate } from '../../../../lib/importTextCase.js';
-import { buildTallyCandidateFromSubmission } from '../../../../lib/tallyWebhookMapping.js';
-import { processTallyCandidateUpsert } from '../../../../lib/tallyCandidateUpsert.js';
+import { applyImportTextCaseToCandidate } from '../../lib/importTextCase.js';
+import { buildTallyCandidateFromSubmission } from '../../lib/tallyWebhookMapping.js';
+import { processTallyCandidateUpsert } from '../../lib/tallyCandidateUpsert.js';
 import {
     composeCandidateFullName,
     notifyMattermostNewCandidate,
-} from '../../../../lib/mattermostNewCandidate.js';
+} from '../../lib/mattermostNewCandidate.js';
 
 console.log('🔵 Cargando módulo webhooks.js...');
 

@@ -86,6 +86,14 @@ app.get('/health', (req, res) => {
     });
 });
 
+app.get('/', (req, res) => {
+    res.json({
+        status: 'ok',
+        timestamp: new Date().toISOString(),
+        service: 'Opalo ATS Backend',
+    });
+});
+
 // Manejo de errores
 app.use((err, req, res, next) => {
     console.error('Error:', err);
