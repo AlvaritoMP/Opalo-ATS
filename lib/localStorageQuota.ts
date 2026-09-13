@@ -1,5 +1,5 @@
 /** Claves de sesión que no se deben borrar salvo al reescribir el login. */
-const SESSION_KEYS = new Set(['ats_pro_user', 'ats_pro_last_activity']);
+const SESSION_KEYS = new Set(['ats_pro_user', 'ats_pro_last_activity', 'ats_mm_session']);
 
 const DISPOSABLE_EXACT = new Set([
     'bulkProcessesTableTemplates',

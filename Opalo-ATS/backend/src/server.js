@@ -2,6 +2,8 @@ import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import authRoutes from './routes/auth.js';
+import mattermostAuthRoutes from './routes/mattermostAuth.js';
+import mattermostChatRoutes from './routes/mattermostChat.js';
 
 console.log('🔵 Cargando webhookRoutes...');
 import webhookRoutes from './routes/webhooks.js';
@@ -69,6 +71,8 @@ app.use((req, res, next) => {
 
 // Rutas
 app.use('/api/auth', authRoutes);
+app.use('/api/auth/mattermost', mattermostAuthRoutes);
+app.use('/api/mattermost', mattermostChatRoutes);
 console.log('🔵 Registrando ruta /api/webhooks');
 app.use('/api/webhooks', webhookRoutes);
 console.log('🔵 Ruta /api/webhooks registrada correctamente');
@@ -100,6 +104,16 @@ app.listen(PORT, '0.0.0.0', () => {
     console.log(`🔐 Google OAuth Redirect URI: ${redirectUri}`);
     if (!process.env.GOOGLE_CLIENT_ID) {
         console.log(`⚠️  ADVERTENCIA: GOOGLE_CLIENT_ID no está configurada. Google Drive no funcionará.`);
+    }
+    const mmUrl = process.env.MATTERMOST_URL;
+    const mmClient = process.env.MATTERMOST_OAUTH_CLIENT_ID;
+    const mmSecret = process.env.MATTERMOST_OAUTH_CLIENT_SECRET;
+    const mmRedirect = process.env.MATTERMOST_OAUTH_REDIRECT_URI;
+    if (mmUrl && mmClient && mmSecret && mmRedirect) {
+        console.log(`💬 Mattermost OAuth: ${mmUrl}`);
+        console.log(`🔐 Mattermost Redirect URI: ${mmRedirect}`);
+    } else {
+        console.log(`⚠️  Mattermost chat/login deshabilitado. Configura MATTERMOST_URL, MATTERMOST_OAUTH_CLIENT_ID, MATTERMOST_OAUTH_CLIENT_SECRET y MATTERMOST_OAUTH_REDIRECT_URI.`);
     }
     console.log(`\n✅ Backend listo para recibir peticiones`);
 });

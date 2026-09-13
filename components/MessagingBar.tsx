@@ -2,11 +2,15 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { MessageCircle, X, ChevronUp, ChevronDown, Send, Minimize2 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { userMessagesApi } from '../lib/api/userMessages';
+import { mattermostChatApi } from '../lib/api/mattermostChat';
+import { hasMattermostSession } from '../lib/mattermostSession';
 import { logUserActivitySafe } from '../lib/api/userActivity';
 import type { User, UserMessage } from '../types';
 
 const STORAGE_KEY_PREFIX = 'ats_messaging_hidden_';
-const POLL_INTERVAL_MS = 60_000;
+const POLL_LOCAL_MS = 60_000;
+const POLL_MM_MS = 12_000;
+const POLL_MM_OPEN_MS = 6_000;
 
 function formatTime(iso: string): string {
     const d = new Date(iso);
@@ -44,7 +48,9 @@ export const MessagingBar: React.FC<MessagingBarProps> = ({
     onNewMessage,
     onSendError,
 }) => {
+    const useMattermost = hasMattermostSession();
     const [messages, setMessages] = useState<UserMessage[]>([]);
+    const [mmPeers, setMmPeers] = useState<User[]>([]);
     const [expanded, setExpanded] = useState(false);
     const [hidden, setHidden] = useState(() => {
         try {
@@ -57,22 +63,27 @@ export const MessagingBar: React.FC<MessagingBarProps> = ({
     const [draft, setDraft] = useState('');
     const [sending, setSending] = useState(false);
     const [available, setAvailable] = useState(true);
+    const [backendLabel, setBackendLabel] = useState(useMattermost ? 'Mattermost' : 'Mensajes');
     const messagesEndRef = useRef<HTMLDivElement>(null);
+    const knownIdsRef = useRef<Set<string>>(new Set());
     const onNewMessageRef = useRef(onNewMessage);
     const onSendErrorRef = useRef(onSendError);
     onNewMessageRef.current = onNewMessage;
     onSendErrorRef.current = onSendError;
 
+    const directoryUsers = useMattermost && mmPeers.length > 0 ? mmPeers : users;
+
     const otherUsers = useMemo(
-        () => users.filter(u => u.id !== currentUser.id),
-        [users, currentUser.id]
+        () => directoryUsers.filter(u => u.id !== currentUser.id && (!useMattermost || Boolean(u.mattermostUserId))),
+        [directoryUsers, currentUser.id, useMattermost]
     );
 
     const userNameById = useMemo(() => {
         const map = new Map<string, string>();
-        for (const u of users) map.set(u.id, u.name);
+        for (const u of directoryUsers) map.set(u.id, u.name);
+        map.set(currentUser.id, currentUser.name);
         return map;
-    }, [users]);
+    }, [directoryUsers, currentUser]);
 
     const mergeIncomingMessage = useCallback((msg: UserMessage) => {
         setMessages(prev => {
@@ -140,16 +151,57 @@ export const MessagingBar: React.FC<MessagingBarProps> = ({
 
     const loadMessages = useCallback(async () => {
         try {
+            if (useMattermost) {
+                const data = await mattermostChatApi.getDms();
+                setAvailable(true);
+                setBackendLabel('Mattermost');
+                setMmPeers(
+                    (data.peers || []).map(peer => ({
+                        id: peer.id,
+                        name: peer.name,
+                        email: peer.email,
+                        role: 'recruiter',
+                        mattermostUserId: peer.mattermostUserId,
+                        mattermostUsername: peer.mattermostUsername,
+                        avatarUrl: peer.avatarUrl,
+                    }))
+                );
+                const incoming = data.messages || [];
+                const previousIds = knownIdsRef.current;
+                if (previousIds.size > 0) {
+                    for (const msg of incoming) {
+                        if (
+                            !previousIds.has(msg.id) &&
+                            msg.recipientId === currentUser.id &&
+                            !msg.readAt
+                        ) {
+                            const fromName =
+                                data.threads.find(t => t.partnerId === msg.senderId)?.partnerName ||
+                                'Un usuario';
+                            onNewMessageRef.current?.(fromName);
+                            setHidden(false);
+                            setExpanded(true);
+                            setActivePartnerId(msg.senderId);
+                        }
+                    }
+                }
+                knownIdsRef.current = new Set(incoming.map(m => m.id));
+                setMessages(incoming);
+                return;
+            }
+
             const ok = await userMessagesApi.isAvailable();
             setAvailable(ok);
+            setBackendLabel('Mensajes');
             if (!ok) return;
             const recent = await userMessagesApi.getRecent(currentUser.id, 150);
             setMessages(recent);
+            knownIdsRef.current = new Set(recent.map(m => m.id));
         } catch (err) {
             console.warn('No se pudo cargar mensajería:', err);
             setAvailable(false);
         }
-    }, [currentUser.id]);
+    }, [currentUser.id, useMattermost]);
 
     useEffect(() => {
         void loadMessages();
@@ -157,6 +209,14 @@ export const MessagingBar: React.FC<MessagingBarProps> = ({
 
     useEffect(() => {
         if (!available) return;
+
+        if (useMattermost) {
+            const ms = expanded ? POLL_MM_OPEN_MS : POLL_MM_MS;
+            const pollId = window.setInterval(() => {
+                void loadMessages();
+            }, ms);
+            return () => window.clearInterval(pollId);
+        }
 
         const rowToMessage = (row: Record<string, unknown>): UserMessage => ({
             id: row.id as string,
@@ -199,31 +259,37 @@ export const MessagingBar: React.FC<MessagingBarProps> = ({
                     return merged;
                 });
             });
-        }, POLL_INTERVAL_MS);
+        }, POLL_LOCAL_MS);
 
         return () => {
             void supabase.removeChannel(channel);
             window.clearInterval(pollId);
         };
-    }, [available, currentUser.id, mergeIncomingMessage]);
+    }, [available, currentUser.id, mergeIncomingMessage, useMattermost, expanded, loadMessages]);
 
     useEffect(() => {
         if (!expanded || !activePartnerId) return;
         const unreadIds = conversationMessages
             .filter(m => m.recipientId === currentUser.id && !m.readAt)
             .map(m => m.id);
-        if (unreadIds.length > 0) {
-            void userMessagesApi.markAsRead(unreadIds, currentUser.id).then(() => {
-                setMessages(prev =>
-                    prev.map(m =>
-                        unreadIds.includes(m.id)
-                            ? { ...m, readAt: m.readAt || new Date().toISOString() }
-                            : m
-                    )
-                );
-            });
-        }
-    }, [expanded, activePartnerId, conversationMessages, currentUser.id]);
+        if (unreadIds.length === 0) return;
+
+        const mark = useMattermost
+            ? mattermostChatApi.markRead(activePartnerId)
+            : userMessagesApi.markAsRead(unreadIds, currentUser.id);
+
+        void mark.then(() => {
+            setMessages(prev =>
+                prev.map(m =>
+                    unreadIds.includes(m.id)
+                        ? { ...m, readAt: m.readAt || new Date().toISOString() }
+                        : m
+                )
+            );
+        }).catch(err => {
+            console.warn('No se pudo marcar leído:', err);
+        });
+    }, [expanded, activePartnerId, conversationMessages, currentUser.id, useMattermost]);
 
     useEffect(() => {
         if (expanded && activePartnerId) {
@@ -235,12 +301,15 @@ export const MessagingBar: React.FC<MessagingBarProps> = ({
         if (!activePartnerId || !draft.trim() || sending) return;
         setSending(true);
         try {
-            const sent = await userMessagesApi.send(
-                currentUser.id,
-                activePartnerId,
-                draft
-            );
-            setMessages(prev => [...prev, sent]);
+            const sent = useMattermost
+                ? await mattermostChatApi.send(activePartnerId, draft)
+                : await userMessagesApi.send(currentUser.id, activePartnerId, draft);
+            const normalized: UserMessage = {
+                ...sent,
+                senderId: sent.senderId || currentUser.id,
+                recipientId: sent.recipientId || activePartnerId,
+            };
+            setMessages(prev => (prev.some(m => m.id === normalized.id) ? prev : [...prev, normalized]));
             setDraft('');
             const partnerName = userNameById.get(activePartnerId);
             logUserActivitySafe({
@@ -276,7 +345,18 @@ export const MessagingBar: React.FC<MessagingBarProps> = ({
         } catch { /* ignore */ }
     };
 
-    if (!available || otherUsers.length === 0) return null;
+    if (!available) {
+        if (useMattermost) {
+            return (
+                <div className="fixed bottom-4 right-4 z-[45] max-w-xs bg-white border border-amber-200 text-amber-800 text-xs rounded-lg shadow px-3 py-2">
+                    No se pudo conectar el chat de Mattermost. Recarga o vuelve a entrar con Mattermost.
+                </div>
+            );
+        }
+        return null;
+    }
+
+    if (!useMattermost && otherUsers.length === 0) return null;
 
     if (hidden) {
         return (
@@ -320,7 +400,7 @@ export const MessagingBar: React.FC<MessagingBarProps> = ({
                             <span className="text-sm font-medium truncate">
                                 {activePartnerId
                                     ? userNameById.get(activePartnerId) || 'Chat'
-                                    : 'Mensajes'}
+                                    : backendLabel}
                             </span>
                             {totalUnread > 0 && !activePartnerId && (
                                 <span className="bg-red-500 text-xs rounded-full px-1.5 py-0.5">
@@ -390,17 +470,23 @@ export const MessagingBar: React.FC<MessagingBarProps> = ({
                                 <p className="text-[10px] text-gray-400 mb-1.5 uppercase tracking-wide">
                                     Nuevo mensaje
                                 </p>
-                                <div className="flex flex-wrap gap-1">
-                                    {otherUsers.slice(0, 6).map(u => (
-                                        <button
-                                            key={u.id}
-                                            onClick={() => setActivePartnerId(u.id)}
-                                            className="text-xs px-2 py-1 rounded-full bg-gray-100 hover:bg-primary-50 hover:text-primary-700 text-gray-700"
-                                        >
-                                            {u.name.split(' ')[0]}
-                                        </button>
-                                    ))}
-                                </div>
+                                {otherUsers.length === 0 ? (
+                                    <p className="text-xs text-gray-500 px-1">
+                                        No hay otros usuarios de Mattermost vinculados al ATS.
+                                    </p>
+                                ) : (
+                                    <div className="flex flex-wrap gap-1">
+                                        {otherUsers.slice(0, 8).map(u => (
+                                            <button
+                                                key={u.id}
+                                                onClick={() => setActivePartnerId(u.id)}
+                                                className="text-xs px-2 py-1 rounded-full bg-gray-100 hover:bg-primary-50 hover:text-primary-700 text-gray-700"
+                                            >
+                                                {u.name.split(' ')[0]}
+                                            </button>
+                                        ))}
+                                    </div>
+                                )}
                             </div>
                         </div>
                     ) : (
@@ -420,7 +506,7 @@ export const MessagingBar: React.FC<MessagingBarProps> = ({
                                                         : 'bg-gray-100 text-gray-800'
                                                 }`}
                                             >
-                                                <p className="break-words">{msg.text}</p>
+                                                <p className="break-words whitespace-pre-wrap">{msg.text}</p>
                                                 <p
                                                     className={`text-[10px] mt-0.5 ${
                                                         mine ? 'text-white/70' : 'text-gray-400'
@@ -466,7 +552,7 @@ export const MessagingBar: React.FC<MessagingBarProps> = ({
                 >
                     <div className="flex items-center gap-2 text-gray-700">
                         <MessageCircle className="w-4 h-4 text-primary-600" />
-                        <span className="font-medium">Mensajes</span>
+                        <span className="font-medium">{backendLabel}</span>
                         {totalUnread > 0 && (
                             <span className="bg-red-500 text-white text-xs rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1">
                                 {totalUnread > 9 ? '9+' : totalUnread}

@@ -17,6 +17,8 @@ function dbToUser(dbUser: any): User {
             Array.isArray(dbUser.allowed_client_ids) && dbUser.allowed_client_ids.length > 0
                 ? dbUser.allowed_client_ids
                 : undefined,
+        mattermostUserId: dbUser.mattermost_user_id || undefined,
+        mattermostUsername: dbUser.mattermost_username || undefined,
     };
 }
 

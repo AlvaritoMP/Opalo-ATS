@@ -2,7 +2,7 @@ import React, { createContext, useContext, useState, useEffect, useMemo, useRef 
 import { initialProcesses, initialCandidates, initialUsers, initialSettings, initialFormIntegrations, initialInterviewEvents } from './lib/data';
 import { Process, Candidate, User, AppSettings, FormIntegration, InterviewEvent, CandidateHistory, Application, PostIt, Comment, Section, UserRole, ProcessStatus } from './types';
 import { getSettings, saveSettings as saveSettingsToStorage } from './lib/settings';
-import { usersApi, processesApi, candidatesApi, postItsApi, commentsApi, interviewsApi, settingsApi, formIntegrationsApi, setCurrentUser, logUserActivitySafe, logUserActivityAwait } from './lib/api/index';
+import { usersApi, processesApi, candidatesApi, postItsApi, commentsApi, interviewsApi, settingsApi, formIntegrationsApi, setCurrentUser, logUserActivitySafe, logUserActivityAwait, mattermostAuthApi } from './lib/api/index';
 import { navigationActivityForView, type UserActivityCategory } from './lib/userActivity';
 import { isCorsError, getErrorMessage, isSupabaseConfigured } from './lib/supabase';
 import { googleDriveService } from './lib/googleDrive';
@@ -19,6 +19,7 @@ import {
     SESSION_STORAGE_QUOTA_ERROR,
 } from './lib/sessionActivity';
 import { freeLocalStorageQuota, isQuotaExceededError } from './lib/localStorageQuota';
+import { clearMattermostSession } from './lib/mattermostSession';
 import { runWithAbortTimeout, isAbortOrTimeoutError } from './lib/runWithAbortTimeout';
 import { toUuidOrNull } from './lib/uuid';
 import { isProcessActive } from './lib/processStatus';
@@ -84,6 +85,7 @@ interface AppState {
 
 interface AppActions {
     login: (email: string, password: string) => Promise<boolean>;
+    completeExternalLogin: (user: User) => Promise<boolean>;
     logout: () => void;
     addProcess: (processData: Omit<Process, 'id'>) => Promise<Process>;
     updateProcess: (processData: Process) => Promise<void>;
@@ -139,61 +141,39 @@ interface AppContextType {
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
-const ForgotPasswordModal: React.FC<{onClose: () => void}> = ({ onClose }) => {
-    const [email, setEmail] = useState('');
-    const [isSubmitting, setIsSubmitting] = useState(false);
-    const [message, setMessage] = useState('');
+const MATTERMOST_LOGIN_ERRORS: Record<string, string> = {
+    not_configured: 'Mattermost no está configurado en el servidor. Usa el acceso local o avisa a un administrador.',
+    denied: 'No se autorizó el acceso a Mattermost.',
+    no_user: 'Ese correo existe en Mattermost pero no en el ATS. Pide a un administrador que cree tu usuario aquí con el mismo email.',
+    mm_inactive: 'Tu usuario está desactivado en Mattermost. No puedes entrar al ATS.',
+    no_email: 'Mattermost no devolvió un correo electrónico.',
+    oauth_failed: 'No se pudo iniciar sesión con Mattermost. Intenta de nuevo.',
+};
 
-    const handleSendLink = (e: React.FormEvent) => {
-        e.preventDefault();
-        setIsSubmitting(true);
-        setMessage('');
-
-        // Simulate API call
-        setTimeout(() => {
-            setMessage('If an account with this email exists, a password reset link has been sent.');
-            setIsSubmitting(false);
-        }, 1500);
-    };
-
+const ForgotPasswordModal: React.FC<{ onClose: () => void; resetUrl?: string }> = ({ onClose, resetUrl }) => {
     return (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-            <div className="w-full max-w-sm p-8 space-y-6 bg-white rounded-xl shadow-lg relative">
-                 <button onClick={onClose} className="absolute top-2 right-2 p-2 rounded-full hover:bg-gray-100"><X className="w-5 h-5"/></button>
-                 <div className="text-center">
-                    <h1 className="text-2xl font-bold text-gray-900">Reset Password</h1>
-                    <p className="mt-2 text-sm text-gray-600">Enter your email to receive a reset link.</p>
+            <div className="w-full max-w-sm p-8 space-y-4 bg-white rounded-xl shadow-lg relative">
+                <button onClick={onClose} className="absolute top-2 right-2 p-2 rounded-full hover:bg-gray-100"><X className="w-5 h-5"/></button>
+                <div className="text-center">
+                    <h1 className="text-2xl font-bold text-gray-900">Recuperar contraseña</h1>
+                    <p className="mt-2 text-sm text-gray-600">
+                        El ATS usa tu clave de Mattermost. Recupérala ahí; con la nueva clave entras al ATS, al chat y a la app de escritorio.
+                    </p>
                 </div>
-
-                {message ? (
-                    <div className="text-center p-4 bg-green-50 text-green-700 rounded-md">
-                        {message}
-                    </div>
+                {resetUrl ? (
+                    <a
+                        href={resetUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="block w-full text-center py-2 px-4 rounded-md text-sm font-medium text-white bg-primary-600 hover:bg-primary-700"
+                    >
+                        Abrir recuperación de Mattermost
+                    </a>
                 ) : (
-                    <form className="space-y-6" onSubmit={handleSendLink}>
-                        <div>
-                            <label htmlFor="reset-email" className="block text-sm font-medium text-gray-700">Email Address</label>
-                            <input
-                                id="reset-email"
-                                name="email"
-                                type="email"
-                                autoComplete="email"
-                                required
-                                value={email}
-                                onChange={(e) => setEmail(e.target.value)}
-                                className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm"
-                            />
-                        </div>
-                        <div>
-                            <button
-                                type="submit"
-                                disabled={isSubmitting}
-                                className="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-primary-600 hover:bg-primary-700 disabled:bg-primary-300"
-                            >
-                                {isSubmitting ? 'Sending...' : 'Send Reset Link'}
-                            </button>
-                        </div>
-                    </form>
+                    <p className="text-sm text-gray-600 text-center">
+                        Abre Mattermost en el navegador y usa «¿Olvidaste tu contraseña?».
+                    </p>
                 )}
             </div>
         </div>
@@ -208,12 +188,56 @@ const LoginPage: React.FC = () => {
     const [sessionExpiredInfo, setSessionExpiredInfo] = useState(false);
     const [isLoggingIn, setIsLoggingIn] = useState(false);
     const [isForgotPasswordOpen, setIsForgotPasswordOpen] = useState(false);
+    const [mmEnabled, setMmEnabled] = useState(false);
+    const [mmResetUrl, setMmResetUrl] = useState('');
+    const ticketHandledRef = useRef(false);
+    const [mmCompleting, setMmCompleting] = useState(() => {
+        try {
+            return new URLSearchParams(window.location.search).has('mm_ticket');
+        } catch {
+            return false;
+        }
+    });
+    const [showLocalLogin, setShowLocalLogin] = useState(false);
 
     useEffect(() => {
         if (consumeSessionExpiredNotice()) {
             setSessionExpiredInfo(true);
         }
+        void mattermostAuthApi.getStatus().then(status => {
+            setMmEnabled(status.enabled);
+            setMmResetUrl(status.passwordResetUrl || '');
+            if (!status.enabled) setShowLocalLogin(true);
+        });
     }, []);
+
+    useEffect(() => {
+        if (ticketHandledRef.current) return;
+        const params = new URLSearchParams(window.location.search);
+        const mmError = params.get('mm_error');
+        const ticket = params.get('mm_ticket');
+        if (mmError || ticket) {
+            window.history.replaceState({}, document.title, window.location.pathname);
+        }
+        if (mmError) {
+            ticketHandledRef.current = true;
+            setError(MATTERMOST_LOGIN_ERRORS[mmError] || MATTERMOST_LOGIN_ERRORS.oauth_failed);
+            setMmCompleting(false);
+            return;
+        }
+        if (!ticket) {
+            setMmCompleting(false);
+            return;
+        }
+        ticketHandledRef.current = true;
+        setMmCompleting(true);
+        void mattermostAuthApi.completeTicket(ticket)
+            .then(({ user }) => actions.completeExternalLogin(user))
+            .catch(err => {
+                setError(err instanceof Error ? err.message : 'No se pudo completar el login de Mattermost.');
+                setMmCompleting(false);
+            });
+    }, [actions]);
 
     const handleLogin = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -222,7 +246,7 @@ const LoginPage: React.FC = () => {
         try {
             const success = await actions.login(email, password);
             if (!success) {
-                setError('Invalid credentials. Please try again.');
+                setError('Credenciales inválidas. Si usas Mattermost, entra con el botón de arriba.');
             }
         } catch (err) {
             const message = err instanceof Error ? err.message : '';
@@ -241,6 +265,11 @@ const LoginPage: React.FC = () => {
         window.location.reload();
     };
 
+    const handleMattermostLogin = () => {
+        setError('');
+        window.location.href = mattermostAuthApi.startLoginUrl();
+    };
+
     return (
         <>
             <div className="flex items-center justify-center min-h-screen bg-gray-100 p-4">
@@ -248,68 +277,96 @@ const LoginPage: React.FC = () => {
                     <div className="text-center">
                         {state.settings?.logoUrl && <img src={state.settings.logoUrl} alt="Logo" className="h-12 mx-auto mb-4 object-contain" />}
                         <h1 className="text-3xl font-bold text-gray-900">{state.settings?.appName || 'Opalo ATS'}</h1>
-                        <p className="mt-2 text-sm text-gray-600">Please sign in to your account</p>
+                        <p className="mt-2 text-sm text-gray-600">Entra con tu cuenta de Mattermost</p>
                     </div>
                     {sessionExpiredInfo && (
                         <p className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-md px-3 py-2 text-center">
                             Tu sesión se cerró por inactividad (más de 1 hora). Vuelve a iniciar sesión.
                         </p>
                     )}
-                    <form className="space-y-6" onSubmit={handleLogin}>
-                        <div>
-                            <label htmlFor="email" className="block text-sm font-medium text-gray-700">Email Address</label>
-                            <input
-                                id="email"
-                                name="email"
-                                type="email"
-                                autoComplete="email"
-                                required
-                                value={email}
-                                onChange={(e) => setEmail(e.target.value)}
-                                className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-primary-500 focus:border-primary-500"
-                            />
-                        </div>
-                        <div>
-                            <div className="flex items-center justify-between">
-                                <label htmlFor="password"className="block text-sm font-medium text-gray-700">Password</label>
-                                <div className="text-sm">
-                                    <a href="#" onClick={(e) => { e.preventDefault(); setIsForgotPasswordOpen(true); }} className="font-medium text-primary-600 hover:text-primary-500">
-                                        Forgot your password?
-                                    </a>
-                                </div>
+                    {error && <p className="text-sm text-red-600 text-center">{error}</p>}
+                    {mmCompleting ? (
+                        <p className="text-sm text-gray-600 text-center">Completando inicio de sesión con Mattermost…</p>
+                    ) : (
+                        <>
+                            {mmEnabled && (
+                                <button
+                                    type="button"
+                                    onClick={handleMattermostLogin}
+                                    className="w-full flex justify-center py-2.5 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-primary-600 hover:bg-primary-700"
+                                >
+                                    Entrar con Mattermost
+                                </button>
+                            )}
+                            <div className="text-center">
+                                <button
+                                    type="button"
+                                    onClick={() => setShowLocalLogin(v => !v)}
+                                    className="text-xs text-gray-500 hover:text-gray-700 underline"
+                                >
+                                    {showLocalLogin ? 'Ocultar acceso local' : 'Acceso local de emergencia'}
+                                </button>
                             </div>
-                             <input
-                                id="password"
-                                name="password"
-                                type="password"
-                                autoComplete="current-password"
-                                required
-                                value={password}
-                                onChange={(e) => setPassword(e.target.value)}
-                                className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-primary-500 focus:border-primary-500"
-                            />
-                        </div>
-                        {error && <p className="text-sm text-red-600 text-center">{error}</p>}
-                        <div>
+                            {showLocalLogin && (
+                                <form className="space-y-4" onSubmit={handleLogin}>
+                                    <div>
+                                        <label htmlFor="email" className="block text-sm font-medium text-gray-700">Email</label>
+                                        <input
+                                            id="email"
+                                            name="email"
+                                            type="email"
+                                            autoComplete="email"
+                                            required
+                                            value={email}
+                                            onChange={(e) => setEmail(e.target.value)}
+                                            className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-primary-500 focus:border-primary-500"
+                                        />
+                                    </div>
+                                    <div>
+                                        <div className="flex items-center justify-between">
+                                            <label htmlFor="password" className="block text-sm font-medium text-gray-700">Contraseña</label>
+                                            <button
+                                                type="button"
+                                                onClick={() => setIsForgotPasswordOpen(true)}
+                                                className="text-sm font-medium text-primary-600 hover:text-primary-500"
+                                            >
+                                                ¿Olvidaste tu clave?
+                                            </button>
+                                        </div>
+                                        <input
+                                            id="password"
+                                            name="password"
+                                            type="password"
+                                            autoComplete="current-password"
+                                            required
+                                            value={password}
+                                            onChange={(e) => setPassword(e.target.value)}
+                                            className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-primary-500 focus:border-primary-500"
+                                        />
+                                    </div>
+                                    <button
+                                        type="submit"
+                                        disabled={isLoggingIn}
+                                        className="w-full flex justify-center py-2 px-4 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50"
+                                    >
+                                        {isLoggingIn ? 'Entrando…' : 'Entrar con clave local'}
+                                    </button>
+                                </form>
+                            )}
                             <button
-                                type="submit"
-                                disabled={isLoggingIn}
-                                className="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-primary-600 hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500 disabled:bg-primary-300"
+                                type="button"
+                                onClick={handleClearLocalCache}
+                                className="w-full text-xs text-gray-500 hover:text-gray-700 underline"
                             >
-                                {isLoggingIn ? 'Signing In...' : 'Sign In'}
+                                Limpiar caché local del navegador
                             </button>
-                        </div>
-                        <button
-                            type="button"
-                            onClick={handleClearLocalCache}
-                            className="w-full text-xs text-gray-500 hover:text-gray-700 underline"
-                        >
-                            Limpiar caché local del navegador
-                        </button>
-                    </form>
+                        </>
+                    )}
                 </div>
             </div>
-            {isForgotPasswordOpen && <ForgotPasswordModal onClose={() => setIsForgotPasswordOpen(false)} />}
+            {isForgotPasswordOpen && (
+                <ForgotPasswordModal onClose={() => setIsForgotPasswordOpen(false)} resetUrl={mmResetUrl} />
+            )}
         </>
     );
 };
@@ -882,6 +939,7 @@ const App: React.FC = () => {
                 return true;
             };
             try {
+                clearMattermostSession();
                 const user = await usersApi.login(email, password);
                 if (user) {
                     return await persistAndEnter(user);
@@ -892,7 +950,6 @@ const App: React.FC = () => {
                     throw error;
                 }
                 console.error('Login error:', error);
-                // Fallback a búsqueda local
                 const user = state.users.find(u => u.email.toLowerCase() === email.toLowerCase());
                 if (user && user.password === password) {
                     return await persistAndEnter(user);
@@ -900,23 +957,42 @@ const App: React.FC = () => {
                 return false;
             }
         },
+        completeExternalLogin: async (user) => {
+            if (!establishSession(user.id)) {
+                throw new Error(SESSION_STORAGE_QUOTA_ERROR);
+            }
+            await setCurrentUser(user.id);
+            await logUserActivityAwait({
+                userId: user.id,
+                userName: user.name,
+                category: 'session',
+                action: 'login',
+                summary: 'Inició sesión con Mattermost',
+            });
+            window.location.reload();
+            return true;
+        },
         logout: () => {
             const user = stateRef.current.currentUser;
             const finish = () => {
                 clearStoredSession();
                 window.location.reload();
             };
+            const revokeMm = mattermostAuthApi.logout();
             if (user) {
-                void logUserActivityAwait({
-                    userId: user.id,
-                    userName: user.name,
-                    category: 'session',
-                    action: 'logout',
-                    summary: 'Cerró sesión',
-                }).finally(finish);
+                void Promise.all([
+                    logUserActivityAwait({
+                        userId: user.id,
+                        userName: user.name,
+                        category: 'session',
+                        action: 'logout',
+                        summary: 'Cerró sesión',
+                    }),
+                    revokeMm,
+                ]).finally(finish);
                 return;
             }
-            finish();
+            void revokeMm.finally(finish);
         },
         setView: (type, payload) => {
             const prev = stateRef.current.view;

@@ -59,6 +59,7 @@ export function establishSession(userId: string): boolean {
 export function clearStoredSession(): void {
     localStorage.removeItem(SESSION_USER_KEY);
     localStorage.removeItem(SESSION_ACTIVITY_KEY);
+    localStorage.removeItem('ats_mm_session');
 }
 
 export function markSessionExpiredNotice(): void {

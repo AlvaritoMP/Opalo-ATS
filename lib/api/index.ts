@@ -15,6 +15,7 @@ export * from './clients';
 export * from './formIntegrations';
 export * from './workerHandoff';
 export * from './userMessages';
+export * from './mattermostChat';
 export * from './userAlerts';
 export * from './userActivity';
 export { bulkTableTemplatesApi } from './bulkTableTemplates';
