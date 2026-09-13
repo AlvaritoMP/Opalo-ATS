@@ -9,8 +9,8 @@ import type { User, UserMessage } from '../types';
 
 const STORAGE_KEY_PREFIX = 'ats_messaging_hidden_';
 const POLL_LOCAL_MS = 60_000;
-const POLL_MM_MS = 12_000;
-const POLL_MM_OPEN_MS = 6_000;
+const POLL_MM_MS = 5_000;
+const POLL_MM_OPEN_MS = 4_000;
 
 function formatTime(iso: string): string {
     const d = new Date(iso);
@@ -66,10 +66,33 @@ export const MessagingBar: React.FC<MessagingBarProps> = ({
     const [backendLabel, setBackendLabel] = useState(useMattermost ? 'Mattermost' : 'Mensajes');
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const knownIdsRef = useRef<Set<string>>(new Set());
+    const mmInitializedRef = useRef(false);
+    const readUntilRef = useRef<Map<string, number>>(new Map());
+    const markedReadPartnersRef = useRef<Set<string>>(new Set());
     const onNewMessageRef = useRef(onNewMessage);
     const onSendErrorRef = useRef(onSendError);
     onNewMessageRef.current = onNewMessage;
     onSendErrorRef.current = onSendError;
+
+    const unhideChat = useCallback(() => {
+        setHidden(false);
+        try {
+            localStorage.removeItem(`${STORAGE_KEY_PREFIX}${currentUser.id}`);
+        } catch { /* ignore */ }
+    }, [currentUser.id]);
+
+    const applyLocalReadState = useCallback((list: UserMessage[]): UserMessage[] => {
+        const readUntil = readUntilRef.current;
+        if (readUntil.size === 0) return list;
+        return list.map(msg => {
+            if (msg.recipientId !== currentUser.id || msg.readAt) return msg;
+            const until = readUntil.get(msg.senderId);
+            if (until != null && Date.parse(msg.createdAt) <= until) {
+                return { ...msg, readAt: new Date(until).toISOString() };
+            }
+            return msg;
+        });
+    }, [currentUser.id]);
 
     const directoryUsers = useMattermost && mmPeers.length > 0 ? mmPeers : users;
 
@@ -166,25 +189,33 @@ export const MessagingBar: React.FC<MessagingBarProps> = ({
                         avatarUrl: peer.avatarUrl,
                     }))
                 );
-                const incoming = data.messages || [];
+                const incoming = applyLocalReadState(data.messages || []);
                 const previousIds = knownIdsRef.current;
-                if (previousIds.size > 0) {
-                    for (const msg of incoming) {
-                        if (
-                            !previousIds.has(msg.id) &&
-                            msg.recipientId === currentUser.id &&
-                            !msg.readAt
-                        ) {
-                            const fromName =
-                                data.threads.find(t => t.partnerId === msg.senderId)?.partnerName ||
-                                'Un usuario';
-                            onNewMessageRef.current?.(fromName);
-                            setHidden(false);
-                            setExpanded(true);
-                            setActivePartnerId(msg.senderId);
-                        }
+                if (mmInitializedRef.current) {
+                    const newestIncoming = incoming
+                        .filter(
+                            msg =>
+                                !previousIds.has(msg.id) &&
+                                msg.senderId !== currentUser.id &&
+                                msg.recipientId === currentUser.id
+                        )
+                        .sort(
+                            (a, b) =>
+                                Date.parse(b.createdAt) - Date.parse(a.createdAt)
+                        )[0];
+                    if (newestIncoming) {
+                        const fromName =
+                            data.threads.find(t => t.partnerId === newestIncoming.senderId)?.partnerName ||
+                            userNameById.get(newestIncoming.senderId) ||
+                            'Un usuario';
+                        onNewMessageRef.current?.(fromName);
+                        unhideChat();
+                        setExpanded(true);
+                        setActivePartnerId(newestIncoming.senderId);
+                        markedReadPartnersRef.current.delete(newestIncoming.senderId);
                     }
                 }
+                mmInitializedRef.current = true;
                 knownIdsRef.current = new Set(incoming.map(m => m.id));
                 setMessages(incoming);
                 return;
@@ -201,7 +232,7 @@ export const MessagingBar: React.FC<MessagingBarProps> = ({
             console.warn('No se pudo cargar mensajería:', err);
             setAvailable(false);
         }
-    }, [currentUser.id, useMattermost]);
+    }, [currentUser.id, useMattermost, applyLocalReadState, unhideChat]);
 
     useEffect(() => {
         void loadMessages();
@@ -269,27 +300,30 @@ export const MessagingBar: React.FC<MessagingBarProps> = ({
 
     useEffect(() => {
         if (!expanded || !activePartnerId) return;
-        const unreadIds = conversationMessages
-            .filter(m => m.recipientId === currentUser.id && !m.readAt)
-            .map(m => m.id);
-        if (unreadIds.length === 0) return;
+
+        const latestIncoming = conversationMessages
+            .filter(m => m.senderId === activePartnerId)
+            .reduce((max, msg) => Math.max(max, Date.parse(msg.createdAt) || 0), 0);
+        readUntilRef.current.set(activePartnerId, Math.max(Date.now(), latestIncoming));
+
+        const unread = conversationMessages.filter(
+            m => m.recipientId === currentUser.id && !m.readAt
+        );
+        if (unread.length > 0) {
+            setMessages(prev => applyLocalReadState(prev));
+        }
+
+        if (markedReadPartnersRef.current.has(activePartnerId)) return;
+        markedReadPartnersRef.current.add(activePartnerId);
 
         const mark = useMattermost
             ? mattermostChatApi.markRead(activePartnerId)
-            : userMessagesApi.markAsRead(unreadIds, currentUser.id);
+            : userMessagesApi.markAsRead(unread.map(m => m.id), currentUser.id);
 
-        void mark.then(() => {
-            setMessages(prev =>
-                prev.map(m =>
-                    unreadIds.includes(m.id)
-                        ? { ...m, readAt: m.readAt || new Date().toISOString() }
-                        : m
-                )
-            );
-        }).catch(err => {
+        void mark.catch(err => {
             console.warn('No se pudo marcar leído:', err);
         });
-    }, [expanded, activePartnerId, conversationMessages, currentUser.id, useMattermost]);
+    }, [expanded, activePartnerId, conversationMessages, currentUser.id, useMattermost, applyLocalReadState]);
 
     useEffect(() => {
         if (expanded && activePartnerId) {

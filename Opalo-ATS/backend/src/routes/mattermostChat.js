@@ -245,6 +245,27 @@ async function openDirectChannel(req) {
     return { me, channel, partner };
 }
 
+async function markDirectChannelRead(token, userId, channelId) {
+    await mmFetch(token, '/api/v4/channels/members/me/view', {
+        method: 'POST',
+        body: JSON.stringify({
+            channel_id: channelId,
+            prev_channel_id: '',
+            collapsed_threads_supported: true,
+        }),
+    });
+    const posts = await getChannelPosts(token, channelId, 60);
+    const now = Date.now();
+    const threadIds = [...new Set(posts.map((post) => post.root_id || post.id).filter(Boolean))];
+    await Promise.all(
+        threadIds.map((threadId) =>
+            mmFetch(token, `/api/v4/users/${userId}/threads/${threadId}/read/${now}`, {
+                method: 'PUT',
+            }).catch(() => null),
+        ),
+    );
+}
+
 router.post('/dms', async (req, res) => {
     const token = requireToken(req, res);
     if (!token) return;
@@ -294,11 +315,8 @@ router.post('/read', async (req, res) => {
     const token = requireToken(req, res);
     if (!token) return;
     try {
-        const { channel } = await openDirectChannel(req);
-        await mmFetch(token, '/api/v4/channels/members/me/view', {
-            method: 'POST',
-            body: JSON.stringify({ channel_id: channel.id, prev_channel_id: '' }),
-        });
+        const { me, channel } = await openDirectChannel(req);
+        await markDirectChannelRead(token, me.id, channel.id);
         res.json({ ok: true, channelId: channel.id });
     } catch (error) {
         console.error('Error marcando leído Mattermost:', error);
