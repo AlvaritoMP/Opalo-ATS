@@ -126,6 +126,11 @@ export const usersApi = {
         const dbData = userToDb({ ...userData, email });
         dbData.id = crypto.randomUUID();
         dbData.app_name = APP_NAME;
+        // Sin clave local: el usuario entra con Mattermost. Guardamos un valor
+        // inutilizable para no dejar password_hash vacío ni adivinable.
+        if (!dbData.password_hash) {
+            dbData.password_hash = `local-disabled:${crypto.randomUUID()}`;
+        }
 
         const { data, error } = await supabase
             .from('users')

@@ -1,14 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { MessageCircle, X, ChevronUp, ChevronDown, Send, Minimize2 } from 'lucide-react';
-import { supabase } from '../lib/supabase';
-import { userMessagesApi } from '../lib/api/userMessages';
 import { mattermostChatApi } from '../lib/api/mattermostChat';
 import { hasMattermostSession } from '../lib/mattermostSession';
 import { logUserActivitySafe } from '../lib/api/userActivity';
 import type { User, UserMessage } from '../types';
 
 const STORAGE_KEY_PREFIX = 'ats_messaging_hidden_';
-const POLL_LOCAL_MS = 60_000;
 const POLL_MM_MS = 5_000;
 const POLL_MM_OPEN_MS = 4_000;
 
@@ -48,7 +45,6 @@ export const MessagingBar: React.FC<MessagingBarProps> = ({
     onNewMessage,
     onSendError,
 }) => {
-    const useMattermost = hasMattermostSession();
     const [messages, setMessages] = useState<UserMessage[]>([]);
     const [mmPeers, setMmPeers] = useState<User[]>([]);
     const [expanded, setExpanded] = useState(false);
@@ -63,7 +59,7 @@ export const MessagingBar: React.FC<MessagingBarProps> = ({
     const [draft, setDraft] = useState('');
     const [sending, setSending] = useState(false);
     const [available, setAvailable] = useState(true);
-    const [backendLabel, setBackendLabel] = useState(useMattermost ? 'Mattermost' : 'Mensajes');
+    const mmEnabled = hasMattermostSession();
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const knownIdsRef = useRef<Set<string>>(new Set());
     const mmInitializedRef = useRef(false);
@@ -94,11 +90,11 @@ export const MessagingBar: React.FC<MessagingBarProps> = ({
         });
     }, [currentUser.id]);
 
-    const directoryUsers = useMattermost && mmPeers.length > 0 ? mmPeers : users;
+    const directoryUsers = mmPeers.length > 0 ? mmPeers : users;
 
     const otherUsers = useMemo(
-        () => directoryUsers.filter(u => u.id !== currentUser.id && (!useMattermost || Boolean(u.mattermostUserId))),
-        [directoryUsers, currentUser.id, useMattermost]
+        () => directoryUsers.filter(u => u.id !== currentUser.id && Boolean(u.mattermostUserId)),
+        [directoryUsers, currentUser.id]
     );
 
     const userNameById = useMemo(() => {
@@ -107,28 +103,6 @@ export const MessagingBar: React.FC<MessagingBarProps> = ({
         map.set(currentUser.id, currentUser.name);
         return map;
     }, [directoryUsers, currentUser]);
-
-    const mergeIncomingMessage = useCallback((msg: UserMessage) => {
-        setMessages(prev => {
-            if (prev.some(m => m.id === msg.id)) return prev;
-            return [...prev, msg];
-        });
-
-        if (msg.recipientId === currentUser.id) {
-            const fromName = userNameById.get(msg.senderId) || 'Un usuario';
-            setHidden(prevHidden => {
-                if (prevHidden) {
-                    try {
-                        localStorage.removeItem(`${STORAGE_KEY_PREFIX}${currentUser.id}`);
-                    } catch { /* ignore */ }
-                }
-                return false;
-            });
-            setExpanded(true);
-            setActivePartnerId(msg.senderId);
-            onNewMessageRef.current?.(fromName);
-        }
-    }, [currentUser.id, userNameById]);
 
     const threads = useMemo((): ThreadPreview[] => {
         const map = new Map<string, ThreadPreview>();
@@ -173,130 +147,67 @@ export const MessagingBar: React.FC<MessagingBarProps> = ({
     }, [messages, activePartnerId, currentUser.id]);
 
     const loadMessages = useCallback(async () => {
+        if (!mmEnabled) return;
         try {
-            if (useMattermost) {
-                const data = await mattermostChatApi.getDms();
-                setAvailable(true);
-                setBackendLabel('Mattermost');
-                setMmPeers(
-                    (data.peers || []).map(peer => ({
-                        id: peer.id,
-                        name: peer.name,
-                        email: peer.email,
-                        role: 'recruiter',
-                        mattermostUserId: peer.mattermostUserId,
-                        mattermostUsername: peer.mattermostUsername,
-                        avatarUrl: peer.avatarUrl,
-                    }))
-                );
-                const incoming = applyLocalReadState(data.messages || []);
-                const previousIds = knownIdsRef.current;
-                if (mmInitializedRef.current) {
-                    const newestIncoming = incoming
-                        .filter(
-                            msg =>
-                                !previousIds.has(msg.id) &&
-                                msg.senderId !== currentUser.id &&
-                                msg.recipientId === currentUser.id
-                        )
-                        .sort(
-                            (a, b) =>
-                                Date.parse(b.createdAt) - Date.parse(a.createdAt)
-                        )[0];
-                    if (newestIncoming) {
-                        const fromName =
-                            data.threads.find(t => t.partnerId === newestIncoming.senderId)?.partnerName ||
-                            userNameById.get(newestIncoming.senderId) ||
-                            'Un usuario';
-                        onNewMessageRef.current?.(fromName);
-                        unhideChat();
-                        setExpanded(true);
-                        setActivePartnerId(newestIncoming.senderId);
-                        markedReadPartnersRef.current.delete(newestIncoming.senderId);
-                    }
+            const data = await mattermostChatApi.getDms();
+            setAvailable(true);
+            setMmPeers(
+                (data.peers || []).map(peer => ({
+                    id: peer.id,
+                    name: peer.name,
+                    email: peer.email,
+                    role: 'recruiter',
+                    mattermostUserId: peer.mattermostUserId,
+                    mattermostUsername: peer.mattermostUsername,
+                    avatarUrl: peer.avatarUrl,
+                }))
+            );
+            const incoming = applyLocalReadState(data.messages || []);
+            const previousIds = knownIdsRef.current;
+            if (mmInitializedRef.current) {
+                const newestIncoming = incoming
+                    .filter(
+                        msg =>
+                            !previousIds.has(msg.id) &&
+                            msg.senderId !== currentUser.id &&
+                            msg.recipientId === currentUser.id
+                    )
+                    .sort(
+                        (a, b) =>
+                            Date.parse(b.createdAt) - Date.parse(a.createdAt)
+                    )[0];
+                if (newestIncoming) {
+                    const fromName =
+                        data.threads.find(t => t.partnerId === newestIncoming.senderId)?.partnerName ||
+                        'Un usuario';
+                    onNewMessageRef.current?.(fromName);
+                    unhideChat();
+                    setExpanded(true);
+                    setActivePartnerId(newestIncoming.senderId);
+                    markedReadPartnersRef.current.delete(newestIncoming.senderId);
                 }
-                mmInitializedRef.current = true;
-                knownIdsRef.current = new Set(incoming.map(m => m.id));
-                setMessages(incoming);
-                return;
             }
-
-            const ok = await userMessagesApi.isAvailable();
-            setAvailable(ok);
-            setBackendLabel('Mensajes');
-            if (!ok) return;
-            const recent = await userMessagesApi.getRecent(currentUser.id, 150);
-            setMessages(recent);
-            knownIdsRef.current = new Set(recent.map(m => m.id));
+            mmInitializedRef.current = true;
+            knownIdsRef.current = new Set(incoming.map(m => m.id));
+            setMessages(incoming);
         } catch (err) {
-            console.warn('No se pudo cargar mensajería:', err);
+            console.warn('No se pudo cargar mensajería de Mattermost:', err);
             setAvailable(false);
         }
-    }, [currentUser.id, useMattermost, applyLocalReadState, unhideChat]);
+    }, [mmEnabled, currentUser.id, applyLocalReadState, unhideChat]);
 
     useEffect(() => {
         void loadMessages();
     }, [loadMessages]);
 
     useEffect(() => {
-        if (!available) return;
-
-        if (useMattermost) {
-            const ms = expanded ? POLL_MM_OPEN_MS : POLL_MM_MS;
-            const pollId = window.setInterval(() => {
-                void loadMessages();
-            }, ms);
-            return () => window.clearInterval(pollId);
-        }
-
-        const rowToMessage = (row: Record<string, unknown>): UserMessage => ({
-            id: row.id as string,
-            senderId: row.sender_id as string,
-            recipientId: row.recipient_id as string,
-            text: row.text as string,
-            readAt: (row.read_at as string) || undefined,
-            createdAt: row.created_at as string,
-        });
-
-        const channel = supabase
-            .channel(`user-messages-in-${currentUser.id}`)
-            .on(
-                'postgres_changes',
-                {
-                    event: 'INSERT',
-                    schema: 'public',
-                    table: 'user_messages',
-                    filter: `recipient_id=eq.${currentUser.id}`,
-                },
-                payload => {
-                    if (!payload.new) return;
-                    mergeIncomingMessage(rowToMessage(payload.new as Record<string, unknown>));
-                }
-            )
-            .subscribe();
-
+        if (!available || !mmEnabled) return;
+        const ms = expanded ? POLL_MM_OPEN_MS : POLL_MM_MS;
         const pollId = window.setInterval(() => {
-            void userMessagesApi.getRecent(currentUser.id, 150).then(recent => {
-                setMessages(prev => {
-                    const known = new Set(prev.map(m => m.id));
-                    const merged = [...prev];
-                    for (const msg of recent) {
-                        if (!known.has(msg.id)) merged.push(msg);
-                    }
-                    merged.sort(
-                        (a, b) =>
-                            new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
-                    );
-                    return merged;
-                });
-            });
-        }, POLL_LOCAL_MS);
-
-        return () => {
-            void supabase.removeChannel(channel);
-            window.clearInterval(pollId);
-        };
-    }, [available, currentUser.id, mergeIncomingMessage, useMattermost, expanded, loadMessages]);
+            void loadMessages();
+        }, ms);
+        return () => window.clearInterval(pollId);
+    }, [available, mmEnabled, expanded, loadMessages]);
 
     useEffect(() => {
         if (!expanded || !activePartnerId) return;
@@ -316,14 +227,10 @@ export const MessagingBar: React.FC<MessagingBarProps> = ({
         if (markedReadPartnersRef.current.has(activePartnerId)) return;
         markedReadPartnersRef.current.add(activePartnerId);
 
-        const mark = useMattermost
-            ? mattermostChatApi.markRead(activePartnerId)
-            : userMessagesApi.markAsRead(unread.map(m => m.id), currentUser.id);
-
-        void mark.catch(err => {
+        void mattermostChatApi.markRead(activePartnerId).catch(err => {
             console.warn('No se pudo marcar leído:', err);
         });
-    }, [expanded, activePartnerId, conversationMessages, currentUser.id, useMattermost, applyLocalReadState]);
+    }, [expanded, activePartnerId, conversationMessages, currentUser.id, applyLocalReadState]);
 
     useEffect(() => {
         if (expanded && activePartnerId) {
@@ -335,9 +242,7 @@ export const MessagingBar: React.FC<MessagingBarProps> = ({
         if (!activePartnerId || !draft.trim() || sending) return;
         setSending(true);
         try {
-            const sent = useMattermost
-                ? await mattermostChatApi.send(activePartnerId, draft)
-                : await userMessagesApi.send(currentUser.id, activePartnerId, draft);
+            const sent = await mattermostChatApi.send(activePartnerId, draft);
             const normalized: UserMessage = {
                 ...sent,
                 senderId: sent.senderId || currentUser.id,
@@ -379,18 +284,15 @@ export const MessagingBar: React.FC<MessagingBarProps> = ({
         } catch { /* ignore */ }
     };
 
-    if (!available) {
-        if (useMattermost) {
-            return (
-                <div className="fixed bottom-4 right-4 z-[45] max-w-xs bg-white border border-amber-200 text-amber-800 text-xs rounded-lg shadow px-3 py-2">
-                    No se pudo conectar el chat de Mattermost. Recarga o vuelve a entrar con Mattermost.
-                </div>
-            );
-        }
-        return null;
-    }
+    if (!mmEnabled) return null;
 
-    if (!useMattermost && otherUsers.length === 0) return null;
+    if (!available) {
+        return (
+            <div className="fixed bottom-4 right-4 z-[45] max-w-xs bg-white border border-amber-200 text-amber-800 text-xs rounded-lg shadow px-3 py-2">
+                No se pudo conectar el chat de Mattermost. Recarga o vuelve a entrar con Mattermost.
+            </div>
+        );
+    }
 
     if (hidden) {
         return (
@@ -434,7 +336,7 @@ export const MessagingBar: React.FC<MessagingBarProps> = ({
                             <span className="text-sm font-medium truncate">
                                 {activePartnerId
                                     ? userNameById.get(activePartnerId) || 'Chat'
-                                    : backendLabel}
+                                    : 'Mattermost'}
                             </span>
                             {totalUnread > 0 && !activePartnerId && (
                                 <span className="bg-red-500 text-xs rounded-full px-1.5 py-0.5">
@@ -586,7 +488,7 @@ export const MessagingBar: React.FC<MessagingBarProps> = ({
                 >
                     <div className="flex items-center gap-2 text-gray-700">
                         <MessageCircle className="w-4 h-4 text-primary-600" />
-                        <span className="font-medium">{backendLabel}</span>
+                        <span className="font-medium">Mattermost</span>
                         {totalUnread > 0 && (
                             <span className="bg-red-500 text-white text-xs rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1">
                                 {totalUnread > 9 ? '9+' : totalUnread}

@@ -44,7 +44,12 @@ export const Users: React.FC = () => {
     return (
         <div className="p-4 md:p-8 h-full flex flex-col overflow-hidden">
             <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center mb-4 md:mb-8 gap-3 sm:gap-4">
-                <h1 className="text-2xl md:text-3xl font-bold text-gray-800">{getLabel('sidebar_users', 'Gestión de usuarios')}</h1>
+                <div>
+                    <h1 className="text-2xl md:text-3xl font-bold text-gray-800">{getLabel('sidebar_users', 'Gestión de usuarios')}</h1>
+                    <p className="text-sm text-gray-500 mt-1">
+                        Cree al usuario con el mismo correo de Mattermost. No necesita su clave: se vincula al primer ingreso.
+                    </p>
+                </div>
                 {isAdmin && (
                     <button
                         onClick={handleAddNew}
@@ -58,11 +63,12 @@ export const Users: React.FC = () => {
             <div className="flex-1 overflow-hidden flex flex-col">
                 <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden flex-1 flex flex-col min-h-0">
                     <div className="overflow-x-auto overflow-y-auto flex-1">
-                        <table className="w-full text-sm text-left text-gray-500 min-w-[700px]">
+                        <table className="w-full text-sm text-left text-gray-500 min-w-[820px]">
                             <thead className="text-xs text-gray-700 uppercase bg-gray-50 sticky top-0 z-10">
                                 <tr>
                                     <th scope="col" className="px-3 md:px-6 py-3">Usuario</th>
                                     <th scope="col" className="px-3 md:px-6 py-3">Email</th>
+                                    <th scope="col" className="px-3 md:px-6 py-3">Mattermost</th>
                                     <th scope="col" className="px-3 md:px-6 py-3">Rol</th>
                                     <th scope="col" className="px-3 md:px-6 py-3">Permisos</th>
                                     <th scope="col" className="px-3 md:px-6 py-3"><span className="sr-only">Acciones</span></th>
@@ -86,6 +92,15 @@ export const Users: React.FC = () => {
                                             </div>
                                         </th>
                                         <td className="px-3 md:px-6 py-4 text-xs md:text-sm">{user.email}</td>
+                                        <td className="px-3 md:px-6 py-4 text-xs md:text-sm">
+                                            {user.mattermostUsername || user.mattermostUserId ? (
+                                                <span className="text-emerald-700">
+                                                    @{user.mattermostUsername || 'vinculado'}
+                                                </span>
+                                            ) : (
+                                                <span className="text-amber-700">Pendiente del primer ingreso</span>
+                                            )}
+                                        </td>
                                         <td className="px-3 md:px-6 py-4">
                                             <span className={`px-2 py-1 text-xs font-medium rounded-full capitalize ${getRoleBadgeColor(user.role)}`}>
                                                 {user.role}

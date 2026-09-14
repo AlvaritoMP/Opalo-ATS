@@ -266,7 +266,7 @@ export const UserEditorModal: React.FC<UserEditorModalProps> = ({ user, onClose 
         e.preventDefault();
 
         if (password !== confirmPassword) {
-            alert("Passwords do not match.");
+            alert('Las contraseñas locales no coinciden.');
             return;
         }
 
@@ -288,10 +288,6 @@ export const UserEditorModal: React.FC<UserEditorModalProps> = ({ user, onClose 
             if (user) {
                 await actions.updateUser({ ...user, ...userData });
             } else {
-                if (!password) {
-                    alert("Password is required for new users.");
-                    return;
-                }
                 await actions.addUser(userData as Omit<User, 'id'>);
             }
             onClose();
@@ -353,7 +349,7 @@ export const UserEditorModal: React.FC<UserEditorModalProps> = ({ user, onClose 
                             />
                         </div>
                         <div>
-                            <label htmlFor="email" className="block text-sm font-medium text-gray-700">Correo electrónico</label>
+                            <label htmlFor="email" className="block text-sm font-medium text-gray-700">Correo electrónico (el mismo de Mattermost)</label>
                             <input
                                 type="email"
                                 id="email"
@@ -362,6 +358,9 @@ export const UserEditorModal: React.FC<UserEditorModalProps> = ({ user, onClose 
                                 required
                                 className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm"
                             />
+                            <p className="mt-1 text-xs text-gray-500">
+                                No necesitas la clave de Mattermost. Crea el usuario aquí con este correo; al pulsar <strong>Entrar con Mattermost</strong> se vincula solo.
+                            </p>
                         </div>
                         <div>
                             <label htmlFor="role" className="block text-sm font-medium text-gray-700">Rol</label>
@@ -602,25 +601,27 @@ export const UserEditorModal: React.FC<UserEditorModalProps> = ({ user, onClose 
                             )}
                         </div>
                         <div>
-                            <label htmlFor="password"className="block text-sm font-medium text-gray-700">Contraseña</label>
+                            <label htmlFor="password" className="block text-sm font-medium text-gray-700">Contraseña local de emergencia (opcional)</label>
                             <input
                                 type="password"
                                 id="password"
                                 value={password}
                                 onChange={e => setPassword(e.target.value)}
-                                required={!user} // Required only for new users
-                                placeholder={user ? "Leave blank to keep current password" : ""}
+                                placeholder={user ? 'Dejar en blanco para no cambiarla' : 'Opcional. No es la clave de Mattermost'}
                                 className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm"
                             />
+                            <p className="mt-1 text-xs text-gray-500">
+                                El ingreso normal es con Mattermost. Esta clave solo sirve para el “Acceso local de emergencia” si Mattermost está caído. El chat no funciona en ese modo.
+                            </p>
                         </div>
                         <div>
-                            <label htmlFor="confirmPassword"className="block text-sm font-medium text-gray-700">Confirmar contraseña</label>
+                            <label htmlFor="confirmPassword" className="block text-sm font-medium text-gray-700">Confirmar contraseña local</label>
                             <input
                                 type="password"
                                 id="confirmPassword"
                                 value={confirmPassword}
                                 onChange={e => setConfirmPassword(e.target.value)}
-                                required={!user || !!password} // Required if it's a new user or if password is being changed
+                                required={!!password}
                                 className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm"
                             />
                         </div>

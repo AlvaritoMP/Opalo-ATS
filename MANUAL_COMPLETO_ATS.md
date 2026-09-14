@@ -1,776 +1,860 @@
-# Manual completo — Opalo ATS
+# 🗂️ Manual de Opalo ATS
 
-**Versión:** 2.0  
-**Fecha:** Junio 2026  
-**Producto:** Opalo ATS (Applicant Tracking System)
+> **Producto:** Opalo ATS — Applicant Tracking System  
+> **Versión del manual:** 3.0 · septiembre 2026  
+> **Para:** consultores, clientes, consulta y administradores  
+> **Cómo leer:** use el índice, salte a su rol y abra solo el módulo que necesita.
 
-Este documento describe el funcionamiento completo del sistema: qué hace cada sección, cada botón y cada opción, según el rol del usuario. Complementa los manuales anteriores (`MANUAL_USUARIO.md`, `MANUAL_SUPER_ADMIN.md`, `MANUAL_USUARIO_CLIENTE.md`) con las funcionalidades actuales del código.
+---
+
+## Cómo pegar este documento en Notion
+
+1. Cree una página nueva y póngale icono `🗂️` (o el logo de Opalo).
+2. Pegue este Markdown. Notion conservará títulos, tablas, listas y diagramas.
+3. Opcional, para que se vea como wiki: convierta los bloques `>` en **Callout** (`/` → Callout) y los títulos largos en **Toggle heading**.
+4. En la página, active **Table of contents** (bloque Índice) al inicio.
+
+> 💡 **Tip visual:** un callout azul para “quién puede”, amarillo para advertencias y verde para flujos recomendados. Este archivo ya usa esas convenciones con emojis.
 
 ---
 
 ## Índice
 
-1. [¿Qué es Opalo ATS?](#1-qué-es-opalo-ats)
-2. [Acceso e interfaz general](#2-acceso-e-interfaz-general)
-3. [Roles, permisos y secciones visibles](#3-roles-permisos-y-secciones-visibles)
-4. [Panel (Dashboard)](#4-panel-dashboard)
-5. [Procesos (reclutamiento Kanban)](#5-procesos-reclutamiento-kanban)
-6. [Procesos masivos (tabla de alto volumen)](#6-procesos-masivos-tabla-de-alto-volumen)
-7. [Candidatos](#7-candidatos)
-8. [Archivados](#8-archivados)
-9. [Formularios (integraciones)](#9-formularios-integraciones)
-10. [Cartas](#10-cartas)
-11. [Calendario](#11-calendario)
-12. [Reportes](#12-reportes)
-13. [Comparador](#13-comparador)
-14. [Importación masiva](#14-importación-masiva)
-15. [Envíos OpsFlow](#15-envíos-opsflow)
-16. [Usuarios (solo administradores)](#16-usuarios-solo-administradores)
-17. [Configuración (solo administradores)](#17-configuración-solo-administradores)
-18. [Google Drive y archivos](#18-google-drive-y-archivos)
-19. [Flujos de trabajo recomendados](#19-flujos-de-trabajo-recomendados)
-20. [Preguntas frecuentes](#20-preguntas-frecuentes)
+1. [Mapa del producto](#1-mapa-del-producto)
+2. [Qué hay de nuevo](#2-qué-hay-de-nuevo)
+3. [Acceso e interfaz](#3-acceso-e-interfaz)
+4. [Roles y permisos](#4-roles-y-permisos)
+5. [Panel](#5-panel)
+6. [Inteligencia](#6-inteligencia)
+7. [Procesos (Kanban)](#7-procesos-kanban)
+8. [Procesos masivos](#8-procesos-masivos)
+9. [Candidatos y ficha](#9-candidatos-y-ficha)
+10. [Archivados](#10-archivados)
+11. [Formularios](#11-formularios)
+12. [Cartas](#12-cartas)
+13. [Calendario](#13-calendario)
+14. [Reportes](#14-reportes)
+15. [Comparador](#15-comparador)
+16. [Importación](#16-importación)
+17. [Envíos OpsFlow](#17-envíos-opsflow)
+18. [Actividad de usuarios](#18-actividad-de-usuarios)
+19. [Usuarios](#19-usuarios)
+20. [Configuración](#20-configuración)
+21. [Google Drive](#21-google-drive)
+22. [Avisos y mensajes](#22-avisos-y-mensajes)
+23. [Flujos recomendados](#23-flujos-recomendados)
+24. [Preguntas frecuentes](#24-preguntas-frecuentes)
+25. [Guía rápida por rol](#25-guía-rápida-por-rol)
 
 ---
 
-## 1. ¿Qué es Opalo ATS?
+## 1. Mapa del producto
 
-Opalo ATS es un sistema de seguimiento de candidatos (Applicant Tracking System) para gestionar reclutamiento de punta a punta:
+Opalo ATS gestiona el reclutamiento de punta a punta: vacantes, postulantes, contacto, entrevistas, documentos y entrega a operación.
 
-| Capacidad | Descripción |
-|-----------|-------------|
-| **Procesos normales** | Tablero Kanban por etapas (arrastrar candidatos). |
-| **Procesos masivos** | Tabla editable tipo hoja de cálculo para miles de postulantes. |
-| **Candidatos** | Ficha completa, documentos, entrevistas, comentarios, historial. |
-| **Integraciones** | Formularios externos (Tally, Google Forms, etc.) que crean candidatos automáticamente. |
-| **Cartas y reportes** | Generación de documentos Word/PDF con datos del candidato. |
-| **OpsFlow** | Envío de candidatos contratados o seleccionados hacia el sistema OpsFlow. |
-| **Google Drive** | Almacenamiento de adjuntos, cartas y reportes en carpetas organizadas. |
+```mermaid
+flowchart LR
+  A[Formulario / Excel / CV / alta manual] --> B[Proceso]
+  B --> C{Tipo}
+  C -->|Pocos postulantes| D[Tablero Kanban]
+  C -->|Alto volumen| E[Tabla masiva]
+  D --> F[Entrevista y documentos]
+  E --> F
+  F --> G[Contratado]
+  G --> H[Carta / OpsFlow]
+```
 
-Los datos viven en **Supabase** (base de datos). Los archivos pueden guardarse en Google Drive (recomendado) o en almacenamiento local embebido en la base de datos.
-
----
-
-## 2. Acceso e interfaz general
-
-### 2.1 Iniciar sesión
-
-1. Abra la URL de la aplicación (proporcionada por su administrador).
-2. Ingrese **correo electrónico** y **contraseña**.
-3. Pulse **Iniciar sesión**.
-4. Si olvidó la contraseña, contacte al administrador (no hay recuperación automática en la app).
-
-### 2.2 Menú lateral (sidebar)
-
-El menú izquierdo muestra solo las secciones que su usuario tiene habilitadas. Orden habitual:
-
-| Ícono / sección | Nombre por defecto | Función |
-|-----------------|-------------------|---------|
-| Cuadrícula | **Panel** | Estadísticas y gráficos. |
-| Maletín | **Procesos** | Procesos Kanban normales. |
-| Cuadrícula 3×3 | **Procesos Masivos** | Tablas de reclutamiento masivo. |
-| Archivo | **Archivados** | Candidatos archivados. |
-| Personas | **Candidatos** | Listado global de candidatos. |
-| Enviar | **Envíos OpsFlow** | Historial de paquetes enviados a OpsFlow. |
-| Documento | **Formularios** | Integraciones con formularios web. |
-| Documento | **Cartas** | Generador de cartas Word. |
-| Calendario | **Calendario** | Entrevistas y eventos. |
-| Gráfico | **Reportes** | Exportación y reportes. |
-| Gráfico | **Comparador** | Comparación visual de candidatos. |
-| Subir archivo | **Importación Masiva** | Importar candidatos desde Excel. |
-| Personas | **Usuarios** | Gestión de usuarios (admin). |
-| Engranaje | **Configuración** | Ajustes del sistema (admin). |
-
-**Pie del menú:**
-
-| Botón | Función |
-|-------|---------|
-| **Colapsar menú** (flechas ‹ ›) | Reduce el sidebar a solo iconos. |
-| **Actualizar** (icono refrescar) | Recarga procesos y candidatos desde el servidor. Útil si otro usuario hizo cambios. |
-| **Cerrar sesión** (icono salir) | Cierra la sesión actual. |
-| **POWERED BY** | Logo opcional configurado en Configuración. |
-
-En **móvil**, el botón **hamburguesa** (esquina superior izquierda) abre el menú; el overlay oscuro lo cierra al tocar fuera.
-
-### 2.3 Nombre y textos personalizados
-
-El administrador puede cambiar etiquetas del menú y pantallas en **Configuración → UI Labels** (por ejemplo, renombrar "Procesos" por "Vacantes").
+| Módulo | Para qué sirve | Quién lo usa más |
+|---|---|---|
+| **Panel** | KPIs del día a día | Todos |
+| **Inteligencia** | Vista ejecutiva de flujo y equipo | Admin |
+| **Procesos** | Vacantes con tablero Kanban | Consultor + cliente |
+| **Procesos masivos** | Campañas de miles de filas | Consultor |
+| **Candidatos** | Listado global y ficha | Todos |
+| **Cartas / Comparador / Reportes** | Salidas para cliente o legal | Consultor + cliente |
+| **OpsFlow** | Entrega de seleccionados a operación | Consultor + admin |
+| **Actividad / Usuarios / Configuración** | Gobierno del sistema | Admin |
 
 ---
 
-## 3. Roles, permisos y secciones visibles
+## 2. Qué hay de nuevo
 
-### 3.1 Roles predeterminados
+Respecto al manual de junio 2026:
 
-| Rol | Descripción breve |
-|-----|-------------------|
-| **admin** | Acceso total: usuarios, configuración, Google Drive, todos los módulos. |
-| **recruiter** (Reclutador) | Gestión operativa de procesos, candidatos, formularios, cartas, masivos y OpsFlow. Sin usuarios ni configuración global. |
-| **client** (Cliente) | Ve procesos y candidatos visibles para cliente; puede mover candidatos en el tablero; no crea ni elimina. |
-| **viewer** (Consulta) | Solo lectura en las secciones que tenga visibles. |
-
-### 3.2 Secciones visibles por defecto
-
-| Sección | admin | recruiter | client | viewer |
-|---------|:-----:|:---------:|:------:|:------:|
-| Panel | ✓ | ✓ | ✓ | ✓ |
-| Procesos | ✓ | ✓ | ✓ | ✓ |
-| Procesos Masivos | ✓ | ✓ | — | — |
-| Archivados | ✓ | ✓ | — | — |
-| Candidatos | ✓ | ✓ | ✓ | ✓ |
-| Envíos OpsFlow | ✓ | ✓ | — | — |
-| Formularios | ✓ | ✓ | — | — |
-| Cartas | ✓ | ✓ | — | — |
-| Calendario | ✓ | ✓ | ✓ | ✓ |
-| Reportes | ✓ | ✓ | ✓ | ✓ |
-| Comparador | ✓ | ✓ | ✓ | — |
-| Importación Masiva | ✓ | ✓ | — | — |
-| Usuarios | ✓ | — | — | — |
-| Configuración | ✓ | — | — | — |
-
-El administrador puede **personalizar** secciones y permisos por usuario al crearlo o editarlo.
-
-### 3.3 Permisos granulares (por categoría)
-
-Al editar un usuario se pueden activar permisos personalizados:
-
-| Categoría | Permisos disponibles |
-|-----------|---------------------|
-| **Procesos** | Ver, Crear, Editar, Eliminar |
-| **Candidatos** | Ver, Crear, Editar, Eliminar, Archivar, Exportar |
-| **Calendario** | Ver, Crear, Editar, Eliminar |
-| **Reportes** | Ver, Exportar |
-| **Usuarios** | Ver, Crear, Editar, Eliminar |
-| **Configuración** | Ver, Editar |
-| **Cartas** | Ver, Crear, Descargar |
-| **Comparador** | Ver, Exportar |
-| **Formularios** | Ver, Editar |
-
-### 3.4 Restricción por cliente
-
-Un usuario puede limitarse a **clientes específicos** (razón social / RUC configurados en Configuración). Solo verá procesos (normales o masivos) asignados a esos clientes.
-
-### 3.5 Visibilidad para clientes externos
-
-En la ficha del candidato existe el interruptor **Visible para clientes**. Los usuarios con rol **client** o **viewer** solo ven candidatos con esta opción activada (en listados y tableros filtrados).
+| Novedad | Dónde se ve |
+|---|---|
+| **Inteligencia** | Menú → Inteligencia (solo admin) |
+| **Actividad de usuarios** | Pie del menú → Actividad (solo admin) |
+| **Estados extra de proceso** | En Proceso · Stand By · Terminado · **Cancelado** · **Trunco** |
+| **Finalizar proceso** | Elige Terminado / Cancelado / Trunco |
+| **Modo tabla** | Desde un proceso Kanban, vista de alta densidad |
+| **Importar CVs** | En el tablero del proceso |
+| **Avisos** | Campana junto a Cerrar sesión |
+| **Chat Mattermost** | Barra **Mattermost** (mismos DMs que la app de escritorio) |
+| **Panel de fidelización** | En procesos masivos (llamadas, WhatsApp, correo) |
+| **Trasladar candidatos** | Mover o duplicar entre procesos masivos |
+| **Perfil ideal, Score IA, psicolaboral, rutas** | Herramientas de la tabla masiva |
+| **Login y chat con Mattermost** | **Entrar con Mattermost**; la barra de mensajes es el mismo DM de Mattermost |
 
 ---
 
-## 4. Panel (Dashboard)
+## 3. Acceso e interfaz
+
+### Iniciar sesión
+
+1. Abra la URL que le entregó su administrador.
+2. Pulse **Entrar con Mattermost**.
+3. Inicie sesión en Mattermost (mismo correo con el que existe en el ATS).
+4. Autorice Opalo ATS. Vuelve solo al ATS.
+
+La app de escritorio de Mattermost **no** inicia sesión en el navegador: son sesiones distintas.
+
+> ⚠️ El alta en el ATS la hace un admin en **Usuarios**, con el **mismo correo** que en Mattermost. No hace falta conocer la clave de Mattermost: se vincula en el primer ingreso.
+>
+> El **Acceso local de emergencia** (correo + clave local) es solo si Mattermost está caído. Esa clave no es la de Mattermost y **no abre el chat**.
+>
+> Si olvidó la clave de Mattermost, recupérela en Mattermost. El admin no la conoce ni la guarda.
+
+### Menú lateral
+
+El menú solo muestra las secciones habilitadas para su usuario. El administrador puede renombrar etiquetas en **Configuración → UI Labels**.
+
+| Orden | Sección | Función |
+|---|---|---|
+| 1 | **Panel** | Estadísticas y gráficos |
+| 2 | **Inteligencia** | KPIs ejecutivos (admin) |
+| 3 | **Procesos** | Tablero Kanban |
+| 4 | **Procesos Masivos** | Tabla de alto volumen |
+| 5 | **Archivados** | Candidatos fuera del pipeline activo |
+| 6 | **Candidatos** | Listado global |
+| 7 | **Envíos OpsFlow** | Historial de paquetes enviados |
+| 8 | **Formularios** | Integraciones (Tally, Google Forms, etc.) |
+| 9 | **Cartas** | Documentos Word con campos dinámicos |
+| 10 | **Calendario** | Entrevistas |
+| 11 | **Reportes** | Exportación |
+| 12 | **Comparador** | Comparación visual |
+
+**Pie del menú (admin):** Actividad · Usuarios · Configuración
+
+**Siempre visibles en el pie:**
+
+| Control | Qué hace |
+|---|---|
+| **Colapsar** (‹ ›) | Deja solo iconos |
+| **Actualizar** | Recarga procesos y candidatos |
+| **Avisos** (campana) | Alertas de contacto y postulantes |
+| **Cerrar sesión** | Sale de la cuenta |
+| **POWERED BY** | Logo opcional de marca |
+
+En **móvil**, el botón hamburguesa (esquina superior izquierda) abre el menú.
+
+---
+
+## 4. Roles y permisos
+
+| Rol en pantalla | Código | Idea |
+|---|---|---|
+| **Admin (Edición)** | `admin` | Acceso total, gobierno e Inteligencia |
+| **Recruiter (Consultor)** | `recruiter` | Operación diaria de procesos y candidatos |
+| **Client (Cliente)** | `client` | Revisa y mueve candidatos visibles |
+| **Viewer (Consulta)** | `viewer` | Solo lectura |
+
+### Qué ve cada rol por defecto
+
+| Sección | Admin | Consultor | Cliente | Consulta |
+|---|:---:|:---:|:---:|:---:|
+| Panel | ✅ | ✅ | ✅ | ✅ |
+| Inteligencia | ✅ | — | — | — |
+| Procesos | ✅ | ✅ | ✅ | ✅ |
+| Procesos masivos | ✅ | ✅ | — | — |
+| Archivados | ✅ | ✅ | — | — |
+| Candidatos | ✅ | ✅ | ✅ | ✅ |
+| Envíos OpsFlow | ✅ | ✅ | — | — |
+| Formularios | ✅ | ✅ | — | — |
+| Cartas | ✅ | ✅ | — | — |
+| Calendario | ✅ | ✅ | ✅ | ✅ |
+| Reportes | ✅ | ✅ | ✅ | ✅ |
+| Comparador | ✅ | ✅ | ✅ | — |
+| Actividad | ✅ | — | — | — |
+| Usuarios | ✅ | — | — | — |
+| Configuración | ✅ | — | — | — |
+
+> 💡 El admin puede **personalizar** secciones y permisos por usuario. Además, puede limitar a un usuario a **clientes específicos** (razón social / RUC).
+
+### Permisos granulares
+
+Al crear o editar un usuario:
+
+| Categoría | Permisos |
+|---|---|
+| Procesos | Ver · Crear · Editar · Eliminar |
+| Candidatos | Ver · Crear · Editar · Eliminar · Archivar · Exportar |
+| Calendario | Ver · Crear · Editar · Eliminar |
+| Reportes | Ver · Exportar |
+| Usuarios | Ver · Crear · Editar · Eliminar |
+| Configuración | Ver · Editar |
+| Cartas y documentos | Ver · Crear · Descargar |
+| Comparador | Ver · Exportar |
+| Formularios | Ver · Editar |
+
+### Visibilidad para clientes
+
+En la ficha del candidato hay el interruptor **Visible para clientes/viewers**.
+
+Los roles **Cliente** y **Consulta** solo ven candidatos con esa opción activa (en listados, tablero, dashboard y comparador).
+
+El **Cliente** sí puede **arrastrar candidatos** entre etapas del Kanban. No puede crear, editar ni eliminar procesos o postulantes.
+
+---
+
+## 5. Panel
 
 **Menú → Panel**
 
-Vista analítica del estado del reclutamiento. Se actualiza con los datos cargados en sesión; use **Actualizar** en el menú si necesita datos en tiempo real.
+Vista analítica del reclutamiento. Use **Actualizar** en el menú o el botón de refresco del propio panel si necesita datos al momento.
 
-### 4.1 Tarjetas de resumen
+### Filtros
 
-Métricas típicas (pueden variar según configuración):
+| Filtro | Uso |
+|---|---|
+| **Tipo de proceso** | Todos / solo masivos / solo regulares |
+| **Proceso** | Una vacante concreta |
+| **Postulación desde / hasta** | Recorta por fecha de alta |
 
-- Total de procesos activos.
-- Total de candidatos.
-- Candidatos activos (no archivados).
-- Entrevistas próximas.
-- Métricas de procesos masivos (contacto, contrataciones, etc.).
+### Tarjetas de resumen
 
-### 4.2 Gráficos
+- Procesos activos (masivos vs regulares)
+- Candidatos en alcance
+- Descartados
+- Contratados
 
-| Gráfico | Qué muestra |
-|---------|-------------|
-| Candidatos por proceso | Distribución en cada vacante. |
-| Candidatos por fuente | LinkedIn, referido, sitio web, etc. |
-| Candidatos por etapa | Embudo del pipeline. |
-| Ubicación / distrito | Concentración geográfica. |
-| Edad | Distribución etaria. |
-| Contacto (masivos) | Intentos por canal (teléfono, email, WhatsApp), por consultor y tendencia diaria. |
-| Entrevistas | Estadísticas de agendamiento. |
-| Eficiencia | Tiempos entre publicación, postulación y contratación (cuando hay fechas registradas). |
+Más abajo hay bloques de **eficiencia**, **canales de atención** (llamadas, WhatsApp, correo), **generación de registros**, **agendamiento de citas**, fuentes, edad, ubicaciones y próximas entrevistas.
 
-Si no hay datos para los filtros activos, aparece el mensaje *"Sin datos para los filtros seleccionados"*.
-
-### 4.3 Filtros
-
-Permiten acotar estadísticas por período, proceso o consultor (según implementación en pantalla).
+> Si no hay datos para los filtros, verá *Sin datos para los filtros seleccionados*.
 
 ---
 
-## 5. Procesos (reclutamiento Kanban)
+## 6. Inteligencia
+
+**Menú → Inteligencia** · solo **admin**
+
+Vista ejecutiva del flujo de postulantes, el desempeño del equipo y la salud de la cartera.
+
+| Control | Qué hace |
+|---|---|
+| Periodo | Última semana · último mes · último año |
+| **Actualizar** | Recalcula KPIs y gráficos |
+| Filtro de estado | En la tabla de procesos |
+
+### KPIs
+
+| Tarjeta | Qué muestra |
+|---|---|
+| **Nuevos postulantes** | Ingresos del periodo y promedio diario |
+| **Llamadas del equipo** | Volumen y quién tiene mayor efectividad |
+| **Contrataciones** | Total y quién lidera |
+| **Cartera de procesos** | En proceso / Stand By / terminados |
+
+### Bloques
+
+- **Flujo diario de nuevos postulantes** — compara hasta 8 procesos con más ingreso.
+- **Desempeño por usuario** — llamadas, efectividad, interés, desistimientos y contrataciones.
+- **Tabla de procesos** — ordenable: nuevos/hora, desistimientos, traslados, conversión, tasa de contacto.
+
+---
+
+## 7. Procesos (Kanban)
 
 **Menú → Procesos**
 
-Gestiona **procesos normales** (no masivos): cada proceso es una vacante o proyecto de selección con etapas en columnas tipo Kanban.
+Cada proceso es una vacante con columnas = etapas. Los procesos marcados como masivos **no** aparecen aquí.
 
-### 5.1 Lista de procesos
+### Lista
 
-Cada tarjeta de proceso muestra:
+Cada tarjeta muestra flyer, título, estado, cantidad de candidatos, vacantes, fechas y una alerta ámbar si hay candidatos en **etapas críticas** sin revisar.
 
-- Imagen de portada (flyer).
-- Título y estado: **En Proceso**, **Stand By**, **Terminado**.
-- Cantidad de candidatos.
-- Vacantes y fechas.
-- Alerta ámbar si hay candidatos en **etapas críticas** sin revisar.
+**Filtros de estado**
 
-**Botones en la lista:**
-
-| Botón | Función |
-|-------|---------|
-| **Nuevo Proceso** | Abre el editor para crear un proceso vacío. |
-| **Buscar** | Filtra procesos por nombre. |
-| **Actualizar** (icono) | Recarga la lista desde el servidor. |
-| **Menú ⋮** (en cada tarjeta) | Ver tablero, Editar, Duplicar, Eliminar. |
-
-**Duplicar proceso:** copia configuración y etapas; los candidatos no se copian automáticamente.
-
-**Eliminar proceso:** borra el proceso y **todos sus candidatos** (acción irreversible). Confirme en el diálogo.
-
-### 5.2 Crear / editar proceso (modal)
-
-Campos principales:
-
-| Campo | Para qué sirve |
-|-------|----------------|
-| **Título** | Nombre visible del proceso (ej. "Analista contable"). |
-| **Descripción** | Detalle del puesto o requisitos. |
-| **Cliente** | Empresa cliente asociada (desde catálogo en Configuración). |
-| **Código OS** | Orden de servicio / código interno. |
-| **Rango salarial** | Referencia salarial (usa símbolo de moneda de Configuración). |
-| **Nivel de experiencia** | Junior, semi-senior, senior, etc. |
-| **Seniority** | Nivel jerárquico adicional. |
-| **Fechas** | Inicio, fin, publicación, identificación de necesidad. |
-| **Estado** | En proceso / Stand by / Terminado. |
-| **Vacantes** | Número de plazas a cubrir. |
-| **Flyer / imagen** | Portada de la tarjeta; se puede ajustar posición arrastrando en el editor de imagen. |
-| **Etapas** | Columnas del Kanban: nombre, color, orden (arrastrar ⋮⋮), marcar como **crítica** o **requerida para avanzar**. |
-| **Categorías de documentos** | Tipos de adjuntos obligatorios por etapa (CV, DNI, etc.). |
-| **Carpeta Google Drive** | Carpeta donde se guardan documentos del proceso y candidatos. |
-| **Adjuntos del proceso** | Documentos generales (bases, perfiles) subidos al proceso. |
-
-**Botones del modal:** Guardar, Cancelar, Agregar etapa, Agregar categoría, Subir adjunto, Seleccionar/crear carpeta en Drive.
-
-### 5.3 Vista tablero (board)
-
-Al abrir un proceso ve columnas = **etapas**. Cada candidato es una tarjeta.
-
-**Barra superior del tablero:**
+| Estado | Significado | ¿Genera alertas e indicadores? |
+|---|---|---|
+| 🟢 **En Proceso** | Operación activa | Sí |
+| 🟡 **Stand By** | Pausado; sigue visible y se puede trabajar | No |
+| ⚫ **Terminado** | Cerrado con contratados | No |
+| 🔴 **Cancelado** | No continúa y no se factura | No |
+| 🟠 **Trunco** | No continúa; facturación parcial | No |
 
 | Botón | Función |
-|-------|---------|
-| **← Volver** | Regresa a la lista de procesos. |
-| **Emitir cartas** | Solo si hay candidatos seleccionados (checkbox). Genera cartas masivas. |
-| **Comunicar** | Envía comunicación a seleccionados o abre comunicación masiva del proceso. |
-| **Comunicación masiva** | Mensaje/email al grupo del proceso. |
-| **Cerrar proceso** / **Gestionar contratados** | Si está terminado, gestiona quiénes quedaron contratados; si no, inicia cierre marcando contratados. |
-| **Ver documentos** | Adjuntos del proceso (contador entre paréntesis). |
-| **Editar proceso** | Abre el modal de edición. |
-| **Añadir candidato** | Formulario de alta manual. |
+|---|---|
+| **Nuevo Proceso** | Crea un proceso vacío |
+| **Buscar** | Filtra por nombre |
+| **Recargar** | Refresca la lista |
+| Menú **⋮** | Ver · Editar · Duplicar · Eliminar · Reactivar |
 
-**Chips informativos:** OS, seniority, salario, experiencia, rango de fechas, vacantes.
+> ⚠️ **Duplicar** copia configuración y etapas, no los candidatos. **Eliminar** borra el proceso y **todos** sus candidatos. No se puede deshacer.
 
-**Por columna (etapa):**
+### Crear / editar proceso
 
-| Control | Función |
-|---------|---------|
-| **Descargar** (icono en encabezado) | Exporta candidatos de esa etapa a Excel (.xlsx). |
-| **Contador** | Número de candidatos en la etapa. |
+| Campo | Para qué |
+|---|---|
+| Título, descripción | Nombre y detalle del puesto |
+| Cliente | Empresa del catálogo (Configuración) |
+| Código OS | Orden de servicio |
+| Rango salarial / experiencia / seniority | Referencia del perfil |
+| Fechas y vacantes | Planificación |
+| Estado | En proceso, Stand By, Terminado, Cancelado, Trunco |
+| Flyer | Portada; se puede ajustar la posición de la imagen |
+| Etapas | Nombre, color, orden; marcar **crítica** o **requerida para avanzar** |
+| Categorías de documentos | CV, DNI, etc. por etapa |
+| Carpeta Google Drive | Destino de adjuntos |
+| Adjuntos del proceso | Bases, perfiles, JD |
 
-**Mover candidatos:** arrastre la tarjeta a otra columna (requiere permiso de edición). El historial registra usuario y fecha.
+### Tablero
 
-### 5.4 Tarjeta de candidato en el tablero
+| Botón | Cuándo aparece | Función |
+|---|---|---|
+| **←** | Siempre | Vuelve a la lista |
+| **Performance** | Siempre | Informe de cobertura y desempeño |
+| **Emitir cartas** | Con candidatos seleccionados | Cartas masivas |
+| **Comunicar** | Con selección | Email / WhatsApp a esos candidatos |
+| **Comunicación masiva** | Admin / consultor | Mensaje al grupo del proceso |
+| **Finalizar proceso** | Si está operativo | Terminado / Cancelado / Trunco |
+| **Gestionar candidatos contratados** | Si está Terminado | Ajusta la lista de contratados |
+| **Ver documentos** | Admin / consultor | Adjuntos del proceso |
+| **Editar proceso** | Admin / consultor | Abre el editor |
+| **Reactivar a En Proceso** | Si no está activo | Vuelve a generar alertas e indicadores |
+| **Modo tabla** | Si el proceso lo soporta | Vista de alta densidad (tipo masivo) |
+| **Importar candidatos** | Proceso activo | Excel |
+| **Importar CVs** | Proceso activo | Alta desde archivos CV |
+| **Añadir candidato** | Proceso operativo | Alta manual |
+
+**Por columna:** contador y **Descargar** (Excel de esa etapa).
+
+**Mover candidatos:** arrastre la tarjeta. El historial guarda usuario y fecha. El sistema puede bloquear el movimiento si faltan documentos requeridos para la etapa destino.
+
+### Tarjeta en el tablero
 
 | Elemento | Función |
-|----------|---------|
-| **Checkbox** | Selecciona para cartas masivas o comunicación. |
-| **Clic en tarjeta** | Abre ficha completa (modal). |
-| **Post-it** (nota adhesiva) | Notas rápidas de color; el borde amarillo indica que hay notas. |
-| **X (descartar)** | Marca candidato como descartado con motivo. |
-| **Teléfono** | Copiar, llamar, WhatsApp mensaje, WhatsApp llamada (si está configurado en el proceso). |
+|---|---|
+| Checkbox | Selección para cartas o comunicación |
+| Clic | Abre la ficha |
+| Post-it | Notas de color; borde amarillo = hay notas |
+| Descartar | Marca descartado con motivo |
+| Teléfono | Copiar, llamar, WhatsApp mensaje / llamada |
 
-### 5.5 Cierre de proceso
+### Finalizar proceso
 
-Al **Cerrar proceso** selecciona qué candidatos fueron **contratados**. El proceso pasa a **Terminado** y se guardan los IDs de contratados. Luego puede usar **Gestionar candidatos contratados** para ajustar la lista.
+Al pulsar **Finalizar proceso** elija un desenlace:
+
+| Opción | Cuándo usarla |
+|---|---|
+| **Terminado** | Hubo contratados. Después selecciona los finalistas. |
+| **Cancelado** | El proceso no continúa y no se factura. |
+| **Trunco** | El proceso no continúa, pero hay facturación parcial. |
+
+Stand By, Cancelado y Trunco **siguen visibles** en la lista para consultarlos o reactivarlos. No disparan avisos ni cuentan en indicadores hasta volver a **En Proceso**.
 
 ---
 
-## 6. Procesos masivos (tabla de alto volumen)
+## 8. Procesos masivos
 
 **Menú → Procesos Masivos**
 
-Módulo para campañas con **miles de postulantes**: tabla editable, columnas personalizadas, contacto multicanal, rutas de transporte, perfil ideal, evaluación psicolaboral e integración OpsFlow.
+Para campañas de **alto volumen**: tabla editable, contactología, rutas, perfil ideal, evaluación psicolaboral y OpsFlow.
 
-> Los procesos marcados como masivos (`isBulkProcess`) **no** aparecen en Procesos normales; solo aquí.
+> Los procesos con marca masiva solo viven aquí, no en el Kanban.
 
-### 6.1 Lista de procesos masivos
+### Lista
 
-- Tarjetas con resumen del proceso masivo.
-- **Crear proceso masivo** abre editor específico (columnas, etapas, cliente, flyer, etc.).
-- Al entrar a un proceso se abre la **tabla principal**.
+- **Nuevo Proceso Masivo**
+- Mismos filtros de estado que procesos regulares
+- Stand By y cerrados siguen visibles; no generan alertas hasta reactivarlos
 
-### 6.2 Barra de herramientas de la tabla
+### Barra de la tabla
 
-| Botón / control | Función |
-|-----------------|---------|
-| **← Volver** | Lista de procesos masivos. |
-| **Editar proceso** | Configuración del proceso masivo. |
-| **Documentos del proceso** | Adjuntos compartidos del proceso. |
-| **Deshacer (Ctrl+Z)** | Revierte última edición de celdas (pila limitada). |
-| **Agregar columna** | Columna personalizada (texto, número, fecha, lista, etc.). |
-| **Editar columnas** | Renombrar, cambiar tipo, opciones de listas. |
-| **Plantillas de tabla** | Guardar/cargar diseño de columnas (orden, ocultas, fijadas). |
-| **Recuperar columnas** | Restaura layout desde respaldo local o plantilla **sin borrar candidatos**. |
-| **Configurar columnas** | Mostrar/ocultar, fijar columnas a la izquierda. |
-| **Añadir fila** | Nuevo candidato con campos básicos. |
-| **Importar** | Restaurar columnas desde Excel original o importar datos. |
-| **Exportar tabla** | Excel personalizado para el cliente. |
-| **Corregir mayúsculas** | Normaliza texto (ej. "CALLE Italia" → "Calle Italia"). |
-| **Calcular rutas** | Costo de transporte público (solo pendientes o forzar recálculo). |
-| **Recargar** | Refresca candidatos y columnas desde servidor. |
-| **Tarifas de transporte** | Edita precios de pasajes para estimación de rutas. |
-| **Estadísticas** | Gráficos por columnas del proceso. |
-| **Perfil ideal** | Define criterios y % de match por candidato. |
-| **Inventario psicolaboral** | Definiciones y plantillas de evaluación. |
-| **Evaluar masivo** | Cuadrícula de evaluación para varios candidatos. |
-| **Informe psicolaboral** | Genera PDF por candidato. |
-| **Filtro etapa** | Muestra solo candidatos en una etapa. |
-| **Buscar** | Texto libre en la tabla. |
-| **Pins de información** | Notas fijadas visibles en barra superior (comunicados internos). |
+Tres grupos:
 
-### 6.3 Columnas estándar (referencia)
+**Proceso**
 
-| Columna | Descripción |
-|---------|-------------|
-| Nombre, DNI, Email, Teléfono | Datos de contacto; doble clic para editar. |
-| Score IA | Puntuación automática (si viene de formulario/IA). |
-| Status | Estado de contacto (semáforo). |
-| Canales Email / WhatsApp / Llamada | Seguimiento de intentos de contacto. |
-| Fuente, Provincia, Distrito | Origen y ubicación. |
-| Fecha creación | Alta en el sistema. |
-| Próxima entrevista / Agendar | Citas; doble clic para editar o agendar. |
-| Etapa | Selector de etapa del pipeline masivo. |
-| Match perfil | % coincidencia con perfil ideal. |
-| Ruta / costo | Ruta en transporte público y costo estimado. |
-| Columnas personalizadas | Definidas por el reclutador. |
+| Botón | Función |
+|---|---|
+| Editar Proceso | Configuración, columnas, etapas, cliente, flyer |
+| Reactivar a En Proceso | Si estaba pausado o cerrado |
+| Documentos | Adjuntos compartidos |
 
-### 6.4 Interacción con la tabla
+**Tabla**
+
+| Botón | Función |
+|---|---|
+| Deshacer (`Ctrl+Z`) | Revierte ediciones de celdas |
+| Agregar columna | Texto, número, fecha, lista, etc. |
+| Gestionar columnas | Renombrar, tipo, opciones |
+| Plantillas | Guardar / cargar diseño |
+| Restaurar diseño | Recupera orden, ocultas y fijadas **sin borrar candidatos** |
+| Recuperar datos | Restaura valores desde el navegador o JSON |
+| Columnas | Mostrar, ocultar, fijar a la izquierda |
+| Añadir fila | Nuevo candidato |
+| Importar | Excel o CVs |
+| Exportar | Excel para el cliente |
+| Normalizar / corregir mayúsculas | Limpia texto |
+| Costos / recalcular rutas | Transporte público |
+| Actualizar | Recarga desde el servidor |
+
+**Herramientas**
+
+| Botón | Función |
+|---|---|
+| **Trasladar** | Mover o duplicar filas a otro proceso masivo |
+| Historial | Bitácora de cambios del proceso |
+| Panel fidelización | Rail de llamadas / WhatsApp / correo |
+| Mensajes contacto | Plantillas de email y WhatsApp |
+| Documentación | Plantillas Word por candidato |
+| Tarifas transporte | Precios de pasajes |
+| Estadísticas / Performance | Gráficos del proceso |
+| Perfil ideal | Criterios y % de match |
+| Inventario / Evaluar masivo / Informe psico. | Si el módulo psicolaboral está activo |
+
+También hay **pines de información** (notas fijadas en la barra) y **respuestas rápidas** / portapapeles.
+
+### Cómo trabajar la tabla
 
 | Acción | Cómo |
-|--------|------|
-| Editar celda | Doble clic o Enter. |
-| Selección múltiple | Ctrl+clic; Shift+arrastrar rango. |
-| Copiar / pegar | Ctrl+C / Ctrl+V (bloques como Excel). |
-| Color / comentario en celda | Clic derecho → menú contextual. |
-| Ancho de columna | Arrastrar borde del encabezado. |
-| Ver detalle | Doble clic en la fila (panel lateral). |
-| Aprobar / Rechazar / Eliminar | Botones en columna Acciones. |
+|---|---|
+| Editar celda | Doble clic o Enter |
+| Selección | `Ctrl`+clic · `Shift`+arrastrar |
+| Copiar / pegar | `Ctrl+C` / `Ctrl+V` (bloques tipo Excel) |
+| Color o comentario | Clic derecho |
+| Ancho de columna | Arrastrar el borde del encabezado |
+| Detalle | Doble clic en la fila (panel lateral) |
 
-**Hint en pantalla:** resume atajos de teclado y comportamiento de scroll horizontal.
+### Contactología
 
-### 6.5 Contacto (celdas de canal)
+En Email / WhatsApp / Llamada:
 
-En columnas de **Email**, **WhatsApp** y **Llamada**:
+- Semáforo de estado (sin contactar, en intento, contactado, no contesta…)
+- Registro de intentos
+- Acceso rápido a WhatsApp o correo
+- Revertir última acción o reiniciar el canal
+- **Bloqueo de contacto:** mientras un consultor gestiona a alguien, otro no lo pisa; al expirar, el aviso **Bloqueo expirado** indica que se puede recontactar
 
-- Semáforo de estado (sin contactar, en proceso, contactado, no contesta, etc.).
-- Registro de intentos con resultado.
-- Acceso rápido a WhatsApp o correo (según configuración).
-- **Revertir** última acción o **reiniciar** seguimiento del canal.
-
-### 6.6 Envío a OpsFlow (desde masivos)
-
-Seleccione filas → **Enviar a OpsFlow** (también disponible en ficha). Completa datos de entrega; el sistema crea un paquete y lo entrega vía Edge Function. Vea [sección 15](#15-envíos-opsflow).
-
-### 6.7 WhatsApp / Email masivo
-
-Modales para enviar mensajes a selección o filtros, usando plantillas configuradas en el proceso.
+Con filas seleccionadas aparecen acciones flotantes: WhatsApp, Email, Informe psicolaboral, OpsFlow, Trasladar.
 
 ---
 
-## 7. Candidatos
+## 9. Candidatos y ficha
 
 **Menú → Candidatos**
 
-Listado global de todos los candidatos a los que tiene acceso su rol (filtrado por cliente y por **visible para clientes** si aplica).
+Listado global (filtrado por cliente y por visibilidad si aplica).
 
 | Acción | Función |
-|--------|---------|
-| **Buscar** | Por nombre, email, teléfono. |
-| **Abrir candidato** | Misma ficha que en el tablero (modal). |
-| **Filtros** | Por proceso, etapa, etc. (según pantalla). |
+|---|---|
+| Buscar | Nombre, email, teléfono |
+| Filtros | Proceso / etapa |
+| Abrir | Misma ficha que en el tablero |
+| **Enviar a OpsFlow** | Admin / consultor, con selección |
 
-### 7.1 Ficha del candidato (modal) — pestañas
-
-#### Barra de acciones (parte superior)
+### Ficha — barra superior
 
 | Botón | Función |
-|-------|---------|
-| **Exportar ZIP** | Descarga foto, datos y adjuntos en un archivo ZIP. |
-| **Enviar a OpsFlow** | Envía paquete de alta a OpsFlow (requiere permisos y configuración). |
-| **Archivar** / **Restaurar** | Oculta del tablero activo o revierte. |
-| **Eliminar** | Borra candidato permanentemente (con confirmación). |
-| **Mover / Duplicar** | Cambia de proceso o copia a otro proceso. |
-| **Editar** | Modo edición de campos. |
-| **Selector de etapa** | Cambia etapa sin arrastrar en el tablero. |
-| **Cerrar (X)** | Cierra el modal. |
+|---|---|
+| Exportar ZIP | Foto, datos y adjuntos |
+| Enviar a OpsFlow | Paquete de alta a operación |
+| Archivar / Restaurar | Saca o devuelve al pipeline |
+| Descartar | Sale del proceso activo con motivo |
+| Eliminar | Borrado permanente (con confirmación) |
+| Mover / Duplicar | Cambia de proceso o copia |
+| Editar | Modo edición de campos |
+| Selector de etapa | Cambia etapa sin arrastrar |
 
-#### Pestaña **Detalles**
+### Pestañas
 
-- Datos personales: nombre, correo, teléfonos, edad, DNI, dirección, provincia, distrito, LinkedIn.
-- Fuente, expectativa salarial, salario acordado, fechas de contratación y oferta.
-- **Visible para clientes** (interruptor): controla visibilidad para rol cliente.
-- **Resumen** y notas.
-- **Botones de contacto rápido:** copiar teléfono, llamar, WhatsApp.
-- **Rutas de transporte** (si hay sedes configuradas): calcula ruta y costo desde dirección del candidato a sede de entrevista.
-- **Adjuntos:** subir, previsualizar, descargar, eliminar, sincronizar desde Google Drive.
-- **Foto:** clic en avatar para cambiar imagen.
+| Pestaña | Contenido |
+|---|---|
+| **Detalles** | Datos personales, fuente, salarios, resumen, interruptor *Visible para clientes*, ficha complementaria, foto, adjuntos, Drive, **rutas en transporte público**, Score IA si aplica |
+| **Historial** | Movimientos de etapa (quién / cuándo) y envíos OpsFlow |
+| **Agenda** | Entrevistas: crear, editar, eliminar |
+| **Comentarios** | Hilo interno; se pueden adjuntar imágenes |
+| **Documentos** | Checklist por categorías del proceso |
 
-#### Pestaña **Historial**
-
-- Movimientos entre etapas con fecha y usuario.
-- Envíos a OpsFlow (si aplica).
-
-#### Pestaña **Agenda**
-
-- Lista de entrevistas del candidato.
-- **Agendar entrevista:** título, inicio, fin, entrevistador, notas, asistentes por email.
-- Editar o eliminar cada evento.
-
-#### Pestaña **Comentarios**
-
-- Hilo de comentarios internos.
-- Adjuntar imágenes en comentarios.
-- Los clientes pueden comentar si tienen permiso de edición limitada.
-
-#### Pestaña **Documentos**
-
-- **Checklist** por categorías definidas en el proceso.
-- Indica qué documentos faltan para cumplir requisitos de etapa.
+**Contacto rápido en Detalles:** copiar teléfono, llamar, WhatsApp.
 
 ---
 
-## 8. Archivados
+## 10. Archivados
 
 **Menú → Archivados**
 
-Lista candidatos con estado archivado.
+Candidatos fuera del tablero activo. No entran en conteos activos del Panel.
 
 | Acción | Función |
-|--------|---------|
-| **Buscar** | Localizar archivados. |
-| **Abrir ficha** | Ver todos los datos. |
-| **Restaurar** | Devuelve al proceso activo. |
-| **Eliminar** | Borrado permanente. |
-
-Los archivados **no** aparecen en tableros Kanban ni en conteos activos del dashboard.
+|---|---|
+| Buscar | Localiza archivados |
+| Abrir ficha | Todos los datos |
+| Restaurar | Vuelve al proceso |
+| Eliminar | Borrado permanente |
 
 ---
 
-## 9. Formularios (integraciones)
+## 11. Formularios
 
 **Menú → Formularios**
 
-Conecta formularios externos para que cada envío **cree o actualice** candidatos automáticamente.
-
-| Botón | Función |
-|-------|---------|
-| **Nueva integración** | Asistente de configuración. |
-| **Editar** (por fila) | Modifica integración existente. |
-| **Eliminar** | Quita la integración del ATS (no borra el formulario en Tally/Google). |
-| **Abrir enlace** | Abre URL del formulario público. |
-
-**Campos típicos de una integración:**
+Conecta un formulario externo para que cada envío **cree o actualice** candidatos.
 
 | Campo | Función |
-|-------|---------|
-| **Nombre** | Identificación interna. |
-| **Plataforma** | Tally, Google Forms, Microsoft Forms, otro. |
-| **Proceso asociado** | Proceso normal o masivo destino. |
-| **URL del formulario** | Enlace público. |
-| **Webhook / clave** | Conexión segura para recibir respuestas (según plataforma). |
-| **Mapeo de campos** | Qué respuesta llena nombre, email, teléfono, etc. |
+|---|---|
+| Nombre | Identificación interna |
+| Plataforma | Tally, Google Forms, Microsoft Forms, otro |
+| Proceso asociado | Destino (normal o masivo) |
+| URL | Enlace público |
+| Webhook / clave | Recepción segura |
+| Mapeo | Qué respuesta llena nombre, email, teléfono, etc. |
 
-Tras configurar, las postulaciones aparecen en la etapa inicial del proceso asociado.
+Tras guardar, las postulaciones caen en la **etapa inicial** del proceso.
+
+> Eliminar la integración en el ATS **no** borra el formulario en Tally o Google.
 
 ---
 
-## 10. Cartas
+## 12. Cartas
 
 **Menú → Cartas**
 
-Genera documentos Word (.docx) desde plantillas con **campos dinámicos** (`{{Nombre}}`, `{{Email}}`, `{{Puesto}}`, etc.).
+Genera `.docx` desde plantillas con campos tipo `{{Nombre}}`, `{{Email}}`, `{{Puesto}}`.
 
-| Paso | Acción |
-|------|--------|
-| 1 | **Nueva carta** o desde tablero **Emitir cartas** (selección múltiple). |
-| 2 | Elegir candidato(s). |
-| 3 | Subir o elegir plantilla .docx. |
-| 4 | Revisar campos detectados y valores autocompletados. |
-| 5 | **Generar y descargar** — guarda copia en Google Drive /carpeta Cartas si Drive está activo. |
+1. **Nueva carta** o, desde el tablero, **Emitir cartas** (selección múltiple).
+2. Elija candidato(s).
+3. Suba o elija plantilla Word.
+4. Revise campos detectados y valores.
+5. **Generar y descargar** — si Drive está conectado, se guarda copia en la carpeta **Cartas**.
 
 ---
 
-## 11. Calendario
+## 13. Calendario
 
 **Menú → Calendario**
 
 | Función | Descripción |
-|---------|-------------|
-| **Vista mes / semana / día** | Cambia granularidad. |
-| **Crear evento** | Clic en franja horaria o botón nuevo. |
-| **Ver / editar** | Clic en evento existente. |
-| **Filtros** | Por proceso, entrevistador o candidato. |
-| **Exportar .ics** | Importar a Outlook/Google Calendar. |
-| **Invitación por email** | Envía convocatoria a asistentes (si está habilitado). |
+|---|---|
+| Vistas | Mes / semana / día |
+| Crear | Clic en una franja o botón nuevo |
+| Editar | Clic en el evento |
+| Filtros | Proceso, entrevistador, candidato |
+| Exportar `.ics` | Outlook / Google Calendar |
+| Invitación por email | Si está habilitada |
 
-Las entrevistas creadas en la ficha del candidato también aparecen aquí.
+Las entrevistas creadas en la pestaña **Agenda** de la ficha también aparecen aquí.
 
 ---
 
-## 12. Reportes
+## 14. Reportes
 
 **Menú → Reportes**
 
-| Elemento | Función |
-|----------|---------|
-| **Tipo de reporte** | Procesos, candidatos, entrevistas, estadísticas por período. |
-| **Filtros** | Fechas, procesos, estado. |
-| **Generar** | Construye vista previa. |
-| **Descargar PDF / Excel** | Exporta resultados (requiere permiso `reports.export`). |
+| Bloque | Qué exporta |
+|---|---|
+| Todos los candidatos | Columnas a elección (nombre, proceso, etapa, correo, teléfonos, fuente, salarios, DNI, LinkedIn, ubigeo…) |
+| Resumen de procesos | Vista agregada de vacantes |
+
+Seleccione columnas → **Descargar**. Requiere permiso `reports.export` para exportar.
 
 ---
 
-## 13. Comparador
+## 15. Comparador
 
 **Menú → Comparador**
 
-Herramienta visual para comparar **dos o más candidatos** lado a lado.
+Compara **dos o más** candidatos lado a lado.
 
-| Botón / acción | Función |
-|----------------|---------|
-| **Nueva comparación** | Inicia lienzo vacío. |
-| **Agregar candidatos** | Selección desde base de datos. |
-| **Agregar widget** | Gráfico (barras, líneas, radar, torta, área), tabla o lista. |
-| **Configurar widget** | Ejes, colores, campos a mostrar. |
-| **Datos manuales** | Tabla editable para criterios no guardados en BD. |
-| **Exportar PDF** | Informe con tema de Configuración (colores, portada, pie). |
-| **Exportar Word** | Documento editable. |
+| Acción | Función |
+|---|---|
+| Nueva comparación | Lienzo vacío |
+| Agregar candidatos | Desde la base |
+| Agregar widget | Barras, líneas, radar, torta, área, tabla o lista |
+| Datos manuales | Criterios que no están en el sistema |
+| Exportar PDF / Word | Informe con colores y pie de **Configuración** |
 
-Los PDF se guardan en Google Drive en carpeta **Reportes** si aplica.
+Si Drive está activo, los PDF se guardan en **Reportes**.
 
 ---
 
-## 14. Importación masiva
+## 16. Importación
 
-**Menú → Importación Masiva**
+La importación **ya no tiene ítem propio en el menú**. Se abre desde el proceso.
 
-Importa candidatos a procesos **normales** desde Excel.
+### Procesos regulares (Kanban)
 
-| Paso | Acción |
-|------|--------|
-| 1 | **Descargar plantilla** de ejemplo. |
-| 2 | Completar columnas (mínimo: nombre, email, proceso). |
-| 3 | **Seleccionar archivo** y subir. |
-| 4 | **Mapear columnas** del Excel a campos del ATS. |
-| 5 | **Revisar vista previa** y corregir errores. |
-| 6 | **Importar** — crea candidatos en la primera etapa del proceso indicado. |
+1. Abra el proceso.
+2. **Importar candidatos** (Excel) o **Importar CVs**.
+3. En Excel: descargue plantilla → complete (mínimo nombre, email) → mapee columnas → revise errores → importe.
+4. Los candidatos entran en la primera etapa.
 
-> Para procesos **masivos** use la importación dentro de **Procesos Masivos** (restaurar desde Excel / importar filas).
+### Procesos masivos
+
+Use **Importar** dentro de la tabla (Excel o CVs) o restaure desde un Excel original.
 
 ---
 
-## 15. Envíos OpsFlow
+## 17. Envíos OpsFlow
 
 **Menú → Envíos OpsFlow**
 
-Historial de paquetes enviados al sistema **OpsFlow** (onboarding operativo).
+Historial de paquetes enviados al sistema operativo **OpsFlow**.
 
-| Estado | Significado |
-|--------|-------------|
-| **pending** | Guardado localmente; entrega en curso o pendiente de reintento. |
-| **delivered** | OpsFlow confirmó recepción (`opsflow_package_id` guardado). |
-| **failed** | Error de red o configuración; use **Reintentar**. |
+| Estado de entrega | Significado |
+|---|---|
+| **pending** | Guardado; entrega en curso o pendiente |
+| **delivered** | OpsFlow confirmó recepción |
+| **failed** | Error de red o configuración → **Reintentar** |
 
-| Botón | Función |
-|-------|---------|
-| **Actualizar** | Recarga lista de paquetes. |
-| **Expandir paquete** | Ver candidatos incluidos y detalle. |
-| **Reintentar** | Vuelve a invocar Edge Function `deliver-worker-handoff` (solo fallidos). |
+Desde la ficha o la tabla masiva: **Enviar a OpsFlow** → complete datos de entrega y nota al receptor.
 
-**Desde candidato:** botón **Enviar a OpsFlow** en ficha o selección masiva → modal con datos requeridos y nota al receptor.
-
-Configuración técnica: ver `CONFIGURAR_ENTREGA_OPSFLOW.md`.
+Puede enviarse como **presentación** (entrevista con área usuaria) o **contratación**, e incluye ficha complementaria si el candidato la completó.
 
 ---
 
-## 16. Usuarios (solo administradores)
+## 18. Actividad de usuarios
 
-**Menú → Usuarios**
+**Menú (pie) → Actividad** · solo **admin**
 
-| Botón | Función |
-|-------|---------|
-| **Nuevo Usuario** | Alta de cuenta. |
-| **Editar** | Modifica datos, rol, permisos, secciones, clientes permitidos, avatar. |
-| **Eliminar** | Desactiva cuenta; el historial (comentarios, movimientos) se conserva como "usuario eliminado". |
+Auditoría de ingresos e interacciones.
 
-**Campos del formulario de usuario:**
+| Control | Uso |
+|---|---|
+| **Hoy / 7 días / 30 días** | Recorte temporal (zona Lima) |
+| Buscar | Texto en el resumen del evento |
+| Usuario / categoría | Filtros |
+| Clic en un usuario | Historial detallado |
 
-| Campo | Función |
-|-------|---------|
-| Nombre, email, contraseña | Credenciales de acceso. |
-| Rol | admin, recruiter, client, viewer. |
-| Permisos personalizados | Sobrescribe permisos del rol. |
-| Secciones visibles | Sobrescribe menú lateral. |
-| Restringir a clientes | Limita procesos visibles por `clientId`. |
-| Foto de perfil | Avatar en la interfaz. |
+### KPIs
 
----
+- **Ingresos** — logins y usuarios distintos
+- **Activos ahora** — actividad en los últimos 15 minutos
+- **Eventos** — volumen del periodo
 
-## 17. Configuración (solo administradores)
+### Categorías
 
-**Menú → Configuración**
+Sesión · Navegación · Candidatos · Contacto · Procesos masivos · Procesos · Calendario · Notas y comentarios · Mensajería · Documentos y OpsFlow · Configuración · Usuarios
 
-Botón global: **Save Changes / Guardar cambios** — persiste todos los ajustes en la base de datos.
-
-### 17.1 Branding
-
-| Opción | Función |
-|--------|---------|
-| **Application Name** | Título en el sidebar. |
-| **Company Logo** | Logo principal. |
-| **POWERED BY Logo** | Logo del pie del menú. |
-
-### 17.2 Informe (PDF)
-
-Colores primario/acento, título de portada, pie de página para comparador y bloque **Informe psicolaboral** (imagen de portada, texto de apertura y cierre).
-
-### 17.3 Fuentes de candidatos
-
-Lista de opciones del campo **Fuente** (una por línea).
-
-### 17.4 Clientes
-
-CRUD de clientes: **razón social** y **RUC** para asignar a procesos y restringir usuarios.
-
-### 17.5 Sedes de entrevista
-
-Puntos de destino para **rutas en transporte público** en fichas de candidatos (procesos normales).
-
-### 17.6 Provincias y distritos
-
-Listas desplegables usadas al editar candidatos.
-
-### 17.7 UI Labels
-
-Textos personalizados del menú, modales y dashboard.
-
-### 17.8 Localization
-
-**Símbolo de moneda** (S/, $, etc.).
-
-### 17.9 Database Connection
-
-Referencia a conexión de datos (informativo; la conexión real es Supabase vía variables de entorno).
-
-### 17.10 Google Drive
-
-Solo **admin**: credenciales OAuth, conectar/desconectar, carpeta raíz, actualizar listado. Ver [sección 18](#18-google-drive-y-archivos).
-
-### 17.11 Psicolaboral y tarifas
-
-Secciones para activar módulo psicolaboral y **tarifas de transporte** usadas en procesos masivos (también accesibles desde la tabla masiva).
+> Si aparece un aviso de migración, el registro aún no está habilitado en la base. Contacte a soporte técnico.
 
 ---
 
-## 18. Google Drive y archivos
+## 19. Usuarios
 
-### 18.1 Estructura de carpetas (recomendada)
+**Menú → Usuarios** · admin
+
+| Acción | Función |
+|---|---|
+| Nuevo Usuario | Alta de cuenta |
+| Editar | Datos, rol, permisos, secciones, clientes, avatar, clave local opcional |
+| Eliminar | Quita el acceso; el historial queda como “usuario eliminado” |
+
+**Cómo dar de alta a alguien**
+
+1. Créelo primero en Mattermost (si aún no existe).
+2. En el ATS: **Usuarios → Añadir**, con el **mismo correo**.
+3. No ponga la clave de Mattermost (usted no la tiene). Deje la contraseña local vacía.
+4. La primera vez que esa persona pulse **Entrar con Mattermost**, el ATS la vincula. En la lista pasará de *Pendiente del primer ingreso* a `@usuario`.
+
+La **contraseña local** es opcional y solo sirve para el acceso de emergencia. No sincroniza con Mattermost.
+
+Al cambiar el **rol**, se recargan permisos y secciones por defecto; después puede personalizarlos.
+
+**Acceso a clientes:** si completa `allowedClientIds`, el usuario solo ve procesos de esas empresas.
+
+---
+
+## 20. Configuración
+
+**Menú → Configuración** · admin
+
+Pantalla única con **Save Changes / Guardar cambios** al final.
+
+| Bloque | Qué controla |
+|---|---|
+| **Branding** | Nombre de la app, logo, logo POWERED BY |
+| **Informe (PDF)** | Colores, portada, pie; subbloque **Informe psicolaboral** |
+| **Fuentes de candidatos** | Lista del campo Fuente (una por línea) |
+| **Clientes** | Razón social y RUC |
+| **Sedes de entrevista** | Destinos para calcular rutas |
+| **Provincias y distritos** | Listas al editar candidatos |
+| **UI Labels** | Textos del menú y de algunas pantallas |
+| **Localization** | Símbolo de moneda (`S/`, `$`…) |
+| **Database Connection** | Referencia informativa |
+| **Almacenamiento / Google Drive** | Ver [sección 21](#21-google-drive) |
+
+---
+
+## 21. Google Drive
+
+Recomendado para adjuntos, cartas y reportes. Si no está conectado, los archivos se guardan en base de datos (con límite de tamaño).
 
 ```
-[Carpeta raíz configurada]/
-├── [Proceso A]/
-│   ├── [Candidato 1]/  ← adjuntos del candidato
-│   └── [Documentos del proceso]/
-├── [Proceso B]/
-│   └── ...
-├── Cartas/
-└── Reportes/
+[Carpeta raíz]
+├── [Proceso A]
+│   ├── [Candidato 1]
+│   └── [Documentos del proceso]
+├── Cartas
+└── Reportes
 ```
 
-### 18.2 Comportamiento
+| Botón (Configuración) | Función |
+|---|---|
+| Guardar credenciales | Client ID y Secret |
+| Conectar Google Drive | OAuth en ventana emergente |
+| Seleccionar carpeta raíz | Base del ATS |
+| Actualizar carpetas | Refresca el listado |
+| Desconectar | Deja de subir archivos nuevos; los existentes permanecen en Drive |
 
-- Al subir adjunto en candidato o proceso, el archivo se envía a la carpeta correspondiente si Drive está conectado.
-- **Sincronizar desde Google Drive** en ficha trae archivos creados directamente en Drive.
-- Si Drive no está conectado, los archivos se almacenan en base de datos (limitado en tamaño).
-
-### 18.3 Botones en Configuración → Google Drive
-
-| Botón | Función |
-|-------|---------|
-| Guardar credenciales | Client ID y Secret de Google Cloud. |
-| Conectar Google Drive | Flujo OAuth en ventana emergente. |
-| Seleccionar carpeta raíz | Define carpeta base ATS. |
-| Actualizar carpetas | Refresca listado. |
-| Desconectar | Deja de subir archivos nuevos a Drive (los existentes permanecen). |
+En la ficha del candidato, **Sincronizar desde Google Drive** trae archivos que se subieron directo a la carpeta.
 
 ---
 
-## 19. Flujos de trabajo recomendados
+## 22. Avisos y mensajes
 
-### 19.1 Reclutamiento estándar (pocos candidatos)
+### Avisos (campana)
 
-1. Crear **proceso** con etapas y documentos requeridos.  
-2. Publicar **formulario** integrado o **añadir candidatos** manualmente.  
-3. Mover tarjetas en el **tablero** según avance.  
-4. **Agendar entrevistas** desde ficha o calendario.  
-5. Completar **checklist de documentos**.  
-6. **Cerrar proceso** marcando contratados.  
-7. Opcional: **Enviar a OpsFlow** y generar **carta** de oferta.
+Junto a Cerrar sesión. Al hacer clic en un aviso abre el proceso correspondiente.
 
-### 19.2 Campaña masiva (miles de postulantes)
+| Aviso | Significado |
+|---|---|
+| Candidatos sin ningún intento de contacto | Nadie los ha tocado aún |
+| Tu gestión sin seguimiento (+1 h) | Llevan más de una hora sin nuevo intento |
+| Bloqueo expirado — puedes recontactar | Ya se puede volver a contactar |
+| Sin candidatos nuevos en el proceso | No ingresan postulantes hace ≥ 1 h (masivos) |
 
-1. Crear **proceso masivo** y configurar columnas/plantilla.  
-2. **Importar** Excel o recibir postulaciones vía **Tally/formulario**.  
-3. Trabajar la **tabla**: contacto por canal, filtros, score, perfil ideal.  
-4. **Agendar** entrevistas desde columnas de fecha.  
-5. **Aprobar/rechazar** filas; exportar tabla al cliente.  
-6. Enviar seleccionados a **OpsFlow**.
+### Mensajes (Mattermost)
 
-### 19.3 Cliente externo
+Barra **Mattermost** (esquina). Es el mismo chat directo de Mattermost: lo que envía o recibe aquí aparece en la app de escritorio y en la web de Mattermost, y al revés.
 
-1. El reclutador marca candidatos como **Visible para clientes**.  
-2. El cliente entra a **Procesos**, revisa tablero y **mueve** candidatos según su evaluación.  
-3. Usa **Comparador** y **Reportes** para decisiones (sin crear ni eliminar).
+Solo está disponible si entró con **Entrar con Mattermost**. No hay un chat interno aparte del ATS.
+
+No reemplaza WhatsApp ni el correo al candidato; es coordinación interna del equipo.
 
 ---
 
-## 20. Preguntas frecuentes
+## 23. Flujos recomendados
 
-**¿Por qué no veo una sección del menú?**  
-Su rol no incluye esa sección o el administrador la ocultó en **Secciones visibles**.
+### Reclutamiento estándar
 
-**¿Por qué el cliente no ve un candidato?**  
-Active **Visible para clientes** en la ficha o verifique restricción por cliente del usuario.
+```mermaid
+flowchart TD
+  A[Crear proceso + etapas + docs] --> B[Formulario o alta / importar]
+  B --> C[Mover en Kanban]
+  C --> D[Agendar entrevista]
+  D --> E[Checklist de documentos]
+  E --> F[Finalizar: Terminado]
+  F --> G[Carta y/o OpsFlow]
+```
 
-**¿Cuál es la diferencia entre Procesos y Procesos Masivos?**  
-Procesos = Kanban clásico. Procesos Masivos = tabla de alto volumen con columnas dinámicas y herramientas de contacto masivo.
+- [ ] Crear proceso con etapas y documentos requeridos
+- [ ] Publicar formulario o añadir / importar candidatos
+- [ ] Mover tarjetas según avance
+- [ ] Agendar desde ficha o Calendario
+- [ ] Completar checklist
+- [ ] Marcar **Visible para clientes** cuando el cliente deba opinar
+- [ ] Finalizar y, si aplica, enviar a OpsFlow
 
-**¿Puedo recuperar un candidato archivado?**  
-Sí, en **Archivados** → abrir ficha → **Restaurar**.
+### Campaña masiva
+
+- [ ] Crear proceso masivo y plantilla de columnas
+- [ ] Importar Excel / CVs o conectar formulario
+- [ ] Trabajar contactología (Panel fidelización + plantillas)
+- [ ] Filtrar, perfil ideal, Score IA
+- [ ] Agendar desde columnas de fecha
+- [ ] Aprobar / rechazar; exportar al cliente
+- [ ] Trasladar o enviar a OpsFlow a los seleccionados
+
+### Cliente externo
+
+- [ ] El consultor marca **Visible para clientes**
+- [ ] El cliente entra a **Procesos**, revisa el tablero y **arrastra** según su evaluación
+- [ ] Usa Comparador y Reportes; no crea ni elimina
+- [ ] Las **etapas críticas** generan alerta hasta que un cliente abre la ficha (un admin o consultor que revise no apaga esa alerta)
+
+---
+
+## 24. Preguntas frecuentes
+
+**¿Por qué no veo una sección?**  
+Su rol no la incluye, o el admin la ocultó en **Secciones visibles**. Inteligencia y Actividad son exclusivas de admin.
+
+**¿Por qué el cliente no ve a un candidato?**  
+Active **Visible para clientes/viewers** y verifique que el usuario no esté restringido a otros clientes.
+
+**¿Kanban o masivo?**  
+Kanban = pocos postulantes, etapas visuales. Masivo = miles de filas, contacto y columnas dinámicas. Un proceso Kanban puede pasar a **Modo tabla** si el volumen crece.
+
+**¿Puedo recuperar un archivado?**  
+Sí: **Archivados** → ficha → **Restaurar**.
 
 **¿El envío a OpsFlow falló?**  
-Vaya a **Envíos OpsFlow**, localice el paquete en estado *failed* y pulse **Reintentar**. Revise configuración en `CONFIGURAR_ENTREGA_OPSFLOW.md`.
+**Envíos OpsFlow** → paquete *failed* → **Reintentar**.
 
-**¿Cómo actualizo datos sin recargar el navegador?**  
-Use **Actualizar** en el pie del menú lateral.
+**¿Cómo refresco sin recargar el navegador?**  
+**Actualizar** en el pie del menú.
 
-**¿Dónde están los manuales anteriores?**  
-- Reclutador/general: `MANUAL_USUARIO.md`  
-- Cliente: `MANUAL_USUARIO_CLIENTE.md`  
-- Administrador: `MANUAL_SUPER_ADMIN.md`  
-- Este documento: referencia unificada y actualizada.
+**¿Stand By, Cancelado y Trunco desaparecen?**  
+No. Siguen en la lista. Use **Reactivar a En Proceso** para volver a operar.
+
+**¿Cómo doy de alta a alguien si no sé su clave de Mattermost?**  
+No la necesita. Créelo en **Usuarios** con el mismo correo. La clave es la de Mattermost; se vincula al primer **Entrar con Mattermost**.
+
+**¿Cómo cambio la contraseña de alguien?**  
+La de Mattermost se recupera en Mattermost. La clave local de emergencia (opcional) la cambia el admin en **Usuarios** → Editar.
+
+---
+
+## 25. Guía rápida por rol
+
+### Consultor
+
+Operación del día: procesos, masivos, contacto, cartas, calendario, OpsFlow.  
+No ve Usuarios, Configuración, Inteligencia ni Actividad.
+
+**Atajos mentales**
+
+1. Empiece por la **campana de avisos**.
+2. En masivos, trabaje el **Panel fidelización** y no deje gestiones +1 h.
+3. Antes de mover etapa, revise **Documentos**.
+4. Marque visibilidad al cliente solo cuando el perfil esté presentable.
+
+### Cliente
+
+Ve Panel, Procesos, Candidatos, Calendario, Reportes y Comparador.  
+Puede mover candidatos en el Kanban. No crea ni edita fichas, no sube documentos, no descarta ni archiva.
+
+Si no puede mover a alguien: casi siempre faltan documentos de la etapa destino. Pida al consultor que complete el checklist.
+
+### Consulta (Viewer)
+
+Solo lectura. Ideal para dirección o auditoría. No mueve etapas ni exporta el comparador.
+
+### Administrador
+
+Todo lo anterior, más:
+
+1. Crear usuarios con el rol mínimo necesario.
+2. Restringir por cliente cuando haya varios mandantes.
+3. Conectar Drive y sedes de entrevista.
+4. Revisar **Inteligencia** (flujo y equipo) y **Actividad** (quién entra y qué hace).
+5. Cerrar o reactivar procesos con el estado correcto (Terminado / Cancelado / Trunco / Stand By).
 
 ---
 
 ## Soporte
 
-Para incidencias técnicas, proporcione: rol de usuario, pantalla, pasos para reproducir, captura y mensaje de error (consola F12 si es posible). Contacte al administrador del sistema o al equipo de desarrollo de Opalo ATS.
+Para incidencias, envíe:
+
+- Rol y correo del usuario
+- Pantalla y proceso
+- Pasos para reproducir
+- Captura
+- Mensaje de error (F12 → Consola, si es posible)
+
+Contacte al administrador de su instancia o al equipo Opalo ATS.
 
 ---
 
-*Documento generado a partir del código fuente de Opalo ATS en el repositorio Opaloats.*
+*Manual 3.0 · septiembre 2026 · alineado con la interfaz actual de Opalo ATS.*
