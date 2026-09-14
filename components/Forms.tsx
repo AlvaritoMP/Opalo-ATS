@@ -42,7 +42,7 @@ export const Forms: React.FC = () => {
     useEffect(() => {
         const loadBulkProcesses = async () => {
             try {
-                const processes = await processesApi.getAllBulkProcesses(true);
+                const processes = await processesApi.getAllBulkProcesses(false);
                 let filteredProcesses = processes;
                 const currentUser = state.currentUser;
                 if (currentUser && currentUser.allowedClientIds !== undefined && currentUser.allowedClientIds !== null) {

@@ -14,6 +14,31 @@ import {
     toPublicUser,
 } from '../lib/atsUsers.js';
 
+function isOriginUnavailable(error) {
+    const msg = String(error?.message || error || '');
+    return (
+        msg.includes('<!DOCTYPE') ||
+        msg.includes('Error code 522') ||
+        msg.includes('Connection timed out') ||
+        msg.includes('canceling statement due to statement timeout') ||
+        error?.code === '57014'
+    );
+}
+
+function publicRouteError(error, fallback) {
+    if (isOriginUnavailable(error)) {
+        return {
+            status: 503,
+            message: 'Supabase no respondió a tiempo. Intenta de nuevo en unos minutos.',
+        };
+    }
+    const msg = String(error?.message || fallback);
+    if (msg.includes('<') || msg.length > 280) {
+        return { status: error?.status || 500, message: fallback };
+    }
+    return { status: error?.status || 500, message: msg || fallback };
+}
+
 const router = express.Router();
 
 function appNameFromReq(req) {
@@ -120,7 +145,8 @@ router.get('/peers', async (req, res) => {
         });
     } catch (error) {
         console.error('Error listando peers Mattermost:', error);
-        res.status(error.status || 500).json({ error: error.message || 'No se pudo listar usuarios' });
+        const { status, message } = publicRouteError(error, 'No se pudo listar usuarios');
+        res.status(status).json({ error: message });
     }
 });
 
@@ -205,7 +231,8 @@ router.get('/dms', async (req, res) => {
         });
     } catch (error) {
         console.error('Error cargando DMs Mattermost:', error);
-        res.status(error.status || 500).json({ error: error.message || 'No se pudieron cargar los mensajes' });
+        const { status, message } = publicRouteError(error, 'No se pudieron cargar los mensajes');
+        res.status(status).json({ error: message });
     }
 });
 
@@ -274,7 +301,8 @@ router.post('/dms', async (req, res) => {
         res.json({ channelId: channel.id, partner: toPublicUser(partner) });
     } catch (error) {
         console.error('Error abriendo DM Mattermost:', error);
-        res.status(error.status || 500).json({ error: error.message || 'No se pudo abrir la conversación' });
+        const { status, message } = publicRouteError(error, 'No se pudo abrir la conversación');
+        res.status(status).json({ error: message });
     }
 });
 
@@ -307,7 +335,8 @@ router.post('/posts', async (req, res) => {
         });
     } catch (error) {
         console.error('Error enviando post Mattermost:', error);
-        res.status(error.status || 500).json({ error: error.message || 'No se pudo enviar el mensaje' });
+        const { status, message } = publicRouteError(error, 'No se pudo enviar el mensaje');
+        res.status(status).json({ error: message });
     }
 });
 
@@ -320,7 +349,8 @@ router.post('/read', async (req, res) => {
         res.json({ ok: true, channelId: channel.id });
     } catch (error) {
         console.error('Error marcando leído Mattermost:', error);
-        res.status(error.status || 500).json({ error: error.message || 'No se pudo marcar como leído' });
+        const { status, message } = publicRouteError(error, 'No se pudo marcar como leído');
+        res.status(status).json({ error: message });
     }
 });
 

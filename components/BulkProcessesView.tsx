@@ -80,7 +80,7 @@ import { Check, X, Loader2, Send, Archive, Search, ChevronDown, ChevronUp, Plus,
 import { BulkCandidateTimeline } from './BulkCandidateTimeline';
 import { BulkContactologyHistory } from './BulkContactologyHistory';
 import { Process, ProcessStatus, CustomColumn, BulkProcessConfig, Candidate, IdealProfileConfig, BulkProcessStatChart, BulkInfoPin, BulkQuickReply, BulkClipboardFieldPreset } from '../types';
-import { PROCESS_STATUS_LABELS, isProcessActive } from '../lib/processStatus';
+import { PROCESS_STATUS_LABELS, isProcessActive, isProcessOperational } from '../lib/processStatus';
 import { candidatesApi } from '../lib/api/candidates';
 import {
     BASE_COLUMNS,
@@ -863,6 +863,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
     const [globalQuickReplies, setGlobalQuickReplies] = useState<
         Array<{ id: string; title: string; quickReplies: BulkQuickReply[] }>
     >([]);
+    const [isLoadingGlobalQuickReplies, setIsLoadingGlobalQuickReplies] = useState(false);
     const undoStackRef = useRef<BulkUndoEntry[]>([]);
     const [undoStackSize, setUndoStackSize] = useState(0);
     const isUndoingRef = useRef(false);
@@ -957,20 +958,20 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
     );
 
     const allQuickReplyEntries = useMemo(() => {
-        // Solo mostramos procesos que el usuario tiene permitido ver (lista ya filtrada).
+        // Solo En Proceso y Stand By, y solo procesos que el usuario puede ver.
         const allowedIds = new Set(bulkProcesses.map(p => p.id));
-        // Base: respuestas rápidas de todos los procesos (carga ligera global).
+        const statusById = new Map(bulkProcesses.map(p => [p.id, p.status]));
         const sources = new Map<string, { id: string; title: string; quickReplies: BulkQuickReply[] }>();
         for (const item of globalQuickReplies) {
             if (allowedIds.size > 0 && !allowedIds.has(item.id)) continue;
+            const status = statusById.get(item.id);
+            if (status !== undefined && !isProcessOperational(status)) continue;
             sources.set(item.id, { id: item.id, title: item.title, quickReplies: item.quickReplies });
         }
-        // Sobrescribe con la versión "viva" de cualquier proceso ya cargado en memoria
-        // (incluye el proceso actual con sus ediciones/altas recientes sin recargar).
         for (const p of bulkProcesses) {
-            const replies = p.bulkConfig?.quickReplies;
-            if (replies) {
-                sources.set(p.id, { id: p.id, title: p.title, quickReplies: replies });
+            if (!isProcessOperational(p.status)) continue;
+            if (Array.isArray(p.bulkConfig?.quickReplies)) {
+                sources.set(p.id, { id: p.id, title: p.title, quickReplies: p.bulkConfig!.quickReplies! });
             }
         }
         const merged: Process[] = Array.from(sources.values()).map(s => ({
@@ -1662,22 +1663,26 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
         loadBulkProcesses();
     }, [isEmbedded, loadBulkProcesses]);
 
-    // Carga ligera de las respuestas rápidas de TODOS los procesos masivos, para que el
-    // panel "Todas" las muestre desde el inicio sin tener que entrar a cada proceso.
+    // Carga las respuestas rápidas de TODOS los procesos al abrir "Todas",
+    // para no saturar Supabase en el arranque. El proceso actual ya está en memoria.
     useEffect(() => {
-        if (isEmbedded) return;
+        if (isEmbedded || !showGlobalQuickRepliesPanel) return;
         let cancelled = false;
+        setIsLoadingGlobalQuickReplies(true);
         void processesApi.getAllBulkQuickReplies()
             .then(rows => {
                 if (!cancelled) setGlobalQuickReplies(rows);
             })
             .catch(err => {
                 console.warn('No se pudieron cargar las respuestas rápidas globales:', err);
+            })
+            .finally(() => {
+                if (!cancelled) setIsLoadingGlobalQuickReplies(false);
             });
         return () => {
             cancelled = true;
         };
-    }, [isEmbedded]);
+    }, [isEmbedded, showGlobalQuickRepliesPanel]);
 
     useEffect(() => {
         if (isEmbedded) return;
@@ -8344,6 +8349,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                 isOpen={showGlobalQuickRepliesPanel}
                 onClose={() => setShowGlobalQuickRepliesPanel(false)}
                 entries={allQuickReplyEntries}
+                isLoading={isLoadingGlobalQuickReplies}
                 currentProcessId={process?.id}
                 copyingKey={copyingQuickReplyId}
                 onCopyReply={handleCopyQuickReplyEntry}

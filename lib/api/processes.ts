@@ -3,6 +3,7 @@ import { Process, ProcessStatus, Stage, DocumentCategory, Attachment } from '../
 import { APP_NAME } from '../appConfig';
 import { applyStageColorsFromBulkConfig } from '../stageColors';
 import { fetchWithRetry } from '../fetchWithRetry';
+import { isProcessOperational } from '../processStatus';
 
 const STAGE_LIST_FIELDS = 'id, process_id, name, order_index, required_documents, is_critical, color';
 
@@ -43,45 +44,63 @@ async function fetchStagesByProcessId(processId: string) {
     return result.data || [];
 }
 
+const IN_FILTER_CHUNK = 80;
+
+async function fetchInIdChunks<T>(
+    ids: string[],
+    fn: (chunk: string[]) => Promise<T[]>
+): Promise<T[]> {
+    const out: T[] = [];
+    for (let i = 0; i < ids.length; i += IN_FILTER_CHUNK) {
+        const chunk = ids.slice(i, i + IN_FILTER_CHUNK);
+        out.push(...await fn(chunk));
+    }
+    return out;
+}
+
 async function fetchStagesBatch(processIds: string[]) {
     if (processIds.length === 0) return [];
 
-    const runQuery = (fields: string, withAppName: boolean) => {
+    const runChunk = async (chunk: string[], fields: string, withAppName: boolean) => {
         let q = supabase
             .from('stages')
             .select(fields)
-            .in('process_id', processIds)
+            .in('process_id', chunk)
             .order('process_id, order_index');
         if (withAppName) q = q.eq('app_name', APP_NAME);
         return q;
     };
 
-    let result = await runQuery(STAGE_LIST_FIELDS, true);
-
-    if (result.error && isMissingColumnError(result.error, 'color')) {
-        result = await runQuery('id, process_id, name, order_index, required_documents, is_critical', true);
-        if (!result.error) {
-            return (result.data || []).map(s => ({ ...s, color: null }));
+    const runAll = async (fields: string, withAppName: boolean) => {
+        const rows: any[] = [];
+        let missingColor = false;
+        for (let i = 0; i < processIds.length; i += IN_FILTER_CHUNK) {
+            const chunk = processIds.slice(i, i + IN_FILTER_CHUNK);
+            const result = await runChunk(chunk, fields, withAppName);
+            if (result.error && isMissingColumnError(result.error, 'color')) {
+                missingColor = true;
+                break;
+            }
+            if (result.error) throw result.error;
+            rows.push(...(result.data || []));
         }
-    }
+        return { rows, missingColor };
+    };
 
-    if (!result.error && (result.data?.length ?? 0) > 0) {
-        return result.data || [];
+    let { rows, missingColor } = await runAll(STAGE_LIST_FIELDS, true);
+    if (missingColor) {
+        const fallback = await runAll('id, process_id, name, order_index, required_documents, is_critical', true);
+        return fallback.rows.map(s => ({ ...s, color: null }));
     }
-
-    if (result.error) throw result.error;
+    if (rows.length > 0) return rows;
 
     // Fallback: etapas legacy sin app_name
-    result = await runQuery(STAGE_LIST_FIELDS, false);
-    if (result.error && isMissingColumnError(result.error, 'color')) {
-        result = await runQuery('id, process_id, name, order_index, required_documents, is_critical', false);
-        if (!result.error) {
-            return (result.data || []).map(s => ({ ...s, color: null }));
-        }
+    const legacy = await runAll(STAGE_LIST_FIELDS, false);
+    if (legacy.missingColor) {
+        const fallback = await runAll('id, process_id, name, order_index, required_documents, is_critical', false);
+        return fallback.rows.map(s => ({ ...s, color: null }));
     }
-
-    if (result.error) throw result.error;
-    return result.data || [];
+    return legacy.rows;
 }
 
 async function updateStageRecord(
@@ -301,9 +320,35 @@ function processToDb(process: Partial<Process>): any {
 }
 
 const BULK_PROCESS_LIST_FIELDS =
+    'id, title, status, vacancies, client_id, is_bulk_process, service_order_code, start_date, end_date, google_drive_folder_id, google_drive_folder_name, closed_at, created_at';
+
+const BULK_PROCESS_LIST_FIELDS_MINIMAL =
+    'id, title, status, client_id, is_bulk_process, created_at, closed_at';
+
+const BULK_PROCESS_DETAIL_FIELDS =
     'id, title, description, salary_range, experience_level, seniority, flyer_url, flyer_position, service_order_code, start_date, end_date, status, vacancies, google_drive_folder_id, google_drive_folder_name, published_date, need_identified_date, client_id, is_bulk_process, hired_candidate_ids, closed_at, created_at';
 
-const BULK_PROCESS_FULL_FIELDS = `${BULK_PROCESS_LIST_FIELDS}, bulk_config`;
+const BULK_PROCESS_FULL_FIELDS = `${BULK_PROCESS_DETAIL_FIELDS}, bulk_config`;
+
+function isStatementTimeout(error: unknown): boolean {
+    const err = error as { code?: string; message?: string; status?: number };
+    const msg = `${err?.message || ''}`.toLowerCase();
+    return err?.code === '57014' || msg.includes('statement timeout') || msg.includes('canceling statement');
+}
+
+async function mapPool<T, R>(items: T[], concurrency: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+    const results: R[] = [];
+    let index = 0;
+    async function worker() {
+        while (index < items.length) {
+            const current = index++;
+            results[current] = await fn(items[current]);
+        }
+    }
+    const n = Math.max(1, Math.min(concurrency, items.length || 1));
+    await Promise.all(Array.from({ length: n }, () => worker()));
+    return results;
+}
 
 export type ProcessListOptions = {
     /**
@@ -1303,42 +1348,46 @@ export const processesApi = {
         const selectFields = includeBulkConfig ? BULK_PROCESS_FULL_FIELDS : BULK_PROCESS_LIST_FIELDS;
         let processes: any[] = [];
         let error: any = null;
-        
+
+        const runList = async (fields: string) => {
+            let query = supabase
+                .from('processes')
+                .select(fields)
+                .eq('app_name', APP_NAME)
+                .eq('is_bulk_process', true)
+                .order('created_at', { ascending: false })
+                .limit(500);
+            query = applyProcessStatusFilter(query as any, options) as typeof query;
+            const response = await query;
+            if (response.error) throw response.error;
+            return response.data || [];
+        };
+
         try {
-            const result = await fetchWithRetry(async () => {
-                let query = supabase
-                    .from('processes')
-                    .select(selectFields)
-                    .eq('app_name', APP_NAME)
-                    .eq('is_bulk_process', true)
-                    .order('created_at', { ascending: false })
-                    .limit(500);
-                query = applyProcessStatusFilter(query as any, options) as typeof query;
-                const response = await query;
-                if (response.error) throw response.error;
-                return response;
-            });
-            
-            // Verificar si hubo error de columna faltante directamente aquí
-            if (result.error && (result.error.message?.includes('client_id') || result.error.message?.includes('is_bulk_process') || result.error.message?.includes('column') || result.error.code === 'PGRST116')) {
-                console.warn('⚠️ Columna client_id o is_bulk_process no existe, cargando con fallback');
-                let fallbackQuery = supabase
-                    .from('processes')
-                    .select('id, title, description, salary_range, experience_level, seniority, flyer_url, flyer_position, service_order_code, start_date, end_date, status, vacancies, google_drive_folder_id, google_drive_folder_name, published_date, need_identified_date, bulk_config, hired_candidate_ids, closed_at, created_at')
-                    .eq('app_name', APP_NAME)
-                    .order('created_at', { ascending: false })
-                    .limit(500);
-                fallbackQuery = applyProcessStatusFilter(fallbackQuery as any, options) as typeof fallbackQuery;
-                const fallbackResult = await fallbackQuery;
-                
-                processes = fallbackResult.data || [];
-                error = fallbackResult.error;
-            } else {
-                processes = result.data || [];
-                error = result.error;
-            }
+            processes = await runList(selectFields);
         } catch (err: any) {
-            error = err;
+            if (isStatementTimeout(err) && !includeBulkConfig) {
+                try {
+                    processes = await runList(BULK_PROCESS_LIST_FIELDS_MINIMAL);
+                    error = null;
+                } catch (retryErr: any) {
+                    error = retryErr;
+                }
+            } else if (
+                err?.message?.includes('client_id') ||
+                err?.message?.includes('is_bulk_process') ||
+                err?.message?.includes('column') ||
+                err?.code === 'PGRST116'
+            ) {
+                try {
+                    processes = await runList(BULK_PROCESS_LIST_FIELDS_MINIMAL);
+                    error = null;
+                } catch (retryErr: any) {
+                    error = retryErr;
+                }
+            } else {
+                error = err;
+            }
         }
         
         if (error) throw error;
@@ -1355,13 +1404,20 @@ export const processesApi = {
             console.warn('⚠️ Error cargando stages de procesos masivos:', error);
         }
 
-        const { data: documentCategories, error: categoriesError } = await supabase
-            .from('document_categories')
-            .select('id, process_id, name, description, required')
-            .in('process_id', processIds)
-            .eq('app_name', APP_NAME);
-
-        if (categoriesError) throw categoriesError;
+        let documentCategories: any[] = [];
+        try {
+            documentCategories = await fetchInIdChunks(processIds, async (chunk) => {
+                const { data, error: categoriesError } = await supabase
+                    .from('document_categories')
+                    .select('id, process_id, name, description, required')
+                    .in('process_id', chunk)
+                    .eq('app_name', APP_NAME);
+                if (categoriesError) throw categoriesError;
+                return data || [];
+            });
+        } catch (error) {
+            console.warn('⚠️ Error cargando categorías de procesos masivos:', error);
+        }
 
         // Agrupar stages y categorías por process_id
         const stagesByProcessId = new Map<string, any[]>();
@@ -1391,29 +1447,46 @@ export const processesApi = {
     },
 
     /**
-     * Trae solo las respuestas rápidas de todos los procesos masivos (sin el resto
-     * del bulk_config pesado), para poder mostrarlas en el panel "Todas" sin tener
-     * que entrar a cada proceso. Minimiza el egress proyectando solo bulk_config->quickReplies.
+     * Trae las respuestas rápidas de procesos masivos En Proceso y Stand By
+     * (no terminados, cancelados ni truncos) para el panel "Todas".
+     * No pide todo el bulk_config de golpe (adjuntos en base64 saturan Supabase).
+     * Lista id+título y luego cada proceso por separado.
      */
     async getAllBulkQuickReplies(): Promise<Array<{ id: string; title: string; quickReplies: any[] }>> {
         try {
-            const result = await fetchWithRetry(async () => {
-                const response = await supabase
-                    .from('processes')
-                    .select('id, title, quickReplies:bulk_config->quickReplies')
-                    .eq('app_name', APP_NAME)
-                    .eq('is_bulk_process', true)
-                    .order('title', { ascending: true });
-                if (response.error) throw response.error;
-                return response;
+            const listResponse = await supabase
+                .from('processes')
+                .select('id, title, status')
+                .eq('app_name', APP_NAME)
+                .eq('is_bulk_process', true)
+                .order('title', { ascending: true })
+                .limit(500);
+            if (listResponse.error) throw listResponse.error;
+
+            const processes = ((listResponse.data || []) as Array<{ id: string; title: string; status?: ProcessStatus }>)
+                .filter(proc => isProcessOperational(proc.status));
+            if (processes.length === 0) return [];
+
+            const rows = await mapPool(processes, 3, async (proc) => {
+                try {
+                    const { data, error } = await supabase
+                        .from('processes')
+                        .select('quickReplies:bulk_config->quickReplies')
+                        .eq('id', proc.id)
+                        .eq('app_name', APP_NAME)
+                        .maybeSingle();
+                    if (error) throw error;
+                    const quickReplies = Array.isArray((data as any)?.quickReplies)
+                        ? (data as any).quickReplies
+                        : [];
+                    return { id: proc.id, title: proc.title, quickReplies };
+                } catch (err) {
+                    console.warn(`⚠️ No se pudieron cargar respuestas rápidas de ${proc.title}:`, err);
+                    return { id: proc.id, title: proc.title, quickReplies: [] };
+                }
             });
 
-            const rows = (result.data || []) as any[];
-            return rows.map(row => ({
-                id: row.id,
-                title: row.title,
-                quickReplies: Array.isArray(row.quickReplies) ? row.quickReplies : [],
-            }));
+            return rows;
         } catch (err) {
             console.warn('⚠️ Error cargando respuestas rápidas globales:', err);
             return [];

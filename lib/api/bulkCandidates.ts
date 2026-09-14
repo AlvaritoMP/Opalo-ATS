@@ -751,31 +751,35 @@ export const bulkCandidatesApi = {
 
     /**
      * Consultores que movieron candidatos a la etapa final (contratación) del proceso.
+     * Filtra por stage_id (UUID único del proceso) para no mandar miles de IDs en la URL.
      */
     async getHiringStageActorsForProcess(
-        processId: string,
+        _processId: string,
         lastStageId: string
     ): Promise<Array<{ candidate_id: string; moved_at: string; moved_by: string | null }>> {
-        const { data: candidates, error: candidatesError } = await supabase
-            .from('candidates')
-            .select('id')
-            .eq('process_id', processId)
-            .eq('app_name', APP_NAME);
+        const pageSize = 500;
+        const out: Array<{ candidate_id: string; moved_at: string; moved_by: string | null }> = [];
+        for (let page = 0; page < 40; page++) {
+            const from = page * pageSize;
+            const to = from + pageSize - 1;
+            const { data, error } = await supabase
+                .from('candidate_history')
+                .select('candidate_id, moved_at, moved_by')
+                .eq('stage_id', lastStageId)
+                .eq('app_name', APP_NAME)
+                .order('moved_at', { ascending: false })
+                .range(from, to);
 
-        if (candidatesError) throw candidatesError;
-        const candidateIds = (candidates || []).map(c => c.id as string);
-        if (candidateIds.length === 0) return [];
-
-        const { data, error } = await supabase
-            .from('candidate_history')
-            .select('candidate_id, moved_at, moved_by')
-            .in('candidate_id', candidateIds)
-            .eq('stage_id', lastStageId)
-            .eq('app_name', APP_NAME)
-            .order('moved_at', { ascending: false });
-
-        if (error) throw error;
-        return (data || []) as Array<{ candidate_id: string; moved_at: string; moved_by: string | null }>;
+            if (error) throw error;
+            const rows = (data || []) as Array<{
+                candidate_id: string;
+                moved_at: string;
+                moved_by: string | null;
+            }>;
+            out.push(...rows);
+            if (rows.length < pageSize) break;
+        }
+        return out;
     },
 
     /**
