@@ -4,6 +4,15 @@ import { APP_NAME } from '../appConfig';
 import { applyStageColorsFromBulkConfig } from '../stageColors';
 import { fetchWithRetry } from '../fetchWithRetry';
 import { isProcessOperational } from '../processStatus';
+import { loadBulkConfigSnapshot } from '../bulkConfigBackup';
+
+export type BulkQuickReplyListRow = { id: string; title: string; quickReplies: any[] };
+export type BulkProcessCardExtras = {
+    id: string;
+    flyerUrl?: string;
+    flyerPosition?: string;
+    description?: string;
+};
 
 const STAGE_LIST_FIELDS = 'id, process_id, name, order_index, required_documents, is_critical, color';
 
@@ -336,18 +345,41 @@ function isStatementTimeout(error: unknown): boolean {
     return err?.code === '57014' || msg.includes('statement timeout') || msg.includes('canceling statement');
 }
 
-async function mapPool<T, R>(items: T[], concurrency: number, fn: (item: T) => Promise<R>): Promise<R[]> {
-    const results: R[] = [];
-    let index = 0;
-    async function worker() {
-        while (index < items.length) {
-            const current = index++;
-            results[current] = await fn(items[current]);
-        }
-    }
-    const n = Math.max(1, Math.min(concurrency, items.length || 1));
-    await Promise.all(Array.from({ length: n }, () => worker()));
-    return results;
+function isAbortError(error: unknown): boolean {
+    return (error as { name?: string })?.name === 'AbortError';
+}
+
+function isMissingRpc(error: unknown): boolean {
+    const err = error as { code?: string; message?: string; status?: number };
+    const msg = `${err?.message || ''}`.toLowerCase();
+    return (
+        err?.code === 'PGRST202' ||
+        err?.code === '42883' ||
+        err?.status === 404 ||
+        msg.includes('could not find the function') ||
+        msg.includes('does not exist')
+    );
+}
+
+function normalizeQuickReplyRows(
+    rows: Array<{ id: string; title?: string; quickReplies?: unknown; quick_replies?: unknown }>,
+    titleById?: Map<string, string>
+): BulkQuickReplyListRow[] {
+    return rows.map(row => ({
+        id: row.id,
+        title: row.title || titleById?.get(row.id) || '',
+        quickReplies: Array.isArray(row.quickReplies)
+            ? row.quickReplies
+            : Array.isArray(row.quick_replies)
+                ? row.quick_replies
+                : [],
+    }));
+}
+
+function snapshotQuickReplies(processId: string, title: string): BulkQuickReplyListRow | null {
+    const replies = loadBulkConfigSnapshot(processId)?.bulkConfig?.quickReplies;
+    if (!Array.isArray(replies) || replies.length === 0) return null;
+    return { id: processId, title, quickReplies: replies };
 }
 
 export type ProcessListOptions = {
@@ -1447,13 +1479,89 @@ export const processesApi = {
     },
 
     /**
-     * Trae las respuestas rápidas de procesos masivos En Proceso y Stand By
-     * (no terminados, cancelados ni truncos) para el panel "Todas".
-     * No pide todo el bulk_config de golpe (adjuntos en base64 saturan Supabase).
-     * Lista id+título y luego cada proceso por separado.
+     * Completa flyer y descripción de las tarjetas sin meterlos en la lista inicial
+     * (los flyers en base64 saturan una sola consulta).
      */
-    async getAllBulkQuickReplies(): Promise<Array<{ id: string; title: string; quickReplies: any[] }>> {
+    async hydrateBulkProcessCardFields(
+        processIds: string[],
+        onBatch?: (rows: BulkProcessCardExtras[]) => void
+    ): Promise<BulkProcessCardExtras[]> {
+        const ids = [...new Set(processIds.filter(Boolean))];
+        const collected: BulkProcessCardExtras[] = [];
+
+        const emit = (rows: BulkProcessCardExtras[]) => {
+            if (rows.length === 0) return;
+            collected.push(...rows);
+            onBatch?.(rows);
+        };
+
+        const fetchIds = async (chunk: string[]): Promise<void> => {
+            if (chunk.length === 0) return;
+            const { data, error } = await supabase
+                .from('processes')
+                .select('id, flyer_url, flyer_position, description')
+                .in('id', chunk)
+                .eq('app_name', APP_NAME);
+            if (!error && data) {
+                emit(data.map((row: any) => ({
+                    id: row.id,
+                    flyerUrl: row.flyer_url || undefined,
+                    flyerPosition: row.flyer_position || undefined,
+                    description: row.description || undefined,
+                })));
+                return;
+            }
+            if (chunk.length === 1) {
+                console.warn('No se pudo hidratar la tarjeta del proceso', chunk[0], error);
+                return;
+            }
+            const mid = Math.ceil(chunk.length / 2);
+            await fetchIds(chunk.slice(0, mid));
+            await fetchIds(chunk.slice(mid));
+        };
+
+        const cardChunk = 8;
+        for (let i = 0; i < ids.length; i += cardChunk) {
+            await fetchIds(ids.slice(i, i + cardChunk));
+        }
+        return collected;
+    },
+
+    /**
+     * Trae las respuestas rápidas de procesos masivos En Proceso y Stand By
+     * para el panel "Todas". Emite lotes en cuanto llegan para no dejar solo
+     * el proceso actual visible.
+     */
+    async getAllBulkQuickReplies(options?: {
+        onBatch?: (rows: BulkQuickReplyListRow[]) => void;
+        signal?: AbortSignal;
+    }): Promise<BulkQuickReplyListRow[]> {
+        const emit = (rows: BulkQuickReplyListRow[]) => {
+            const useful = rows.filter(row => row.quickReplies.length > 0);
+            if (useful.length > 0) options?.onBatch?.(useful);
+            return useful;
+        };
+
         try {
+            const rpc = await supabase.rpc('get_operational_bulk_quick_replies', {
+                p_app_name: APP_NAME,
+            });
+            if (!rpc.error && Array.isArray(rpc.data)) {
+                const rows = normalizeQuickReplyRows(rpc.data as any[]);
+                emit(rows);
+                return rows;
+            }
+            if (rpc.error && !isMissingRpc(rpc.error)) {
+                console.warn('⚠️ RPC de respuestas rápidas falló, usando consulta por lotes:', rpc.error);
+            }
+        } catch (err) {
+            if (!isMissingRpc(err)) {
+                console.warn('⚠️ RPC de respuestas rápidas no disponible:', err);
+            }
+        }
+
+        try {
+            if (options?.signal?.aborted) return [];
             const listResponse = await supabase
                 .from('processes')
                 .select('id, title, status')
@@ -1467,28 +1575,54 @@ export const processesApi = {
                 .filter(proc => isProcessOperational(proc.status));
             if (processes.length === 0) return [];
 
-            const rows = await mapPool(processes, 3, async (proc) => {
+            const titleById = new Map(processes.map(p => [p.id, p.title]));
+            const allRows: BulkQuickReplyListRow[] = [];
+
+            const fetchGroup = async (
+                group: Array<{ id: string; title: string }>
+            ): Promise<BulkQuickReplyListRow[]> => {
+                if (options?.signal?.aborted || group.length === 0) return [];
                 try {
                     const { data, error } = await supabase
                         .from('processes')
-                        .select('quickReplies:bulk_config->quickReplies')
-                        .eq('id', proc.id)
-                        .eq('app_name', APP_NAME)
-                        .maybeSingle();
+                        .select('id, title, quickReplies:bulk_config->quickReplies')
+                        .in('id', group.map(p => p.id))
+                        .eq('app_name', APP_NAME);
                     if (error) throw error;
-                    const quickReplies = Array.isArray((data as any)?.quickReplies)
-                        ? (data as any).quickReplies
-                        : [];
-                    return { id: proc.id, title: proc.title, quickReplies };
+                    const rows = normalizeQuickReplyRows((data || []) as any[], titleById);
+                    emit(rows);
+                    return rows;
                 } catch (err) {
-                    console.warn(`⚠️ No se pudieron cargar respuestas rápidas de ${proc.title}:`, err);
-                    return { id: proc.id, title: proc.title, quickReplies: [] };
+                    if (isAbortError(err) || options?.signal?.aborted) return [];
+                    if (group.length === 1) {
+                        const fallback = snapshotQuickReplies(group[0].id, group[0].title);
+                        if (fallback) {
+                            emit([fallback]);
+                            return [fallback];
+                        }
+                        console.warn(`⚠️ No se pudieron cargar respuestas rápidas de ${group[0].title}:`, err);
+                        return [{ id: group[0].id, title: group[0].title, quickReplies: [] }];
+                    }
+                    const mid = Math.ceil(group.length / 2);
+                    const [left, right] = await Promise.all([
+                        fetchGroup(group.slice(0, mid)),
+                        fetchGroup(group.slice(mid)),
+                    ]);
+                    return [...left, ...right];
                 }
-            });
+            };
 
-            return rows;
+            const groupSize = 4;
+            for (let i = 0; i < processes.length; i += groupSize) {
+                if (options?.signal?.aborted) break;
+                const groupRows = await fetchGroup(processes.slice(i, i + groupSize));
+                allRows.push(...groupRows);
+            }
+            return allRows;
         } catch (err) {
-            console.warn('⚠️ Error cargando respuestas rápidas globales:', err);
+            if (!isAbortError(err)) {
+                console.warn('⚠️ Error cargando respuestas rápidas globales:', err);
+            }
             return [];
         }
     },

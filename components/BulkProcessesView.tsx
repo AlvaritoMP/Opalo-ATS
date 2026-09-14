@@ -720,18 +720,19 @@ const BulkActionsFAB: React.FC<{
     );
 };
 
-/** Conserva bulk_config ya cargado cuando la lista ligera (sin bulk_config) vuelve a sincronizarse. */
+/** Conserva datos ya hidratados cuando la lista ligera vuelve a sincronizarse. */
 function mergePreservingBulkConfig(prev: Process[], incoming: Process[]): Process[] {
-    const configById = new Map<string, Process['bulkConfig']>();
-    for (const p of prev) {
-        if (p.bulkConfig) configById.set(p.id, p.bulkConfig);
-    }
-    for (const p of incoming) {
-        if (p.bulkConfig) configById.set(p.id, p.bulkConfig);
-    }
+    const prevById = new Map(prev.map(p => [p.id, p]));
     return incoming.map(p => {
-        const bulkConfig = p.bulkConfig ?? configById.get(p.id);
-        return bulkConfig && !p.bulkConfig ? { ...p, bulkConfig } : p;
+        const previous = prevById.get(p.id);
+        if (!previous) return p;
+        return {
+            ...p,
+            bulkConfig: p.bulkConfig ?? previous.bulkConfig,
+            flyerUrl: p.flyerUrl || previous.flyerUrl,
+            flyerPosition: p.flyerPosition || previous.flyerPosition,
+            description: p.description || previous.description,
+        };
     });
 }
 
@@ -1636,6 +1637,25 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                 filteredProcesses = processes.filter(p => p.clientId && allowedClientIdsSet.has(p.clientId));
             }
             setBulkProcesses(prev => mergePreservingBulkConfig(prev, filteredProcesses));
+            void processesApi.hydrateBulkProcessCardFields(
+                filteredProcesses.map(p => p.id),
+                extras => {
+                    setBulkProcesses(prev =>
+                        prev.map(p => {
+                            const extra = extras.find(e => e.id === p.id);
+                            if (!extra) return p;
+                            return {
+                                ...p,
+                                flyerUrl: extra.flyerUrl || p.flyerUrl,
+                                flyerPosition: extra.flyerPosition || p.flyerPosition,
+                                description: extra.description || p.description,
+                            };
+                        })
+                    );
+                }
+            ).catch(err => {
+                console.warn('No se pudieron cargar imágenes de las tarjetas masivas:', err);
+            });
             if (filteredProcesses.length === 0) return;
 
             const activeId =
@@ -1663,24 +1683,42 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
         loadBulkProcesses();
     }, [isEmbedded, loadBulkProcesses]);
 
-    // Carga las respuestas rápidas de TODOS los procesos al abrir "Todas",
-    // para no saturar Supabase en el arranque. El proceso actual ya está en memoria.
+    // Carga las respuestas de En Proceso y Stand By al abrir "Todas",
+    // y las va mostrando por lote para no quedarse solo con el proceso actual.
     useEffect(() => {
         if (isEmbedded || !showGlobalQuickRepliesPanel) return;
         let cancelled = false;
+        const controller = new AbortController();
         setIsLoadingGlobalQuickReplies(true);
-        void processesApi.getAllBulkQuickReplies()
+        const mergeRows = (
+            rows: Array<{ id: string; title: string; quickReplies: BulkQuickReply[] }>
+        ) => {
+            if (cancelled || rows.length === 0) return;
+            setGlobalQuickReplies(prev => {
+                const map = new Map(prev.map(item => [item.id, item]));
+                for (const row of rows) {
+                    if (!Array.isArray(row.quickReplies) || row.quickReplies.length === 0) continue;
+                    map.set(row.id, row);
+                }
+                return Array.from(map.values());
+            });
+        };
+        void processesApi.getAllBulkQuickReplies({
+            signal: controller.signal,
+            onBatch: mergeRows,
+        })
             .then(rows => {
-                if (!cancelled) setGlobalQuickReplies(rows);
+                if (!cancelled) mergeRows(rows);
             })
             .catch(err => {
-                console.warn('No se pudieron cargar las respuestas rápidas globales:', err);
+                if (!cancelled) console.warn('No se pudieron cargar las respuestas rápidas globales:', err);
             })
             .finally(() => {
                 if (!cancelled) setIsLoadingGlobalQuickReplies(false);
             });
         return () => {
             cancelled = true;
+            controller.abort();
         };
     }, [isEmbedded, showGlobalQuickRepliesPanel]);
 
