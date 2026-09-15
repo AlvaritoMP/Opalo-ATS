@@ -9,8 +9,8 @@
     "npm": ">=10.0.0"
   },
   "scripts": {
-    "dev": "node --watch src/server.js",
-    "start": "node src/server.js"
+    "dev": "node --env-file=.env --watch src/server.js",
+    "start": "node --env-file=.env src/server.js"
   },
   "keywords": ["ats", "google-drive", "oauth"],
   "author": "",
