@@ -59,6 +59,7 @@ export const MessagingBar: React.FC<MessagingBarProps> = ({
     const [draft, setDraft] = useState('');
     const [sending, setSending] = useState(false);
     const [available, setAvailable] = useState(true);
+    const [selfId, setSelfId] = useState(currentUser.id);
     const mmEnabled = hasMattermostSession();
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const knownIdsRef = useRef<Set<string>>(new Set());
@@ -81,37 +82,38 @@ export const MessagingBar: React.FC<MessagingBarProps> = ({
         const readUntil = readUntilRef.current;
         if (readUntil.size === 0) return list;
         return list.map(msg => {
-            if (msg.recipientId !== currentUser.id || msg.readAt) return msg;
+            if (msg.recipientId !== selfId || msg.readAt) return msg;
             const until = readUntil.get(msg.senderId);
             if (until != null && Date.parse(msg.createdAt) <= until) {
                 return { ...msg, readAt: new Date(until).toISOString() };
             }
             return msg;
         });
-    }, [currentUser.id]);
+    }, [selfId]);
 
     const directoryUsers = mmPeers.length > 0 ? mmPeers : users;
 
     const otherUsers = useMemo(
-        () => directoryUsers.filter(u => u.id !== currentUser.id && Boolean(u.mattermostUserId)),
-        [directoryUsers, currentUser.id]
+        () => directoryUsers.filter(u => u.id !== selfId && Boolean(u.mattermostUserId)),
+        [directoryUsers, selfId]
     );
 
     const userNameById = useMemo(() => {
         const map = new Map<string, string>();
         for (const u of directoryUsers) map.set(u.id, u.name);
         map.set(currentUser.id, currentUser.name);
+        map.set(selfId, currentUser.name);
         return map;
-    }, [directoryUsers, currentUser]);
+    }, [directoryUsers, currentUser, selfId]);
 
     const threads = useMemo((): ThreadPreview[] => {
         const map = new Map<string, ThreadPreview>();
         for (const msg of messages) {
             const partnerId =
-                msg.senderId === currentUser.id ? msg.recipientId : msg.senderId;
+                msg.senderId === selfId ? msg.recipientId : msg.senderId;
             const existing = map.get(partnerId);
             const unread =
-                msg.recipientId === currentUser.id && !msg.readAt
+                msg.recipientId === selfId && !msg.readAt
                     ? (existing?.unread || 0) + 1
                     : existing?.unread || 0;
             if (!existing || new Date(msg.createdAt) > new Date(existing.lastMessage.createdAt)) {
@@ -130,27 +132,28 @@ export const MessagingBar: React.FC<MessagingBarProps> = ({
                 new Date(b.lastMessage.createdAt).getTime() -
                 new Date(a.lastMessage.createdAt).getTime()
         );
-    }, [messages, currentUser.id, userNameById]);
+    }, [messages, selfId, userNameById]);
 
     const totalUnread = useMemo(
-        () => messages.filter(m => m.recipientId === currentUser.id && !m.readAt).length,
-        [messages, currentUser.id]
+        () => messages.filter(m => m.recipientId === selfId && !m.readAt).length,
+        [messages, selfId]
     );
 
     const conversationMessages = useMemo(() => {
         if (!activePartnerId) return [];
         return messages.filter(
             m =>
-                (m.senderId === currentUser.id && m.recipientId === activePartnerId) ||
-                (m.senderId === activePartnerId && m.recipientId === currentUser.id)
+                (m.senderId === selfId && m.recipientId === activePartnerId) ||
+                (m.senderId === activePartnerId && m.recipientId === selfId)
         );
-    }, [messages, activePartnerId, currentUser.id]);
+    }, [messages, activePartnerId, selfId]);
 
     const loadMessages = useCallback(async () => {
         if (!mmEnabled) return;
         try {
-            const data = await mattermostChatApi.getDms();
+            const data = await mattermostChatApi.getDms(currentUser.id);
             setAvailable(true);
+            if (data.me?.id) setSelfId(data.me.id);
             setMmPeers(
                 (data.peers || []).map(peer => ({
                     id: peer.id,
@@ -162,6 +165,7 @@ export const MessagingBar: React.FC<MessagingBarProps> = ({
                     avatarUrl: peer.avatarUrl,
                 }))
             );
+            const meId = data.me?.id || currentUser.id;
             const incoming = applyLocalReadState(data.messages || []);
             const previousIds = knownIdsRef.current;
             if (mmInitializedRef.current) {
@@ -169,8 +173,8 @@ export const MessagingBar: React.FC<MessagingBarProps> = ({
                     .filter(
                         msg =>
                             !previousIds.has(msg.id) &&
-                            msg.senderId !== currentUser.id &&
-                            msg.recipientId === currentUser.id
+                            msg.senderId !== meId &&
+                            msg.recipientId === meId
                     )
                     .sort(
                         (a, b) =>
@@ -192,7 +196,7 @@ export const MessagingBar: React.FC<MessagingBarProps> = ({
             setMessages(incoming);
         } catch (err) {
             console.warn('No se pudo cargar mensajería de Mattermost:', err);
-            setAvailable(false);
+            if (!mmInitializedRef.current) setAvailable(false);
         }
     }, [mmEnabled, currentUser.id, applyLocalReadState, unhideChat]);
 
@@ -201,13 +205,13 @@ export const MessagingBar: React.FC<MessagingBarProps> = ({
     }, [loadMessages]);
 
     useEffect(() => {
-        if (!available || !mmEnabled) return;
+        if (!mmEnabled) return;
         const ms = expanded ? POLL_MM_OPEN_MS : POLL_MM_MS;
         const pollId = window.setInterval(() => {
             void loadMessages();
         }, ms);
         return () => window.clearInterval(pollId);
-    }, [available, mmEnabled, expanded, loadMessages]);
+    }, [mmEnabled, expanded, loadMessages]);
 
     useEffect(() => {
         if (!expanded || !activePartnerId) return;
@@ -218,7 +222,7 @@ export const MessagingBar: React.FC<MessagingBarProps> = ({
         readUntilRef.current.set(activePartnerId, Math.max(Date.now(), latestIncoming));
 
         const unread = conversationMessages.filter(
-            m => m.recipientId === currentUser.id && !m.readAt
+            m => m.recipientId === selfId && !m.readAt
         );
         if (unread.length > 0) {
             setMessages(prev => applyLocalReadState(prev));
@@ -227,10 +231,10 @@ export const MessagingBar: React.FC<MessagingBarProps> = ({
         if (markedReadPartnersRef.current.has(activePartnerId)) return;
         markedReadPartnersRef.current.add(activePartnerId);
 
-        void mattermostChatApi.markRead(activePartnerId).catch(err => {
+        void mattermostChatApi.markRead(activePartnerId, currentUser.id).catch(err => {
             console.warn('No se pudo marcar leído:', err);
         });
-    }, [expanded, activePartnerId, conversationMessages, currentUser.id, applyLocalReadState]);
+    }, [expanded, activePartnerId, conversationMessages, selfId, currentUser.id, applyLocalReadState]);
 
     useEffect(() => {
         if (expanded && activePartnerId) {
@@ -242,10 +246,10 @@ export const MessagingBar: React.FC<MessagingBarProps> = ({
         if (!activePartnerId || !draft.trim() || sending) return;
         setSending(true);
         try {
-            const sent = await mattermostChatApi.send(activePartnerId, draft);
+            const sent = await mattermostChatApi.send(activePartnerId, draft, currentUser.id);
             const normalized: UserMessage = {
                 ...sent,
-                senderId: sent.senderId || currentUser.id,
+                senderId: sent.senderId || selfId,
                 recipientId: sent.recipientId || activePartnerId,
             };
             setMessages(prev => (prev.some(m => m.id === normalized.id) ? prev : [...prev, normalized]));
@@ -289,7 +293,7 @@ export const MessagingBar: React.FC<MessagingBarProps> = ({
     if (!available) {
         return (
             <div className="fixed bottom-4 right-4 z-[45] max-w-xs bg-white border border-amber-200 text-amber-800 text-xs rounded-lg shadow px-3 py-2">
-                No se pudo conectar el chat de Mattermost. Recarga o vuelve a entrar con Mattermost.
+                No se pudo conectar el chat de Mattermost. Reintentando…
             </div>
         );
     }
@@ -388,7 +392,7 @@ export const MessagingBar: React.FC<MessagingBarProps> = ({
                                                 </span>
                                             </div>
                                             <p className="text-xs text-gray-500 truncate">
-                                                {thread.lastMessage.senderId === currentUser.id
+                                                {thread.lastMessage.senderId === selfId
                                                     ? 'Tú: '
                                                     : ''}
                                                 {thread.lastMessage.text}
@@ -429,7 +433,7 @@ export const MessagingBar: React.FC<MessagingBarProps> = ({
                         <>
                             <div className="flex-1 overflow-y-auto p-3 space-y-2 min-h-[140px] max-h-[220px]">
                                 {conversationMessages.map(msg => {
-                                    const mine = msg.senderId === currentUser.id;
+                                    const mine = msg.senderId === selfId;
                                     return (
                                         <div
                                             key={msg.id}

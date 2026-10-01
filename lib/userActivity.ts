@@ -55,6 +55,7 @@ const VIEW_NAVIGATION: Record<string, { action: string; summary: string }> = {
     forms: { action: 'view_forms', summary: 'Abrió formularios' },
     letters: { action: 'view_letters', summary: 'Abrió cartas' },
     calendar: { action: 'view_calendar', summary: 'Abrió el calendario' },
+    planning: { action: 'view_planning', summary: 'Abrió planeamiento' },
     reports: { action: 'view_reports', summary: 'Abrió reportes' },
     compare: { action: 'view_compare', summary: 'Abrió el comparador' },
     users: { action: 'view_users', summary: 'Abrió gestión de usuarios' },

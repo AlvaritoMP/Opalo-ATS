@@ -89,6 +89,7 @@ async function chatFetch(path: string, init: RequestInit = {}, retry = true): Pr
             'Content-Type': 'application/json',
             Authorization: `Bearer ${session.accessToken}`,
             'X-App-Name': APP_NAME,
+            ...(session.atsUserId ? { 'X-Ats-User-Id': session.atsUserId } : {}),
             ...(init.headers || {}),
         },
     });
@@ -155,25 +156,29 @@ export const mattermostChatApi = {
         return Boolean(getMattermostSession()?.accessToken);
     },
 
-    async getDms(): Promise<MattermostDmsPayload> {
-        const res = await chatFetch('/dms');
-        if (!res.ok) throw new Error(await parseError(res));
-        return res.json();
-    },
-
-    async send(partnerId: string, text: string): Promise<UserMessage> {
-        const res = await chatFetch('/posts', {
-            method: 'POST',
-            body: JSON.stringify({ partnerId, text }),
+    async getDms(atsUserId?: string): Promise<MattermostDmsPayload> {
+        const res = await chatFetch('/dms', {
+            headers: atsUserId ? { 'X-Ats-User-Id': atsUserId } : {},
         });
         if (!res.ok) throw new Error(await parseError(res));
         return res.json();
     },
 
-    async markRead(partnerId: string): Promise<void> {
+    async send(partnerId: string, text: string, atsUserId?: string): Promise<UserMessage> {
+        const res = await chatFetch('/posts', {
+            method: 'POST',
+            body: JSON.stringify({ partnerId, text }),
+            headers: atsUserId ? { 'X-Ats-User-Id': atsUserId } : {},
+        });
+        if (!res.ok) throw new Error(await parseError(res));
+        return res.json();
+    },
+
+    async markRead(partnerId: string, atsUserId?: string): Promise<void> {
         const res = await chatFetch('/read', {
             method: 'POST',
             body: JSON.stringify({ partnerId }),
+            headers: atsUserId ? { 'X-Ats-User-Id': atsUserId } : {},
         });
         if (!res.ok) throw new Error(await parseError(res));
     },

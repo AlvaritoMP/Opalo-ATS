@@ -18,6 +18,7 @@ export * from './userMessages';
 export * from './mattermostChat';
 export * from './userAlerts';
 export * from './userActivity';
+export * from './workPlanning';
 export { bulkTableTemplatesApi } from './bulkTableTemplates';
 
 // Exportar funciones helper de Supabase

@@ -106,10 +106,10 @@ const DEFAULT_ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
 
 // Secciones visibles por defecto según rol
 const DEFAULT_ROLE_SECTIONS: Record<UserRole, Section[]> = {
-    admin: ['dashboard', 'intelligence', 'processes', 'archived', 'candidates', 'forms', 'letters', 'calendar', 'reports', 'compare', 'bulk-processes', 'opsflow-handoffs', 'user-activity', 'users', 'settings'],
-    recruiter: ['dashboard', 'processes', 'archived', 'candidates', 'forms', 'letters', 'calendar', 'reports', 'compare', 'bulk-processes', 'opsflow-handoffs'],
+    admin: ['dashboard', 'intelligence', 'processes', 'archived', 'candidates', 'forms', 'letters', 'calendar', 'planning', 'reports', 'compare', 'bulk-processes', 'opsflow-handoffs', 'user-activity', 'users', 'settings'],
+    recruiter: ['dashboard', 'processes', 'archived', 'candidates', 'forms', 'letters', 'calendar', 'planning', 'reports', 'compare', 'bulk-processes', 'opsflow-handoffs'],
     client: ['dashboard', 'processes', 'candidates', 'calendar', 'reports', 'compare'],
-    viewer: ['dashboard', 'processes', 'candidates', 'calendar', 'reports']
+    viewer: ['dashboard', 'processes', 'candidates', 'calendar', 'planning', 'reports']
 };
 
 const SECTION_LABELS: Record<Section, string> = {
@@ -121,6 +121,7 @@ const SECTION_LABELS: Record<Section, string> = {
     'forms': 'Formularios',
     'letters': 'Cartas',
     'calendar': 'Calendario',
+    'planning': 'Planeamiento',
     'reports': 'Reportes',
     'compare': 'Comparador',
     'bulk-import': 'Importación Masiva',

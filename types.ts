@@ -697,6 +697,23 @@ export interface CandidateHandoffHistoryEntry {
     deliveryError?: string;
 }
 
+/** Acuerdo de reunión: quién trabaja qué proceso, en qué periodo. No modifica el proceso. */
+export interface WorkPlanAssignment {
+    id: string;
+    processId: string;
+    processTitle: string;
+    userIds: string[];
+    userNames: string[];
+    startsAt: string;
+    endsAt: string;
+    allDay: boolean;
+    note?: string;
+    createdBy?: string;
+    createdByName?: string;
+    createdAt: string;
+    updatedAt: string;
+}
+
 export type Section = 
     | 'dashboard' 
     | 'processes' 
@@ -705,6 +722,7 @@ export type Section =
     | 'forms' 
     | 'letters' 
     | 'calendar' 
+    | 'planning'
     | 'reports' 
     | 'compare' 
     | 'bulk-import' 

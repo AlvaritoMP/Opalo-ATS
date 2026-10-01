@@ -45,6 +45,7 @@ import { UserActivityView } from './components/UserActivityView';
 import { Candidates as CandidatesView } from './components/Candidates';
 import { Forms } from './components/Forms';
 import { CalendarView } from './components/CalendarView';
+import { TeamPlanningView } from './components/TeamPlanningView';
 import { BulkImportView } from './components/BulkImportView';
 import { BulkProcessesView } from './components/BulkProcessesView';
 import { OpsFlowHandoffHistory } from './components/OpsFlowHandoffHistory';
@@ -54,7 +55,7 @@ import { Letters } from './components/Letters';
 import { ToastContainer } from './components/Toast';
 import { MessagingBar } from './components/MessagingBar';
 import { UserAlertsPanel } from './components/UserAlertsPanel';
-import { LayoutDashboard, Briefcase, FileText, Settings as SettingsIcon, Users as UsersIcon, ChevronsLeft, ChevronsRight, BarChart2, Calendar, LogOut, X, Archive, RefreshCw, Menu, Grid3x3, Send, Brain, Activity } from 'lucide-react';
+import { LayoutDashboard, Briefcase, FileText, Settings as SettingsIcon, Users as UsersIcon, ChevronsLeft, ChevronsRight, BarChart2, Calendar, CalendarDays, LogOut, X, Archive, RefreshCw, Menu, Grid3x3, Send, Brain, Activity } from 'lucide-react';
 import { CandidateComparator } from './components/CandidateComparator';
 
 
@@ -382,10 +383,10 @@ const getVisibleSections = (user: User | null): Section[] => {
         sections = [...user.visibleSections];
     } else {
         const defaultSections: Record<UserRole, Section[]> = {
-            admin: ['dashboard', 'intelligence', 'processes', 'archived', 'candidates', 'forms', 'letters', 'calendar', 'reports', 'compare', 'bulk-processes', 'opsflow-handoffs', 'user-activity', 'users', 'settings'],
-            recruiter: ['dashboard', 'processes', 'archived', 'candidates', 'forms', 'letters', 'calendar', 'reports', 'compare', 'bulk-processes', 'opsflow-handoffs'],
+            admin: ['dashboard', 'intelligence', 'processes', 'archived', 'candidates', 'forms', 'letters', 'calendar', 'planning', 'reports', 'compare', 'bulk-processes', 'opsflow-handoffs', 'user-activity', 'users', 'settings'],
+            recruiter: ['dashboard', 'processes', 'archived', 'candidates', 'forms', 'letters', 'calendar', 'planning', 'reports', 'compare', 'bulk-processes', 'opsflow-handoffs'],
             client: ['dashboard', 'processes', 'candidates', 'calendar', 'reports', 'compare'],
-            viewer: ['dashboard', 'processes', 'candidates', 'calendar', 'reports']
+            viewer: ['dashboard', 'processes', 'candidates', 'calendar', 'planning', 'reports']
         };
         sections = defaultSections[user.role] || [];
     }
@@ -398,6 +399,9 @@ const getVisibleSections = (user: User | null): Section[] => {
     }
     if (user.role !== 'admin') {
         sections = sections.filter(s => s !== 'user-activity');
+    }
+    if ((user.role === 'admin' || user.role === 'recruiter') && !sections.includes('planning')) {
+        sections = [...sections, 'planning'];
     }
     return sections;
 };
@@ -496,6 +500,7 @@ const Sidebar: React.FC = () => {
                 {canSeeSection('forms') && <NavItem icon={FileText} label={getLabel('sidebar_forms', 'Formularios')} view="forms" currentView={state.view.type} setView={actions.setView} isCollapsed={isCollapsed} />}
                 {canSeeSection('letters') && <NavItem icon={FileText} label={getLabel('sidebar_letters', 'Cartas')} view="letters" currentView={state.view.type} setView={actions.setView} isCollapsed={isCollapsed} />}
                 {canSeeSection('calendar') && <NavItem icon={Calendar} label={getLabel('sidebar_calendar', 'Calendario')} view="calendar" currentView={state.view.type} setView={actions.setView} isCollapsed={isCollapsed} />}
+                {canSeeSection('planning') && <NavItem icon={CalendarDays} label={getLabel('sidebar_planning', 'Planeamiento')} view="planning" currentView={state.view.type} setView={actions.setView} isCollapsed={isCollapsed} />}
                 {canSeeSection('reports') && <NavItem icon={BarChart2} label={getLabel('sidebar_reports', 'Reportes')} view="reports" currentView={state.view.type} setView={actions.setView} isCollapsed={isCollapsed} />}
                 {canSeeSection('compare') && <NavItem icon={BarChart2} label={getLabel('sidebar_compare', 'Comparador')} view="compare" currentView={state.view.type} setView={actions.setView} isCollapsed={isCollapsed} />}
             </nav>
@@ -2315,6 +2320,7 @@ const App: React.FC = () => {
                 'forms': 'forms',
                 'letters': 'letters',
                 'calendar': 'calendar',
+                'planning': 'planning',
                 'reports': 'reports',
                 'compare': 'compare',
                 'users': 'users',
@@ -2348,6 +2354,7 @@ const App: React.FC = () => {
             case 'forms': return <Forms />;
             case 'letters': return <Letters />;
             case 'calendar': return <CalendarView />;
+            case 'planning': return <TeamPlanningView />;
             case 'candidates': return <CandidatesView />;
             case 'compare': return <CandidateComparator />;
             case 'users': return <Users />;
