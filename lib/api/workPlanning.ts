@@ -3,6 +3,8 @@ import { APP_NAME } from '../appConfig';
 import { supabase } from '../supabase';
 
 const LOCAL_KEY = `work-plan-assignments:${APP_NAME}`;
+const COLORS_KEY = `work-plan-colors:${APP_NAME}`;
+const PALETTE_PROCESS_ID = '__work_plan_palette__';
 
 export type WorkPlanWrite = {
     processId: string;
@@ -24,9 +26,12 @@ export type WorkPlanListResult = {
     source: WorkPlanSource;
     /** La tabla ya existe y el borrador local todavía no se compartió. */
     remoteReady: boolean;
+    colors: Record<string, string>;
 };
 
 let source: WorkPlanSource | null = null;
+let colorCache: Record<string, string> = {};
+let paletteRowId: string | null = null;
 
 function isMissingTableError(error: any): boolean {
     const code = String(error?.code || '');
@@ -56,6 +61,52 @@ function readLocal(): WorkPlanAssignment[] {
 
 function writeLocal(items: WorkPlanAssignment[]) {
     localStorage.setItem(LOCAL_KEY, JSON.stringify(items));
+}
+
+function readColorMap(): Record<string, string> {
+    try {
+        const raw = localStorage.getItem(COLORS_KEY);
+        if (!raw) return {};
+        const parsed = JSON.parse(raw);
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+        const colors: Record<string, string> = {};
+        for (const [key, value] of Object.entries(parsed)) {
+            if (typeof value === 'string') colors[key] = value;
+        }
+        return colors;
+    } catch {
+        return {};
+    }
+}
+
+function parseColorNote(note?: string): Record<string, string> {
+    if (!note) return {};
+    try {
+        const parsed = JSON.parse(note);
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+        const colors: Record<string, string> = {};
+        for (const [key, value] of Object.entries(parsed)) {
+            if (typeof value === 'string') colors[key] = value;
+        }
+        return colors;
+    } catch {
+        return {};
+    }
+}
+
+function rememberColors(colors: Record<string, string>, rowId: string | null) {
+    colorCache = colors;
+    paletteRowId = rowId;
+    localStorage.setItem(COLORS_KEY, JSON.stringify(colors));
+}
+
+function splitPalette(items: WorkPlanAssignment[]) {
+    const palette = items.find(item => item.processId === PALETTE_PROCESS_ID);
+    return {
+        items: items.filter(item => item.processId !== PALETTE_PROCESS_ID),
+        colors: palette ? parseColorNote(palette.note) : readColorMap(),
+        paletteId: palette?.id || null,
+    };
 }
 
 function rowToAssignment(row: any): WorkPlanAssignment {
@@ -117,6 +168,7 @@ const ASSIGNMENT_COLUMNS = 'id, process_id, process_title, user_ids, user_names,
 export const workPlanningApi = {
     resetSource() {
         source = null;
+        paletteRowId = null;
     },
 
     async list(): Promise<WorkPlanListResult> {
@@ -130,19 +182,25 @@ export const workPlanningApi = {
         if (error) {
             if (isMissingTableError(error)) {
                 source = 'local';
-                return { items: readLocal(), source: 'local', remoteReady: false };
+                const colors = readColorMap();
+                rememberColors(colors, null);
+                return { items: readLocal().filter(item => item.processId !== PALETTE_PROCESS_ID), source: 'local', remoteReady: false, colors };
             }
             throw error;
         }
 
         const remote = (data || []).map(rowToAssignment);
-        const local = readLocal();
+        const local = readLocal().filter(item => item.processId !== PALETTE_PROCESS_ID);
         if (remote.length === 0 && local.length > 0) {
             source = 'local';
-            return { items: local, source: 'local', remoteReady: true };
+            const colors = readColorMap();
+            rememberColors(colors, null);
+            return { items: local, source: 'local', remoteReady: true, colors };
         }
         source = 'remote';
-        return { items: remote, source: 'remote', remoteReady: false };
+        const split = splitPalette(remote);
+        rememberColors(split.colors, split.paletteId);
+        return { items: split.items, source: 'remote', remoteReady: false, colors: split.colors };
     },
 
     async publishLocal(): Promise<WorkPlanAssignment[]> {
@@ -223,5 +281,44 @@ export const workPlanningApi = {
             .eq('id', id)
             .eq('app_name', APP_NAME);
         if (error) throw error;
+    },
+
+    async saveProcessColor(processId: string, colorId: string): Promise<Record<string, string>> {
+        const next = { ...colorCache, [processId]: colorId };
+        rememberColors(next, paletteRowId);
+        if (source !== 'remote') return next;
+
+        const now = new Date().toISOString();
+        const note = JSON.stringify(next);
+        if (paletteRowId) {
+            const { error } = await supabase
+                .from('work_plan_assignments')
+                .update({ note, updated_at: now })
+                .eq('id', paletteRowId)
+                .eq('app_name', APP_NAME);
+            if (error) throw error;
+            return next;
+        }
+
+        const { data, error } = await supabase
+            .from('work_plan_assignments')
+            .insert({
+                app_name: APP_NAME,
+                process_id: PALETTE_PROCESS_ID,
+                process_title: 'Colores de procesos',
+                user_ids: [],
+                user_names: [],
+                starts_at: '2000-01-01T00:00:00.000Z',
+                ends_at: '2000-01-02T00:00:00.000Z',
+                all_day: true,
+                note,
+                created_at: now,
+                updated_at: now,
+            })
+            .select('id')
+            .single();
+        if (error) throw error;
+        paletteRowId = data.id;
+        return next;
     },
 };

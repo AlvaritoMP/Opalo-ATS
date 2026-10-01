@@ -6,11 +6,10 @@ import { workPlanningApi, type WorkPlanSource } from '../lib/api/workPlanning';
 import { getErrorMessage } from '../lib/supabase';
 import { isProcessOperational } from '../lib/processStatus';
 import {
-    PROCESS_PALETTE,
+    PROCESS_COLOR_OPTIONS,
     WEEKDAY_LABELS,
     addDays,
     assignmentsOverlap,
-    colorFromKey,
     combineDateAndTime,
     dotFromKey,
     endOfDay,
@@ -20,6 +19,7 @@ import {
     monthWeeks,
     parseDateInput,
     rangesOverlap,
+    resolveProcessColor,
     startOfDay,
     startOfMonth,
     startOfWeekMonday,
@@ -40,15 +40,8 @@ type Draft = {
     note: string;
 };
 
-const MONTH_LANES = 3;
-const WEEK_LANES = 10;
-
-function firstNames(names: string[]): string {
-    return names
-        .map(name => name.trim().split(/\s+/)[0])
-        .filter(Boolean)
-        .join(', ');
-}
+const LANE_HEIGHT = 62;
+const BAR_HEIGHT = 56;
 
 function sortByTitle(processes: Process[]): Process[] {
     return [...processes].sort((a, b) => a.title.localeCompare(b.title, 'es'));
@@ -64,7 +57,7 @@ export const TeamPlanningView: React.FC = () => {
     const [loading, setLoading] = useState(true);
     const [loadError, setLoadError] = useState('');
     const [hiddenUserIds, setHiddenUserIds] = useState<Set<string>>(new Set());
-    const [expandedWeeks, setExpandedWeeks] = useState<Set<string>>(new Set());
+    const [processColors, setProcessColors] = useState<Record<string, string>>({});
     const [draft, setDraft] = useState<Draft | null>(null);
     const [saving, setSaving] = useState(false);
     const [publishing, setPublishing] = useState(false);
@@ -72,7 +65,6 @@ export const TeamPlanningView: React.FC = () => {
     const [processQuery, setProcessQuery] = useState('');
     const [userQuery, setUserQuery] = useState('');
     const [showClosed, setShowClosed] = useState(false);
-    const [gapQuery, setGapQuery] = useState('');
 
     const canEdit = state.currentUser?.role === 'admin' || state.currentUser?.role === 'recruiter';
 
@@ -82,6 +74,7 @@ export const TeamPlanningView: React.FC = () => {
         try {
             const result = await workPlanningApi.list();
             setItems(result.items);
+            setProcessColors(result.colors);
             setSource(result.source);
             setRemoteReady(result.remoteReady);
         } catch (error) {
@@ -124,25 +117,6 @@ export const TeamPlanningView: React.FC = () => {
         return items.filter(item => rangesOverlap(new Date(item.startsAt), new Date(item.endsAt), range.start, range.end));
     }, [items, range]);
 
-    const operational = useMemo(
-        () => sortByTitle(state.processes.filter(process => isProcessOperational(process.status))),
-        [state.processes],
-    );
-
-    const uncovered = useMemo(() => {
-        const covered = new Set(
-            itemsInRange.map(item => item.processId).filter(Boolean),
-        );
-        const query = gapQuery.trim().toLowerCase();
-        return operational.filter(process => {
-            if (covered.has(process.id)) return false;
-            if (!query) return true;
-            return process.title.toLowerCase().includes(query);
-        });
-    }, [operational, itemsInRange, gapQuery]);
-
-    const coveredCount = operational.filter(process => itemsInRange.some(item => item.processId === process.id)).length;
-
     const processTitleOf = (item: WorkPlanAssignment) =>
         state.processes.find(process => process.id === item.processId)?.title || item.processTitle;
 
@@ -166,6 +140,16 @@ export const TeamPlanningView: React.FC = () => {
             }
         }
         return false;
+    };
+
+    const chooseProcessColor = async (processId: string, colorId: string) => {
+        setProcessColors(current => ({ ...current, [processId]: colorId }));
+        try {
+            const saved = await workPlanningApi.saveProcessColor(processId, colorId);
+            setProcessColors(saved);
+        } catch (error) {
+            actions.showToast(getErrorMessage(error), 'error', 4000);
+        }
     };
 
     const openDraft = (next: Draft) => {
@@ -385,9 +369,8 @@ export const TeamPlanningView: React.FC = () => {
                         <CalendarDays className="w-7 h-7 text-primary-600" />
                         {getLabel('sidebar_planning', 'Planeamiento')}
                     </h1>
-                    <p className="text-sm text-gray-500 mt-1 max-w-2xl">
-                        Acuerdo visual de la reunión. Cada color es un proceso y los nombres son el equipo.
-                        Si alguien ve dos procesos a la vez, las barras quedan una sobre la otra. No modifica procesos, candidatos ni entrevistas.
+                    <p className="text-sm text-gray-500 mt-1 max-w-3xl">
+                        Acuerdo de la reunión. El color lo eliges por proceso. Los consultores van en etiquetas propias, debajo del nombre del proceso.
                     </p>
                 </div>
                 {canEdit && (
@@ -519,11 +502,7 @@ export const TeamPlanningView: React.FC = () => {
                                 Actualizar
                             </button>
                         </div>
-                        <div className="flex items-center gap-2">
-                            <span className="text-xs text-gray-500">
-                                {coveredCount} con equipo · {operational.length - coveredCount} sin cobertura
-                            </span>
-                            <div className="inline-flex rounded-lg border border-gray-200 overflow-hidden text-sm">
+                        <div className="inline-flex rounded-lg border border-gray-200 overflow-hidden text-sm">
                                 <button
                                     type="button"
                                     onClick={() => setMode('month')}
@@ -539,12 +518,11 @@ export const TeamPlanningView: React.FC = () => {
                                     Semana
                                 </button>
                             </div>
-                        </div>
                     </div>
 
-                    <div className="grid grid-cols-7 border-b border-gray-100 bg-gray-50">
+                    <div className="grid grid-cols-7 border-b border-gray-200 bg-gray-50">
                         {WEEKDAY_LABELS.map(label => (
-                            <div key={label} className="px-2 py-2 text-xs font-medium text-gray-500">{label}</div>
+                            <div key={label} className="px-2 py-3 text-sm font-semibold text-gray-600">{label}</div>
                         ))}
                     </div>
 
@@ -554,121 +532,130 @@ export const TeamPlanningView: React.FC = () => {
                         weeks.map(week => {
                             const weekKey = toDateInput(week[0]);
                             const segments = layoutWeek(week[0], visibleItems);
-                            const expanded = expandedWeeks.has(weekKey) || mode === 'week';
-                            const laneCap = mode === 'week' ? WEEK_LANES : MONTH_LANES;
-                            const maxLane = segments.reduce((max, segment) => Math.max(max, segment.lane), -1);
-                            const hidden = expanded ? 0 : segments.filter(segment => segment.lane >= laneCap).length;
-                            const shownLanes = expanded ? maxLane + 1 : Math.min(maxLane + 1, laneCap);
-                            const bodyHeight = Math.max(shownLanes, 1) * 26;
+                            const laneCount = segments.reduce((max, segment) => Math.max(max, segment.lane), -1) + 1;
+                            const eventsHeight = Math.max(laneCount * LANE_HEIGHT, 72);
                             const today = new Date();
                             return (
-                                <div key={weekKey} className="border-b border-gray-100 last:border-b-0">
-                                    <div className="relative" style={{ minHeight: 36 + bodyHeight }}>
-                                        <div className="grid grid-cols-7 grid-rows-1 h-full absolute inset-0">
-                                            {week.map(day => {
-                                                const inMonth = day.getMonth() === cursor.getMonth();
-                                                const isToday = day.getFullYear() === today.getFullYear()
-                                                    && day.getMonth() === today.getMonth()
-                                                    && day.getDate() === today.getDate();
-                                                return (
-                                                    <button
-                                                        key={toDateInput(day)}
-                                                        type="button"
-                                                        onClick={() => {
-                                                            if (canEdit) openCreate(day);
-                                                        }}
-                                                        className={`h-full border-l border-gray-100 first:border-l-0 text-left px-1.5 pt-1 ${
-                                                            mode === 'month' && !inMonth ? 'bg-gray-50' : ''
-                                                        } ${canEdit ? 'hover:bg-primary-50/40' : 'cursor-default'}`}
-                                                        title={canEdit ? `Asignar el ${day.toLocaleDateString('es-PE')}` : undefined}
-                                                    >
-                                                        <span className={`inline-flex items-center justify-center w-6 h-6 text-xs rounded-full ${
-                                                            isToday ? 'bg-primary-600 text-white' : inMonth || mode === 'week' ? 'text-gray-700' : 'text-gray-400'
-                                                        }`}>
-                                                            {day.getDate()}
-                                                        </span>
-                                                    </button>
-                                                );
-                                            })}
-                                        </div>
-                                        <div className="absolute inset-x-0 z-10 pointer-events-none" style={{ top: 32, height: bodyHeight }}>
-                                            {segments.filter(segment => expanded || segment.lane < laneCap).map(segment => {
-                                                const item = segment.item;
-                                                const color = colorFromKey(item.processId || item.id, PROCESS_PALETTE);
-                                                const names = namesOf(item);
-                                                const startClock = new Date(item.startsAt).toLocaleTimeString('es-PE', { hour: 'numeric', minute: '2-digit' });
-                                                const endClock = new Date(item.endsAt).toLocaleTimeString('es-PE', { hour: 'numeric', minute: '2-digit' });
-                                                const singleDay = segment.startCol === segment.endCol && !segment.continuesBefore && !segment.continuesAfter;
-                                                const timePrefix = item.allDay
-                                                    ? ''
-                                                    : singleDay
-                                                        ? `${startClock}–${endClock} `
-                                                        : !segment.continuesBefore
-                                                            ? `${startClock} `
-                                                            : '';
-                                                const label = `${timePrefix}${processTitleOf(item)}${names.length ? ` · ${firstNames(names)}` : ''}`;
-                                                const parallel = parallelTitles(item);
-                                                const tip = [
-                                                    processTitleOf(item),
-                                                    names.join(', '),
-                                                    formatWhen(item),
-                                                    item.note || '',
-                                                    parallel.length ? `En paralelo: ${parallel.join(' · ')}` : '',
-                                                ].filter(Boolean).join('\n');
-                                                return (
-                                                    <button
-                                                        key={`${item.id}-${weekKey}-${segment.startCol}`}
-                                                        type="button"
-                                                        title={tip}
-                                                        onClick={event => {
-                                                            event.stopPropagation();
-                                                            openEdit(item);
-                                                        }}
-                                                        className="absolute pointer-events-auto h-[22px] px-1.5 text-left text-[11px] leading-[22px] truncate border"
-                                                        style={{
-                                                            top: segment.lane * 26,
-                                                            left: `calc(${(segment.startCol / 7) * 100}% + 3px)`,
-                                                            width: `calc(${((segment.endCol - segment.startCol + 1) / 7) * 100}% - 6px)`,
-                                                            background: color.bg,
-                                                            color: color.text,
-                                                            borderColor: color.border,
-                                                            borderRadius: segment.continuesBefore && segment.continuesAfter
-                                                                ? 0
-                                                                : segment.continuesBefore
-                                                                    ? '0 6px 6px 0'
-                                                                    : segment.continuesAfter
-                                                                        ? '6px 0 0 6px'
-                                                                        : 6,
-                                                        }}
-                                                    >
-                                                        {label}
-                                                    </button>
-                                                );
-                                            })}
-                                        </div>
+                                <div key={weekKey} className="border-b border-gray-200 last:border-b-0">
+                                    <div className="grid grid-cols-7 bg-white">
+                                        {week.map(day => {
+                                            const inMonth = day.getMonth() === cursor.getMonth();
+                                            const isToday = day.getFullYear() === today.getFullYear()
+                                                && day.getMonth() === today.getMonth()
+                                                && day.getDate() === today.getDate();
+                                            return (
+                                                <button
+                                                    key={toDateInput(day)}
+                                                    type="button"
+                                                    onClick={() => {
+                                                        if (canEdit) openCreate(day);
+                                                    }}
+                                                    className={`h-12 border-l border-gray-100 first:border-l-0 text-left px-2 ${
+                                                        mode === 'month' && !inMonth ? 'bg-gray-50' : 'bg-white'
+                                                    } ${canEdit ? 'hover:bg-primary-50' : 'cursor-default'}`}
+                                                    title={canEdit ? `Asignar el ${day.toLocaleDateString('es-PE')}` : undefined}
+                                                >
+                                                    <span className={`inline-flex items-center justify-center w-8 h-8 text-sm font-semibold rounded-full ${
+                                                        isToday ? 'bg-primary-600 text-white' : inMonth || mode === 'week' ? 'text-gray-900' : 'text-gray-400'
+                                                    }`}>
+                                                        {day.getDate()}
+                                                    </span>
+                                                </button>
+                                            );
+                                        })}
                                     </div>
-                                    {hidden > 0 && (
-                                        <button
-                                            type="button"
-                                            className="px-3 pb-2 text-xs text-primary-700 hover:underline"
-                                            onClick={() => setExpandedWeeks(current => new Set(current).add(weekKey))}
-                                        >
-                                            +{hidden} más
-                                        </button>
-                                    )}
-                                    {expanded && mode === 'month' && segments.some(segment => segment.lane >= MONTH_LANES) && (
-                                        <button
-                                            type="button"
-                                            className="px-3 pb-2 text-xs text-gray-500 hover:underline"
-                                            onClick={() => setExpandedWeeks(current => {
-                                                const next = new Set(current);
-                                                next.delete(weekKey);
-                                                return next;
-                                            })}
-                                        >
-                                            Ver menos
-                                        </button>
-                                    )}
+                                    <div className="relative border-t border-gray-100" style={{ height: eventsHeight }}>
+                                        <div className="absolute inset-0 grid grid-cols-7">
+                                            {week.map(day => (
+                                                <button
+                                                    key={`${weekKey}-slot-${toDateInput(day)}`}
+                                                    type="button"
+                                                    onClick={() => {
+                                                        if (canEdit) openCreate(day);
+                                                    }}
+                                                    className={`border-l border-gray-100 first:border-l-0 ${
+                                                        mode === 'month' && day.getMonth() !== cursor.getMonth() ? 'bg-gray-50/80' : ''
+                                                    } ${canEdit ? 'hover:bg-primary-50/40' : 'cursor-default'}`}
+                                                    aria-label={canEdit ? `Asignar el ${day.toLocaleDateString('es-PE')}` : undefined}
+                                                />
+                                            ))}
+                                        </div>
+                                        {segments.map(segment => {
+                                            const item = segment.item;
+                                            const color = resolveProcessColor(item.processId || item.id, processColors[item.processId]);
+                                            const names = namesOf(item);
+                                            const startClock = new Date(item.startsAt).toLocaleTimeString('es-PE', { hour: 'numeric', minute: '2-digit' });
+                                            const endClock = new Date(item.endsAt).toLocaleTimeString('es-PE', { hour: 'numeric', minute: '2-digit' });
+                                            const singleDay = segment.startCol === segment.endCol && !segment.continuesBefore && !segment.continuesAfter;
+                                            const timePrefix = item.allDay
+                                                ? ''
+                                                : singleDay
+                                                    ? `${startClock}–${endClock} `
+                                                    : !segment.continuesBefore
+                                                        ? `${startClock} `
+                                                        : '';
+                                            const parallel = parallelTitles(item);
+                                            const tip = [
+                                                processTitleOf(item),
+                                                names.join(', '),
+                                                formatWhen(item),
+                                                item.note || '',
+                                                parallel.length ? `En paralelo: ${parallel.join(' · ')}` : '',
+                                            ].filter(Boolean).join('\n');
+                                            const shownPeople = item.userIds.slice(0, 4);
+                                            const extraPeople = item.userIds.length - shownPeople.length;
+                                            return (
+                                                <button
+                                                    key={`${item.id}-${weekKey}-${segment.startCol}`}
+                                                    type="button"
+                                                    title={tip}
+                                                    onClick={event => {
+                                                        event.stopPropagation();
+                                                        openEdit(item);
+                                                    }}
+                                                    className="absolute z-10 overflow-hidden border-2 text-left px-2 py-1 flex flex-col justify-center gap-1"
+                                                    style={{
+                                                        top: segment.lane * LANE_HEIGHT + 4,
+                                                        height: BAR_HEIGHT,
+                                                        left: `calc(${(segment.startCol / 7) * 100}% + 4px)`,
+                                                        width: `calc(${((segment.endCol - segment.startCol + 1) / 7) * 100}% - 8px)`,
+                                                        background: color.bg,
+                                                        color: color.text,
+                                                        borderColor: color.border,
+                                                        borderRadius: segment.continuesBefore && segment.continuesAfter
+                                                            ? 0
+                                                            : segment.continuesBefore
+                                                                ? '0 8px 8px 0'
+                                                                : segment.continuesAfter
+                                                                    ? '8px 0 0 8px'
+                                                                    : 8,
+                                                    }}
+                                                >
+                                                    <span className="block truncate text-[13px] font-semibold leading-none">
+                                                        {timePrefix}{processTitleOf(item)}
+                                                    </span>
+                                                    {shownPeople.length > 0 && (
+                                                        <span className="flex items-center gap-1 min-w-0 overflow-hidden">
+                                                            {shownPeople.map((userId, index) => (
+                                                                <span
+                                                                    key={`${userId}-${index}`}
+                                                                    className="inline-flex items-center max-w-[8rem] truncate rounded px-1.5 py-1 text-[11px] font-semibold leading-none text-white"
+                                                                    style={{ background: dotFromKey(userId) }}
+                                                                >
+                                                                    {(names[index] || 'Consultor').trim().split(/\s+/)[0]}
+                                                                </span>
+                                                            ))}
+                                                            {extraPeople > 0 && (
+                                                                <span className="shrink-0 rounded bg-gray-900 px-1.5 py-1 text-[11px] font-semibold leading-none text-white">
+                                                                    +{extraPeople}
+                                                                </span>
+                                                            )}
+                                                        </span>
+                                                    )}
+                                                </button>
+                                            );
+                                        })}
+                                    </div>
                                 </div>
                             );
                         })
@@ -681,50 +668,6 @@ export const TeamPlanningView: React.FC = () => {
                         </p>
                     )}
                 </section>
-
-                <aside className="w-full xl:w-72 bg-white border border-gray-200 rounded-xl p-3 xl:sticky xl:top-4 xl:max-h-[calc(100vh-2rem)] xl:overflow-y-auto">
-                    <h2 className="text-sm font-semibold text-gray-800">Sin cobertura</h2>
-                    <p className="text-xs text-gray-500 mt-1 mb-2">
-                        Procesos en curso o en stand by que nadie tiene en {mode === 'week' ? 'esta semana' : 'este mes'}.
-                    </p>
-                    <input
-                        type="search"
-                        value={gapQuery}
-                        onChange={event => setGapQuery(event.target.value)}
-                        placeholder="Buscar proceso"
-                        className="w-full mb-2 px-2 py-1.5 text-sm border border-gray-200 rounded-md"
-                    />
-                    {uncovered.length === 0 ? (
-                        <p className="text-sm text-gray-500">Todos los procesos operativos tienen a alguien en este periodo.</p>
-                    ) : (
-                        <ul className="space-y-1">
-                            {uncovered.map(process => (
-                                <li key={process.id} className="flex items-start gap-2 px-1 py-1.5 rounded hover:bg-gray-50">
-                                    <span className="w-2 h-2 mt-1.5 rounded-full flex-shrink-0" style={{ background: colorFromKey(process.id, PROCESS_PALETTE).border }} />
-                                    <span className="min-w-0 flex-1">
-                                        <span className="block text-sm text-gray-800 leading-snug">{process.title}</span>
-                                        <span className="text-[11px] text-gray-500">
-                                            {process.status === 'standby' ? 'Stand by' : 'En proceso'}
-                                            {process.isBulkProcess ? ' · Masivo' : ''}
-                                        </span>
-                                    </span>
-                                    {canEdit && (
-                                        <button
-                                            type="button"
-                                            className="text-xs text-primary-700 hover:underline flex-shrink-0"
-                                            onClick={() => {
-                                                const anchor = range.start.getTime() > Date.now() ? range.start : new Date();
-                                                openCreate(anchor, process.id);
-                                            }}
-                                        >
-                                            Asignar
-                                        </button>
-                                    )}
-                                </li>
-                            ))}
-                        </ul>
-                    )}
-                </aside>
             </div>
 
             {draft && (
@@ -747,6 +690,8 @@ export const TeamPlanningView: React.FC = () => {
                     onToggleProcess={toggleProcess}
                     onToggleUser={toggleUser}
                     onPreset={applyPreset}
+                    processColors={processColors}
+                    onProcessColor={chooseProcessColor}
                     onClose={() => { if (!saving) setDraft(null); }}
                     onSave={() => void saveDraft()}
                     onDelete={() => void removeDraft()}
@@ -775,6 +720,8 @@ function AssignmentDialog({
     onToggleProcess,
     onToggleUser,
     onPreset,
+    processColors,
+    onProcessColor,
     onClose,
     onSave,
     onDelete,
@@ -797,6 +744,8 @@ function AssignmentDialog({
     onToggleProcess: (processId: string) => void;
     onToggleUser: (userId: string) => void;
     onPreset: (preset: 'day' | 'friday' | 'workweek' | 'month') => void;
+    processColors: Record<string, string>;
+    onProcessColor: (processId: string, colorId: string) => void;
     onClose: () => void;
     onSave: () => void;
     onDelete: () => void;
@@ -928,16 +877,14 @@ function AssignmentDialog({
                             </div>
                             {selectedProcesses.length > 0 && (
                                 <div className="flex flex-wrap gap-1 mb-2">
-                            {selectedProcesses.map(process => (
-                                draft.id ? (
+                            {selectedProcesses.map(process => {
+                                const color = resolveProcessColor(process.id, processColors[process.id]);
+                                const chipStyle = { background: color.bg, color: color.text, borderColor: color.border };
+                                return draft.id ? (
                                     <span
                                         key={process.id}
                                         className="inline-flex items-center max-w-full text-xs px-2 py-1 rounded-full border"
-                                        style={{
-                                            background: colorFromKey(process.id, PROCESS_PALETTE).bg,
-                                            color: colorFromKey(process.id, PROCESS_PALETTE).text,
-                                            borderColor: colorFromKey(process.id, PROCESS_PALETTE).border,
-                                        }}
+                                        style={chipStyle}
                                     >
                                         <span className="truncate">{process.title}</span>
                                     </span>
@@ -948,17 +895,40 @@ function AssignmentDialog({
                                         disabled={readOnly}
                                         onClick={() => onToggleProcess(process.id)}
                                         className="inline-flex items-center gap-1 max-w-full text-xs px-2 py-1 rounded-full border"
-                                        style={{
-                                            background: colorFromKey(process.id, PROCESS_PALETTE).bg,
-                                            color: colorFromKey(process.id, PROCESS_PALETTE).text,
-                                            borderColor: colorFromKey(process.id, PROCESS_PALETTE).border,
-                                        }}
+                                        style={chipStyle}
                                     >
                                         <span className="truncate">{process.title}</span>
                                         {!readOnly && <X className="w-3 h-3" />}
                                     </button>
-                                )
-                            ))}
+                                );
+                            })}
+                                </div>
+                            )}
+                            {selectedProcesses.length > 0 && (
+                                <div className="space-y-2 mb-3">
+                                    <p className="text-xs font-medium text-gray-700">Color de cada proceso</p>
+                                    {selectedProcesses.map(process => (
+                                        <div key={process.id}>
+                                            <p className="text-xs text-gray-600 truncate mb-1">{process.title}</p>
+                                            <div className="flex flex-wrap gap-1">
+                                                {PROCESS_COLOR_OPTIONS.map(option => {
+                                                    const selected = processColors[process.id] === option.id;
+                                                    return (
+                                                        <button
+                                                            key={option.id}
+                                                            type="button"
+                                                            disabled={readOnly}
+                                                            title={option.label}
+                                                            aria-label={`${option.label} para ${process.title}`}
+                                                            onClick={() => onProcessColor(process.id, option.id)}
+                                                            className={`w-6 h-6 rounded-full border-2 shadow-sm disabled:opacity-60 ${selected ? 'border-gray-900' : 'border-white'}`}
+                                                            style={{ background: option.border }}
+                                                        />
+                                                    );
+                                                })}
+                                            </div>
+                                        </div>
+                                    ))}
                                 </div>
                             )}
                             <input
@@ -983,6 +953,10 @@ function AssignmentDialog({
                                                 checked={draft.processIds.includes(process.id)}
                                                 disabled={readOnly}
                                                 onChange={() => onToggleProcess(process.id)}
+                                            />
+                                            <span
+                                                className="w-2.5 h-2.5 mt-1 rounded-full shrink-0"
+                                                style={{ background: resolveProcessColor(process.id, processColors[process.id]).border }}
                                             />
                                             <span>
                                                 <span className="block text-gray-800">{process.title}</span>

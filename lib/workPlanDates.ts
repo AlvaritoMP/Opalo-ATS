@@ -14,18 +14,30 @@ export type WeekSegment<T> = {
     continuesAfter: boolean;
 };
 
-export const PROCESS_PALETTE = [
-    { bg: '#dcfce7', text: '#166534', border: '#86efac' },
-    { bg: '#f3e8ff', text: '#6b21a8', border: '#d8b4fe' },
-    { bg: '#fce7f3', text: '#9d174d', border: '#f9a8d4' },
-    { bg: '#dbeafe', text: '#1e40af', border: '#93c5fd' },
-    { bg: '#ffedd5', text: '#9a3412', border: '#fdba74' },
-    { bg: '#ccfbf1', text: '#115e59', border: '#5eead4' },
-    { bg: '#fef9c3', text: '#854d0e', border: '#fde047' },
-    { bg: '#e0e7ff', text: '#3730a3', border: '#a5b4fc' },
-    { bg: '#fae8ff', text: '#86198f', border: '#f0abfc' },
-    { bg: '#ffe4e6', text: '#9f1239', border: '#fda4af' },
+export const PROCESS_COLOR_OPTIONS = [
+    { id: 'green', label: 'Verde', bg: '#dcfce7', text: '#14532d', border: '#16a34a' },
+    { id: 'teal', label: 'Verde agua', bg: '#ccfbf1', text: '#134e4a', border: '#0d9488' },
+    { id: 'blue', label: 'Azul', bg: '#dbeafe', text: '#1e3a8a', border: '#2563eb' },
+    { id: 'indigo', label: 'Índigo', bg: '#e0e7ff', text: '#312e81', border: '#4f46e5' },
+    { id: 'violet', label: 'Violeta', bg: '#f3e8ff', text: '#581c87', border: '#7c3aed' },
+    { id: 'pink', label: 'Rosa', bg: '#fce7f3', text: '#831843', border: '#db2777' },
+    { id: 'rose', label: 'Fucsia', bg: '#ffe4e6', text: '#881337', border: '#e11d48' },
+    { id: 'orange', label: 'Naranja', bg: '#ffedd5', text: '#7c2d12', border: '#ea580c' },
+    { id: 'amber', label: 'Ámbar', bg: '#fef3c7', text: '#78350f', border: '#d97706' },
+    { id: 'yellow', label: 'Amarillo', bg: '#fef9c3', text: '#713f12', border: '#ca8a04' },
+    { id: 'slate', label: 'Pizarra', bg: '#e2e8f0', text: '#1e293b', border: '#475569' },
+    { id: 'red', label: 'Rojo', bg: '#fee2e2', text: '#7f1d1d', border: '#dc2626' },
 ] as const;
+
+export type ProcessColorId = (typeof PROCESS_COLOR_OPTIONS)[number]['id'];
+
+export const PROCESS_PALETTE = PROCESS_COLOR_OPTIONS;
+
+export function resolveProcessColor(processId: string, colorId?: string) {
+    const chosen = PROCESS_COLOR_OPTIONS.find(option => option.id === colorId);
+    if (chosen) return chosen;
+    return colorFromKey(processId || 'proceso', PROCESS_COLOR_OPTIONS);
+}
 
 export const USER_DOTS = [
     '#2563eb',
