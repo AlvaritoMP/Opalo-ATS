@@ -3,6 +3,7 @@ import { useAppState } from '../App';
 import { AppSettings, Client, InterviewLocation } from '../types';
 import { Save, Database, HardDrive, Globe, Brush, Type, Building2, Plus, Trash2, Edit2, MapPin } from 'lucide-react';
 import { GoogleDriveSettings } from './GoogleDriveSettings';
+import { AlertSettingsSection } from './AlertSettingsSection';
 import { clientsApi } from '../lib/api';
 
 const fileToBase64 = (file: File): Promise<string> => {
@@ -510,6 +511,13 @@ export const Settings: React.FC = () => {
                         </div>
                     )}
                 </div>
+
+                <AlertSettingsSection
+                    clients={clients}
+                    processes={state.processes}
+                    value={settings.userAlertSettings}
+                    onChange={userAlertSettings => setSettings({ ...settings, userAlertSettings })}
+                />
 
                 {/* Sedes de entrevista (rutas en transporte público) */}
                 <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">

@@ -10,10 +10,11 @@ import {
     Unlock,
     ChevronRight,
 } from 'lucide-react';
-import type { Process, User, UserAlert } from '../types';
+import type { Process, User, UserAlert, UserAlertSettings } from '../types';
 import { userAlertsApi } from '../lib/api/userAlerts';
 import { computeUserAlerts, getSporadicAlerts } from '../lib/userAlerts';
 import { getProcessesVisibleToUser } from '../lib/userAlertAccess';
+import { areAlertsEnabledForProcess } from '../lib/userAlertSettings';
 import {
     filterPendingAlerts,
     isAlertPending,
@@ -99,12 +100,14 @@ const TYPE_ICONS: Record<UserAlert['type'], React.ElementType> = {
 interface UserAlertsPanelProps {
     currentUser: User;
     processes: Process[];
+    alertSettings?: UserAlertSettings | null;
     onNavigateToProcess?: (processId: string) => void;
 }
 
 export const UserAlertsPanel: React.FC<UserAlertsPanelProps> = ({
     currentUser,
     processes,
+    alertSettings,
     onNavigateToProcess,
 }) => {
     const [alerts, setAlerts] = useState<UserAlert[]>([]);
@@ -121,6 +124,10 @@ export const UserAlertsPanel: React.FC<UserAlertsPanelProps> = ({
     processesRef.current = processes;
     const currentUserRef = useRef(currentUser);
     currentUserRef.current = currentUser;
+    const alertSettingsRef = useRef(alertSettings);
+    alertSettingsRef.current = alertSettings;
+    const alertSettingsKey = JSON.stringify(alertSettings ?? null);
+    const alertSettingsKeyRef = useRef(alertSettingsKey);
 
     const pendingAlerts = useMemo(
         () => filterPendingAlerts(alerts, acks),
@@ -147,7 +154,9 @@ export const UserAlertsPanel: React.FC<UserAlertsPanelProps> = ({
         }
 
         try {
-            const visible = getProcessesVisibleToUser(user, procs);
+            const visible = getProcessesVisibleToUser(user, procs).filter(process =>
+                areAlertsEnabledForProcess(process, alertSettingsRef.current)
+            );
             const bulkProcessIds = visible.filter(p => p.isBulkProcess).map(p => p.id);
             const standardProcessIds = visible.filter(p => !p.isBulkProcess).map(p => p.id);
 
@@ -172,7 +181,9 @@ export const UserAlertsPanel: React.FC<UserAlertsPanelProps> = ({
                     bulkRows,
                     standardRows,
                     user,
-                    latestBulkCreatedAt
+                    latestBulkCreatedAt,
+                    Date.now(),
+                    alertSettingsRef.current
                 );
             }, ALERTS_LOAD_TIMEOUT_MS);
 
@@ -210,10 +221,12 @@ export const UserAlertsPanel: React.FC<UserAlertsPanelProps> = ({
             setLoading(false);
             return;
         }
-        void loadAlerts().then(computed => {
+        const settingsChanged = alertSettingsKeyRef.current !== alertSettingsKey;
+        alertSettingsKeyRef.current = alertSettingsKey;
+        void loadAlerts({ force: settingsChanged }).then(computed => {
             maybeShowAutoModal(computed);
         });
-    }, [currentUser.id, processIdsKey, loadAlerts, maybeShowAutoModal]);
+    }, [currentUser.id, processIdsKey, alertSettingsKey, loadAlerts, maybeShowAutoModal]);
 
     // Polling horario estable (no se reinicia al confirmar avisos).
     useEffect(() => {

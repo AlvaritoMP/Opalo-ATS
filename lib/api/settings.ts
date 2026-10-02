@@ -3,6 +3,7 @@ import { AppSettings } from '../../types';
 import { APP_NAME } from '../appConfig';
 import { getSettings } from '../settings';
 import { debugLog, debugWarn } from '../debugLog';
+import { normalizeUserAlertSettings } from '../userAlertSettings';
 
 const SETTINGS_ID = '00000000-0000-0000-0000-000000000000';
 
@@ -28,6 +29,13 @@ function dbToSettings(dbSettings: any): AppSettings {
             ? typeof dbSettings.transport_fares === 'string'
                 ? JSON.parse(dbSettings.transport_fares)
                 : dbSettings.transport_fares
+            : undefined,
+        userAlertSettings: dbSettings.user_alert_settings
+            ? normalizeUserAlertSettings(
+                typeof dbSettings.user_alert_settings === 'string'
+                    ? JSON.parse(dbSettings.user_alert_settings)
+                    : dbSettings.user_alert_settings
+            )
             : undefined,
         psycholaboralInventory: dbSettings.psycholaboral_inventory
             ? typeof dbSettings.psycholaboral_inventory === 'string'
@@ -73,6 +81,7 @@ function settingsToDb(settings: Partial<AppSettings>): any {
     if (settings.districts !== undefined) dbSettings.districts = settings.districts;
     if (settings.interviewLocations !== undefined) dbSettings.interview_locations = settings.interviewLocations;
     if (settings.transportFares !== undefined) dbSettings.transport_fares = settings.transportFares;
+    if (settings.userAlertSettings !== undefined) dbSettings.user_alert_settings = settings.userAlertSettings;
     if (settings.psycholaboralInventory !== undefined) {
         dbSettings.psycholaboral_inventory = settings.psycholaboralInventory;
     }
@@ -256,7 +265,7 @@ export const settingsApi = {
         }
         
         // Separar campos opcionales que pueden no existir en el esquema
-        const { candidate_sources, provinces, districts, interview_locations, powered_by_logo_url, ...standardFields } = mergedDbData;
+        const { candidate_sources, provinces, districts, interview_locations, powered_by_logo_url, user_alert_settings, ...standardFields } = mergedDbData;
         
         // No permitir cambiar app_name
         delete standardFields.app_name;
@@ -321,6 +330,26 @@ export const settingsApi = {
                 }
             }
         }
+
+        let alertSettingsPersisted = user_alert_settings === undefined;
+        if (user_alert_settings !== undefined) {
+            const { error: alertSettingsError } = await supabase
+                .from('app_settings')
+                .update({ user_alert_settings })
+                .eq('app_name', APP_NAME);
+
+            if (alertSettingsError) {
+                const errorMsg = alertSettingsError.message || '';
+                if (errorMsg.includes('schema cache') || errorMsg.includes('Could not find') || errorMsg.includes('column') || errorMsg.includes('user_alert_settings')) {
+                    console.warn('⚠️ La columna user_alert_settings no existe. Ejecuta MIGRATION_ADD_USER_ALERT_SETTINGS.sql. Error:', alertSettingsError.message);
+                } else {
+                    console.error('Error updating user alert settings:', alertSettingsError);
+                    throw alertSettingsError;
+                }
+            } else {
+                alertSettingsPersisted = true;
+            }
+        }
         
         // Obtener configuración actualizada
         const { data, error: fetchError } = await supabase
@@ -346,6 +375,9 @@ export const settingsApi = {
         }
         
         const result = dbToSettings(data);
+        if (!alertSettingsPersisted && mergedSettings.userAlertSettings) {
+            result.userAlertSettings = mergedSettings.userAlertSettings;
+        }
         debugLog('Settings actualizados');
         return result;
     },

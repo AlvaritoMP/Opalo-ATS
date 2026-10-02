@@ -551,6 +551,7 @@ const Sidebar: React.FC = () => {
                                 <UserAlertsPanel
                                     currentUser={state.currentUser}
                                     processes={state.processes}
+                                    alertSettings={state.settings?.userAlertSettings}
                                     onNavigateToProcess={(processId) => {
                                         const process = state.processes.find(p => p.id === processId);
                                         if (process?.isBulkProcess) {

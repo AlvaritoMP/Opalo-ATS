@@ -814,6 +814,15 @@ export interface TransportFareSetting {
     formal: boolean;
 }
 
+/**
+ * Qué avisos de seguimiento quedan apagados.
+ * Por defecto todo está encendido: solo se listan clientes o procesos excluidos.
+ */
+export interface UserAlertSettings {
+    disabledClientIds: string[];
+    disabledProcessIds: string[];
+}
+
 export interface AppSettings {
     database: {
         apiUrl: string;
@@ -849,6 +858,8 @@ export interface AppSettings {
     interviewLocations?: InterviewLocation[]; // Sedes para rutas en transporte público hacia entrevistas
     /** Tarifas aproximadas de transporte público para estimación de costos de ruta. */
     transportFares?: TransportFareSetting[];
+    /** Clientes y procesos para los que no se generan avisos de seguimiento. */
+    userAlertSettings?: UserAlertSettings;
     psycholaboralInventory?: PsycholaboralInventory;
 }
 

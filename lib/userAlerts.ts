@@ -1,4 +1,4 @@
-import type { Process, User, UserAlert, UserAlertSeverity } from '../types';
+import type { Process, User, UserAlert, UserAlertSeverity, UserAlertSettings } from '../types';
 import type { AlertCandidateRow } from './api/userAlerts';
 import { getProcessesVisibleToUser } from './userAlertAccess';
 import {
@@ -13,6 +13,7 @@ import {
     type ContactLockCandidateRow,
 } from './contactLock';
 import { normalizeContactStatus } from './contactTracking';
+import { areAlertsEnabledForProcess } from './userAlertSettings';
 
 const ONE_HOUR_MS = 60 * 60 * 1000;
 
@@ -76,10 +77,13 @@ export function computeUserAlerts(
     standardRows: AlertCandidateRow[],
     user: User,
     latestBulkCreatedAt?: Map<string, number>,
-    nowMs = Date.now()
+    nowMs = Date.now(),
+    alertSettings?: UserAlertSettings | null
 ): UserAlert[] {
     const alerts: UserAlert[] = [];
-    const visibleProcesses = getProcessesVisibleToUser(user, processes);
+    const visibleProcesses = getProcessesVisibleToUser(user, processes).filter(process =>
+        areAlertsEnabledForProcess(process, alertSettings)
+    );
     const processMap = new Map(visibleProcesses.map(p => [p.id, p]));
     const visibleProcessIds = new Set(visibleProcesses.map(p => p.id));
 
