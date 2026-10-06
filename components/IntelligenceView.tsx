@@ -46,6 +46,22 @@ import {
 import { PROCESS_STATUS_COLORS } from '../lib/processStatus';
 import type { ProcessStatus } from '../types';
 
+function withDeadline<T>(promise: Promise<T>, ms: number): Promise<T> {
+    return new Promise((resolve, reject) => {
+        const timer = window.setTimeout(() => reject(new Error('timeout')), ms);
+        promise.then(
+            value => {
+                window.clearTimeout(timer);
+                resolve(value);
+            },
+            error => {
+                window.clearTimeout(timer);
+                reject(error);
+            }
+        );
+    });
+}
+
 const MeasuredChartArea: React.FC<{
     height: number;
     children: (size: { width: number; height: number }) => React.ReactNode;
@@ -163,13 +179,6 @@ export const IntelligenceView: React.FC = () => {
             }, 400);
             return () => window.clearTimeout(timer);
         }
-        // Si el cache tiene más de 5 min, refrescar en segundo plano al abrir Inteligencia
-        if (dashboardCache?.loadedAt && !dashboardCacheLoading) {
-            const ageMs = Date.now() - new Date(dashboardCache.loadedAt).getTime();
-            if (ageMs > 5 * 60 * 1000) {
-                void actions.loadDashboardCache(true);
-            }
-        }
     }, [dashboardCache, dashboardCacheLoading, actions]);
 
     const loadTransfers = useCallback(async () => {
@@ -179,7 +188,10 @@ export const IntelligenceView: React.FC = () => {
         }
         setTransfersLoading(true);
         try {
-            const rows = await bulkProcessActivityApi.getTransfersForProcesses(processIds);
+            const rows = await withDeadline(
+                bulkProcessActivityApi.getTransfersForProcesses(processIds),
+                20_000
+            );
             setTransferActivity(rows);
         } catch {
             setTransferActivity([]);
@@ -199,7 +211,10 @@ export const IntelligenceView: React.FC = () => {
             const periodStartMs = new Date(limaDateKeyToStartIso(startKey)).getTime();
             const last24hMs = Date.now() - 24 * 60 * 60 * 1000;
             const sinceIso = new Date(Math.min(periodStartMs, last24hMs)).toISOString();
-            const rows = await fetchCandidateInflowRows(processIds, sinceIso);
+            const rows = await withDeadline(
+                fetchCandidateInflowRows(processIds, sinceIso),
+                20_000
+            );
             setInflowRows(rows);
         } catch (err) {
             console.warn('Inteligencia: no se pudo cargar el flujo de ingresos', err);

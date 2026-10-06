@@ -1520,7 +1520,7 @@ export const processesApi = {
             await fetchIds(chunk.slice(mid));
         };
 
-        const cardChunk = 8;
+        const cardChunk = 1;
         for (let i = 0; i < ids.length; i += cardChunk) {
             await fetchIds(ids.slice(i, i + cardChunk));
         }

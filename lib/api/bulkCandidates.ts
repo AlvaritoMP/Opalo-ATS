@@ -248,6 +248,7 @@ export const bulkCandidatesApi = {
             search?: string;
             archived?: boolean;
             discarded?: boolean;
+            signal?: AbortSignal;
         }
     ): Promise<BulkCandidatesResult> {
         const from = page * pageSize;
@@ -274,9 +275,16 @@ export const bulkCandidatesApi = {
         let lastError: { message?: string; code?: string } | null = null;
 
         for (const selectFields of getBulkSelectCandidates()) {
-            const { data: rows, error, count: total } = await applyFilters(
+            if (filters?.signal?.aborted) {
+                throw new DOMException('The operation was aborted.', 'AbortError');
+            }
+            let request = applyFilters(
                 supabase.from('candidates').select(selectFields, { count: 'exact' })
             );
+            if (filters?.signal) {
+                request = request.abortSignal(filters.signal);
+            }
+            const { data: rows, error, count: total } = await request;
             if (!error) {
                 data = (rows || []) as Record<string, unknown>[];
                 count = total;
@@ -401,6 +409,7 @@ export const bulkCandidatesApi = {
             search?: string;
             archived?: boolean;
             discarded?: boolean;
+            signal?: AbortSignal;
         }
     ): Promise<BulkCandidate[]> {
         const pageSize = 400;
@@ -415,19 +424,25 @@ export const bulkCandidatesApi = {
 
     /** Historial de etapas por candidato (Panel de estadísticas en procesos masivos). */
     async loadCandidateHistoryByIds(
-        candidateIds: string[]
+        candidateIds: string[],
+        signal?: AbortSignal
     ): Promise<Record<string, CandidateHistory[]>> {
         const out: Record<string, CandidateHistory[]> = {};
         if (candidateIds.length === 0) return out;
 
         for (let offset = 0; offset < candidateIds.length; offset += 200) {
             const chunk = candidateIds.slice(offset, offset + 200);
-            const { data, error } = await supabase
+            if (signal?.aborted) {
+                throw new DOMException('The operation was aborted.', 'AbortError');
+            }
+            let historyQuery = supabase
                 .from('candidate_history')
                 .select('candidate_id, stage_id, moved_at, moved_by')
                 .in('candidate_id', chunk)
                 .eq('app_name', APP_NAME)
                 .order('moved_at', { ascending: true });
+            if (signal) historyQuery = historyQuery.abortSignal(signal);
+            const { data, error } = await historyQuery;
 
             if (error) throw error;
 
@@ -447,7 +462,8 @@ export const bulkCandidatesApi = {
 
     /** Carga bulk_column_values de TODOS los candidatos del proceso (sin paginación de tabla) */
     async loadAllBulkColumnValues(
-        processId: string
+        processId: string,
+        signal?: AbortSignal
     ): Promise<Record<string, Record<string, unknown>>> {
         const out: Record<string, Record<string, unknown>> = {};
         const pageSize = 500;
@@ -456,7 +472,10 @@ export const bulkCandidatesApi = {
             const from = page * pageSize;
             const to = from + pageSize - 1;
 
-            const { data, error } = await supabase
+            if (signal?.aborted) {
+                throw new DOMException('The operation was aborted.', 'AbortError');
+            }
+            let columnQuery = supabase
                 .from('candidates')
                 .select('id, bulk_column_values')
                 .eq('app_name', APP_NAME)
@@ -464,6 +483,8 @@ export const bulkCandidatesApi = {
                 .eq('archived', false)
                 .eq('discarded', false)
                 .range(from, to);
+            if (signal) columnQuery = columnQuery.abortSignal(signal);
+            const { data, error } = await columnQuery;
 
             if (error) {
                 if (isMissingColumnError(error)) return out;
@@ -755,20 +776,26 @@ export const bulkCandidatesApi = {
      */
     async getHiringStageActorsForProcess(
         _processId: string,
-        lastStageId: string
+        lastStageId: string,
+        signal?: AbortSignal
     ): Promise<Array<{ candidate_id: string; moved_at: string; moved_by: string | null }>> {
         const pageSize = 500;
         const out: Array<{ candidate_id: string; moved_at: string; moved_by: string | null }> = [];
         for (let page = 0; page < 40; page++) {
             const from = page * pageSize;
             const to = from + pageSize - 1;
-            const { data, error } = await supabase
+            if (signal?.aborted) {
+                throw new DOMException('The operation was aborted.', 'AbortError');
+            }
+            let actorsQuery = supabase
                 .from('candidate_history')
                 .select('candidate_id, moved_at, moved_by')
                 .eq('stage_id', lastStageId)
                 .eq('app_name', APP_NAME)
                 .order('moved_at', { ascending: false })
                 .range(from, to);
+            if (signal) actorsQuery = actorsQuery.abortSignal(signal);
+            const { data, error } = await actorsQuery;
 
             if (error) throw error;
             const rows = (data || []) as Array<{

@@ -83,16 +83,24 @@ async function chatFetch(path: string, init: RequestInit = {}, retry = true): Pr
     if (!session?.accessToken) {
         throw new Error('No hay sesión de Mattermost');
     }
-    const res = await fetch(chatUrl(path), {
-        ...init,
-        headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${session.accessToken}`,
-            'X-App-Name': APP_NAME,
-            ...(session.atsUserId ? { 'X-Ats-User-Id': session.atsUserId } : {}),
-            ...(init.headers || {}),
-        },
-    });
+    const timeout = new AbortController();
+    const timer = setTimeout(() => timeout.abort(), 8_000);
+    let res: Response;
+    try {
+        res = await fetch(chatUrl(path), {
+            ...init,
+            signal: timeout.signal,
+            headers: {
+                'Content-Type': 'application/json',
+                Authorization: `Bearer ${session.accessToken}`,
+                'X-App-Name': APP_NAME,
+                ...(session.atsUserId ? { 'X-Ats-User-Id': session.atsUserId } : {}),
+                ...(init.headers || {}),
+            },
+        });
+    } finally {
+        clearTimeout(timer);
+    }
     if (res.status === 401 && retry) {
         const refreshed = await refreshSession();
         if (refreshed) return chatFetch(path, init, false);

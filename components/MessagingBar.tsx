@@ -148,8 +148,12 @@ export const MessagingBar: React.FC<MessagingBarProps> = ({
         );
     }, [messages, activePartnerId, selfId]);
 
+    const mmInFlightRef = useRef(false);
+    const mmFailStreakRef = useRef(0);
+
     const loadMessages = useCallback(async () => {
-        if (!mmEnabled) return;
+        if (!mmEnabled || mmInFlightRef.current) return;
+        mmInFlightRef.current = true;
         try {
             const data = await mattermostChatApi.getDms(currentUser.id);
             setAvailable(true);
@@ -194,23 +198,38 @@ export const MessagingBar: React.FC<MessagingBarProps> = ({
             mmInitializedRef.current = true;
             knownIdsRef.current = new Set(incoming.map(m => m.id));
             setMessages(incoming);
+            mmFailStreakRef.current = 0;
         } catch (err) {
+            mmFailStreakRef.current = Math.min(mmFailStreakRef.current + 1, 5);
             console.warn('No se pudo cargar mensajería de Mattermost:', err);
             if (!mmInitializedRef.current) setAvailable(false);
+        } finally {
+            mmInFlightRef.current = false;
         }
     }, [mmEnabled, currentUser.id, applyLocalReadState, unhideChat]);
 
     useEffect(() => {
-        void loadMessages();
-    }, [loadMessages]);
-
-    useEffect(() => {
         if (!mmEnabled) return;
-        const ms = expanded ? POLL_MM_OPEN_MS : POLL_MM_MS;
-        const pollId = window.setInterval(() => {
-            void loadMessages();
-        }, ms);
-        return () => window.clearInterval(pollId);
+        let cancelled = false;
+        let timer = 0;
+        const schedule = (delay: number) => {
+            timer = window.setTimeout(() => {
+                if (cancelled) return;
+                void loadMessages().finally(() => {
+                    if (cancelled) return;
+                    const base = expanded ? POLL_MM_OPEN_MS : POLL_MM_MS;
+                    const wait = mmFailStreakRef.current === 0
+                        ? base
+                        : Math.min(60_000, base * 2 ** mmFailStreakRef.current);
+                    schedule(wait);
+                });
+            }, delay);
+        };
+        schedule(0);
+        return () => {
+            cancelled = true;
+            window.clearTimeout(timer);
+        };
     }, [mmEnabled, expanded, loadMessages]);
 
     useEffect(() => {

@@ -905,6 +905,7 @@ const App: React.FC = () => {
 
     const stateRef = useRef(state);
     stateRef.current = state;
+    const dashboardLoadInFlightRef = useRef(false);
 
     const trackActivity = (
         category: UserActivityCategory,
@@ -1056,32 +1057,54 @@ const App: React.FC = () => {
         loadDashboardCache: async (force = false) => {
             const s = stateRef.current;
             if (!force && s.dashboardCache) return;
-            if (s.dashboardCacheLoading) return;
+            if (dashboardLoadInFlightRef.current) return;
 
+            dashboardLoadInFlightRef.current = true;
             setState(prev => ({ ...prev, dashboardCacheLoading: true }));
             const toastId = force
                 ? showToastHelper('Actualizando panel de datos...', 'loading', 0)
                 : null;
+            let toastCleared = false;
+            const clearLoadingToast = () => {
+                if (!toastId || toastCleared) return;
+                toastCleared = true;
+                hideToastHelper(toastId);
+            };
+            const unblockTimer = window.setTimeout(() => {
+                setState(prev => ({ ...prev, dashboardCacheLoading: false }));
+                clearLoadingToast();
+                if (force) {
+                    showToastHelper(
+                        'La actualización sigue en segundo plano. Puedes usar los datos ya cargados.',
+                        'info',
+                        4000
+                    );
+                }
+            }, 20_000);
             try {
                 const cache = await fetchDashboardData(
                     s.processes,
                     s.users,
                     s.currentUser
                 );
+                window.clearTimeout(unblockTimer);
                 setState(prev => ({
                     ...prev,
                     dashboardCache: cache,
                     dashboardCacheLoading: false,
                 }));
+                clearLoadingToast();
                 if (toastId) {
-                    hideToastHelper(toastId);
                     showToastHelper('Panel de datos actualizado', 'success', 2500);
                 }
             } catch (error) {
+                window.clearTimeout(unblockTimer);
                 console.error('Error cargando datos del panel:', error);
-                setState(s => ({ ...s, dashboardCacheLoading: false }));
-                if (toastId) hideToastHelper(toastId);
+                setState(prev => ({ ...prev, dashboardCacheLoading: false }));
+                clearLoadingToast();
                 showToastHelper('No se pudo actualizar el panel de datos', 'error', 4000);
+            } finally {
+                dashboardLoadInFlightRef.current = false;
             }
         },
         saveSettings: async (settings) => {

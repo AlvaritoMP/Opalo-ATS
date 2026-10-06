@@ -21,6 +21,17 @@ import type { BulkSchedulingCandidateRow } from './interviewSchedulingReconcile'
 import type { ContactAttempt } from './contactTracking';
 import { buildUserLookupForStats, type DashboardActorUser } from './dashboardActorNames';
 
+const PROCESS_LOAD_MS = 20_000;
+
+function startAbortTimer(ms: number): { signal: AbortSignal; done: () => void } {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), ms);
+    return {
+        signal: controller.signal,
+        done: () => clearTimeout(timer),
+    };
+}
+
 export type BulkCandidateFieldExtras = {
     bulkColumnValues?: Record<string, unknown>;
     age?: number;
@@ -60,12 +71,13 @@ export async function fetchDashboardData(
 
     // Procesos masivos en serie para no saturar I/O de Supabase al abrir el panel
     for (const processId of bulkProcessIds) {
+        const deadline = startAbortTimer(PROCESS_LOAD_MS);
         try {
             const process = processMap.get(processId);
-            const all = await bulkCandidatesApi.getAllCandidates(processId);
+            const all = await bulkCandidatesApi.getAllCandidates(processId, { signal: deadline.signal });
             const candidateIds = all.map(c => c.id);
-            const columnValuesMap = await bulkCandidatesApi.loadAllBulkColumnValues(processId);
-            const historyByCandidate = await bulkCandidatesApi.loadCandidateHistoryByIds(candidateIds);
+            const columnValuesMap = await bulkCandidatesApi.loadAllBulkColumnValues(processId, deadline.signal);
+            const historyByCandidate = await bulkCandidatesApi.loadCandidateHistoryByIds(candidateIds, deadline.signal);
             for (const c of all) {
                 const columnRow = columnValuesMap[c.id] || {};
                 const withHistory = {
@@ -94,7 +106,15 @@ export async function fetchDashboardData(
                 });
             }
         } catch (err) {
-            console.warn(`Inteligencia/Panel: no se pudo cargar el proceso masivo ${processId}`, err);
+            const timedOut = deadline.signal.aborted;
+            console.warn(
+                timedOut
+                    ? `Inteligencia/Panel: el proceso masivo ${processId} superó ${PROCESS_LOAD_MS / 1000}s y se omitió`
+                    : `Inteligencia/Panel: no se pudo cargar el proceso masivo ${processId}`,
+                err
+            );
+        } finally {
+            deadline.done();
         }
     }
 
@@ -107,10 +127,17 @@ export async function fetchDashboardData(
             continue;
         }
         try {
-            const rows = await bulkCandidatesApi.getHiringStageActorsForProcess(
-                processId,
-                hiringStageId
-            );
+            const actorDeadline = startAbortTimer(PROCESS_LOAD_MS);
+            let rows: Awaited<ReturnType<typeof bulkCandidatesApi.getHiringStageActorsForProcess>> = [];
+            try {
+                rows = await bulkCandidatesApi.getHiringStageActorsForProcess(
+                    processId,
+                    hiringStageId,
+                    actorDeadline.signal
+                );
+            } finally {
+                actorDeadline.done();
+            }
             byProcess[processId] = mapRawHiringMoves(rows, statsUsers);
         } catch {
             byProcess[processId] = {};
@@ -122,37 +149,55 @@ export async function fetchDashboardData(
     let schedulingCycles: DashboardDataCache['schedulingCycles'] = [];
 
     if (allProcessIds.length > 0) {
-        const summaryList = Object.values(summaries);
-        if (summaryList.length > 0) {
-            try {
-                await contactTrackingApi.syncSummariesToHistory(summaryList, bulkProcessIds);
-            } catch {
-                /* opcional */
+        const tailDeadline = startAbortTimer(PROCESS_LOAD_MS);
+        const loadTail = async () => {
+            const summaryList = Object.values(summaries);
+            if (summaryList.length > 0) {
+                try {
+                    await contactTrackingApi.syncSummariesToHistory(summaryList, bulkProcessIds);
+                } catch {
+                    /* opcional */
+                }
             }
-        }
 
-        const bulkCandidateIds = pool.map(c => c.id);
-        const candidateProcessIdMap = new Map<string, string>();
-        for (const c of pool) candidateProcessIdMap.set(c.id, c.processId);
+            const bulkCandidateIds = pool.map(c => c.id);
+            const candidateProcessIdMap = new Map<string, string>();
+            for (const c of pool) candidateProcessIdMap.set(c.id, c.processId);
 
-        try {
-            const byProcessAttempts = await contactTrackingApi.getAttemptsForProcesses(allProcessIds);
-            const byCandidates = bulkCandidateIds.length > 0
-                ? await contactTrackingApi.getAttemptsForCandidateIds(bulkCandidateIds)
-                : [];
-            const logs = await interviewSchedulingApi.getLogsForProcesses(allProcessIds);
-            const cycles = await interviewSchedulingApi.getCyclesForProcesses(allProcessIds);
-            contactAttempts = backfillContactAttemptProcessIds(
-                mergeContactAttemptsDedupe([...byProcessAttempts, ...byCandidates]),
-                candidateProcessIdMap
-            );
-            schedulingLogs = logs;
-            schedulingCycles = cycles;
-        } catch {
-            contactAttempts = [];
-            schedulingLogs = [];
-            schedulingCycles = [];
+            try {
+                const byProcessAttempts = await contactTrackingApi.getAttemptsForProcesses(allProcessIds);
+                const byCandidates = bulkCandidateIds.length > 0
+                    ? await contactTrackingApi.getAttemptsForCandidateIds(bulkCandidateIds)
+                    : [];
+                const logs = await interviewSchedulingApi.getLogsForProcesses(allProcessIds);
+                const cycles = await interviewSchedulingApi.getCyclesForProcesses(allProcessIds);
+                contactAttempts = backfillContactAttemptProcessIds(
+                    mergeContactAttemptsDedupe([...byProcessAttempts, ...byCandidates]),
+                    candidateProcessIdMap
+                );
+                schedulingLogs = logs;
+                schedulingCycles = cycles;
+            } catch {
+                contactAttempts = [];
+                schedulingLogs = [];
+                schedulingCycles = [];
+            }
+        };
+
+        await Promise.race([
+            loadTail(),
+            new Promise<void>(resolve => {
+                if (tailDeadline.signal.aborted) {
+                    resolve();
+                    return;
+                }
+                tailDeadline.signal.addEventListener('abort', () => resolve(), { once: true });
+            }),
+        ]);
+        if (tailDeadline.signal.aborted) {
+            console.warn('Inteligencia/Panel: contactos y agenda se omitieron por tiempo de espera');
         }
+        tailDeadline.done();
     }
 
     return {
