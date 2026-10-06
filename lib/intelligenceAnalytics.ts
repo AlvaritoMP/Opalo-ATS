@@ -4,12 +4,12 @@ import {
     filterAttemptsInDateRange,
     formatDateKeyLima,
     formatDayLabelFromKey,
-    getContactPeriodRange,
     isEffectiveCallConsultantAttempt,
     isRecordedCallAttempt,
     isCountableContactAction,
     iterDateKeys,
     type ContactConsultantPeriod,
+    type ContactPeriodRange,
 } from './contactDashboardStats';
 import {
     isInterestedCandidateResponse,
@@ -192,6 +192,48 @@ export function resolveInflowCreatedAt(candidate: {
     );
 }
 
+const INTELLIGENCE_PERIOD_TITLES: Record<ContactConsultantPeriod, string> = {
+    week: 'Últimos 7 días',
+    month: 'Último mes',
+    year: 'Último año',
+};
+
+/** Resta meses de calendario y recorta el día si el mes destino es más corto (31 mar → 28 feb). */
+function shiftMonthsDateKey(key: string, deltaMonths: number): string {
+    const [yStr, mStr, dStr] = key.split('-');
+    const year0 = Number(yStr);
+    const month0 = Number(mStr);
+    const day0 = Number(dStr);
+    const shifted = new Date(Date.UTC(year0, month0 - 1 + deltaMonths, 1));
+    const year = shifted.getUTCFullYear();
+    const monthIndex = shifted.getUTCMonth();
+    const daysInTarget = new Date(Date.UTC(year, monthIndex + 1, 0)).getUTCDate();
+    const day = Math.min(day0, daysInTarget);
+    return `${String(year).padStart(4, '0')}-${String(monthIndex + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+}
+
+/**
+ * Ventana continua para Inteligencia (hora Lima).
+ * Semana = 7 días hasta hoy. Mes = mismo día del mes anterior hasta hoy.
+ * Año = mismo día del año anterior hasta hoy.
+ * Así el gráfico no se vacía al empezar la semana o el mes, y el mes siempre
+ * incluye días de dos meses distintos.
+ */
+export function getIntelligencePeriodRange(
+    period: ContactConsultantPeriod,
+    refDate = new Date()
+): ContactPeriodRange {
+    const endKey = formatDateKeyLima(refDate);
+    const startKey =
+        period === 'week'
+            ? addDaysToDateKey(endKey, -6)
+            : period === 'month'
+              ? shiftMonthsDateKey(endKey, -1)
+              : shiftMonthsDateKey(endKey, -12);
+    const label = `${INTELLIGENCE_PERIOD_TITLES[period]} · ${formatDayLabelFromKey(startKey)} – ${formatDayLabelFromKey(endKey)}`;
+    return { startKey, endKey, label };
+}
+
 /**
  * Flujo diario de nuevos postulantes por proceso (comparativo) + totalización.
  * `inflowRows` (si viene) tiene prioridad: consulta fresca por created_at desde BD.
@@ -203,7 +245,7 @@ export function buildMultiProcessDailyInflow(
     maxProcesses = 8,
     inflowRows?: InflowTimestamp[] | null
 ): DailyInflowSeries {
-    const { startKey, endKey, label: periodLabel } = getContactPeriodRange(period);
+    const { startKey, endKey, label: periodLabel } = getIntelligencePeriodRange(period);
     const dateKeys = iterDateKeys(startKey, endKey);
 
     const countsByProcessDay = new Map<string, Map<string, number>>();
@@ -306,7 +348,7 @@ export function computeUserPerformanceRows(
     bulkHiringActorsByProcess: Record<string, Record<string, HiredStageActor>>,
     period: ContactConsultantPeriod
 ): UserPerformanceRow[] {
-    const { startKey, endKey } = getContactPeriodRange(period);
+    const { startKey, endKey } = getIntelligencePeriodRange(period);
     const scoped = filterAttemptsInDateRange(attempts, startKey, endKey);
     const processMap = new Map(processes.map(p => [p.id, p]));
 
@@ -391,7 +433,7 @@ export function buildTeamDailyEvolution(
     bulkHiringActorsByProcess: Record<string, Record<string, HiredStageActor>>,
     period: ContactConsultantPeriod
 ): UserDailyEvolutionPoint[] {
-    const { startKey, endKey } = getContactPeriodRange(period);
+    const { startKey, endKey } = getIntelligencePeriodRange(period);
     const dateKeys = iterDateKeys(startKey, endKey);
     const processMap = new Map(processes.map(p => [p.id, p]));
 
@@ -498,7 +540,7 @@ export function computeProcessIntelligenceRows(
     now = new Date(),
     inflowRows?: InflowTimestamp[] | null
 ): ProcessIntelligenceRow[] {
-    const { startKey, endKey } = getContactPeriodRange(period);
+    const { startKey, endKey } = getIntelligencePeriodRange(period);
     const hours = hoursElapsedInPeriod(startKey, endKey, now);
     const last24hCutoff = now.getTime() - 24 * 60 * 60 * 1000;
     const processMap = new Map(processes.map(p => [p.id, p]));

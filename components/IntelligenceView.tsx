@@ -39,10 +39,10 @@ import {
     computePortfolioStatusCounts,
     computeProcessIntelligenceRows,
     computeUserPerformanceRows,
+    getIntelligencePeriodRange,
     type InflowTimestamp,
     type ProcessIntelligenceRow,
 } from '../lib/intelligenceAnalytics';
-import { getContactPeriodRange } from '../lib/contactDashboardStats';
 import { PROCESS_STATUS_COLORS } from '../lib/processStatus';
 import type { ProcessStatus } from '../types';
 
@@ -195,7 +195,7 @@ export const IntelligenceView: React.FC = () => {
         }
         setInflowLoading(true);
         try {
-            const { startKey } = getContactPeriodRange(period);
+            const { startKey } = getIntelligencePeriodRange(period);
             const periodStartMs = new Date(limaDateKeyToStartIso(startKey)).getTime();
             const last24hMs = Date.now() - 24 * 60 * 60 * 1000;
             const sinceIso = new Date(Math.min(periodStartMs, last24hMs)).toISOString();
@@ -381,6 +381,8 @@ export const IntelligenceView: React.FC = () => {
         }
     };
 
+    const periodRange = getIntelligencePeriodRange(period);
+
     const sortMark = (key: SortKey) =>
         sortKey === key ? (sortDir === 'asc' ? ' ↑' : ' ↓') : '';
 
@@ -406,15 +408,20 @@ export const IntelligenceView: React.FC = () => {
                     </p>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
-                    <select
-                        value={period}
-                        onChange={e => setPeriod(e.target.value as ContactConsultantPeriod)}
-                        className="text-sm border border-gray-300 rounded-lg px-3 py-2 bg-white"
-                    >
-                        <option value="week">Última semana</option>
-                        <option value="month">Último mes</option>
-                        <option value="year">Último año</option>
-                    </select>
+                    <div className="flex flex-col gap-1">
+                        <select
+                            value={period}
+                            onChange={e => setPeriod(e.target.value as ContactConsultantPeriod)}
+                            className="text-sm border border-gray-300 rounded-lg px-3 py-2 bg-white"
+                        >
+                            <option value="week">Últimos 7 días</option>
+                            <option value="month">Último mes</option>
+                            <option value="year">Último año</option>
+                        </select>
+                        <p className="text-[11px] text-gray-500 leading-snug max-w-[16rem]">
+                            {periodRange.label}
+                        </p>
+                    </div>
                     <button
                         type="button"
                         onClick={() => void handleRefresh()}
