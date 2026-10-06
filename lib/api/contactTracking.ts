@@ -290,6 +290,61 @@ export const contactTrackingApi = {
         return all;
     },
 
+    /**
+     * Intentos desde una fecha, por lotes de procesos.
+     * Evita un único `.in()` enorme y no descarga el historial completo.
+     */
+    async getAttemptsForProcessesSince(
+        processIds: string[],
+        sinceIso: string
+    ): Promise<ContactAttempt[]> {
+        const ids = [...new Set(processIds.filter(Boolean))];
+        if (ids.length === 0 || !sinceIso) return [];
+
+        const selectFields =
+            'id, candidate_id, process_id, user_id, user_name, channel, outcome, attempt_number, status_after, notes, created_at';
+        const pageSize = 1000;
+        const chunkSize = 20;
+        const all: ContactAttempt[] = [];
+        const seen = new Set<string>();
+
+        for (let i = 0; i < ids.length; i += chunkSize) {
+            const chunk = ids.slice(i, i + chunkSize);
+            for (let page = 0; page < 40; page++) {
+                const from = page * pageSize;
+                const to = from + pageSize - 1;
+                const { data, error } = await supabase
+                    .from('candidate_contact_attempts')
+                    .select(selectFields)
+                    .in('process_id', chunk)
+                    .eq('app_name', APP_NAME)
+                    .gte('created_at', sinceIso)
+                    .order('created_at', { ascending: false })
+                    .range(from, to);
+
+                if (error) {
+                    if (isMissingContactColumnError(error)) {
+                        contactColumnsSupported = false;
+                        return all;
+                    }
+                    console.warn('Inteligencia: lote de intentos de contacto omitido', error);
+                    break;
+                }
+
+                contactColumnsSupported = true;
+                for (const row of data || []) {
+                    const mapped = mapAttemptRow(row as Record<string, unknown>);
+                    if (!mapped.id || seen.has(mapped.id)) continue;
+                    seen.add(mapped.id);
+                    all.push(mapped);
+                }
+                if (!data || data.length < pageSize) break;
+            }
+        }
+
+        return all;
+    },
+
     async getAttemptsForCandidateIds(candidateIds: string[]): Promise<ContactAttempt[]> {
         if (candidateIds.length === 0) return [];
 

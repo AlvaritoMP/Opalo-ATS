@@ -29,6 +29,8 @@ import {
     enrichContactAttemptsForStats,
 } from '../lib/dashboardActorNames';
 import { bulkProcessActivityApi, type BulkProcessActivityEntry } from '../lib/api/bulkProcessActivity';
+import { contactTrackingApi } from '../lib/api/contactTracking';
+import type { ContactAttempt } from '../lib/contactTracking';
 import {
     fetchCandidateInflowRows,
     limaDateKeyToStartIso,
@@ -155,6 +157,8 @@ export const IntelligenceView: React.FC = () => {
     const [transfersLoading, setTransfersLoading] = useState(false);
     const [inflowRows, setInflowRows] = useState<InflowTimestamp[] | null>(null);
     const [inflowLoading, setInflowLoading] = useState(false);
+    const [periodAttempts, setPeriodAttempts] = useState<ContactAttempt[] | null>(null);
+    const [attemptsLoading, setAttemptsLoading] = useState(false);
     const [sortKey, setSortKey] = useState<SortKey>('newPerHour');
     const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
     const [statusFilter, setStatusFilter] = useState<'all' | ProcessStatus>('all');
@@ -228,9 +232,37 @@ export const IntelligenceView: React.FC = () => {
         void loadTransfers();
     }, [loadTransfers]);
 
+    const loadAttempts = useCallback(async () => {
+        if (processIds.length === 0) {
+            setPeriodAttempts([]);
+            return;
+        }
+        setAttemptsLoading(true);
+        try {
+            const { startKey } = getIntelligencePeriodRange(period);
+            const rows = await withDeadline(
+                contactTrackingApi.getAttemptsForProcessesSince(
+                    processIds,
+                    limaDateKeyToStartIso(startKey)
+                ),
+                45_000
+            );
+            setPeriodAttempts(rows);
+        } catch (err) {
+            console.warn('Inteligencia: no se pudieron cargar los intentos de contacto', err);
+            setPeriodAttempts(null);
+        } finally {
+            setAttemptsLoading(false);
+        }
+    }, [processIds, period]);
+
     useEffect(() => {
         void loadInflow();
     }, [loadInflow]);
+
+    useEffect(() => {
+        void loadAttempts();
+    }, [loadAttempts]);
 
     const bulkPoolCandidates = useMemo(() => {
         if (!dashboardCache) return [];
@@ -247,11 +279,13 @@ export const IntelligenceView: React.FC = () => {
     }, [allCandidates, bulkPoolCandidates, visibleProcesses]);
 
     const contactAttempts = useMemo(() => {
-        if (!dashboardCache) return [];
         const ids = new Set(processIds);
-        const raw = dashboardCache.contactAttempts.filter(a => ids.has(a.processId));
+        const fromCache = dashboardCache
+            ? dashboardCache.contactAttempts.filter(a => ids.has(a.processId))
+            : [];
+        const raw = periodAttempts ?? fromCache;
         return enrichContactAttemptsForStats(raw, statsUsers);
-    }, [dashboardCache, processIds, statsUsers]);
+    }, [dashboardCache, periodAttempts, processIds, statsUsers]);
 
     const contactSummaries = useMemo(() => {
         if (!dashboardCache) return {};
@@ -406,6 +440,7 @@ export const IntelligenceView: React.FC = () => {
             actions.loadDashboardCache(true),
             loadTransfers(),
             loadInflow(),
+            loadAttempts(),
         ]);
     };
 
@@ -603,7 +638,9 @@ export const IntelligenceView: React.FC = () => {
                                 {userRows.length === 0 ? (
                                     <tr>
                                         <td colSpan={7} className="px-3 py-8 text-center text-gray-500">
-                                            Sin actividad de contactología en el periodo.
+                                            {attemptsLoading
+                                                ? 'Cargando desempeño…'
+                                                : 'Sin actividad de contactología en el periodo.'}
                                         </td>
                                     </tr>
                                 ) : (
