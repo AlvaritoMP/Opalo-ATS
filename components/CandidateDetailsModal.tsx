@@ -453,14 +453,6 @@ export const CandidateDetailsModal: React.FC<{ candidate: Candidate, onClose: ()
 
     const handleSaveChanges = async () => {
         await actions.updateCandidate(editableCandidate, state.currentUser?.name);
-        // Recargar candidatos después de actualizar para asegurar sincronización
-        if (actions.reloadCandidates && typeof actions.reloadCandidates === 'function') {
-            try {
-                await actions.reloadCandidates();
-            } catch (reloadError) {
-                console.warn('Error recargando candidatos después de actualizar (no crítico):', reloadError);
-            }
-        }
         setIsEditing(false);
     };
     
@@ -669,15 +661,6 @@ export const CandidateDetailsModal: React.FC<{ candidate: Candidate, onClose: ()
                     setPreviewFile(newAttachment);
                 }
                 
-                // Recargar candidatos para sincronización
-                if (actions.reloadCandidates && typeof actions.reloadCandidates === 'function') {
-                    try {
-                        await actions.reloadCandidates();
-                    } catch (reloadError) {
-                        console.warn('Error recargando candidatos (no crítico):', reloadError);
-                    }
-                }
-                
                 } catch (error: any) {
                     console.error('Error subiendo a Google Drive:', error);
                     actions.hideToast(loadingToastId);
@@ -721,15 +704,6 @@ export const CandidateDetailsModal: React.FC<{ candidate: Candidate, onClose: ()
                 // Actualizar preview si no hay uno seleccionado
                 if (!previewFile) {
                     setPreviewFile(newAttachment);
-                }
-                
-                // Recargar candidatos para sincronización
-                if (actions.reloadCandidates && typeof actions.reloadCandidates === 'function') {
-                    try {
-                        await actions.reloadCandidates();
-                    } catch (reloadError) {
-                        console.warn('Error recargando candidatos (no crítico):', reloadError);
-                    }
                 }
             }
         } catch (error: any) {

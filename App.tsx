@@ -1339,18 +1339,37 @@ const App: React.FC = () => {
                     loadedIds
                 );
 
+                const loadedIdSet = new Set(loadedIds);
+                const incomingCountByProcess = new Map<string, number>();
+                for (const candidate of activeCandidates) {
+                    if (!candidate.processId) continue;
+                    incomingCountByProcess.set(
+                        candidate.processId,
+                        (incomingCountByProcess.get(candidate.processId) || 0) + 1
+                    );
+                }
+
                 let candidatesForRelations: Candidate[] = [];
                 setState(s => {
                     const archivedCandidates = s.candidates.filter(c => c.archived === true);
                     const activeIds = new Set(activeCandidates.map(c => c.id));
                     const preservedArchived = archivedCandidates.filter(c => !activeIds.has(c.id));
+                    const keptFromLoadedProcesses = s.candidates.filter(c => {
+                        if (c.archived || !loadedIdSet.has(c.processId)) return false;
+                        // Una respuesta vacía (500, timeout) no debe borrar la lista ya visible.
+                        return (incomingCountByProcess.get(c.processId) || 0) === 0;
+                    });
                     const otherProcessCandidates = s.candidates.filter(
                         c =>
                             !c.archived &&
                             !loadedIds.includes(c.processId)
                     );
+                    const incomingForLoaded = activeCandidates.filter(
+                        c => c.processId && loadedIdSet.has(c.processId) && (incomingCountByProcess.get(c.processId) || 0) > 0
+                    );
                     candidatesForRelations = [
-                        ...activeCandidates,
+                        ...incomingForLoaded,
+                        ...keptFromLoadedProcesses,
                         ...otherProcessCandidates,
                         ...preservedArchived,
                     ];
@@ -1437,7 +1456,8 @@ const App: React.FC = () => {
 
             const alreadyLoaded = current.loadedStandardProcessIds.includes(processId);
             const existing = current.candidates.filter(c => c.processId === processId && !c.archived);
-            const needsLoad = force || !alreadyLoaded;
+            // Lista vacía en memoria: volver a pedir, aunque el proceso figure como cargado.
+            const needsLoad = force || !alreadyLoaded || existing.length === 0;
             const needsRelations =
                 !force &&
                 alreadyLoaded &&
@@ -1456,6 +1476,10 @@ const App: React.FC = () => {
                     ? await candidatesApi.getByProcess(processId, false, true)
                     : await candidatesApi.enrichWithRelations(existing);
                 setState(s => {
+                    const currentForProcess = s.candidates.filter(c => c.processId === processId && !c.archived);
+                    if (loaded.length === 0 && currentForProcess.length > 0) {
+                        return s;
+                    }
                     const others = s.candidates.filter(c => c.processId !== processId);
                     const archived = s.candidates.filter(c => c.processId === processId && c.archived);
                     const loadedIds = s.loadedStandardProcessIds.includes(processId)
@@ -1707,6 +1731,15 @@ const App: React.FC = () => {
                 const actorId = toUuidOrNull(movedBy) || state.currentUser?.id;
                 const updated = await candidatesApi.update(updatedCandidateData.id, updatedCandidateData, actorId);
                 const previous = currentCandidate;
+                const mergedUpdated = previous
+                    ? {
+                        ...previous,
+                        ...updated,
+                        processId: updated.processId || previous.processId,
+                        stageId: updated.stageId || previous.stageId,
+                        attachments: updated.attachments?.length ? updated.attachments : (previous.attachments || []),
+                    }
+                    : updated;
                 const stageChanged = previous && previous.stageId !== updated.stageId;
                 const processChanged = previous && previous.processId !== updated.processId;
                 trackActivity(
@@ -1716,21 +1749,18 @@ const App: React.FC = () => {
                         ? `Trasladó a ${updated.name}`
                         : stageChanged
                             ? `Cambió de etapa a ${updated.name}`
-                            : `Editó a ${updated.name}`,
-                    { candidateName: updated.name },
+                            : `Editó a ${mergedUpdated.name}`,
+                    { candidateName: mergedUpdated.name },
                 );
-                // Actualizar candidato en el estado, preservando si está archivado
+                // Actualizar solo ese candidato. No reemplazar la lista del proceso.
                 setState(s => {
                     const existingIndex = s.candidates.findIndex(c => c.id === candidateData.id);
                     if (existingIndex >= 0) {
-                        // Reemplazar el candidato existente
                         const updatedCandidates = [...s.candidates];
-                        updatedCandidates[existingIndex] = updated;
+                        updatedCandidates[existingIndex] = mergedUpdated;
                         return { ...s, candidates: updatedCandidates };
-                    } else {
-                        // Si no existe (puede ser un candidato archivado), agregarlo
-                        return { ...s, candidates: [...s.candidates, updated] };
                     }
+                    return { ...s, candidates: [...s.candidates, mergedUpdated] };
                 });
                 hideToastHelper(loadingToastId);
                 showToastHelper('Candidato actualizado exitosamente', 'success');
