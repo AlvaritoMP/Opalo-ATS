@@ -159,19 +159,19 @@ export const TEST_META: Record<AssessmentTestId, {
   timeLimitSec: number | null;
 }> = {
   barsit: {
-    title: 'Prueba Barsit',
+    title: 'Prueba de aptitud',
     instructions:
       'A continuación se encuentran 60 preguntas. En la mayoría debe escoger la opción correcta entre cinco. En las series numéricas debe escribir los dos números que faltan.\n\nEs mejor hacer las cosas bien que de prisa, pero si no sabe cómo resolver una pregunta, pase a la siguiente.\n\nDispone de 15 minutos como máximo. El tiempo empieza cuando confirme que desea comenzar. Al cumplirse, la prueba se envía con lo respondido.',
     timeLimitSec: 15 * 60,
   },
   inteligencia: {
-    title: 'Prueba de inteligencia',
+    title: 'Prueba de aptitud',
     instructions:
       'Dispone de 15 figuras incompletas. En cada una elija, entre las opciones numeradas, la pieza que completa exactamente la figura grande.\n\nTiene 10 minutos. El tiempo empieza cuando confirme que desea comenzar. Al cumplirse, la prueba se envía con lo respondido.',
     timeLimitSec: 10 * 60,
   },
   personalidad: {
-    title: 'Prueba de personalidad (D)',
+    title: 'Cuestionario',
     instructions:
       'En cada uno de los 28 grupos, marque la palabra que más lo(a) represente en MÁS y la que menos lo(a) represente en MENOS. Solo una palabra por columna, y no puede ser la misma.\n\nTiene 15 minutos como máximo. El tiempo empieza cuando confirme que desea comenzar. Al cumplirse, la prueba se envía con lo respondido.',
     timeLimitSec: 15 * 60,

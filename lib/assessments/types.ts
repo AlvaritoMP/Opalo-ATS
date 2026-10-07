@@ -62,6 +62,13 @@ export const ASSESSMENT_TEST_LABELS: Record<AssessmentTestId, string> = {
     personalidad: 'Prueba de personalidad (D)',
 };
 
+/** Nombres que ve el candidato. El consultor sigue viendo el nombre real de cada prueba. */
+export const ASSESSMENT_PUBLIC_LABELS: Record<AssessmentTestId, string> = {
+    barsit: 'Prueba de aptitud',
+    inteligencia: 'Prueba de aptitud',
+    personalidad: 'Cuestionario',
+};
+
 export const DISC_FACTOR_LABELS: Record<DiscFactor, string> = {
     D: 'Dominancia',
     I: 'Influencia',

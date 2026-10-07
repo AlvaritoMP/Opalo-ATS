@@ -3030,6 +3030,49 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
         actions.showToast(getMailComposeToastMessage(result), 'success', 6000);
     }, [selectedIds, candidates, actions, process?.title]);
 
+    const inviteSelectedToAssessments = useCallback(async () => {
+        const selected = candidates.filter(c => selectedIds.has(c.id));
+        if (selected.length === 0) {
+            actions.showToast('Selecciona al menos un candidato para invitarlo a las pruebas', 'error', 3500);
+            return;
+        }
+        const withEmail = selected.filter(c => c.email && !isPlaceholderImportEmail(c.email));
+        if (withEmail.length === 0) {
+            actions.showToast('Los candidatos seleccionados no tienen un correo real', 'error', 4000);
+            return;
+        }
+        const single = withEmail.length === 1 ? withEmail[0] : null;
+        const url = buildPublicAssessmentsUrl(single?.dni);
+        const puesto = process?.title || 'el proceso de selección';
+        const greeting = single?.name?.trim() ? `Hola ${single.name.trim()},` : 'Hola,';
+        const body = [
+            greeting,
+            '',
+            `Te invitamos a resolver las pruebas del proceso ${puesto}.`,
+            'Abre el enlace e ingresa con tu número de documento. Cada prueba se puede enviar una sola vez.',
+            '',
+            url,
+            '',
+            'Saludos,',
+            'Selección',
+        ].join('\n');
+        const result = await openMailCompose({
+            to: withEmail.map(c => c.email!),
+            subject: `Pruebas de selección — ${puesto}`,
+            body,
+        });
+        const skipped = selected.length - withEmail.length;
+        const message = getMailComposeToastMessage(result);
+        actions.showToast(
+            skipped > 0 ? `${message} Se omitieron ${skipped} sin correo.` : message,
+            'success',
+            5000
+        );
+        if (!process?.bulkConfig?.assessmentProfile) {
+            actions.showToast('Este proceso aún no tiene jerarquía de pruebas. Configúrala para que el candidato vea su batería.', 'info', 5000);
+        }
+    }, [selectedIds, candidates, actions, process?.title, process?.bulkConfig?.assessmentProfile]);
+
     const openScheduleModal = useCallback((candidate: BulkCandidate) => {
         const eventId = candidate.nextInterviewEventId
             || (() => {
@@ -6743,6 +6786,15 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                                         >
                                             <ClipboardCheck className="w-4 h-4 shrink-0" />
                                             Link pruebas
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => { void inviteSelectedToAssessments(); }}
+                                            className="bg-white border border-teal-300 text-teal-900 hover:bg-teal-50 transition-colors whitespace-nowrap"
+                                            title="Abrir el correo del candidato en el programa de mail de esta PC, con el enlace de las pruebas"
+                                        >
+                                            <Mail className="w-4 h-4 shrink-0" />
+                                            Invitar a pruebas
                                         </button>
                                         <button
                                             type="button"
