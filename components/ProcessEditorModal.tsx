@@ -475,25 +475,18 @@ export const ProcessEditorModal: React.FC<ProcessEditorModalProps> = ({ process,
             // Verificar si es un proceso existente (tiene ID y existe en la BD)
             // Los procesos duplicados tienen IDs temporales que empiezan con "temp-"
             const isExistingProcess = process && process.id && !process.id.startsWith('temp-') && state.processes.some(p => p.id === process.id);
-            
             if (isExistingProcess) {
-                await actions.updateProcess({ ...process, ...processData });
+                const merged = { ...process, ...processData };
+                if ((flyerUrl || '') === (process.flyerUrl || '')) {
+                    delete merged.flyerUrl;
+                }
+                if ((flyerPosition || 'center center') === (process.flyerPosition || 'center center')) {
+                    delete merged.flyerPosition;
+                }
+                await actions.updateProcess(merged);
             } else {
                 await actions.addProcess(processData);
             }
-            // Recargar procesos después de guardar para asegurar sincronización completa
-            // Esto asegura que las etapas, categorías y otros cambios se reflejen correctamente
-            if (actions.reloadProcesses && typeof actions.reloadProcesses === 'function') {
-                try {
-                    await actions.reloadProcesses();
-                } catch (reloadError: any) {
-                    console.warn('Error al recargar procesos (no crítico):', reloadError);
-                    // No mostrar error al usuario, el proceso ya se guardó correctamente
-                }
-            } else {
-                console.warn('reloadProcesses no está disponible, omitiendo recarga');
-            }
-            // Solo cerrar el modal si la creación/actualización fue exitosa
             onClose();
         } catch (error: any) {
             console.error('Error guardando proceso:', error);

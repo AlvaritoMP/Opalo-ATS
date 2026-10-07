@@ -906,6 +906,7 @@ const App: React.FC = () => {
     const stateRef = useRef(state);
     stateRef.current = state;
     const dashboardLoadInFlightRef = useRef(false);
+    const dashboardAbortRef = useRef<AbortController | null>(null);
 
     const trackActivity = (
         category: UserActivityCategory,
@@ -1002,6 +1003,9 @@ const App: React.FC = () => {
             void revokeMm.finally(finish);
         },
         setView: (type, payload) => {
+            if (type !== 'dashboard' && type !== 'intelligence') {
+                dashboardAbortRef.current?.abort();
+            }
             const prev = stateRef.current.view;
             setState(s => {
                 // Si se está navegando a un proceso específico, guardar como último proceso visto
@@ -1057,8 +1061,11 @@ const App: React.FC = () => {
         loadDashboardCache: async (force = false) => {
             const s = stateRef.current;
             if (!force && s.dashboardCache) return;
-            if (dashboardLoadInFlightRef.current) return;
+            if (dashboardLoadInFlightRef.current && !dashboardAbortRef.current?.signal.aborted) return;
 
+            dashboardAbortRef.current?.abort();
+            const dashboardAbort = new AbortController();
+            dashboardAbortRef.current = dashboardAbort;
             dashboardLoadInFlightRef.current = true;
             setState(prev => ({ ...prev, dashboardCacheLoading: true }));
             const toastId = force
@@ -1085,7 +1092,8 @@ const App: React.FC = () => {
                 const cache = await fetchDashboardData(
                     s.processes,
                     s.users,
-                    s.currentUser
+                    s.currentUser,
+                    dashboardAbort.signal
                 );
                 window.clearTimeout(unblockTimer);
                 setState(prev => ({
@@ -1099,12 +1107,19 @@ const App: React.FC = () => {
                 }
             } catch (error) {
                 window.clearTimeout(unblockTimer);
+                if (isAbortOrTimeoutError(error) && dashboardAbort.signal.aborted) {
+                    setState(prev => ({ ...prev, dashboardCacheLoading: false }));
+                    clearLoadingToast();
+                    return;
+                }
                 console.error('Error cargando datos del panel:', error);
                 setState(prev => ({ ...prev, dashboardCacheLoading: false }));
                 clearLoadingToast();
                 showToastHelper('No se pudo actualizar el panel de datos', 'error', 4000);
             } finally {
-                dashboardLoadInFlightRef.current = false;
+                if (dashboardAbortRef.current === dashboardAbort) {
+                    dashboardLoadInFlightRef.current = false;
+                }
             }
         },
         saveSettings: async (settings) => {
@@ -1203,40 +1218,24 @@ const App: React.FC = () => {
             const loadingToastId = showToastHelper('Guardando cambios del proceso...', 'loading', 0);
             try {
                 const updated = await processesApi.update(processData.id, processData);
-                
-                // Recargar el proceso completo desde la BD para asegurar que tiene todos los datos actualizados
-                // (stages, documentCategories, attachments, etc.)
-                try {
-                    const reloadedProcess = await processesApi.getById(processData.id);
-                    const nextProcess = reloadedProcess || updated;
-                    setState(s => {
-                        const processes = s.processes.map(p => p.id === processData.id ? nextProcess : p);
-                        if (isProcessActive(nextProcess.status)) {
-                            return { ...s, processes };
-                        }
-                        // Al pasar a Stand By / cerrado: soltar candidatos de memoria (sin cargas).
-                        return {
-                            ...s,
-                            processes,
-                            candidates: s.candidates.filter(c => c.processId !== processData.id),
-                            loadedStandardProcessIds: s.loadedStandardProcessIds.filter(id => id !== processData.id),
-                        };
-                    });
-                } catch (reloadError) {
-                    console.warn('Error recargando proceso después de actualizar, usando el retornado:', reloadError);
-                    setState(s => {
-                        const processes = s.processes.map(p => p.id === processData.id ? updated : p);
-                        if (isProcessActive(updated.status)) {
-                            return { ...s, processes };
-                        }
-                        return {
-                            ...s,
-                            processes,
-                            candidates: s.candidates.filter(c => c.processId !== processData.id),
-                            loadedStandardProcessIds: s.loadedStandardProcessIds.filter(id => id !== processData.id),
-                        };
-                    });
-                }
+                setState(s => {
+                    const previous = s.processes.find(p => p.id === processData.id);
+                    const nextProcess = {
+                        ...updated,
+                        flyerUrl: updated.flyerUrl ?? previous?.flyerUrl,
+                        flyerPosition: updated.flyerPosition ?? previous?.flyerPosition,
+                    };
+                    const processes = s.processes.map(p => p.id === processData.id ? nextProcess : p);
+                    if (isProcessActive(nextProcess.status)) {
+                        return { ...s, processes };
+                    }
+                    return {
+                        ...s,
+                        processes,
+                        candidates: s.candidates.filter(c => c.processId !== processData.id),
+                        loadedStandardProcessIds: s.loadedStandardProcessIds.filter(id => id !== processData.id),
+                    };
+                });
                 
                 hideToastHelper(loadingToastId);
                 showToastHelper('Proceso actualizado exitosamente', 'success');

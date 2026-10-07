@@ -302,6 +302,66 @@ function dbToProcess(dbProcess: any, stages: any[] = [], documentCategories: any
 }
 
 // Convertir de tipo de aplicación a DB
+function isFlyerPositionColumnError(error: any): boolean {
+    return isMissingColumnError(error, 'flyer_position') ||
+        `${error?.message || ''}`.includes('flyer_position');
+}
+
+/** Inserta el proceso en un solo request. Si falta flyer_position, reintenta sin esa columna. */
+async function insertProcessRow(dbData: Record<string, any>): Promise<{ id: string }> {
+    const attempt = (data: Record<string, any>) =>
+        supabase.from('processes').insert(data).select('id').single();
+
+    let result = await attempt(dbData);
+    if (result.error && dbData.flyer_position !== undefined && isFlyerPositionColumnError(result.error)) {
+        console.warn('⚠️ La columna flyer_position no existe. El proceso se crea sin esa posición.');
+        const { flyer_position: _flyerPosition, ...rest } = dbData;
+        result = await attempt(rest);
+    }
+    if (result.error) throw result.error;
+    return result.data as { id: string };
+}
+
+/** Actualiza el proceso en un solo request. Si falta flyer_position, reintenta sin esa columna. */
+async function updateProcessRow(id: string, dbData: Record<string, any>): Promise<void> {
+    const attempt = (data: Record<string, any>) =>
+        supabase.from('processes').update(data).eq('id', id).eq('app_name', APP_NAME);
+
+    let result = await attempt(dbData);
+    if (result.error && dbData.flyer_position !== undefined && isFlyerPositionColumnError(result.error)) {
+        console.warn('⚠️ La columna flyer_position no existe. Se actualiza el proceso sin esa posición.');
+        const { flyer_position: _flyerPosition, ...rest } = dbData;
+        result = await attempt(rest);
+    }
+    if (result.error) throw result.error;
+}
+
+function categorySignature(
+    cats: Array<{ name?: string; description?: string | null; required?: boolean }>
+): string {
+    return [...cats]
+        .map(cat => `${cat.name || ''}\u0000${cat.description || ''}\u0000${cat.required ? 1 : 0}`)
+        .sort()
+        .join('\n');
+}
+
+function stageFieldsUnchanged(
+    existing: { name?: string; order_index?: number; required_documents?: unknown; is_critical?: boolean; color?: string | null },
+    next: { name: string; order_index: number; required_documents: unknown; is_critical: boolean; color: string | null }
+): boolean {
+    return existing.name === next.name
+        && (existing.order_index ?? 0) === next.order_index
+        && JSON.stringify(existing.required_documents ?? null) === JSON.stringify(next.required_documents ?? null)
+        && Boolean(existing.is_critical) === Boolean(next.is_critical)
+        && (existing.color ?? null) === (next.color ?? null);
+}
+
+function applyFlyerFromPayload(saved: Process, processData: Partial<Process>): Process {
+    if (processData.flyerUrl !== undefined) saved.flyerUrl = processData.flyerUrl;
+    if (processData.flyerPosition !== undefined) saved.flyerPosition = processData.flyerPosition;
+    return saved;
+}
+
 function processToDb(process: Partial<Process>): any {
     const dbProcess: any = {};
     if (process.title !== undefined) dbProcess.title = process.title;
@@ -410,15 +470,37 @@ function applyProcessStatusFilter<T extends { eq: (c: string, v: string) => T; i
 export const processesApi = {
     /** Conteo rápido solo desde Supabase (sin Google Drive) */
     async getAttachmentsCountDb(processId: string): Promise<number> {
-        const { count, error } = await supabase
-            .from('attachments')
-            .select('*', { count: 'exact', head: true })
-            .eq('process_id', processId)
-            .eq('app_name', APP_NAME)
-            .is('candidate_id', null);
+        const counts = await this.getAttachmentsCounts([processId]);
+        return counts[processId] || 0;
+    },
 
-        if (error) throw error;
-        return count || 0;
+    /**
+     * Conteos de documentos del proceso (sin adjuntos de candidatos) en pocas
+     * consultas, en lugar de un `select=*` por proceso.
+     */
+    async getAttachmentsCounts(processIds: string[]): Promise<Record<string, number>> {
+        const counts: Record<string, number> = {};
+        const ids = [...new Set(processIds.filter(Boolean))];
+        for (const id of ids) counts[id] = 0;
+        if (ids.length === 0) return counts;
+
+        const rows = await fetchInIdChunks(ids, async (chunk) => {
+            const { data, error } = await supabase
+                .from('attachments')
+                .select('process_id')
+                .in('process_id', chunk)
+                .eq('app_name', APP_NAME)
+                .is('candidate_id', null)
+                .limit(10000);
+            if (error) throw error;
+            return (data || []) as Array<{ process_id: string }>;
+        });
+
+        for (const row of rows) {
+            if (!row.process_id) continue;
+            counts[row.process_id] = (counts[row.process_id] || 0) + 1;
+        }
+        return counts;
     },
 
     // Obtener solo el conteo de attachments de un proceso (sin cargar los datos)
@@ -655,12 +737,15 @@ export const processesApi = {
     },
 
     // Obtener un proceso por ID
-    async getById(id: string, options?: { includeAttachments?: boolean }): Promise<Process | null> {
+    async getById(id: string, options?: { includeAttachments?: boolean; omitFlyer?: boolean }): Promise<Process | null> {
         const includeAttachments = options?.includeAttachments ?? false;
+        const selectFields = options?.omitFlyer
+            ? BULK_PROCESS_FULL_FIELDS.replace('flyer_url, ', '')
+            : BULK_PROCESS_FULL_FIELDS;
         const { data: process, error } = await fetchWithRetry(async () => {
             const result = await supabase
                 .from('processes')
-                .select(BULK_PROCESS_FULL_FIELDS)
+                .select(selectFields)
                 .eq('id', id)
                 .eq('app_name', APP_NAME)
                 .single();
@@ -697,7 +782,7 @@ export const processesApi = {
         outcome: 'terminado' | 'cancelado' | 'trunco',
         hiredCandidateIds: string[] = [],
     ): Promise<Process> {
-        const currentProcess = await this.getById(processId);
+        const currentProcess = await this.getById(processId, { omitFlyer: true });
         if (!currentProcess) {
             throw new Error('Proceso no encontrado');
         }
@@ -742,61 +827,8 @@ export const processesApi = {
     async create(processData: Omit<Process, 'id'>, createdBy?: string): Promise<Process> {
         const dbData = processToDb(processData);
         if (createdBy) dbData.created_by = createdBy;
-
-        // Separar flyer_position del resto de los datos para manejarlo por separado
-        // ya que la columna puede no existir en la BD
-        const { flyer_position, ...restDbData } = dbData;
-        
-        // Crear proceso sin flyer_position primero
-        restDbData.app_name = APP_NAME; // Asegurar que siempre se asigne el app_name
-        const { data: process, error } = await supabase
-            .from('processes')
-            .insert(restDbData)
-            .select()
-            .single();
-        
-        if (error) throw error;
-        
-        // Intentar actualizar flyer_position por separado si existe
-        // Si la columna no existe, simplemente ignoramos el error
-        if (flyer_position !== undefined && process) {
-            try {
-                const { error: positionError } = await supabase
-                    .from('processes')
-                    .update({ flyer_position })
-                    .eq('id', process.id);
-                
-                if (positionError) {
-                    // Si el error es porque la columna no existe, solo loguear y continuar
-                    const isColumnError = positionError.message?.includes('flyer_position') || 
-                                         positionError.message?.includes('column') || 
-                                         positionError.message?.includes('schema cache') ||
-                                         positionError.code === '42703'; // PostgreSQL error code for undefined column
-                    
-                    if (isColumnError) {
-                        console.warn('⚠️ La columna flyer_position no existe en la base de datos.');
-                        console.warn('📝 Para habilitar esta funcionalidad, ejecuta el script SQL: MIGRATION_ADD_FLYER_POSITION.sql');
-                        console.warn('💡 La posición se aplicará visualmente pero no se guardará hasta agregar la columna.');
-                    } else {
-                        // Si es otro error, lanzarlo
-                        throw positionError;
-                    }
-                }
-            } catch (err: any) {
-                // Si falla por cualquier razón relacionada con la columna, solo loguear
-                const isColumnError = err.message?.includes('flyer_position') || 
-                                     err.message?.includes('column') || 
-                                     err.message?.includes('schema cache') ||
-                                     err.code === '42703';
-                
-                if (isColumnError) {
-                    console.warn('⚠️ No se pudo guardar flyer_position. La columna puede no existir en la base de datos.');
-                    console.warn('📝 Ejecuta el script SQL: MIGRATION_ADD_FLYER_POSITION.sql para habilitar esta funcionalidad.');
-                } else {
-                    throw err;
-                }
-            }
-        }
+        dbData.app_name = APP_NAME;
+        const process = await insertProcessRow(dbData);
 
         // Crear stages
         if (processData.stages && processData.stages.length > 0) {
@@ -858,15 +890,6 @@ export const processesApi = {
                 } else {
                     throw stagesError;
                 }
-            } else if (insertedStages) {
-                for (let i = 0; i < processData.stages.length && i < insertedStages.length; i++) {
-                    const insertedStage = insertedStages.find(s => s.order_index === i);
-                    if (!insertedStage) continue;
-                    await persistStageOptionalFields(insertedStage.id, {
-                        is_critical: processData.stages[i].isCritical || false,
-                        color: processData.stages[i].color || null,
-                    });
-                }
             }
         }
 
@@ -917,74 +940,23 @@ export const processesApi = {
             }
         }
 
-        return await this.getById(process.id) as Process;
+        const saved = await this.getById(process.id, { omitFlyer: true });
+        if (!saved) throw new Error('No se pudo leer el proceso creado');
+        return applyFlyerFromPayload(saved, processData);
     },
 
     // Actualizar proceso
     async update(id: string, processData: Partial<Process>): Promise<Process> {
         const dbData = processToDb(processData);
-        
-        // Separar flyer_position del resto de los datos para manejarlo por separado
-        // ya que la columna puede no existir en la BD
-        const { flyer_position, ...restDbData } = dbData;
-        
-        // No permitir cambiar app_name
-        delete restDbData.app_name;
-        
-        // Actualizar primero los campos principales
-        const { error } = await supabase
-            .from('processes')
-            .update(restDbData)
-            .eq('id', id)
-            .eq('app_name', APP_NAME); // Asegurar que solo se actualicen procesos de esta app
-        
-        if (error) throw error;
-        
-        // Intentar actualizar flyer_position por separado si existe
-        // Si la columna no existe, simplemente ignoramos el error
-        if (flyer_position !== undefined) {
-            try {
-                const { error: positionError } = await supabase
-                    .from('processes')
-                    .update({ flyer_position })
-                    .eq('id', id)
-                    .eq('app_name', APP_NAME);
-                
-                if (positionError) {
-                    // Si el error es porque la columna no existe, solo loguear y continuar
-                    const isColumnError = positionError.message?.includes('flyer_position') || 
-                                         positionError.message?.includes('column') || 
-                                         positionError.message?.includes('schema cache') ||
-                                         positionError.code === '42703'; // PostgreSQL error code for undefined column
-                    
-                    if (isColumnError) {
-                        console.warn('⚠️ La columna flyer_position no existe en la base de datos.');
-                        console.warn('📝 Para habilitar esta funcionalidad, ejecuta el script SQL: MIGRATION_ADD_FLYER_POSITION.sql');
-                        console.warn('💡 La posición se aplicará visualmente pero no se guardará hasta agregar la columna.');
-                    } else {
-                        // Si es otro error, lanzarlo
-                        throw positionError;
-                    }
-                }
-            } catch (err: any) {
-                // Si falla por cualquier razón relacionada con la columna, solo loguear
-                const isColumnError = err.message?.includes('flyer_position') || 
-                                     err.message?.includes('column') || 
-                                     err.message?.includes('schema cache') ||
-                                     err.code === '42703';
-                
-                if (isColumnError) {
-                    console.warn('⚠️ No se pudo guardar flyer_position. La columna puede no existir en la base de datos.');
-                    console.warn('📝 Ejecuta el script SQL: MIGRATION_ADD_FLYER_POSITION.sql para habilitar esta funcionalidad.');
-                } else {
-                    throw err;
-                }
-            }
+        delete dbData.app_name;
+        if (Object.keys(dbData).length > 0) {
+            await updateProcessRow(id, dbData);
         }
 
         // Actualizar stages si se proporcionan
         if (processData.stages) {
-            const existingStages = await fetchStagesByProcessId(id);
+            const existingStages = (await fetchStagesByProcessId(id))
+                .filter(s => (s.order_index ?? 0) < ORPHAN_STAGE_ORDER_BASE);
             const existingStagesMap = new Map(existingStages.map(s => [s.id, s]));
 
             const stagesToUpdate: Array<{ id: string; name: string; order_index: number; required_documents: any; is_critical: boolean; color: string | null }> = [];
@@ -1039,66 +1011,87 @@ export const processesApi = {
                     stagesToDelete.push(stageId);
                 }
             });
-            
-            // Mover a order_index temporales TODOS los stages del proceso (incluye los a eliminar)
-            // para liberar índices antes de reordenar/insertar y evitar conflictos.
+
+            const stagesUnchanged =
+                stagesToInsert.length === 0 &&
+                stagesToDelete.length === 0 &&
+                stagesToUpdate.every(stage => {
+                    const existing = existingStagesMap.get(stage.id);
+                    return !!existing && stageFieldsUnchanged(existing, stage);
+                });
+
+            if (stagesUnchanged) {
+                // Título, fechas u otros campos: no reescribir etapas.
+            } else {
+            // Índices temporales en paralelo para no chocar al reordenar, luego el orden final.
             const allExistingIds = existingStages.map(s => s.id as string);
-            for (let i = 0; i < allExistingIds.length; i++) {
+            await Promise.all(allExistingIds.map(async (stageId, i) => {
                 const { error: tempError } = await supabase
                     .from('stages')
                     .update({ order_index: -1000 - i })
-                    .eq('id', allExistingIds[i])
+                    .eq('id', stageId)
                     .eq('process_id', id);
 
                 if (tempError) {
-                    console.error(`Error actualizando order_index temporal para stage ${allExistingIds[i]}:`, tempError);
+                    console.error(`Error actualizando order_index temporal para stage ${stageId}:`, tempError);
                     throw tempError;
                 }
-            }
+            }));
 
-            for (const stage of stagesToUpdate) {
-                await updateStageRecord(id, stage.id, {
-                    name: stage.name,
-                    order_index: stage.order_index,
-                    required_documents: stage.required_documents,
-                    is_critical: stage.is_critical,
-                    color: stage.color,
-                });
-            }
+            await Promise.all(stagesToUpdate.map(stage => updateStageRecord(id, stage.id, {
+                name: stage.name,
+                order_index: stage.order_index,
+                required_documents: stage.required_documents,
+                is_critical: stage.is_critical,
+                color: stage.color,
+            })));
             
-            // Insertar nuevos stages (sin is_critical primero)
             let insertedStages: Array<{ id: string; order_index: number }> | null = null;
             if (stagesToInsert.length > 0) {
-                const stagesWithoutCritical = stagesToInsert.map(s => ({
+                const stagesWithOptional = stagesToInsert.map(s => ({
                     process_id: s.process_id,
                     name: s.name,
                     order_index: s.order_index,
                     required_documents: s.required_documents,
-                    app_name: APP_NAME, // Asegurar que siempre se asigne el app_name
+                    is_critical: s.is_critical,
+                    color: s.color,
+                    app_name: APP_NAME,
                 }));
-                
-                const insertResult = await supabase
+                const stagesWithoutOptional = stagesToInsert.map(s => ({
+                    process_id: s.process_id,
+                    name: s.name,
+                    order_index: s.order_index,
+                    required_documents: s.required_documents,
+                    app_name: APP_NAME,
+                }));
+
+                let insertResult = await supabase
                     .from('stages')
-                    .insert(stagesWithoutCritical)
+                    .insert(stagesWithOptional)
                     .select('id, order_index');
-                
+
+                if (insertResult.error && isMissingColumnError(insertResult.error)) {
+                    insertResult = await supabase
+                        .from('stages')
+                        .insert(stagesWithoutOptional)
+                        .select('id, order_index');
+                    if (!insertResult.error && insertResult.data) {
+                        await Promise.all(insertResult.data.map(async insertedStage => {
+                            const originalStage = stagesToInsert.find(s => s.order_index === insertedStage.order_index);
+                            if (!originalStage) return;
+                            await persistStageOptionalFields(insertedStage.id, {
+                                is_critical: originalStage.is_critical,
+                                color: originalStage.color,
+                            });
+                        }));
+                    }
+                }
+
                 if (insertResult.error) {
                     console.error('Error insertando nuevos stages:', insertResult.error);
                     throw insertResult.error;
                 }
                 insertedStages = insertResult.data;
-                
-                // Ahora intentar actualizar is_critical y color por separado para cada stage insertado
-                if (insertedStages) {
-                    for (const insertedStage of insertedStages) {
-                        const originalStage = stagesToInsert.find(s => s.order_index === insertedStage.order_index);
-                        if (!originalStage) continue;
-                        await persistStageOptionalFields(insertedStage.id, {
-                            is_critical: originalStage.is_critical,
-                            color: originalStage.color,
-                        });
-                    }
-                }
             }
             
             // Eliminar stages que ya no están en la lista nueva.
@@ -1168,10 +1161,25 @@ export const processesApi = {
                         .eq('process_id', id);
                 }
             }
+            }
         }
 
-        // Actualizar categorías si se proporcionan
+        // Actualizar categorías si se proporcionan y realmente cambiaron
         if (processData.documentCategories !== undefined) {
+            const { data: existingCategories } = await supabase
+                .from('document_categories')
+                .select('name, description, required')
+                .eq('process_id', id)
+                .eq('app_name', APP_NAME);
+            const nextSignature = categorySignature(processData.documentCategories.map(cat => ({
+                name: cat.name,
+                description: cat.description || null,
+                required: !!cat.required,
+            })));
+            const currentSignature = categorySignature(existingCategories || []);
+            if (nextSignature === currentSignature) {
+                // Sin cambios: evita borrar y volver a insertar.
+            } else {
             // Eliminar categorías existentes
             await supabase.from('document_categories').delete().eq('process_id', id).eq('app_name', APP_NAME);
             
@@ -1190,6 +1198,7 @@ export const processesApi = {
                     .insert(categoriesToInsert);
                 
                 if (categoriesError) throw categoriesError;
+            }
             }
         }
 
@@ -1230,7 +1239,9 @@ export const processesApi = {
             // así que no necesitamos insertarlos aquí
         }
 
-        return await this.getById(id) as Process;
+        const saved = await this.getById(id, { omitFlyer: true });
+        if (!saved) throw new Error('No se pudo leer el proceso guardado');
+        return applyFlyerFromPayload(saved, processData);
     },
 
     // Eliminar proceso

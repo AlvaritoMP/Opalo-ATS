@@ -1062,23 +1062,23 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
         psycholaboralApi.getInventory().then(setPsychInventory).catch(() => {});
     }, []);
 
+    const bulkProcessIdsKey = bulkProcesses.map(p => p.id).join('|');
     useEffect(() => {
-        if (bulkProcesses.length === 0) return;
-        const loadCounts = async () => {
-            const counts: Record<string, number> = {};
-            await Promise.all(
-                bulkProcesses.map(async p => {
-                    try {
-                        counts[p.id] = await processesApi.getAttachmentsCountDb(p.id);
-                    } catch {
-                        counts[p.id] = p.attachments?.length ?? 0;
-                    }
-                })
-            );
-            setAttachmentCounts(counts);
+        const ids = bulkProcessIdsKey ? bulkProcessIdsKey.split('|') : [];
+        if (ids.length === 0) return;
+        let cancelled = false;
+        (async () => {
+            try {
+                const counts = await processesApi.getAttachmentsCounts(ids);
+                if (!cancelled) setAttachmentCounts(counts);
+            } catch {
+                if (!cancelled) setAttachmentCounts({});
+            }
+        })();
+        return () => {
+            cancelled = true;
         };
-        loadCounts();
-    }, [bulkProcesses]);
+    }, [bulkProcessIdsKey]);
 
     const openPsychBulkEvaluate = useCallback((list: BulkCandidate[]) => {
         if (!process || list.length === 0) return;

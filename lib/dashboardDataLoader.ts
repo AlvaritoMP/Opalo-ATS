@@ -23,12 +23,20 @@ import { buildUserLookupForStats, type DashboardActorUser } from './dashboardAct
 
 const PROCESS_LOAD_MS = 20_000;
 
-function startAbortTimer(ms: number): { signal: AbortSignal; done: () => void } {
+function startAbortTimer(ms: number, parent?: AbortSignal): { signal: AbortSignal; done: () => void } {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), ms);
+    const onParent = () => controller.abort();
+    if (parent) {
+        if (parent.aborted) controller.abort();
+        else parent.addEventListener('abort', onParent, { once: true });
+    }
     return {
         signal: controller.signal,
-        done: () => clearTimeout(timer),
+        done: () => {
+            clearTimeout(timer);
+            parent?.removeEventListener('abort', onParent);
+        },
     };
 }
 
@@ -55,7 +63,8 @@ export interface DashboardDataCache {
 export async function fetchDashboardData(
     processes: Process[],
     users: User[],
-    currentUser: User | null
+    currentUser: User | null,
+    signal?: AbortSignal
 ): Promise<DashboardDataCache> {
     // Stand By / cerrados: sin cargas de candidatos, contactos ni scheduling.
     const activeProcesses = processes.filter(p => isProcessActive(p.status));
@@ -71,7 +80,8 @@ export async function fetchDashboardData(
 
     // Procesos masivos en serie para no saturar I/O de Supabase al abrir el panel
     for (const processId of bulkProcessIds) {
-        const deadline = startAbortTimer(PROCESS_LOAD_MS);
+        if (signal?.aborted) break;
+        const deadline = startAbortTimer(PROCESS_LOAD_MS, signal);
         try {
             const process = processMap.get(processId);
             const all = await bulkCandidatesApi.getAllCandidates(processId, { signal: deadline.signal });
@@ -106,6 +116,7 @@ export async function fetchDashboardData(
                 });
             }
         } catch (err) {
+            if (signal?.aborted) break;
             const timedOut = deadline.signal.aborted;
             console.warn(
                 timedOut
@@ -120,6 +131,7 @@ export async function fetchDashboardData(
 
     const byProcess: Record<string, Record<string, HiredStageActor>> = {};
     for (const processId of bulkProcessIds) {
+        if (signal?.aborted) break;
         const process = processMap.get(processId);
         const hiringStageId = resolveHiringStageId(process);
         if (!hiringStageId) {
@@ -127,7 +139,7 @@ export async function fetchDashboardData(
             continue;
         }
         try {
-            const actorDeadline = startAbortTimer(PROCESS_LOAD_MS);
+            const actorDeadline = startAbortTimer(PROCESS_LOAD_MS, signal);
             let rows: Awaited<ReturnType<typeof bulkCandidatesApi.getHiringStageActorsForProcess>> = [];
             try {
                 rows = await bulkCandidatesApi.getHiringStageActorsForProcess(
@@ -149,7 +161,7 @@ export async function fetchDashboardData(
     let schedulingCycles: DashboardDataCache['schedulingCycles'] = [];
 
     if (allProcessIds.length > 0) {
-        const tailDeadline = startAbortTimer(PROCESS_LOAD_MS);
+        const tailDeadline = startAbortTimer(PROCESS_LOAD_MS, signal);
         const loadTail = async () => {
             const summaryList = Object.values(summaries);
             if (summaryList.length > 0) {
@@ -194,10 +206,14 @@ export async function fetchDashboardData(
                 tailDeadline.signal.addEventListener('abort', () => resolve(), { once: true });
             }),
         ]);
-        if (tailDeadline.signal.aborted) {
+        if (tailDeadline.signal.aborted && !signal?.aborted) {
             console.warn('Inteligencia/Panel: contactos y agenda se omitieron por tiempo de espera');
         }
         tailDeadline.done();
+    }
+
+    if (signal?.aborted) {
+        throw new DOMException('Aborted', 'AbortError');
     }
 
     return {
