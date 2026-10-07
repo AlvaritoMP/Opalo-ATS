@@ -424,7 +424,9 @@ export const CandidateDetailsModal: React.FC<{ candidate: Candidate, onClose: ()
         setEditableCandidate(prev => {
             const next = {
                 ...prev,
-                [name]: e.target.type === 'number' && value !== '' ? parseInt(value, 10) : value
+                [name]: e.target.type === 'number'
+                    ? (value.trim() === '' ? null : parseInt(value, 10))
+                    : value
             };
             if (name === 'nombres' || name === 'apellidoPaterno' || name === 'apellidoMaterno') {
                 next.name = composeIdentityFullName({
@@ -452,8 +454,12 @@ export const CandidateDetailsModal: React.FC<{ candidate: Candidate, onClose: ()
     };
 
     const handleSaveChanges = async () => {
-        await actions.updateCandidate(editableCandidate, state.currentUser?.name);
-        setIsEditing(false);
+        try {
+            await actions.updateCandidate(editableCandidate, state.currentUser?.name);
+            setIsEditing(false);
+        } catch {
+            // El aviso de error ya lo muestra updateCandidate.
+        }
     };
     
     const handleCancelEdit = () => {

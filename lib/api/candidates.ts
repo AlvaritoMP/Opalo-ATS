@@ -431,6 +431,17 @@ async function dbToCandidate(dbCandidate: any): Promise<Candidate> {
     };
 }
 
+function blankToNull(value: unknown): string | null | unknown {
+    if (typeof value === 'string' && value.trim() === '') return null;
+    return value;
+}
+
+function blankIntToNull(value: unknown): number | null {
+    if (value === '' || value === null || value === undefined) return null;
+    const n = typeof value === 'number' ? value : parseInt(String(value), 10);
+    return Number.isFinite(n) ? n : null;
+}
+
 // Convertir de tipo de aplicación a DB
 function candidateToDb(candidate: Partial<Candidate>): any {
     const dbCandidate: any = {};
@@ -475,7 +486,7 @@ function candidateToDb(candidate: Partial<Candidate>): any {
         // Si solo se actualiza el campo de letras sin el salario, también guardarlo
         dbCandidate.agreed_salary_in_words = candidate.agreedSalaryInWords || null;
     }
-    if (candidate.age !== undefined) dbCandidate.age = candidate.age;
+    if (candidate.age !== undefined) dbCandidate.age = blankIntToNull(candidate.age);
     if (candidate.dni !== undefined) dbCandidate.dni = candidate.dni;
     if (candidate.linkedinUrl !== undefined) dbCandidate.linkedin_url = candidate.linkedinUrl;
     if (candidate.address !== undefined) dbCandidate.address = candidate.address;
@@ -483,17 +494,17 @@ function candidateToDb(candidate: Partial<Candidate>): any {
     // El distrito puede quedar en blanco - se guarda como null si está vacío
     if (candidate.district !== undefined) dbCandidate.district = candidate.district && candidate.district.trim() ? candidate.district.trim() : null;
     if (candidate.archived !== undefined) dbCandidate.archived = candidate.archived;
-    if (candidate.archivedAt !== undefined) dbCandidate.archived_at = candidate.archivedAt;
+    if (candidate.archivedAt !== undefined) dbCandidate.archived_at = blankToNull(candidate.archivedAt);
     if (candidate.discarded !== undefined) dbCandidate.discarded = candidate.discarded;
     if (candidate.discardReason !== undefined) dbCandidate.discard_reason = candidate.discardReason;
-    if (candidate.discardedAt !== undefined) dbCandidate.discarded_at = candidate.discardedAt;
-    if (candidate.hireDate !== undefined) dbCandidate.hire_date = candidate.hireDate;
+    if (candidate.discardedAt !== undefined) dbCandidate.discarded_at = blankToNull(candidate.discardedAt);
+    if (candidate.hireDate !== undefined) dbCandidate.hire_date = blankToNull(candidate.hireDate);
     if (candidate.googleDriveFolderId !== undefined) dbCandidate.google_drive_folder_id = candidate.googleDriveFolderId;
     if (candidate.googleDriveFolderName !== undefined) dbCandidate.google_drive_folder_name = candidate.googleDriveFolderName;
     if (candidate.visibleToClients !== undefined) dbCandidate.visible_to_clients = candidate.visibleToClients;
-    if (candidate.offerAcceptedDate !== undefined) dbCandidate.offer_accepted_date = candidate.offerAcceptedDate;
-    if (candidate.applicationStartedDate !== undefined) dbCandidate.application_started_date = candidate.applicationStartedDate;
-    if (candidate.applicationCompletedDate !== undefined) dbCandidate.application_completed_date = candidate.applicationCompletedDate;
+    if (candidate.offerAcceptedDate !== undefined) dbCandidate.offer_accepted_date = blankToNull(candidate.offerAcceptedDate);
+    if (candidate.applicationStartedDate !== undefined) dbCandidate.application_started_date = blankToNull(candidate.applicationStartedDate);
+    if (candidate.applicationCompletedDate !== undefined) dbCandidate.application_completed_date = blankToNull(candidate.applicationCompletedDate);
     if (candidate.criticalStageReviewedAt !== undefined) dbCandidate.critical_stage_reviewed_at = candidate.criticalStageReviewedAt || null;
     if (candidate.registrationOrigin !== undefined) dbCandidate.registration_origin = candidate.registrationOrigin;
     return dbCandidate;
