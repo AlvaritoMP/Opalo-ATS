@@ -362,6 +362,10 @@ verify_jwt = false
 [functions.candidate-complementary-ficha]
 verify_jwt = false
 
+# Pruebas públicas por DNI (sin login ATS).
+[functions.candidate-assessments]
+verify_jwt = false
+
 # Reenvío a OpsFlow: requiere sesión ATS (JWT del usuario logueado).
 [functions.deliver-worker-handoff]
 verify_jwt = true

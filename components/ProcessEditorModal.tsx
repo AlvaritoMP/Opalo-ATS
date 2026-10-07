@@ -10,6 +10,8 @@ import { StageColorPicker } from './StageColorPicker';
 import { DateInput } from './DateInput';
 import { suggestStageColor } from '../lib/stageColors';
 import { openAttachment } from '../lib/openAttachment';
+import { AssessmentProfileField } from './AssessmentProfileField';
+import type { AssessmentProfile } from '../lib/assessments/types';
 
 interface ProcessEditorModalProps {
     process: Process | null;
@@ -57,6 +59,7 @@ export const ProcessEditorModal: React.FC<ProcessEditorModalProps> = ({ process,
     const [uploadingFileName, setUploadingFileName] = useState<string | null>(null);
     const [clients, setClients] = useState<Client[]>([]);
     const [selectedClientId, setSelectedClientId] = useState<string | undefined>(process?.clientId);
+    const [assessmentProfile, setAssessmentProfile] = useState<AssessmentProfile | ''>(process?.bulkConfig?.assessmentProfile || '');
     const [isLoadingClients, setIsLoadingClients] = useState(false);
     const flyerInputRef = useRef<HTMLInputElement>(null);
     const attachmentInputRef = useRef<HTMLInputElement>(null);
@@ -469,6 +472,10 @@ export const ProcessEditorModal: React.FC<ProcessEditorModalProps> = ({ process,
             googleDriveFolderId: googleDriveFolderId || undefined,
             googleDriveFolderName: googleDriveFolderName || undefined,
             clientId: selectedClientId || undefined,
+            bulkConfig: {
+                ...(process?.bulkConfig || {}),
+                assessmentProfile: assessmentProfile || undefined,
+            },
         };
 
         try {
@@ -541,6 +548,9 @@ export const ProcessEditorModal: React.FC<ProcessEditorModalProps> = ({ process,
                             <div><label className="block text-sm font-medium text-gray-700">Rango salarial</label><input type="text" placeholder={`${state.settings?.currencySymbol || '$'}100k - ${state.settings?.currencySymbol || '$'}120k`} value={salaryRange} onChange={e => setSalaryRange(e.target.value)} className="mt-1 block w-full input"/></div>
                             <div><label className="block text-sm font-medium text-gray-700">Nivel de experiencia</label><input type="text" placeholder="Ej: 5+ años" value={experienceLevel} onChange={e => setExperienceLevel(e.target.value)} className="mt-1 block w-full input"/></div>
                             <div><label className="block text-sm font-medium text-gray-700">Seniority</label><input type="text" placeholder="Ej: Senior, Mid-Level" value={seniority} onChange={e => setSeniority(e.target.value)} className="mt-1 block w-full input"/></div>
+                            <div className="md:col-span-2">
+                                <AssessmentProfileField value={assessmentProfile} onChange={setAssessmentProfile} />
+                            </div>
                             <div><label className="block text-sm font-medium text-gray-700">Fecha de inicio</label><DateInput value={startDate} onChange={setStartDate} className="mt-1 block w-full input"/></div>
                             <div><label className="block text-sm font-medium text-gray-700">Fecha de fin</label><DateInput value={endDate} onChange={setEndDate} className="mt-1 block w-full input"/></div>
                             <div><label className="block text-sm font-medium text-gray-700">Fecha de publicación de la oferta</label><DateInput value={publishedDate} onChange={setPublishedDate} className="mt-1 block w-full input" title="Fecha en que se publicó la oferta (para calcular Time to Hire)"/></div>

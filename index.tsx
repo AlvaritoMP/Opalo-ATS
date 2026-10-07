@@ -4,7 +4,9 @@ import './src/index.css';
 import App from './App';
 import { AppErrorBoundary } from './components/AppErrorBoundary';
 import { PublicComplementaryFicha } from './components/PublicComplementaryFicha';
+import { PublicAssessments } from './components/PublicAssessments';
 import { isPublicComplementaryFichaRoute } from './lib/complementaryFicha';
+import { isPublicAssessmentsRoute } from './lib/assessments/publicRoute';
 
 const rootElement = document.getElementById('root');
 if (!rootElement) {
@@ -12,12 +14,13 @@ if (!rootElement) {
 }
 
 const root = ReactDOM.createRoot(rootElement);
-const publicFicha = isPublicComplementaryFichaRoute();
+const publicPruebas = isPublicAssessmentsRoute();
+const publicFicha = !publicPruebas && isPublicComplementaryFichaRoute();
 
 root.render(
   <React.StrictMode>
     <AppErrorBoundary>
-      {publicFicha ? <PublicComplementaryFicha /> : <App />}
+    {publicPruebas ? <PublicAssessments /> : publicFicha ? <PublicComplementaryFicha /> : <App />}
     </AppErrorBoundary>
   </React.StrictMode>
 );

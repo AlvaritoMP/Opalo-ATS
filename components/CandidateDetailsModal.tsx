@@ -1,7 +1,7 @@
 import React, { useRef, useState } from 'react';
 import { useAppState } from '../App';
 import { Candidate, Attachment, InterviewEvent, UserRole, Process, DocumentCategory } from '../types';
-import { X, Mail, Phone, Linkedin, User, FileText, Eye, Download, Upload, Trash2, Briefcase, DollarSign, Calendar, Info, MapPin, Edit, ArrowRightLeft, Copy, MessageCircle, PhoneCall, Archive, Undo2, RefreshCw, Loader, Send } from 'lucide-react';
+import { X, Mail, Phone, Linkedin, User, FileText, Eye, Download, Upload, Trash2, Briefcase, DollarSign, Calendar, Info, MapPin, Edit, ArrowRightLeft, Copy, MessageCircle, PhoneCall, Archive, Undo2, RefreshCw, Loader, Send, ClipboardCheck } from 'lucide-react';
 import { ScheduleInterviewModal } from './ScheduleInterviewModal';
 import { ChangeProcessModal } from './ChangeProcessModal';
 import { CandidateCommentsModal } from './CandidateCommentsModal';
@@ -13,6 +13,8 @@ import { CandidateTransitRoutes } from './CandidateTransitRoutes';
 import { DateInput } from './DateInput';
 import { candidatesApi } from '../lib/api/candidates';
 import { buildPublicComplementaryFichaUrl } from '../lib/complementaryFicha';
+import { buildPublicAssessmentsUrl } from '../lib/assessments/publicRoute';
+import { CandidateAssessmentPanel } from './CandidateAssessmentPanel';
 import JSZip from 'jszip';
 import { saveAs } from 'file-saver';
 import { openAttachment } from '../lib/openAttachment';
@@ -61,6 +63,7 @@ export const CandidateDetailsModal: React.FC<{ candidate: Candidate, onClose: ()
     const [editableCandidate, setEditableCandidate] = useState<Candidate>(initialCandidate);
     const [isDiscardModalOpen, setIsDiscardModalOpen] = useState(false);
     const [isSendToOpsFlowOpen, setIsSendToOpsFlowOpen] = useState(false);
+    const [isAssessmentPanelOpen, setIsAssessmentPanelOpen] = useState(false);
     
     // Usar useRef para rastrear el último candidato procesado y evitar bucles infinitos
     const lastProcessedCandidateRef = React.useRef<string>('');
@@ -1004,6 +1007,40 @@ export const CandidateDetailsModal: React.FC<{ candidate: Candidate, onClose: ()
                         {canEdit && (
                             <button
                                 type="button"
+                                onClick={() => setIsAssessmentPanelOpen(true)}
+                                className="flex items-center px-2 md:px-3 py-1.5 bg-white border border-gray-300 rounded-md shadow-sm text-xs md:text-sm font-medium text-gray-700 hover:bg-gray-50"
+                                title="Ver resultados de pruebas"
+                            >
+                                <ClipboardCheck className="w-4 h-4 md:mr-2" />
+                                <span className="hidden sm:inline">Pruebas</span>
+                            </button>
+                        )}
+                        {canEdit && (
+                            <button
+                                type="button"
+                                onClick={async () => {
+                                    if (!currentCandidate.dni) {
+                                        actions.showToast('El candidato necesita DNI para generar el enlace de pruebas.', 'error', 4000);
+                                        return;
+                                    }
+                                    const url = buildPublicAssessmentsUrl(currentCandidate.dni);
+                                    try {
+                                        await navigator.clipboard.writeText(url);
+                                        actions.showToast('Enlace de pruebas copiado', 'success', 2500);
+                                    } catch {
+                                        actions.showToast(url, 'info', 8000);
+                                    }
+                                }}
+                                className="flex items-center px-2 md:px-3 py-1.5 bg-white border border-gray-300 rounded-md shadow-sm text-xs md:text-sm font-medium text-gray-700 hover:bg-gray-50"
+                                title="Copiar enlace público de pruebas"
+                            >
+                                <Copy className="w-4 h-4 md:mr-2" />
+                                <span className="hidden sm:inline">Link pruebas</span>
+                            </button>
+                        )}
+                        {canEdit && (
+                            <button
+                                type="button"
                                 onClick={async () => {
                                     if (!currentCandidate.dni) {
                                         actions.showToast('El candidato necesita DNI para generar el enlace de ficha.', 'error', 4000);
@@ -1821,6 +1858,13 @@ export const CandidateDetailsModal: React.FC<{ candidate: Candidate, onClose: ()
                     isOpen={isSendToOpsFlowOpen}
                     onClose={() => setIsSendToOpsFlowOpen(false)}
                     candidates={[initialCandidate]}
+                />
+            )}
+            {isAssessmentPanelOpen && (
+                <CandidateAssessmentPanel
+                    candidateId={currentCandidate.id}
+                    candidateName={currentCandidate.name}
+                    onClose={() => setIsAssessmentPanelOpen(false)}
                 />
             )}
             

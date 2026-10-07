@@ -284,11 +284,26 @@ export const PsycholaboralReportModal: React.FC<Props> = ({
                             </div>
                         </section>
 
+                        {evaluation.assessmentSource && (
+                            <p className="text-xs text-teal-900 bg-teal-50 border border-teal-100 rounded-lg px-3 py-2">
+                                {evaluation.assessmentSource.personalidad
+                                    ? 'Los rasgos de personalidad se cargaron desde la prueba D. '
+                                    : ''}
+                                {evaluation.assessmentSource.inteligencia
+                                    ? `El nivel intelectual usa el puntaje de la prueba de figuras${evaluation.intellectualScore != null ? ` (${evaluation.intellectualScore}/60)` : ''}. `
+                                    : 'El nivel intelectual todavía no viene de la prueba de figuras. '}
+                                Puedes ajustar los valores antes de guardar.
+                            </p>
+                        )}
+
                         {/* Nivel intelectual */}
                         <section>
                             <h3 className="text-sm font-semibold text-primary-700 mb-2">Nivel intelectual</h3>
+                            {evaluation.intellectualScore != null && (
+                                <p className="text-xs text-gray-500 mb-2">Puntaje registrado: {evaluation.intellectualScore}/60</p>
+                            )}
                             <select
-                                value={evaluation.intellectualLevelId}
+                                value={evaluation.intellectualLevelId || ''}
                                 onChange={e =>
                                     setEvaluation({
                                         ...evaluation,
@@ -297,6 +312,7 @@ export const PsycholaboralReportModal: React.FC<Props> = ({
                                 }
                                 className="w-full md:w-auto px-3 py-2 border rounded-lg text-sm mb-2"
                             >
+                                {!evaluation.intellectualLevelId && <option value="">Sin calificar</option>}
                                 {inventory.intellectualLevels.map(l => (
                                     <option key={l.id} value={l.id}>
                                         {l.name} ({l.scoreRange})

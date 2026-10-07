@@ -12,6 +12,7 @@ import { readBulkTableTemplatesCache } from './bulkTableTemplates';
 import { extractRouteCostTotal } from './routeCostStorage';
 import { ensureFloatingColumnsHidden, resolveFloatingColumnIds } from './bulkFloatingColumns';
 import { BULK_DOCUMENTS_COLUMN_ID } from './bulkDocumentData';
+import { assessmentColumnLabel, isAssessmentColumnId } from './assessments/columns';
 import {
     DNI_COLUMN_ID,
     GIVEN_NAMES_COLUMN_ID,
@@ -837,6 +838,9 @@ export const COLUMN_WIDTHS: Record<string, number> = {
     [BULK_DOCUMENTS_COLUMN_ID]: 72,
     stage: 120,
     hiredStageUser: 112,
+    assessmentBarsit: 120,
+    assessmentInteligencia: 110,
+    assessmentPersonalidad: 130,
 };
 
 export const COMPACT_TD_CLASS = 'px-1.5 py-0.5 text-xs text-gray-700 whitespace-nowrap leading-tight';
@@ -1148,7 +1152,8 @@ export function buildVisibleColumnIds(
         }
         return (
             DEFAULT_COLUMN_ORDER.includes(colId) ||
-            colId === HIRED_STAGE_USER_COLUMN_ID
+            colId === HIRED_STAGE_USER_COLUMN_ID ||
+            isAssessmentColumnId(colId)
         );
     });
 }
@@ -1606,7 +1611,7 @@ export function getColumnLabel(
         const customCol = customColumns.find(c => c.id === colId.replace('custom_', ''));
         return customCol?.name || colId;
     }
-    return BASE_COLUMNS.find(c => c.id === colId)?.label || colId;
+    return assessmentColumnLabel(colId) || BASE_COLUMNS.find(c => c.id === colId)?.label || colId;
 }
 
 export function isColumnVisible(colId: string, bulkConfig?: BulkProcessConfig): boolean {

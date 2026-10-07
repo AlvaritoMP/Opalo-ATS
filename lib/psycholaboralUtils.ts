@@ -171,7 +171,28 @@ export function createEmptyEvaluation(
     existing?: PsycholaboralEvaluation | null,
     positionApplied?: string
 ): PsycholaboralEvaluation {
-    if (existing) return { ...existing };
+    if (existing) {
+        return {
+            ...existing,
+            personality: existing.personality?.length
+                ? existing.personality
+                : inventory.personalityTraits.map(t => ({
+                    traitId: t.id,
+                    level: 'promedio' as PersonalityLevel,
+                    observations: '',
+                })),
+            competencies: existing.competencies?.length
+                ? existing.competencies
+                : competencies.map(c => ({
+                    competencyId: c.id,
+                    obtainedScore: c.expectedScore,
+                    observations: '',
+                })),
+            conclusions: existing.conclusions ?? '',
+            positionApplied: existing.positionApplied || positionApplied || '',
+            reportDate: existing.reportDate || new Date().toISOString().split('T')[0],
+        };
+    }
 
     return {
         intellectualLevelId: 'normal_promedio' as IntellectualLevelId,

@@ -76,7 +76,7 @@ import {
 } from '../lib/bulkConfigBackup';
 import { useDebouncedValue } from '../lib/useDebouncedValue';
 import { fetchWithRetry } from '../lib/fetchWithRetry';
-import { Check, X, Loader2, Send, Archive, Search, ChevronDown, ChevronUp, Plus, Edit, Trash2, ArrowLeft, MessageCircle, Phone, Upload, Download, Filter, Mail, Calendar, Settings, ArrowUp, ArrowDown, Pin, FileText, BookOpen, Paperclip, ClipboardList, ListPlus, RefreshCw, HardDrive, CaseSensitive, Package, History, Target, BarChart3, UserCheck, Coins, Bus, Undo2, ArrowRightLeft, LayoutGrid, LineChart, ClipboardCopy, PlayCircle } from 'lucide-react';
+import { Check, X, Loader2, Send, Archive, Search, ChevronDown, ChevronUp, Plus, Edit, Trash2, ArrowLeft, MessageCircle, Phone, Upload, Download, Filter, Mail, Calendar, Settings, ArrowUp, ArrowDown, Pin, FileText, BookOpen, Paperclip, ClipboardList, ListPlus, RefreshCw, HardDrive, CaseSensitive, Package, History, Target, BarChart3, UserCheck, Coins, Bus, Undo2, ArrowRightLeft, LayoutGrid, LineChart, ClipboardCopy, PlayCircle, ClipboardCheck } from 'lucide-react';
 import { BulkCandidateTimeline } from './BulkCandidateTimeline';
 import { BulkContactologyHistory } from './BulkContactologyHistory';
 import { Process, ProcessStatus, CustomColumn, BulkProcessConfig, Candidate, IdealProfileConfig, BulkProcessStatChart, BulkInfoPin, BulkQuickReply, BulkClipboardFieldPreset } from '../types';
@@ -163,6 +163,9 @@ import { AddColumnModal } from './AddColumnModal';
 import { ManageCustomColumnsModal } from './ManageCustomColumnsModal';
 import { TableTemplateModal, BulkTableTemplateLayout } from './TableTemplateModal';
 import { PsycholaboralReportModal } from './PsycholaboralReportModal';
+import { CandidateAssessmentPanel } from './CandidateAssessmentPanel';
+import { buildPublicAssessmentsUrl } from '../lib/assessments/publicRoute';
+import { assessmentColumnsForProfile, isAssessmentColumnId } from '../lib/assessments/columns';
 import { PsycholaboralBulkEvaluateModal } from './PsycholaboralBulkEvaluateModal';
 import { PsycholaboralInventoryModal } from './PsycholaboralInventoryModal';
 import { BulkIdealProfileModal } from './BulkIdealProfileModal';
@@ -836,6 +839,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
     const [psychInventory, setPsychInventory] = useState<PsycholaboralInventory>(createDefaultPsycholaboralInventory());
     const [showPsychReportModal, setShowPsychReportModal] = useState(false);
     const [showPsychInventoryModal, setShowPsychInventoryModal] = useState(false);
+    const [assessmentCandidate, setAssessmentCandidate] = useState<{ id: string; name: string } | null>(null);
     const [psychReportCandidates, setPsychReportCandidates] = useState<BulkCandidate[]>([]);
     const [showPsychBulkModal, setShowPsychBulkModal] = useState(false);
     const [psychBulkCandidates, setPsychBulkCandidates] = useState<BulkCandidate[]>([]);
@@ -1106,10 +1110,11 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
 
     const baseColumns = BASE_COLUMNS;
 
-    const columnConfigIds = useMemo(
-        () => buildColumnConfigIds(columnOrder, customColumns),
-        [columnOrder, customColumns]
-    );
+    const columnConfigIds = useMemo(() => {
+        const ids = buildColumnConfigIds(columnOrder, customColumns);
+        const extra = assessmentColumnsForProfile(process?.bulkConfig?.assessmentProfile).map((col) => col.id);
+        return [...ids, ...extra.filter((id) => !ids.includes(id))];
+    }, [columnOrder, customColumns, process?.bulkConfig?.assessmentProfile]);
 
     const persistBulkTableLayoutBackup = useCallback((
         processId: string,
@@ -4181,6 +4186,32 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
     };
 
     const toggleColumnVisibility = async (colId: string) => {
+        if (isAssessmentColumnId(colId)) {
+            const currentlyVisible = columnOrder.includes(colId) && !hiddenColumns.includes(colId);
+            const previousHidden = hiddenColumns;
+            const previousOrder = columnOrder;
+            const newHidden = currentlyVisible
+                ? [...hiddenColumns, colId]
+                : hiddenColumns.filter((id) => id !== colId);
+            const newOrder = currentlyVisible || columnOrder.includes(colId) ? columnOrder : [...columnOrder, colId];
+            setHiddenColumns(newHidden);
+            setColumnOrder(newOrder);
+            try {
+                await persistBulkConfig(
+                    { hiddenColumns: newHidden, columnOrder: newOrder },
+                    {
+                        baseConfig: {
+                            ...(process?.bulkConfig || {}),
+                            customColumns: customColumns.length > 0 ? customColumns : process?.bulkConfig?.customColumns,
+                        },
+                    }
+                );
+            } catch {
+                setHiddenColumns(previousHidden);
+                setColumnOrder(previousOrder);
+            }
+            return;
+        }
         const isHiding = !hiddenColumns.includes(colId);
         if (isHiding && isIdentitySystemColumnId(colId)) {
             actions.showToast('Nombres, apellidos y DNI son columnas de sistema y no se pueden ocultar.', 'info', 3500);
@@ -6419,7 +6450,11 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                                                                 <label className="flex items-center gap-2 flex-1 cursor-pointer min-w-0">
                                                                     <input
                                                                         type="checkbox"
-                                                                        checked={!hiddenColumns.includes(colId) || isIdentitySystemColumnId(colId)}
+                                                                        checked={
+                                                                            isAssessmentColumnId(colId)
+                                                                                ? columnOrder.includes(colId) && !hiddenColumns.includes(colId)
+                                                                                : !hiddenColumns.includes(colId) || isIdentitySystemColumnId(colId)
+                                                                        }
                                                                         disabled={isIdentitySystemColumnId(colId)}
                                                                         onChange={() => toggleColumnVisibility(colId)}
                                                                         className="w-3.5 h-3.5 text-primary-600 rounded focus:ring-primary-500 disabled:opacity-60"
@@ -6685,6 +6720,45 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                                         >
                                             <Target className="w-4 h-4 shrink-0" />
                                             Perfil ideal
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={async () => {
+                                                const url = buildPublicAssessmentsUrl();
+                                                try {
+                                                    await navigator.clipboard.writeText(url);
+                                                    actions.showToast(
+                                                        process?.bulkConfig?.assessmentProfile
+                                                            ? 'Enlace de pruebas copiado'
+                                                            : 'Enlace copiado. Elige la jerarquía en la edición del proceso para que el candidato vea sus pruebas.',
+                                                        process?.bulkConfig?.assessmentProfile ? 'success' : 'info',
+                                                        4000
+                                                    );
+                                                } catch {
+                                                    actions.showToast(url, 'info', 8000);
+                                                }
+                                            }}
+                                            className="bg-white border border-teal-300 text-teal-900 hover:bg-teal-50 transition-colors whitespace-nowrap"
+                                            title="Copiar el enlace donde el candidato ingresa con su DNI"
+                                        >
+                                            <ClipboardCheck className="w-4 h-4 shrink-0" />
+                                            Link pruebas
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                const sel = candidates.filter(c => selectedIds.has(c.id));
+                                                if (sel.length !== 1) {
+                                                    actions.showToast('Selecciona un candidato para ver sus pruebas', 'error', 3000);
+                                                    return;
+                                                }
+                                                setAssessmentCandidate({ id: sel[0].id, name: sel[0].name });
+                                            }}
+                                            className="bg-white border border-teal-300 text-teal-900 hover:bg-teal-50 transition-colors whitespace-nowrap"
+                                            title="Resultados de las pruebas del candidato seleccionado"
+                                        >
+                                            <ClipboardList className="w-4 h-4 shrink-0" />
+                                            Resultados pruebas
                                         </button>
                                         {psycholaboralActive && (
                                             <>
@@ -7086,6 +7160,13 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                                                     <span>Etapa</span>
                                                     {sortColumn === 'stage' ? (sortDirection === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />) : <div className="w-3 h-3 opacity-30"><ArrowUp className="w-3 h-3" /></div>}
                                                 </button>
+                                            </BulkTh>
+                                        );
+                                    }
+                                    if (isAssessmentColumnId(colId)) {
+                                        return (
+                                            <BulkTh colId={colId} headerProps={commonProps} style={thStyle()} onResizeStart={handleColumnResizeStart}>
+                                                <span>{getColumnLabel(colId, customColumns)}</span>
                                             </BulkTh>
                                         );
                                     }
@@ -7675,6 +7756,21 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                                                                 <option key={s.id} value={s.id}>{s.name}</option>
                                                             ))}
                                                         </select>
+                                                    </td>
+                                                );
+                                            }
+                                            if (isAssessmentColumnId(colId)) {
+                                                const stored = columnValues[candidate.id]?.[colId] ?? displayCandidate.bulkColumnValues?.[colId];
+                                                const status = String(stored || 'Pendiente');
+                                                const done = status.startsWith('Realizada');
+                                                const running = status === 'En curso';
+                                                return (
+                                                    <td key={colId} {...tdProps(candidate.id, colId)}>
+                                                        <span className={`inline-flex rounded px-1.5 py-0.5 text-[11px] font-medium ${
+                                                            done ? 'bg-emerald-50 text-emerald-800' : running ? 'bg-amber-50 text-amber-800' : 'bg-gray-100 text-gray-600'
+                                                        }`}>
+                                                            {status}
+                                                        </span>
                                                     </td>
                                                 );
                                             }
@@ -8275,6 +8371,14 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                     initialAttachments={docsModalProcess.attachments}
                     googleDriveFolderId={docsModalProcess.googleDriveFolderId}
                     googleDriveConfig={state.settings?.googleDrive}
+                />
+            )}
+
+            {assessmentCandidate && (
+                <CandidateAssessmentPanel
+                    candidateId={assessmentCandidate.id}
+                    candidateName={assessmentCandidate.name}
+                    onClose={() => setAssessmentCandidate(null)}
                 />
             )}
 

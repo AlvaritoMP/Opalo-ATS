@@ -9,6 +9,7 @@ import { isScoreIaColumnVisible, pickBulkTableLayoutConfig } from '../lib/bulkTa
 import { psycholaboralApi } from '../lib/api/psycholaboral';
 import { createDefaultPsycholaboralInventory } from '../lib/psycholaboralDefaults';
 import { PsycholaboralConfigSection } from './PsycholaboralConfigSection';
+import { AssessmentProfileField } from './AssessmentProfileField';
 import { PsycholaboralInventoryModal } from './PsycholaboralInventoryModal';
 import { googleDriveService } from '../lib/googleDrive';
 import { StageColorPicker } from './StageColorPicker';
@@ -944,6 +945,16 @@ export const BulkProcessEditorModal: React.FC<BulkProcessEditorModalProps> = ({ 
                                     </label>
                                 </div>
                             </div>
+
+                            <AssessmentProfileField
+                                value={bulkConfig.assessmentProfile || ''}
+                                onChange={(assessmentProfile) =>
+                                    setBulkConfig({
+                                        ...bulkConfig,
+                                        assessmentProfile: assessmentProfile || undefined,
+                                    })
+                                }
+                            />
 
                             <PsycholaboralConfigSection
                                 bulkConfig={bulkConfig}

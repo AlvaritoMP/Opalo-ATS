@@ -213,6 +213,13 @@ export interface PsycholaboralEvaluation {
     reportDate?: string;
     evaluatedAt?: string;
     positionApplied?: string;
+    /** Datos cargados desde las pruebas del candidato (operativos y básicos). */
+    assessmentSource?: {
+        profile?: 'operativos' | 'mandos';
+        updatedAt?: string;
+        personalidad?: boolean;
+        inteligencia?: boolean;
+    };
 }
 
 // Configuración para procesos masivos
@@ -236,6 +243,11 @@ export interface BulkProcessConfig {
     /** ID de columna personalizada → nombre (para resolver valores guardados con IDs antiguos) */
     columnKeyAliases?: Record<string, string>;
     psycholaboral?: PsycholaboralProcessConfig;
+    /**
+     * Jerarquía de la posición para asignar pruebas al candidato.
+     * mandos: Barsit + personalidad. operativos: inteligencia figurativa + personalidad.
+     */
+    assessmentProfile?: 'mandos' | 'operativos';
     /** Perfil ideal para comparar candidatos del proceso masivo */
     idealProfile?: IdealProfileConfig;
     /** Gráficos personalizados del proceso masivo (columna + tipo) */
