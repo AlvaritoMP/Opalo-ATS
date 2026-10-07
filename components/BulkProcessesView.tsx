@@ -764,6 +764,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
         return getBulkSelectedProcessId(state.currentUser?.id) ?? '';
     });
     const [statusFilter, setStatusFilter] = useState<ProcessStatus | 'all'>('all');
+    const [processSearchQuery, setProcessSearchQuery] = useState('');
     const [selectedStage, setSelectedStage] = useState<string>('');
     const [searchInput, setSearchInput] = useState('');
     const debouncedSearch = useDebouncedValue(searchInput, 300);
@@ -913,9 +914,26 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
     }, [selectedProcess, bulkProcesses]);
 
     const visibleBulkProcesses = useMemo(() => {
-        if (statusFilter === 'all') return bulkProcesses;
-        return bulkProcesses.filter(p => (p.status || 'en_proceso') === statusFilter);
-    }, [bulkProcesses, statusFilter]);
+        let filtered = statusFilter === 'all'
+            ? bulkProcesses
+            : bulkProcesses.filter(p => (p.status || 'en_proceso') === statusFilter);
+
+        const query = processSearchQuery.trim().toLowerCase();
+        if (query) {
+            filtered = filtered.filter(process => {
+                if (process.title?.toLowerCase().includes(query)) return true;
+                if (process.description?.toLowerCase().includes(query)) return true;
+                if (process.serviceOrderCode?.toLowerCase().includes(query)) return true;
+                if (process.salaryRange?.toLowerCase().includes(query)) return true;
+                if (process.experienceLevel?.toLowerCase().includes(query)) return true;
+                if (process.seniority?.toLowerCase().includes(query)) return true;
+                if (process.client?.razonSocial?.toLowerCase().includes(query)) return true;
+                return false;
+            });
+        }
+
+        return filtered;
+    }, [bulkProcesses, statusFilter, processSearchQuery]);
 
     const bulkStatusCounts = useMemo(() => {
         const counts: Record<string, number> = { all: bulkProcesses.length };
@@ -6046,6 +6064,35 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                                 </button>
                             </div>
                         </div>
+                        <div className="mt-3">
+                            <div className="relative max-w-full md:max-w-md">
+                                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
+                                <input
+                                    type="text"
+                                    placeholder="Buscar procesos por título, descripción, código OS..."
+                                    value={processSearchQuery}
+                                    onChange={(e) => setProcessSearchQuery(e.target.value)}
+                                    className="w-full pl-10 pr-10 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none"
+                                />
+                                {processSearchQuery && (
+                                    <button
+                                        type="button"
+                                        onClick={() => setProcessSearchQuery('')}
+                                        className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                                        title="Limpiar búsqueda"
+                                    >
+                                        <X className="w-5 h-5" />
+                                    </button>
+                                )}
+                            </div>
+                            {processSearchQuery && (
+                                <p className="mt-2 text-sm text-gray-500">
+                                    {visibleBulkProcesses.length === 0
+                                        ? 'No se encontraron procesos que coincidan con la búsqueda'
+                                        : `${visibleBulkProcesses.length} proceso${visibleBulkProcesses.length !== 1 ? 's' : ''} encontrado${visibleBulkProcesses.length !== 1 ? 's' : ''}`}
+                                </p>
+                            )}
+                        </div>
                         <div className="flex flex-wrap items-center gap-2 mt-3">
                             {([
                                 { id: 'all' as const, label: 'Todos' },
@@ -6089,7 +6136,11 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                             </div>
                         ) : visibleBulkProcesses.length === 0 ? (
                             <div className="text-center py-12 border-2 border-dashed border-gray-300 rounded-lg">
-                                <p className="text-gray-500">No hay procesos masivos en este estado.</p>
+                                <p className="text-gray-500">
+                                    {processSearchQuery
+                                        ? 'No se encontraron procesos masivos que coincidan con la búsqueda'
+                                        : 'No hay procesos masivos en este estado.'}
+                                </p>
                             </div>
                         ) : (
                             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
