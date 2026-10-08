@@ -1,7 +1,6 @@
 /**
- * Abre composición de correo sin congelar la SPA.
- * Usa mailto: en pestaña nueva — el navegador/OS abre el gestor configurado
- * (cliente de escritorio o webmail predeterminado: Gmail, Outlook, Yahoo, etc.).
+ * Abre el cliente de correo de esta PC sin cambiar de página
+ * y sin abrir una ventana del navegador.
  * No forzamos Google ni Microsoft.
  */
 
@@ -55,19 +54,10 @@ function fitMailtoWithBody(
     return null;
 }
 
-function openInNewTab(url: string): boolean {
-    try {
-        const win = window.open(url, '_blank', 'noopener,noreferrer');
-        if (win) return true;
-    } catch {
-        /* ignore */
-    }
-
+function openMailClient(url: string): boolean {
     try {
         const anchor = document.createElement('a');
         anchor.href = url;
-        anchor.target = '_blank';
-        anchor.rel = 'noopener noreferrer';
         anchor.style.display = 'none';
         document.body.appendChild(anchor);
         anchor.click();
@@ -95,7 +85,7 @@ export async function copyMailComposeDraft(
 }
 
 /**
- * Abre mailto en pestaña nueva (no navega la app) y copia borrador al portapapeles.
+ * Abre el cliente de correo instalado y copia el borrador al portapapeles.
  */
 export async function openMailCompose(
     options: OpenMailComposeOptions
@@ -110,11 +100,11 @@ export async function openMailCompose(
     let mailtoRecipientCount = validTo.length;
 
     if (fitted) {
-        openInNewTab(fitted.href);
+        openMailClient(fitted.href);
         mailtoRecipientCount = fitted.included.length;
     } else {
         const shortHref = buildMailtoHref(validTo, subject, '');
-        openInNewTab(
+        openMailClient(
             shortHref.length <= MAILTO_MAX_HREF_LENGTH
                 ? shortHref
                 : buildMailtoHref(validTo.slice(0, 1), '', '')
