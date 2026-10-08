@@ -21,12 +21,16 @@ export interface OpenMailComposeResult {
 /** Límite práctico de longitud para mailto en navegadores */
 const MAILTO_MAX_HREF_LENGTH = 1800;
 
+function encodeMailtoParam(value: string): string {
+    return encodeURIComponent(value.replace(/\r?\n/g, '\r\n'));
+}
+
 export function buildMailtoHref(to: string[], subject: string, body: string): string {
     const emails = to.map(e => e?.trim()).filter(Boolean).join(';');
-    const params = new URLSearchParams();
-    if (subject) params.set('subject', subject);
-    if (body) params.set('body', body);
-    const qs = params.toString();
+    const params: string[] = [];
+    if (subject) params.push(`subject=${encodeMailtoParam(subject)}`);
+    if (body) params.push(`body=${encodeMailtoParam(body)}`);
+    const qs = params.join('&');
     return qs ? `mailto:${emails}?${qs}` : `mailto:${emails}`;
 }
 

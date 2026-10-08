@@ -3044,21 +3044,41 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
         const single = withEmail.length === 1 ? withEmail[0] : null;
         const url = buildPublicAssessmentsUrl(single?.dni);
         const puesto = process?.title || 'el proceso de selección';
-        const greeting = single?.name?.trim() ? `Hola ${single.name.trim()},` : 'Hola,';
+        const firstName = (single?.name || '').trim().split(/\s+/)[0] || '';
+        const givenName = firstName
+            ? firstName.charAt(0).toUpperCase() + firstName.slice(1).toLowerCase()
+            : '';
+        const greeting = givenName ? `Hola ${givenName},` : 'Hola,';
         const body = [
             greeting,
             '',
-            `Te invitamos a resolver las pruebas del proceso ${puesto}.`,
-            'Abre el enlace e ingresa con tu número de documento. Cada prueba se puede enviar una sola vez.',
+            `¡Felicitaciones! Llegaste a la fase de pruebas del proceso ${puesto}. Nos alegra que sigas adelante.`,
             '',
+            'Para realizarlas, te pedimos seguir estos pasos:',
+            '',
+            '1. Abre el enlace de abajo, de preferencia desde tu celular y con una conexión estable.',
             url,
             '',
-            'Saludos,',
+            '2. Revisa que tu número de documento sea el correcto y pulsa Continuar. Si el campo está vacío, escríbelo. Debe tener al menos 8 dígitos.',
+            '',
+            '3. Verás las pruebas que te corresponden. Entra a una, lee con calma las instrucciones y mira el ejemplo.',
+            '',
+            '4. El tiempo empieza recién cuando confirmas que deseas comenzar. Hazlo cuando estés en un lugar tranquilo y listo para concentrarte. No cierres la página mientras respondes.',
+            '',
+            '5. Responde cada pregunta. En el cuestionario debes marcar una palabra en MÁS y otra distinta en MENOS; no podrás avanzar si falta una de las dos.',
+            '',
+            '6. Cada prueba se envía una sola vez. Si se acaba el tiempo, se envía lo que hayas alcanzado a responder.',
+            '',
+            'Si sales antes de terminar, puedes volver con el mismo enlace. Ten en cuenta que el tiempo de una prueba ya iniciada sigue corriendo.',
+            '',
+            'Cualquier duda, responde a este correo y con gusto te orientamos.',
+            '',
+            'Saludos cordiales,',
             'Selección',
         ].join('\n');
         const result = await openMailCompose({
             to: withEmail.map(c => c.email!),
-            subject: `Pruebas de selección — ${puesto}`,
+            subject: `Felicitaciones, avanzaste a las pruebas — ${puesto}`,
             body,
         });
         const skipped = selected.length - withEmail.length;
