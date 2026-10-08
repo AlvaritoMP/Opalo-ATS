@@ -32,7 +32,16 @@ export const PublicAssessments: React.FC = () => {
     const [dni, setDni] = useState('');
 
     useLayoutEffect(() => {
-        ensureAssessmentsMobileViewport();
+        const pin = () => ensureAssessmentsMobileViewport();
+        pin();
+        window.addEventListener('resize', pin);
+        window.addEventListener('orientationchange', pin);
+        window.visualViewport?.addEventListener('resize', pin);
+        return () => {
+            window.removeEventListener('resize', pin);
+            window.removeEventListener('orientationchange', pin);
+            window.visualViewport?.removeEventListener('resize', pin);
+        };
     }, []);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');

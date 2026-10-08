@@ -5,17 +5,49 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <script>
       (function () {
-        function apply() {
+        function isPruebas() {
+          return (location.search || '').indexOf('pruebas=') !== -1;
+        }
+        function phoneWidth() {
+          var dpr = window.devicePixelRatio || 1;
+          var raw = Math.min(screen.width || 0, screen.height || 0) || screen.width || 0;
+          if (raw > 540 && dpr > 1) {
+            var css = raw / dpr;
+            if (css >= 280 && css <= 540) return css;
+          }
+          var vv = window.visualViewport;
+          if (vv && vv.scale > 0 && vv.scale < 0.92 && vv.width) {
+            var visible = Math.round(vv.width * vv.scale);
+            if (visible >= 280 && visible <= 540) return visible;
+          }
+          return raw;
+        }
+        function pin() {
           try {
-            if ((location.search || '').indexOf('pruebas=') === -1) return;
-            var sw = screen.width || 0;
-            if (!sw || sw > 520 || !window.innerWidth || window.innerWidth <= sw * 1.25) return;
+            if (!isPruebas()) return;
+            var phone = phoneWidth();
+            if (!phone || phone > 540) return;
+            var layout = window.innerWidth || 0;
+            var vv = window.visualViewport;
+            var shrunk = vv && vv.scale > 0 && vv.scale < 0.92;
+            if (!shrunk && layout > 0 && layout <= phone * 1.2) return;
             var meta = document.querySelector('meta[name="viewport"]');
-            if (meta) meta.setAttribute('content', 'width=' + Math.round(sw) + ', initial-scale=1, viewport-fit=cover');
+            if (meta) meta.setAttribute('content', 'width=' + Math.round(phone) + ', initial-scale=1, minimum-scale=1, viewport-fit=cover');
           } catch (e) { /* ignore */ }
         }
-        apply();
-        document.addEventListener('DOMContentLoaded', apply);
+        function rescue() {
+          try {
+            if (!isPruebas()) return;
+            pin();
+            var vv = window.visualViewport;
+            if (!vv || !(vv.scale > 0) || vv.scale >= 0.9) return;
+            var zoom = Math.min(1 / vv.scale, 2.8);
+            if (zoom > 1.15) document.documentElement.style.zoom = String(Math.round(zoom * 100) / 100);
+          } catch (e) { /* ignore */ }
+        }
+        pin();
+        document.addEventListener('DOMContentLoaded', pin);
+        window.addEventListener('load', rescue);
       })();
     </script>
     <meta name="google" content="notranslate" />
