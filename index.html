@@ -3,6 +3,21 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <script>
+      (function () {
+        function apply() {
+          try {
+            if ((location.search || '').indexOf('pruebas=') === -1) return;
+            var sw = screen.width || 0;
+            if (!sw || sw > 520 || !window.innerWidth || window.innerWidth <= sw * 1.25) return;
+            var meta = document.querySelector('meta[name="viewport"]');
+            if (meta) meta.setAttribute('content', 'width=' + Math.round(sw) + ', initial-scale=1, viewport-fit=cover');
+          } catch (e) { /* ignore */ }
+        }
+        apply();
+        document.addEventListener('DOMContentLoaded', apply);
+      })();
+    </script>
     <meta name="google" content="notranslate" />
     <title>Opalo ATS</title>
     <link rel="icon" href="/favicon.ico" sizes="48x48" />

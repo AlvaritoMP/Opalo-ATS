@@ -3042,8 +3042,9 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
             return;
         }
         const single = withEmail.length === 1 ? withEmail[0] : null;
-        const url = buildPublicAssessmentsUrl(single?.dni);
+        const url = buildPublicAssessmentsUrl();
         const puesto = process?.title || 'el proceso de selección';
+        const signer = (state.currentUser?.name || state.currentUser?.email || '').trim();
         const firstName = (single?.name || '').trim().split(/\s+/)[0] || '';
         const givenName = firstName
             ? firstName.charAt(0).toUpperCase() + firstName.slice(1).toLowerCase()
@@ -3056,10 +3057,10 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
             '',
             'Para realizarlas, te pedimos seguir estos pasos:',
             '',
-            '1. Abre el enlace de abajo, de preferencia desde tu celular y con una conexión estable.',
+            '1. Abre el enlace de abajo desde tu celular o tu computadora, con una conexión estable.',
             url,
             '',
-            '2. Revisa que tu número de documento sea el correcto y pulsa Continuar. Si el campo está vacío, escríbelo. Debe tener al menos 8 dígitos.',
+            '2. Escribe tu número de documento y pulsa Continuar. El campo va vacío a propósito: debes digitarlo tú. Debe tener al menos 8 dígitos.',
             '',
             '3. Verás las pruebas que te corresponden. Entra a una, lee con calma las instrucciones y mira el ejemplo.',
             '',
@@ -3074,6 +3075,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
             'Cualquier duda, responde a este correo y con gusto te orientamos.',
             '',
             'Saludos cordiales,',
+            ...(signer ? [signer] : []),
             'Selección',
         ].join('\n');
         const result = await openMailCompose({
@@ -3091,7 +3093,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
         if (!process?.bulkConfig?.assessmentProfile) {
             actions.showToast('Este proceso aún no tiene jerarquía de pruebas. Configúrala para que el candidato vea su batería.', 'info', 5000);
         }
-    }, [selectedIds, candidates, actions, process?.title, process?.bulkConfig?.assessmentProfile]);
+    }, [selectedIds, candidates, actions, process?.title, process?.bulkConfig?.assessmentProfile, state.currentUser?.name, state.currentUser?.email]);
 
     const openScheduleModal = useCallback((candidate: BulkCandidate) => {
         const eventId = candidate.nextInterviewEventId

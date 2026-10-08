@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { CheckCircle2, Clock, ClipboardList, Loader2 } from 'lucide-react';
 import {
     AssessmentLookupMatch,
@@ -9,7 +9,7 @@ import {
     startAssessment,
     submitAssessment,
 } from '../lib/api/assessments';
-import { getAssessmentDniFromUrl } from '../lib/assessments/publicRoute';
+import { ensureAssessmentsMobileViewport } from '../lib/assessments/publicRoute';
 import { normalizeDniDigits } from '../lib/complementaryFicha';
 import type { AssessmentTestId } from '../lib/assessments/types';
 import { ASSESSMENT_PUBLIC_LABELS } from '../lib/assessments/types';
@@ -29,7 +29,11 @@ function draftKey(candidateId: string, testId: string) {
 
 export const PublicAssessments: React.FC = () => {
     const [phase, setPhase] = useState<Phase>('dni');
-    const [dni, setDni] = useState(getAssessmentDniFromUrl());
+    const [dni, setDni] = useState('');
+
+    useLayoutEffect(() => {
+        ensureAssessmentsMobileViewport();
+    }, []);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
     const [matches, setMatches] = useState<AssessmentLookupMatch[]>([]);
@@ -194,7 +198,7 @@ export const PublicAssessments: React.FC = () => {
                 type="button"
                 disabled={index === 0}
                 onClick={() => setIndex((n) => Math.max(0, n - 1))}
-                className="min-h-12 flex-1 rounded-xl border border-slate-300 text-base font-medium disabled:opacity-40 touch-manipulation"
+                className="min-h-14 flex-1 rounded-xl border border-slate-300 text-base font-semibold disabled:opacity-40 touch-manipulation"
             >
                 Anterior
             </button>
@@ -204,7 +208,7 @@ export const PublicAssessments: React.FC = () => {
                     disabled={currentNeedsBothWords}
                     onClick={() => openQuestion(index + 1)}
                     title={currentNeedsBothWords ? 'Marca MÁS y MENOS para continuar' : undefined}
-                    className="min-h-12 flex-[1.4] rounded-xl bg-teal-700 text-white text-base font-medium disabled:opacity-40 touch-manipulation"
+                    className="min-h-14 flex-[1.4] rounded-xl bg-teal-700 text-white text-base font-semibold disabled:opacity-40 touch-manipulation"
                 >
                     Siguiente
                 </button>
@@ -214,7 +218,7 @@ export const PublicAssessments: React.FC = () => {
                     disabled={loading || currentNeedsBothWords}
                     onClick={() => void sendAnswers(false)}
                     title={currentNeedsBothWords ? 'Marca MÁS y MENOS para enviar' : undefined}
-                    className="min-h-12 flex-[1.4] rounded-xl bg-teal-700 text-white text-base font-medium disabled:opacity-60 touch-manipulation"
+                    className="min-h-14 flex-[1.4] rounded-xl bg-teal-700 text-white text-base font-semibold disabled:opacity-60 touch-manipulation"
                 >
                     {loading ? 'Enviando…' : 'Enviar prueba'}
                 </button>
@@ -224,24 +228,24 @@ export const PublicAssessments: React.FC = () => {
 
     if (phase === 'run' && question) {
         return (
-            <div className="min-h-[100dvh] bg-slate-100 text-slate-900">
-                <header className="sticky top-0 z-20 bg-white border-b border-slate-200 px-3 pt-[max(0.5rem,env(safe-area-inset-top))] pb-2">
+            <div className="min-h-[100dvh] overflow-x-hidden bg-slate-100 text-slate-900">
+                <header className="sticky top-0 z-20 bg-white border-b border-slate-200 px-4 pt-[max(0.75rem,env(safe-area-inset-top))] pb-3">
                     <div className="max-w-2xl mx-auto">
                         <div className="flex items-center justify-between gap-3">
-                            <p className="text-sm font-semibold truncate">{active ? ASSESSMENT_PUBLIC_LABELS[active.id] : ''}</p>
+                            <p className="text-base font-semibold truncate">{active ? ASSESSMENT_PUBLIC_LABELS[active.id] : ''}</p>
                             {remainingMs != null && (
-                                <span className={`shrink-0 font-mono text-base font-semibold ${remainingMs < 60_000 ? 'text-red-600' : 'text-slate-800'}`}>
+                                <span className={`shrink-0 font-mono text-lg font-semibold ${remainingMs < 60_000 ? 'text-red-600' : 'text-slate-800'}`}>
                                     {formatRemaining(remainingMs)}
                                 </span>
                             )}
                         </div>
-                        <p className="text-xs text-slate-500 mt-0.5">Pregunta {index + 1} de {questions.length}</p>
+                        <p className="text-sm text-slate-500 mt-0.5">Pregunta {index + 1} de {questions.length}</p>
                         <div className="h-1.5 bg-slate-100 rounded-full mt-2">
                             <div className="h-1.5 bg-teal-600 rounded-full" style={{ width: `${progress}%` }} />
                         </div>
                     </div>
                 </header>
-                <main className="max-w-2xl mx-auto px-3 py-3 pb-44">
+                <main className="max-w-2xl mx-auto px-4 py-4 pb-52 sm:px-6">
                     {error && (
                         <div className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
                             {error}
@@ -250,7 +254,7 @@ export const PublicAssessments: React.FC = () => {
                     <QuestionView question={question} value={answers[question.id]} onChange={(value) => setAnswer(question.id, value)} />
                 </main>
                 <footer className="fixed inset-x-0 bottom-0 z-20 border-t border-slate-200 bg-white/95 backdrop-blur">
-                    <div className="max-w-2xl mx-auto px-3 pt-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] space-y-2">
+                    <div className="max-w-2xl mx-auto px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] space-y-3 sm:px-6">
                         <QuestionDots questions={questions} answers={answers} index={index} onPick={openQuestion} />
                         {navButtons}
                     </div>
@@ -260,13 +264,13 @@ export const PublicAssessments: React.FC = () => {
     }
 
     return (
-        <div className="min-h-[100dvh] bg-slate-100 text-slate-900">
-            <div className="max-w-2xl mx-auto px-3 py-4 sm:px-4 sm:py-8">
-                <header className="mb-6">
-                    <p className="text-xs font-semibold uppercase tracking-wide text-teal-700">Evaluación</p>
-                    <h1 className="text-2xl font-bold">Pruebas del proceso</h1>
+        <div className="min-h-[100dvh] overflow-x-hidden bg-slate-100 text-slate-900">
+            <div className={`mx-auto flex w-full max-w-lg flex-col px-4 py-6 sm:max-w-2xl sm:px-6 sm:py-10 ${phase === 'dni' ? 'min-h-[100dvh] justify-center' : ''}`}>
+                <header className="mb-5 sm:mb-6">
+                    <p className="text-sm font-semibold uppercase tracking-wide text-teal-700">Evaluación</p>
+                    <h1 className="text-3xl font-bold leading-tight">Pruebas del proceso</h1>
                     {session && phase !== 'dni' && phase !== 'pick' && (
-                        <p className="text-sm text-slate-600 mt-1">
+                        <p className="text-base text-slate-600 mt-1">
                             {session.name} · {session.processTitle}
                         </p>
                     )}
@@ -279,23 +283,25 @@ export const PublicAssessments: React.FC = () => {
                 )}
 
                 {phase === 'dni' && (
-                    <form onSubmit={(e) => void handleLookup(e)} className="bg-white rounded-2xl border border-slate-200 p-5 space-y-4">
-                        <p className="text-sm text-slate-600">
-                            Ingresa tu DNI para ver las pruebas que debes resolver. Cada prueba se puede enviar una sola vez. Si necesitas repetirla, selección debe habilitar la reevaluación.
+                    <form onSubmit={(e) => void handleLookup(e)} className="bg-white rounded-2xl border border-slate-200 p-5 sm:p-6 space-y-4 shadow-sm">
+                        <p className="text-base sm:text-lg leading-relaxed text-slate-700">
+                            Escribe tu número de documento para ver las pruebas que debes resolver. Cada prueba se puede enviar una sola vez. Si necesitas repetirla, selección debe habilitar la reevaluación.
                         </p>
-                        <label className="block text-sm font-medium">Número de documento</label>
+                        <label className="block text-base font-semibold">Número de documento</label>
                         <input
                             inputMode="numeric"
+                            autoComplete="off"
+                            autoCorrect="off"
                             autoFocus
                             value={dni}
                             onChange={(e) => setDni(e.target.value)}
                             placeholder="DNI"
-                            className="w-full min-h-12 rounded-xl border border-slate-300 px-3 text-base"
+                            className="w-full min-h-14 rounded-xl border border-slate-300 px-4 text-lg"
                         />
                         <button
                             type="submit"
                             disabled={loading}
-                            className="w-full min-h-12 rounded-xl bg-teal-700 text-white text-base font-medium hover:bg-teal-800 disabled:opacity-60 touch-manipulation"
+                            className="w-full min-h-14 rounded-xl bg-teal-700 text-white text-lg font-semibold hover:bg-teal-800 disabled:opacity-60 touch-manipulation"
                         >
                             {loading ? 'Buscando…' : 'Continuar'}
                         </button>
@@ -304,7 +310,7 @@ export const PublicAssessments: React.FC = () => {
 
                 {phase === 'pick' && (
                     <div className="space-y-3">
-                        <p className="text-sm text-slate-600">Encontramos más de un proceso con tu documento. Elige en cuál vas a rendir las pruebas.</p>
+                        <p className="text-base leading-relaxed text-slate-700">Encontramos más de un proceso con tu documento. Elige en cuál vas a rendir las pruebas.</p>
                         {matches.map((match) => (
                             <button
                                 key={match.candidateId}
@@ -325,8 +331,8 @@ export const PublicAssessments: React.FC = () => {
                             <article key={card.id} className="bg-white rounded-2xl border border-slate-200 p-4">
                                 <div className="flex items-start justify-between gap-3">
                                     <div>
-                                        <h2 className="font-semibold">{ASSESSMENT_PUBLIC_LABELS[card.id]}</h2>
-                                        <p className="text-xs text-slate-500 mt-1 whitespace-pre-line line-clamp-4">{card.instructions}</p>
+                                        <h2 className="text-lg font-semibold">{ASSESSMENT_PUBLIC_LABELS[card.id]}</h2>
+                                        <p className="text-sm text-slate-600 mt-1 whitespace-pre-line line-clamp-4">{card.instructions}</p>
                                     </div>
                                     {card.timeLimitSec ? (
                                         <span className="shrink-0 inline-flex items-center gap-1 text-xs font-medium text-amber-800 bg-amber-50 border border-amber-200 rounded-full px-2 py-1">
@@ -336,7 +342,7 @@ export const PublicAssessments: React.FC = () => {
                                     ) : null}
                                 </div>
                                 <div className="mt-4 flex items-center justify-between">
-                                    <span className="text-xs text-slate-500">
+                                    <span className="text-sm text-slate-600">
                                         {card.status === 'completed'
                                             ? 'Enviada. Solo se resuelve una vez.'
                                             : card.status === 'retake'
@@ -362,7 +368,7 @@ export const PublicAssessments: React.FC = () => {
                                                 setPhase('brief');
                                                 setError('');
                                             }}
-                                            className="min-h-11 rounded-xl bg-teal-700 text-white px-4 text-sm font-medium hover:bg-teal-800 disabled:opacity-60 touch-manipulation"
+                                            className="min-h-12 rounded-xl bg-teal-700 text-white px-4 text-base font-medium hover:bg-teal-800 disabled:opacity-60 touch-manipulation"
                                         >
                                             {card.status === 'in_progress' ? 'Continuar' : 'Ver instrucciones'}
                                         </button>
@@ -381,7 +387,7 @@ export const PublicAssessments: React.FC = () => {
                             {briefing.timeLimitSec ? `${Math.round(briefing.timeLimitSec / 60)} minutos` : 'Sin límite'}
                             . El tiempo empieza al confirmar.
                         </p>
-                        <p className="text-sm text-slate-700 whitespace-pre-line">{briefing.instructions}</p>
+                        <p className="text-base leading-relaxed text-slate-700 whitespace-pre-line">{briefing.instructions}</p>
                         <ExampleBlock testId={briefing.id} />
                         <div className="flex flex-col-reverse sm:flex-row gap-2">
                             <button
@@ -551,7 +557,7 @@ function QuestionView({
     if (question.kind === 'choice') {
         return (
             <div className="space-y-2">
-                <p className="text-base font-medium mb-2">{question.prompt}</p>
+                <p className="text-lg font-medium mb-3 leading-snug">{question.prompt}</p>
                 {(question.options || []).map((option) => {
                     const on = value === option;
                     return (
@@ -560,7 +566,7 @@ function QuestionView({
                             type="button"
                             onClick={() => onChange(option)}
                             aria-pressed={on}
-                            className={`w-full min-h-12 text-left rounded-xl border px-3 py-3 text-base touch-manipulation ${
+                            className={`w-full min-h-14 text-left rounded-xl border px-4 py-3 text-lg leading-snug touch-manipulation ${
                                 on ? 'border-teal-700 bg-teal-50 text-teal-950' : 'border-slate-200 bg-white'
                             }`}
                         >
@@ -574,13 +580,13 @@ function QuestionView({
     if (question.kind === 'series') {
         return (
             <div>
-                <p className="text-base font-medium mb-2">{question.prompt}</p>
+                <p className="text-lg font-medium mb-3 leading-snug">{question.prompt}</p>
                 <input
                     value={typeof value === 'string' ? value : ''}
                     onChange={(e) => onChange(e.target.value)}
                     placeholder="Ejemplo: 30 y 50"
                     enterKeyHint="done"
-                    className="w-full min-h-12 rounded-xl border border-slate-300 px-3 text-base"
+                    className="w-full min-h-14 rounded-xl border border-slate-300 px-4 text-lg"
                 />
             </div>
         );
@@ -591,8 +597,8 @@ function QuestionView({
         const cols = count > 6 ? 4 : 3;
         return (
             <div>
-                <p className="text-base font-medium mb-1">{question.prompt}</p>
-                <p className="text-sm text-slate-600 mb-2">Toca la pieza que completa la figura. El número queda sobre esa pieza.</p>
+                <p className="text-lg font-medium mb-2 leading-snug">{question.prompt}</p>
+                <p className="text-base text-slate-700 mb-3">Toca la pieza que completa la figura. El número queda sobre esa pieza.</p>
                 <div className="relative">
                     {question.image && (
                         <img src={question.image} alt="" className="w-full block rounded-lg border border-slate-200 bg-white" />
@@ -645,20 +651,20 @@ function QuestionView({
     };
     return (
         <div>
-            <p className="text-sm text-slate-600 mb-3">Toca MÁS en una palabra y MENOS en otra distinta. Las dos son obligatorias.</p>
-            <div className="grid grid-cols-[1fr_4.25rem_4.25rem] gap-2 items-center">
+            <p className="text-base text-slate-700 mb-3">Toca MÁS en una palabra y MENOS en otra distinta. Las dos son obligatorias.</p>
+            <div className="grid grid-cols-[1fr_4.75rem_4.75rem] gap-2 items-center sm:grid-cols-[1fr_5.5rem_5.5rem]">
                 <span />
                 <span className="text-center text-xs font-semibold text-slate-500">MÁS</span>
                 <span className="text-center text-xs font-semibold text-slate-500">MENOS</span>
                 {words.map((word, idx) => (
                     <React.Fragment key={`${question.id}-${idx}`}>
-                        <span className="text-base leading-snug break-words">{word}</span>
+                        <span className="text-lg leading-snug break-words">{word}</span>
                         <button
                             type="button"
                             aria-label={`Más: ${word}`}
                             aria-pressed={row.most === idx}
                             onClick={() => setSide('most', idx)}
-                            className={`min-h-12 rounded-xl border text-sm font-semibold touch-manipulation ${
+                            className={`min-h-14 rounded-xl border text-base font-semibold touch-manipulation ${
                                 row.most === idx ? 'bg-teal-700 text-white border-teal-700' : 'bg-white border-slate-300'
                             }`}
                         >
@@ -669,7 +675,7 @@ function QuestionView({
                             aria-label={`Menos: ${word}`}
                             aria-pressed={row.least === idx}
                             onClick={() => setSide('least', idx)}
-                            className={`min-h-12 rounded-xl border text-sm font-semibold touch-manipulation ${
+                            className={`min-h-14 rounded-xl border text-base font-semibold touch-manipulation ${
                                 row.least === idx ? 'bg-slate-800 text-white border-slate-800' : 'bg-white border-slate-300'
                             }`}
                         >

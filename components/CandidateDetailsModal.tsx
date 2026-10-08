@@ -1019,11 +1019,7 @@ export const CandidateDetailsModal: React.FC<{ candidate: Candidate, onClose: ()
                             <button
                                 type="button"
                                 onClick={async () => {
-                                    if (!currentCandidate.dni) {
-                                        actions.showToast('El candidato necesita DNI para generar el enlace de pruebas.', 'error', 4000);
-                                        return;
-                                    }
-                                    const url = buildPublicAssessmentsUrl(currentCandidate.dni);
+                                    const url = buildPublicAssessmentsUrl();
                                     try {
                                         await navigator.clipboard.writeText(url);
                                         actions.showToast('Enlace de pruebas copiado', 'success', 2500);
