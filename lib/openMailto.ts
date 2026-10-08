@@ -13,13 +13,19 @@ export interface OpenMailComposeOptions {
 
 export interface OpenMailComposeResult {
     recipientCount: number;
+    /** Destinatarios que cupieron en el mailto junto con el cuerpo */
+    mailtoRecipientCount: number;
     /** true si el cuerpo completo solo está en el portapapeles (URL mailto demasiado larga) */
     bodyTruncatedInMailto: boolean;
     copiedToClipboard: boolean;
 }
 
-/** Límite práctico de longitud para mailto en navegadores */
-const MAILTO_MAX_HREF_LENGTH = 1800;
+/**
+ * Por encima de esto, Outlook en Windows abre un mensaje en blanco.
+ * 1800 era corto: el cuerpo de la invitación a pruebas, ya codificado
+ * (%20 y saltos CRLF), queda alrededor de 2000 caracteres.
+ */
+const MAILTO_MAX_HREF_LENGTH = 2083;
 
 function encodeMailtoParam(value: string): string {
     return encodeURIComponent(value.replace(/\r?\n/g, '\r\n'));
@@ -32,6 +38,21 @@ export function buildMailtoHref(to: string[], subject: string, body: string): st
     if (body) params.push(`body=${encodeMailtoParam(body)}`);
     const qs = params.join('&');
     return qs ? `mailto:${emails}?${qs}` : `mailto:${emails}`;
+}
+
+/** Incluye el cuerpo completo y la mayor cantidad de destinatarios que quepa. */
+function fitMailtoWithBody(
+    to: string[],
+    subject: string,
+    body: string
+): { href: string; included: string[] } | null {
+    const sizes = to.length > 0 ? to.map((_, index) => to.length - index) : [0];
+    for (const count of sizes) {
+        const included = to.slice(0, count);
+        const href = buildMailtoHref(included, subject, body);
+        if (href.length <= MAILTO_MAX_HREF_LENGTH) return { href, included };
+    }
+    return null;
 }
 
 function openInNewTab(url: string): boolean {
@@ -84,19 +105,27 @@ export async function openMailCompose(
 
     const copiedToClipboard = await copyMailComposeDraft(validTo, subject, body);
 
-    const fullHref = buildMailtoHref(validTo, subject, body);
+    const fitted = fitMailtoWithBody(validTo, subject, body);
     let bodyTruncatedInMailto = false;
+    let mailtoRecipientCount = validTo.length;
 
-    if (fullHref.length > MAILTO_MAX_HREF_LENGTH) {
-        const shortHref = buildMailtoHref(validTo, subject, '');
-        openInNewTab(shortHref.length <= MAILTO_MAX_HREF_LENGTH ? shortHref : buildMailtoHref(validTo, '', ''));
-        bodyTruncatedInMailto = true;
+    if (fitted) {
+        openInNewTab(fitted.href);
+        mailtoRecipientCount = fitted.included.length;
     } else {
-        openInNewTab(fullHref);
+        const shortHref = buildMailtoHref(validTo, subject, '');
+        openInNewTab(
+            shortHref.length <= MAILTO_MAX_HREF_LENGTH
+                ? shortHref
+                : buildMailtoHref(validTo.slice(0, 1), '', '')
+        );
+        bodyTruncatedInMailto = true;
+        mailtoRecipientCount = 0;
     }
 
     return {
         recipientCount: validTo.length,
+        mailtoRecipientCount,
         bodyTruncatedInMailto,
         copiedToClipboard,
     };
@@ -110,6 +139,13 @@ export function getMailComposeToastMessage(result: OpenMailComposeResult): strin
         return result.copiedToClipboard
             ? `Correo abierto (${countLabel}). El mensaje completo está en el portapapeles — pégalo en tu cliente web.`
             : `Correo abierto (${countLabel}). El mensaje es largo: copia el texto manualmente si hace falta.`;
+    }
+
+    if (result.mailtoRecipientCount < result.recipientCount) {
+        const placed = result.mailtoRecipientCount;
+        return result.copiedToClipboard
+            ? `Correo abierto con el mensaje (${placed} de ${n} destinatarios). El resto está en el borrador del portapapeles.`
+            : `Correo abierto con el mensaje (${placed} de ${n} destinatarios).`;
     }
 
     return result.copiedToClipboard
