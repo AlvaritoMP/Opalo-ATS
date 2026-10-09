@@ -166,6 +166,7 @@ import { PsycholaboralReportModal } from './PsycholaboralReportModal';
 import { CandidateAssessmentPanel } from './CandidateAssessmentPanel';
 import { buildPublicAssessmentsUrl } from '../lib/assessments/publicRoute';
 import { assessmentColumnsForProfile, isAssessmentColumnId } from '../lib/assessments/columns';
+import { AssessmentCheckCell } from './assessments/AssessmentCheckCell';
 import { PsycholaboralBulkEvaluateModal } from './PsycholaboralBulkEvaluateModal';
 import { PsycholaboralInventoryModal } from './PsycholaboralInventoryModal';
 import { BulkIdealProfileModal } from './BulkIdealProfileModal';
@@ -5291,6 +5292,10 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                     );
                 }
 
+                if (col.tracksAssessment) {
+                    return <AssessmentCheckCell checked={value === true} />;
+                }
+
                 if (isEditing) {
                     if (col.type === 'checkbox') {
                         return (
@@ -7935,7 +7940,9 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                                                         {...tdProps(candidate.id, colId)}
                                                     >
                                                         {renderCellCommentIndicator(candidate.id, colId)}
-                                                        {isEditing ? (
+                                                        {col.tracksAssessment ? (
+                                                            <AssessmentCheckCell checked={value === true} />
+                                                        ) : isEditing ? (
                                                             col.type === 'checkbox' ? (
                                                                 <select
                                                                     defaultValue={editingCell!.initialValue}

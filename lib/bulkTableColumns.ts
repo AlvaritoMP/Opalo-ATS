@@ -12,7 +12,7 @@ import { readBulkTableTemplatesCache } from './bulkTableTemplates';
 import { extractRouteCostTotal } from './routeCostStorage';
 import { ensureFloatingColumnsHidden, resolveFloatingColumnIds } from './bulkFloatingColumns';
 import { BULK_DOCUMENTS_COLUMN_ID } from './bulkDocumentData';
-import { assessmentColumnLabel, isAssessmentColumnId } from './assessments/columns';
+import { assessmentColumnLabel, assessmentStatusColumnId, isAssessmentColumnId, isAssessmentStatusComplete } from './assessments/columns';
 import {
     DNI_COLUMN_ID,
     GIVEN_NAMES_COLUMN_ID,
@@ -2081,6 +2081,10 @@ export function resolveBulkTableCellValue(
 ): unknown {
     const col = customColumns.find(c => c.id === columnId);
     const row = getCandidateColumnRow(candidate, columnValues);
+
+    if (col?.tracksAssessment) {
+        return isAssessmentStatusComplete(row[assessmentStatusColumnId(col.tracksAssessment)]);
+    }
 
     if (col) {
         const resolved = resolveColumnValueFromRow(row, col, legacyColumnIdToName);

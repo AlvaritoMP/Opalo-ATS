@@ -34,3 +34,15 @@ export function assessmentColumnsForProfile(profile?: AssessmentProfile | null, 
 export function assessmentStatusColumnId(testId: AssessmentTestId): string {
     return ASSESSMENT_STATUS_COLUMNS.find((col) => col.testId === testId)?.id || '';
 }
+
+export function assessmentTrackingLabel(testId: AssessmentTestId): string {
+    const label = ASSESSMENT_STATUS_COLUMNS.find((col) => col.testId === testId)?.label || 'Prueba';
+    return `${label} completada`;
+}
+
+/** La prueba cuenta como enviada si la columna de estado dice Realizada. */
+export function isAssessmentStatusComplete(value: unknown): boolean {
+    if (value === true || value === 1) return true;
+    const text = String(value ?? '').trim().toLowerCase();
+    return text === 'true' || text === '1' || text === 'sí' || text === 'si' || text.startsWith('realizada');
+}

@@ -47,7 +47,7 @@ export const AssessmentProfileField: React.FC<Props> = ({ value, onChange, behav
                 <span>
                     <span className="block text-sm font-medium text-gray-800">Incluir pruebas de conducta</span>
                     <span className="block text-xs text-gray-500 mt-0.5">
-                        Riesgo y recompensa, atención bajo presión, y esfuerzo frente a retorno. El consultor ve la interpretación en la ficha. No modifican el informe psicolaboral.
+                        Riesgo y recompensa, atención bajo presión, y esfuerzo frente a retorno. El consultor ve el dictamen en la ficha y puede pegarlo en las conclusiones del informe. No reemplazan el nivel intelectual ni los rasgos de personalidad.
                     </span>
                 </span>
             </label>

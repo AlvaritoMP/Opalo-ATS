@@ -12,6 +12,7 @@ import { BulkProcessConfig, CustomColumn, Process } from '../types';
 import {
     formatCustomCellDisplay,
     getDisplayEmail,
+    resolveBulkTableCellValue,
     isPlaceholderImportEmail,
     mapImportHeader,
     resolveStandardFieldValue,
@@ -175,7 +176,9 @@ export function getBulkExportCellValue(
             const total = extractRouteCostTotal(raw);
             return total != null ? total.toFixed(2) : '';
         }
-        const raw = getCustomStoredValue(candidate.id, cid, candidate, columnValues, customColumns);
+        const raw = col.tracksAssessment
+            ? resolveBulkTableCellValue(candidate, cid, customColumns, columnValues)
+            : getCustomStoredValue(candidate.id, cid, candidate, columnValues, customColumns);
         return formatCustomCellDisplay(raw, col);
     }
     return '';

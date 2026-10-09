@@ -19,6 +19,13 @@ import {
 import { captureElementToPdf, downloadPsycholaboralPdf } from '../lib/psycholaboralPdf';
 import { PsycholaboralReportDocument } from './PsycholaboralReportDocument';
 import { DateInput } from './DateInput';
+import { fetchAssessmentResults } from '../lib/api/assessments';
+import {
+    BEHAVIORAL_REPORT_START,
+    formatAssessmentInsightsForReport,
+    insightsFromResults,
+    upsertBehavioralConclusions,
+} from '../lib/assessments/insights';
 
 interface Props {
     isOpen: boolean;
@@ -48,6 +55,7 @@ export const PsycholaboralReportModal: React.FC<Props> = ({
 
     const [index, setIndex] = useState(0);
     const [evaluation, setEvaluation] = useState<PsycholaboralEvaluation | null>(null);
+    const [behaviorBlock, setBehaviorBlock] = useState('');
     const [loading, setLoading] = useState(false);
     const [saving, setSaving] = useState(false);
     const [generating, setGenerating] = useState(false);
@@ -87,6 +95,24 @@ export const PsycholaboralReportModal: React.FC<Props> = ({
         if (!candidate) return candidate;
         return { ...candidate, age: reportAge };
     }, [candidate, reportAge]);
+
+    useEffect(() => {
+        if (!isOpen || !candidate) {
+            setBehaviorBlock('');
+            return;
+        }
+        let cancelled = false;
+        fetchAssessmentResults(candidate.id)
+            .then((results) => {
+                if (!cancelled) setBehaviorBlock(formatAssessmentInsightsForReport(insightsFromResults(results)));
+            })
+            .catch(() => {
+                if (!cancelled) setBehaviorBlock('');
+            });
+        return () => {
+            cancelled = true;
+        };
+    }, [isOpen, candidate?.id]);
 
     useEffect(() => {
         if (!isOpen || !candidate) return;
@@ -444,7 +470,28 @@ export const PsycholaboralReportModal: React.FC<Props> = ({
                                     <RefreshCw className="w-3.5 h-3.5" />
                                     Aplicar plantilla
                                 </button>
+                                <button
+                                    type="button"
+                                    disabled={!behaviorBlock || !evaluation}
+                                    onClick={() => {
+                                        if (!evaluation || !behaviorBlock) return;
+                                        setEvaluation({
+                                            ...evaluation,
+                                            conclusions: upsertBehavioralConclusions(evaluation.conclusions, behaviorBlock),
+                                        });
+                                    }}
+                                    className="px-3 py-1 text-sm border border-teal-300 text-teal-900 rounded-lg hover:bg-teal-50 disabled:opacity-40"
+                                >
+                                    {evaluation?.conclusions?.includes(BEHAVIORAL_REPORT_START)
+                                        ? 'Actualizar dictamen de conducta'
+                                        : 'Incluir dictamen de conducta'}
+                                </button>
                             </div>
+                            {behaviorBlock && (
+                                <p className="text-xs text-gray-500 mb-2">
+                                    El dictamen entra en las conclusiones y sale en el PDF. No reemplaza el nivel intelectual ni los rasgos de personalidad. Revísalo antes de generar.
+                                </p>
+                            )}
                             <textarea
                                 value={evaluation.conclusions}
                                 onChange={e => setEvaluation({ ...evaluation, conclusions: e.target.value })}

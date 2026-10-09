@@ -2,6 +2,8 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { X, Plus, Trash2 } from 'lucide-react';
 import { CustomColumn, PsycholaboralReportNamePart, DashboardSemanticField, DASHBOARD_SEMANTIC_FIELD_OPTIONS } from '../types';
 import { identityColumnIdFromLabel } from '../lib/candidateIdentity';
+import { ASSESSMENT_STATUS_COLUMNS, assessmentTrackingLabel } from '../lib/assessments/columns';
+import type { AssessmentTestId } from '../lib/assessments/types';
 
 interface AddColumnModalProps {
     isOpen: boolean;
@@ -30,6 +32,7 @@ export const AddColumnModal: React.FC<AddColumnModalProps> = ({
     const [sourceRouteColumnId, setSourceRouteColumnId] = useState('');
     const [reportNamePart, setReportNamePart] = useState<'' | PsycholaboralReportNamePart>('');
     const [dashboardSemanticField, setDashboardSemanticField] = useState<'' | DashboardSemanticField>('');
+    const [tracksAssessment, setTracksAssessment] = useState<'' | AssessmentTestId>('');
 
     const routeColumns = useMemo(
         () => existingColumns.filter(c => c.type === 'route'),
@@ -56,6 +59,7 @@ export const AddColumnModal: React.FC<AddColumnModalProps> = ({
             setSourceRouteColumnId(editingColumn.sourceRouteColumnId || '');
             setReportNamePart(editingColumn.reportNamePart ?? '');
             setDashboardSemanticField(editingColumn.dashboardSemanticField ?? '');
+            setTracksAssessment(editingColumn.tracksAssessment ?? '');
         } else if (isOpen) {
             setName('');
             setType('text');
@@ -64,6 +68,7 @@ export const AddColumnModal: React.FC<AddColumnModalProps> = ({
             setSourceRouteColumnId('');
             setReportNamePart('');
             setDashboardSemanticField('');
+            setTracksAssessment('');
         }
     }, [isOpen, editingColumn]);
 
@@ -114,6 +119,16 @@ export const AddColumnModal: React.FC<AddColumnModalProps> = ({
             }
         }
 
+        if (type === 'checkbox' && tracksAssessment) {
+            const duplicate = existingColumns.find(
+                (col) => col.tracksAssessment === tracksAssessment && col.id !== editingColumn?.id
+            );
+            if (duplicate) {
+                alert(`Este proceso ya tiene la columna «${duplicate.name}» para esa prueba.`);
+                return;
+            }
+        }
+
         const column: CustomColumn = {
             id: editingColumn?.id || `col_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
             name: name.trim(),
@@ -128,6 +143,7 @@ export const AddColumnModal: React.FC<AddColumnModalProps> = ({
             ...(dashboardSemanticField && type !== 'route' && type !== 'route_cost'
                 ? { dashboardSemanticField }
                 : {}),
+            ...(type === 'checkbox' && tracksAssessment ? { tracksAssessment } : {}),
         };
 
         if (isEditing && onEdit) {
@@ -143,6 +159,7 @@ export const AddColumnModal: React.FC<AddColumnModalProps> = ({
         setSourceRouteColumnId('');
         setReportNamePart('');
         setDashboardSemanticField('');
+        setTracksAssessment('');
         onClose();
     };
 
@@ -210,6 +227,34 @@ export const AddColumnModal: React.FC<AddColumnModalProps> = ({
                             <option value="route_cost">Costo aprox. de ruta</option>
                         </select>
                     </div>
+
+                    {type === 'checkbox' && (
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">
+                                Marcar al completar una prueba
+                            </label>
+                            <p className="text-xs text-gray-500 mb-2">
+                                Opcional. Si eliges una prueba, la casilla se marca sola cuando el candidato la envía. Úsala solo en los procesos que evalúan.
+                            </p>
+                            <select
+                                value={tracksAssessment}
+                                onChange={(e) => {
+                                    const next = (e.target.value || '') as '' | AssessmentTestId;
+                                    setTracksAssessment(next);
+                                    if (!next) return;
+                                    const suggested = assessmentTrackingLabel(next);
+                                    const previousDefaults = ASSESSMENT_STATUS_COLUMNS.map((col) => assessmentTrackingLabel(col.testId));
+                                    if (!name.trim() || previousDefaults.includes(name.trim())) setName(suggested);
+                                }}
+                                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                            >
+                                <option value="">No. Es un sí/no manual</option>
+                                {ASSESSMENT_STATUS_COLUMNS.map((col) => (
+                                    <option key={col.testId} value={col.testId}>{col.label}</option>
+                                ))}
+                            </select>
+                        </div>
+                    )}
 
                     {type === 'route' && (
                         <div>

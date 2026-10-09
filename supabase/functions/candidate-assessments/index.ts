@@ -59,11 +59,22 @@ function assessmentStatusLabel(state: TestState): string {
   return 'Pendiente'
 }
 
-function withAssessmentStatus(bulk: unknown, testId: string, state: TestState): Record<string, unknown> {
+function trackingColumnIds(customColumns: unknown, testId: string): string[] {
+  if (!Array.isArray(customColumns)) return []
+  const ids: string[] = []
+  for (const col of customColumns) {
+    const row = asObject(col)
+    if (row.tracksAssessment === testId && typeof row.id === 'string' && row.id) ids.push(row.id)
+  }
+  return ids
+}
+
+function withAssessmentStatus(bulk: unknown, testId: string, state: TestState, customColumns?: unknown): Record<string, unknown> {
   const key = ASSESSMENT_STATUS_COLUMN[testId]
   const next = asObject(bulk)
-  if (!key) return next
-  next[key] = assessmentStatusLabel(state)
+  if (key) next[key] = assessmentStatusLabel(state)
+  const done = state.status === 'completed'
+  for (const id of trackingColumnIds(customColumns, testId)) next[id] = done
   return next
 }
 
@@ -145,9 +156,20 @@ Deno.serve(async (req) => {
       const evaluation = profile === 'operativos'
         ? await mergeOperativosReport(supabase, asObject(row.psycholaboral_evaluation), tests)
         : null
+      let customColumns: unknown[] = []
+      if (row.process_id) {
+        const { data: proc } = await supabase
+          .from('processes')
+          .select('bulk_config')
+          .eq('id', row.process_id)
+          .eq('app_name', APP_NAME)
+          .maybeSingle()
+        const cols = asObject(proc?.bulk_config).customColumns
+        if (Array.isArray(cols)) customColumns = cols
+      }
       let bulkValues = asObject(row.bulk_column_values)
       for (const [id, state] of Object.entries(tests)) {
-        bulkValues = withAssessmentStatus(bulkValues, id, state)
+        bulkValues = withAssessmentStatus(bulkValues, id, state, customColumns)
       }
       const patch: Record<string, unknown> = { assessment_results: results, bulk_column_values: bulkValues }
       if (evaluation) patch.psycholaboral_evaluation = evaluation
@@ -187,7 +209,7 @@ Deno.serve(async (req) => {
     }
 
     const processIds = [...new Set(matches.map((m) => m.process_id).filter(Boolean))]
-    const processById = new Map<string, { title: string; profile: AssessmentProfile | null; behavioral: boolean; position: string }>()
+    const processById = new Map<string, { title: string; profile: AssessmentProfile | null; behavioral: boolean; position: string; customColumns: unknown[] }>()
     if (processIds.length > 0) {
       const { data: processes } = await supabase
         .from('processes')
@@ -202,6 +224,7 @@ Deno.serve(async (req) => {
           profile: profileOf(p.bulk_config),
           behavioral: behavioralOf(p.bulk_config),
           position: typeof psych.defaultPositionTitle === 'string' ? psych.defaultPositionTitle : '',
+          customColumns: Array.isArray(bulk.customColumns) ? bulk.customColumns : [],
         })
       }
     }
@@ -308,7 +331,7 @@ Deno.serve(async (req) => {
         .from('candidates')
         .update({
           assessment_results: next,
-          bulk_column_values: withAssessmentStatus(selected.bulk_column_values, testId, tests[testId]),
+          bulk_column_values: withAssessmentStatus(selected.bulk_column_values, testId, tests[testId], processById.get(selected.process_id as string)?.customColumns),
         })
         .eq('id', selected.id)
         .eq('app_name', APP_NAME)
@@ -393,7 +416,7 @@ Deno.serve(async (req) => {
       }
       const patch: Record<string, unknown> = {
         assessment_results: nextResults,
-        bulk_column_values: withAssessmentStatus(selected.bulk_column_values, testId, tests[testId]),
+        bulk_column_values: withAssessmentStatus(selected.bulk_column_values, testId, tests[testId], processById.get(selected.process_id as string)?.customColumns),
       }
       if (profile === 'operativos') {
         patch.psycholaboral_evaluation = await mergeOperativosReport(

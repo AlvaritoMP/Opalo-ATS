@@ -193,32 +193,31 @@ function scoreRisk(plan: RiskPlan, answers: unknown): BehavioralScore {
   const postFail = mean(postFailPumps)
   const drop = adjusted != null && postFail != null && adjusted > 0 ? (adjusted - postFail) / adjusted : null
 
-  let band = 'intermedio'
-  let title = 'Zona intermedia'
-  let summary = 'El patrón no cae con claridad en un extremo. Conviene leerlo junto con la entrevista y el puesto.'
-  if (adjusted != null && (adjusted > 20 || popRate > 0.4)) {
+  let band = 'mixto'
+  let title = 'Perfil mixto'
+  let summary = 'El patrón no se instala en un extremo. Conviene leerlo con el puesto concreto.'
+  if (adjusted != null && (adjusted > 18 || popRate > 0.4)) {
     band = 'impulsivo'
-    title = 'Impulsivo'
-    summary = 'Infla mucho y revienta con frecuencia. Le cuesta frenar la ganancia inmediata. En roles con activos, caja o normas estrictas, el riesgo de exceso es alto.'
-  } else if (adjusted != null && adjusted < 8 && popRate <= 0.15) {
+    title = 'Arriesgado / Impulsivo'
+    summary = 'Le cuesta postergar la ganancia inmediata y tiende a forzar el resultado hasta el quiebre.'
+  } else if (adjusted != null && adjusted < 8 && popRate <= 0.2) {
     band = 'conservador'
-    title = 'Conservador'
-    summary = 'Infla poco y casi no revienta. Prioriza no perder. Es un perfil cauteloso, que puede dejar pasar oportunidades de mayor valor.'
-  } else if (adjusted != null && adjusted >= 10 && adjusted <= 18) {
-    band = 'equilibrado'
-    title = 'Equilibrado'
-    summary = 'Asume un riesgo calculado: busca puntos sin llevar la mayoría de los globos al límite. Tolera alguna pérdida sin que el patrón se desborde.'
+    title = 'Prudente / Conservador'
+    summary = 'Prioriza la seguridad y una ganancia modesta antes que exponerse a un error.'
+  } else if (adjusted != null && adjusted >= 8 && adjusted <= 18 && popRate >= 0.15 && popRate <= 0.35) {
+    band = 'estrategico'
+    title = 'Calculado / Estratégico'
+    summary = 'Busca maximizar el retorno con riesgos que puede sostener.'
   }
 
   const notes: string[] = []
-  if (postFail != null && drop != null && drop >= 0.4) {
-    notes.push('Después de un globo reventado baja mucho las infladas. La pérdida le corta el plan: baja tolerancia a la frustración en el momento.')
+  if (postFail != null && drop != null && drop > 0.4) {
+    notes.push('Sensible a la frustración: después de un error baja con fuerza el nivel de exposición.')
   } else if (postFail != null && adjusted != null && Math.abs(postFail - adjusted) / Math.max(adjusted, 1) <= 0.2) {
-    notes.push('Después de reventar un globo mantiene un nivel parecido de infladas. El fallo no le desarma la estrategia.')
+    notes.push('Firmeza emocional: el error no le desarma el método de trabajo.')
   } else if (popped === 0) {
     notes.push('No hubo explosiones, así que no se observa cómo se recupera después de una pérdida.')
   }
-  notes.push('El punto de quiebre de cada globo se sorteó entre 1 y 32 infladas, con la misma regla para todos. El promedio que importa es el de los globos cobrados, no el de los que reventaron.')
 
   return {
     score: banked,
@@ -283,30 +282,30 @@ function scoreAttention(plan: AttentionPlan, answers: unknown): BehavioralScore 
   const first10 = errorsByIndex.slice(0, 10).filter(Boolean).length / Math.max(1, Math.min(10, errorsByIndex.length))
   const last10 = errorsByIndex.slice(-10).filter(Boolean).length / Math.max(1, Math.min(10, errorsByIndex.length))
 
-  let band = 'mixto'
-  let title = 'Patrón mixto'
-  let summary = 'El efecto de las flechas laterales no es ni muy bajo ni muy alto. Revísalo junto con la tasa de error y el puesto.'
-  if (flanker != null && flanker < 60 && errAll < 0.05) {
+  const accuracy = 1 - errAll
+  let band = 'funcional'
+  let title = 'Concentración funcional'
+  let summary = 'Filtra parte del ruido. La interferencia todavía le cuesta algo de tiempo o algún error.'
+  if (flanker != null && flanker < 70 && accuracy >= 0.9) {
     band = 'enfoque'
-    title = 'Enfoque alto'
-    summary = 'Filtra bien las flechas de los costados y se equivoca poco. Tiene buena concentración para tareas operativas o de precisión.'
-  } else if ((flanker != null && flanker > 120) || errIncongRate > 0.25) {
+    title = 'Alta concentración'
+    summary = 'Aísla el ruido y sostiene la precisión bajo interferencia.'
+  } else if (accuracy < 0.8 || (flanker != null && flanker > 120)) {
     band = 'interferencia'
-    title = 'Sensible a interferencias'
-    summary = 'Las flechas de los costados le demoran o le hacen fallar más. Bajo presión del entorno puede perder el foco de la instrucción central.'
+    title = 'Vulnerable a distractores'
+    summary = 'El ruido o la presión de tiempo le bajan la calidad de la respuesta.'
   }
 
   const notes: string[] = []
   if (fastErrors >= 3) {
-    notes.push(`Hay ${fastErrors} errores en menos de 200 ms. Responde antes de mirar la flecha del centro: impulsividad motora.`)
+    notes.push('Hay varios errores en menos de 200 ms: responde antes de mirar el dato central.')
   }
   const fatigue = last10 - first10
   if (fatigue >= 0.2) {
-    notes.push('En los últimos 10 intentos falla bastante más que en los primeros 10. Aparece fatiga al sostener la atención.')
+    notes.push('La atención se desgasta: falla bastante más al final de la serie que al inicio.')
   } else if (fatigue <= -0.1) {
-    notes.push('Los últimos intentos no empeoran respecto de los primeros. Sostiene el rendimiento durante la serie.')
+    notes.push('Sostiene el rendimiento: los últimos intentos no empeoran respecto de los primeros.')
   }
-  notes.push('El efecto de interferencia es la diferencia, en milisegundos, entre el tiempo de las figuras incongruentes y el de las congruentes. Solo entran las respuestas correctas y dentro de los 800 ms.')
 
   return {
     score: plan.trials.length - errCong - errIncong,
@@ -376,29 +375,26 @@ function scoreEffort(plan: EffortPlan, answers: unknown): BehavioralScore {
     })
   })
 
-  const hardAtLeast50 = (byProb[50].total + byProb[80].total) > 0
-    ? (byProb[50].hard + byProb[80].hard) / (byProb[50].total + byProb[80].total)
-    : 0
-  const hardAtLow = byProb[20].total > 0 ? byProb[20].hard / byProb[20].total : 0
-  const hardAt80 = byProb[80].total > 0 ? byProb[80].hard / byProb[80].total : 0
   const abandonRate = hardChosen > 0 ? hardAbandoned / hardChosen : 0
   const completeRate = hardChosen > 0 ? hardCompleted / hardChosen : 0
 
-  let band = 'mixto'
-  let title = 'Patrón mixto'
-  let summary = 'La elección entre la tarea fácil y la retadora no sigue una regla clara. Conviene contrastarla con la motivación que cuente en la entrevista.'
-  if (abandonRate >= 0.4 && hardChosen >= 3) {
-    band = 'baja_autoeficacia'
-    title = 'Baja autoeficacia'
-    summary = 'Elige la tarea difícil pero deja de tocar antes de terminarla. El esfuerzo se corta a mitad de camino.'
-  } else if (hardAtLeast50 >= 0.7 && completeRate >= 0.7) {
+  const choiceTotal = byProb[20].total + byProb[50].total + byProb[80].total
+  const overallHard = choiceTotal > 0
+    ? (byProb[20].hard + byProb[50].hard + byProb[80].hard) / choiceTotal
+    : 0
+  const hardAt50 = byProb[50].total > 0 ? byProb[50].hard / byProb[50].total : null
+
+  let band = 'selectiva'
+  let title = 'Motivación selectiva'
+  let summary = 'Mide el esfuerzo según qué tan seguro ve el retorno.'
+  if (hardAt50 != null && hardAt50 >= 0.6) {
     band = 'logro'
-    title = 'Orientación al logro'
-    summary = 'Cuando la probabilidad de la tarea retadora es de 50 % o más, la elige y la termina. Busca el retorno mayor y sostiene el esfuerzo. Encaja en roles por objetivos.'
-  } else if (hardAtLow <= 0.25 && hardAt80 >= 0.75 && hardAtLeast50 < 0.7) {
+    title = 'Alta motivación al logro'
+    summary = 'Invierte esfuerzo extra por un retorno mayor, también cuando el premio no está asegurado.'
+  } else if (overallHard < 0.3) {
     band = 'pragmatico'
-    title = 'Pragmático'
-    summary = 'Solo se va a la tarea difícil cuando la probabilidad de éxito es alta. Prefiere el crédito seguro si el retorno es incierto.'
+    title = 'Economizador de esfuerzo'
+    summary = 'Cumple lo requerido y reserva el esfuerzo extra para cuando el beneficio está casi asegurado.'
   }
 
   const pct = (part: { hard: number; total: number }) => part.total ? round1((part.hard / part.total) * 100) : null
@@ -410,10 +406,9 @@ function scoreEffort(plan: EffortPlan, answers: unknown): BehavioralScore {
       band,
       title,
       summary,
-      notes: [
-        'La probabilidad anunciada es la chance de cobrar los 3 créditos después de completar la tarea retadora. No es la chance de poder tocarla.',
-        'Un abandono es elegir la retadora y no llegar a 35 toques dentro del tiempo.',
-      ],
+      notes: abandonRate >= 0.4 && hardChosen >= 3
+        ? ['Elige la tarea exigente, pero una parte importante de esas rondas no la termina.']
+        : [],
     },
     telemetry: {
       hardChoiceAt20Pct: pct(byProb[20]),

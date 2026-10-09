@@ -107,6 +107,11 @@ export interface CustomColumn {
      * con nombres estándar (p. ej. "¿Cómo se enteró?" → fuente).
      */
     dashboardSemanticField?: DashboardSemanticField;
+    /**
+     * Si es un checkbox, se marca solo cuando el candidato envía esta prueba.
+     * El proceso lo inserta únicamente si quiere monitorear evaluaciones.
+     */
+    tracksAssessment?: 'barsit' | 'inteligencia' | 'personalidad' | 'riesgo' | 'atencion' | 'esfuerzo';
 }
 
 /** Clasificación de columna para gráficos del Panel y agregaciones. */
@@ -250,7 +255,7 @@ export interface BulkProcessConfig {
     assessmentProfile?: 'mandos' | 'operativos';
     /**
      * Suma tres pruebas de conducta al enlace público: riesgo, atención y esfuerzo.
-     * Los resultados se ven en la ficha y no alimentan el informe psicolaboral.
+     * Los resultados se ven en la ficha. El evaluador puede incluir el dictamen en las conclusiones del informe; no reemplazan nivel intelectual ni personalidad.
      */
     behavioralAssessments?: boolean;
     /** Perfil ideal para comparar candidatos del proceso masivo */
