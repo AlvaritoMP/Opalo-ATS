@@ -248,6 +248,11 @@ export interface BulkProcessConfig {
      * mandos: Barsit + personalidad. operativos: inteligencia figurativa + personalidad.
      */
     assessmentProfile?: 'mandos' | 'operativos';
+    /**
+     * Suma tres pruebas de conducta al enlace público: riesgo, atención y esfuerzo.
+     * Los resultados se ven en la ficha y no alimentan el informe psicolaboral.
+     */
+    behavioralAssessments?: boolean;
     /** Perfil ideal para comparar candidatos del proceso masivo */
     idealProfile?: IdealProfileConfig;
     /** Gráficos personalizados del proceso masivo (columna + tipo) */

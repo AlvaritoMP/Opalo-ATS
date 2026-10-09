@@ -1,5 +1,5 @@
 export type AssessmentProfile = 'mandos' | 'operativos';
-export type AssessmentTestId = 'barsit' | 'inteligencia' | 'personalidad';
+export type AssessmentTestId = 'barsit' | 'inteligencia' | 'personalidad' | 'riesgo' | 'atencion' | 'esfuerzo';
 export type DiscFactor = 'D' | 'I' | 'S' | 'C';
 
 export interface PublicQuestion {
@@ -176,6 +176,24 @@ export const TEST_META: Record<AssessmentTestId, {
       'En cada uno de los 28 grupos, marque la palabra que más lo(a) represente en MÁS y la que menos lo(a) represente en MENOS. Solo una palabra por columna, y no puede ser la misma.\n\nTiene 15 minutos como máximo. El tiempo empieza cuando confirme que desea comenzar. Al cumplirse, la prueba se envía con lo respondido.',
     timeLimitSec: 15 * 60,
   },
+  riesgo: {
+    title: 'Riesgo y recompensa',
+    instructions:
+      'Verás un globo y dos botones: Inflar y Cobrar.\n\nCada inflada suma 10 puntos en esa ronda y agranda el globo. Puedes cobrar y guardar esos puntos, o seguir inflando. Si el globo revienta, pierdes los puntos de esa ronda. Los puntos ya cobrados en rondas anteriores se conservan.\n\nSon 15 globos. No hay un número fijo de infladas: cada globo puede reventar en un momento distinto.\n\nTómate el tiempo de decidir. Al terminar la última ronda, la prueba se envía sola.',
+    timeLimitSec: 12 * 60,
+  },
+  atencion: {
+    title: 'Atención bajo presión',
+    instructions:
+      'Verás cinco flechas en fila. Responde solo según la flecha del centro: izquierda o derecha.\n\nIgnora las flechas de los costados, aunque apunten al lado contrario.\n\nCada figura dura menos de un segundo. Si no alcanzas a responder, cuenta como fallo y sigue la siguiente.\n\nSon 40 figuras, una tras otra. Mantén el ritmo hasta el final.',
+    timeLimitSec: 8 * 60,
+  },
+  esfuerzo: {
+    title: 'Esfuerzo y retorno',
+    instructions:
+      'En cada ronda eliges una de dos tareas.\n\nLa fácil pide pocos toques, en poco tiempo, y paga 1 crédito seguro si la completas.\n\nLa retadora pide muchos más toques, en un poco más de tiempo, y paga 3 créditos solo si la completas y sale favorecida. La probabilidad de ese favor se muestra antes de elegir (20 %, 50 % u 80 %).\n\nSon 12 rondas. Elige y completa cada tarea antes de que se acabe su tiempo.',
+    timeLimitSec: 10 * 60,
+  },
 };
 
 export function testsForProfile(profile: AssessmentProfile): AssessmentTestId[] {
@@ -184,6 +202,7 @@ export function testsForProfile(profile: AssessmentProfile): AssessmentTestId[] 
 }
 
 export function publicQuestions(testId: AssessmentTestId): PublicQuestion[] {
+  if (testId === 'riesgo' || testId === 'atencion' || testId === 'esfuerzo') return [];
   if (testId === 'barsit') {
     const byId = new Map<string, PublicQuestion>();
     for (const item of BARSIT_CHOICES) {
@@ -237,6 +256,9 @@ export interface ScoredTest {
 }
 
 export function scoreTest(testId: AssessmentTestId, answers: unknown): ScoredTest {
+  if (testId === 'riesgo' || testId === 'atencion' || testId === 'esfuerzo') {
+    return { score: null, maxScore: null, scaledScore: null, items: [] };
+  }
   const map = answers && typeof answers === 'object' && !Array.isArray(answers)
     ? answers as Record<string, unknown>
     : {};

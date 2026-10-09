@@ -9,8 +9,14 @@ import {
   publicQuestions,
   scoreTest,
   TEST_META,
-  testsForProfile,
 } from '../_shared/assessmentBank.ts'
+import {
+  assignedTests,
+  createBehavioralPlan,
+  isBehavioralTest,
+  publicBehavioralPlan,
+  scoreBehavioral,
+} from '../_shared/behavioralAssessments.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -34,10 +40,16 @@ const ASSESSMENT_STATUS_COLUMN: Record<string, string> = {
   barsit: 'assessmentBarsit',
   inteligencia: 'assessmentInteligencia',
   personalidad: 'assessmentPersonalidad',
+  riesgo: 'assessmentRiesgo',
+  atencion: 'assessmentAtencion',
+  esfuerzo: 'assessmentEsfuerzo',
 }
 
 function assessmentStatusLabel(state: TestState): string {
   if (state.status === 'completed') {
+    const interpretation = asObject(state.interpretation)
+    const title = typeof interpretation.title === 'string' ? interpretation.title.trim() : ''
+    if (title) return `Realizada · ${title}`
     const score = state.score
     const max = state.maxScore
     if (typeof score === 'number' && typeof max === 'number') return `Realizada ${score}/${max}`
@@ -64,6 +76,10 @@ function profileOf(bulk: unknown): AssessmentProfile | null {
   const value = asObject(bulk).assessmentProfile
   if (value === 'mandos' || value === 'operativos') return value
   return null
+}
+
+function behavioralOf(bulk: unknown): boolean {
+  return asObject(bulk).behavioralAssessments === true
 }
 
 type TestState = Record<string, unknown>
@@ -105,8 +121,20 @@ Deno.serve(async (req) => {
       const tests = testsOf(results)
       for (const testId of Object.keys(tests)) {
         if (tests[testId].status !== 'completed') continue
+        if (isBehavioralTest(testId)) {
+          const scored = scoreBehavioral(testId, tests[testId].plan, tests[testId].answers)
+          tests[testId] = {
+            ...tests[testId],
+            score: scored.score,
+            maxScore: scored.maxScore,
+            interpretation: scored.interpretation,
+            telemetry: scored.telemetry,
+            items: scored.items,
+          }
+          continue
+        }
         if (testId !== 'barsit' && testId !== 'inteligencia' && testId !== 'personalidad') continue
-        const scored = scoreTest(testId, tests[testId].answers)
+        const scored = scoreTest(testId as 'barsit' | 'inteligencia' | 'personalidad', tests[testId].answers)
         tests[testId] = { ...tests[testId], ...scored, answers: tests[testId].answers }
       }
       results.tests = tests
@@ -159,7 +187,7 @@ Deno.serve(async (req) => {
     }
 
     const processIds = [...new Set(matches.map((m) => m.process_id).filter(Boolean))]
-    const processById = new Map<string, { title: string; profile: AssessmentProfile | null; position: string }>()
+    const processById = new Map<string, { title: string; profile: AssessmentProfile | null; behavioral: boolean; position: string }>()
     if (processIds.length > 0) {
       const { data: processes } = await supabase
         .from('processes')
@@ -172,12 +200,16 @@ Deno.serve(async (req) => {
         processById.set(p.id, {
           title: p.title || 'Proceso',
           profile: profileOf(p.bulk_config),
+          behavioral: behavioralOf(p.bulk_config),
           position: typeof psych.defaultPositionTitle === 'string' ? psych.defaultPositionTitle : '',
         })
       }
     }
 
-    const eligible = matches.filter((m) => processById.get(m.process_id as string)?.profile)
+    const eligible = matches.filter((m) => {
+      const info = processById.get(m.process_id as string)
+      return !!info && assignedTests(info.profile, info.behavioral).length > 0
+    })
     if (eligible.length === 0) {
       return json({ error: 'Tu proceso todavía no tiene pruebas asignadas. Contacta a selección.' }, 404)
     }
@@ -204,7 +236,8 @@ Deno.serve(async (req) => {
     if (!selected) return json({ error: 'El candidato seleccionado no coincide con el documento.' }, 400)
 
     const processInfo = processById.get(selected.process_id as string)!
-    const profile = processInfo.profile!
+    const profile = processInfo.profile
+    const battery = assignedTests(profile, processInfo.behavioral)
     const results = asObject(selected.assessment_results)
     const tests = testsOf(results)
 
@@ -217,9 +250,9 @@ Deno.serve(async (req) => {
         processTitle: processInfo.title,
         position: processInfo.position || processInfo.title,
         profile,
-        tests: testsForProfile(profile).map((testId) => {
+        tests: battery.map((testId) => {
           const state = tests[testId] || {}
-          const meta = TEST_META[testId]
+          const meta = TEST_META[testId as AssessmentTestId]
           return {
             id: testId,
             title: meta.title,
@@ -236,7 +269,7 @@ Deno.serve(async (req) => {
     }
 
     const testId = body?.testId as AssessmentTestId
-    if (!testsForProfile(profile).includes(testId)) {
+    if (!battery.includes(testId)) {
       return json({ error: 'Esa prueba no corresponde a tu proceso.' }, 400)
     }
 
@@ -258,9 +291,12 @@ Deno.serve(async (req) => {
       const startedAt = retake
         ? nowIso
         : (typeof current.startedAt === 'string' ? current.startedAt : nowIso)
+      const plan = isBehavioralTest(testId)
+        ? (retake || !current.plan ? createBehavioralPlan(testId, `${selected.id}:${testId}:${startedAt}`) : current.plan)
+        : undefined
       tests[testId] = retake
-        ? { status: 'in_progress', startedAt, previousAttempts }
-        : { ...current, status: 'in_progress', startedAt, previousAttempts }
+        ? { status: 'in_progress', startedAt, previousAttempts, ...(plan ? { plan } : {}) }
+        : { ...current, status: 'in_progress', startedAt, previousAttempts, ...(plan ? { plan } : {}) }
       const next = {
         ...results,
         profile,
@@ -287,7 +323,8 @@ Deno.serve(async (req) => {
         instructions: meta.instructions,
         startedAt,
         deadlineAt,
-        questions: publicQuestions(testId),
+        questions: isBehavioralTest(testId) ? [] : publicQuestions(testId),
+        plan: isBehavioralTest(testId) && tests[testId].plan ? publicBehavioralPlan(tests[testId].plan as never) : null,
       })
     }
 
@@ -301,27 +338,51 @@ Deno.serve(async (req) => {
       const now = new Date()
       const deadline = meta.timeLimitSec ? new Date(new Date(startedAt).getTime() + meta.timeLimitSec * 1000) : null
       const timedOut = !!(deadline && now.getTime() > deadline.getTime() + 1500)
-      const scored = scoreTest(testId, body?.answers)
+      const answers = body?.answers && typeof body.answers === 'object' ? body.answers : {}
       const submittedAt = now.toISOString()
-      tests[testId] = {
-        status: 'completed',
-        startedAt,
-        submittedAt,
-        timedOut,
-        durationSec: Math.max(0, Math.round((now.getTime() - new Date(startedAt).getTime()) / 1000)),
-        score: scored.score,
-        maxScore: scored.maxScore,
-        scaledScore: scored.scaledScore,
-        factors: scored.factors,
-        dominant: scored.dominant,
-        items: scored.items,
-        answers: body?.answers && typeof body.answers === 'object' ? body.answers : {},
-        retakeEnabled: false,
-        previousAttempts: Array.isArray(current.previousAttempts) ? current.previousAttempts : [],
-      }
-      if (scored.scaledScore != null) {
-        const inventory = await loadInventory(supabase)
-        tests[testId].intellectualLevelId = levelIdForScore(scored.scaledScore, inventory)
+      if (isBehavioralTest(testId)) {
+        if (!current.plan) {
+          return json({ error: 'Esta prueba no tiene protocolo guardado. Pide a selección que habilite una reevaluación.' }, 409)
+        }
+        const scored = scoreBehavioral(testId, current.plan, answers)
+        tests[testId] = {
+          status: 'completed',
+          startedAt,
+          submittedAt,
+          timedOut,
+          durationSec: Math.max(0, Math.round((now.getTime() - new Date(startedAt).getTime()) / 1000)),
+          score: scored.score,
+          maxScore: scored.maxScore,
+          interpretation: scored.interpretation,
+          telemetry: scored.telemetry,
+          items: scored.items,
+          plan: current.plan,
+          answers,
+          retakeEnabled: false,
+          previousAttempts: Array.isArray(current.previousAttempts) ? current.previousAttempts : [],
+        }
+      } else {
+        const scored = scoreTest(testId, answers)
+        tests[testId] = {
+          status: 'completed',
+          startedAt,
+          submittedAt,
+          timedOut,
+          durationSec: Math.max(0, Math.round((now.getTime() - new Date(startedAt).getTime()) / 1000)),
+          score: scored.score,
+          maxScore: scored.maxScore,
+          scaledScore: scored.scaledScore,
+          factors: scored.factors,
+          dominant: scored.dominant,
+          items: scored.items,
+          answers,
+          retakeEnabled: false,
+          previousAttempts: Array.isArray(current.previousAttempts) ? current.previousAttempts : [],
+        }
+        if (scored.scaledScore != null) {
+          const inventory = await loadInventory(supabase)
+          tests[testId].intellectualLevelId = levelIdForScore(scored.scaledScore, inventory)
+        }
       }
       const nextResults = {
         ...results,

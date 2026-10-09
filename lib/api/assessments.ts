@@ -45,7 +45,7 @@ export interface AssessmentLookupMatch {
     name: string;
     processId: string;
     processTitle: string;
-    profile: 'mandos' | 'operativos';
+    profile: 'mandos' | 'operativos' | null;
 }
 
 export interface AssessmentTestCard {
@@ -64,13 +64,19 @@ export interface AssessmentLookupPayload {
     processId: string;
     processTitle: string;
     position: string;
-    profile: 'mandos' | 'operativos';
+    profile: 'mandos' | 'operativos' | null;
     tests: AssessmentTestCard[];
 }
 
 export type AssessmentLookupResult =
     | { multiple: true; matches: AssessmentLookupMatch[] }
     | ({ multiple: false } & AssessmentLookupPayload);
+
+export function isSingleAssessmentLookup(
+    result: AssessmentLookupResult
+): result is { multiple: false } & AssessmentLookupPayload {
+    return result.multiple === false;
+}
 
 export interface PublicQuestion {
     id: string;
@@ -90,6 +96,11 @@ export function lookupAssessments(dni: string, candidateId?: string) {
     });
 }
 
+export type BehavioralPlan =
+    | { kind: 'riesgo'; burstAt: number[] }
+    | { kind: 'atencion'; limitMs: number; trials: Array<{ direction: 'left' | 'right'; congruent: boolean }> }
+    | { kind: 'esfuerzo'; rounds: Array<{ probability: 20 | 50 | 80 }> };
+
 export function startAssessment(dni: string, candidateId: string, testId: AssessmentTestId) {
     return callAssessments<{
         testId: AssessmentTestId;
@@ -98,6 +109,7 @@ export function startAssessment(dni: string, candidateId: string, testId: Assess
         startedAt: string;
         deadlineAt: string | null;
         questions: PublicQuestion[];
+        plan?: BehavioralPlan | null;
     }>({
         action: 'start',
         dni: normalizeDniDigits(dni),

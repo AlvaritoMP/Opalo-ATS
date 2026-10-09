@@ -60,6 +60,7 @@ export const ProcessEditorModal: React.FC<ProcessEditorModalProps> = ({ process,
     const [clients, setClients] = useState<Client[]>([]);
     const [selectedClientId, setSelectedClientId] = useState<string | undefined>(process?.clientId);
     const [assessmentProfile, setAssessmentProfile] = useState<AssessmentProfile | ''>(process?.bulkConfig?.assessmentProfile || '');
+    const [behavioralAssessments, setBehavioralAssessments] = useState(Boolean(process?.bulkConfig?.behavioralAssessments));
     const [isLoadingClients, setIsLoadingClients] = useState(false);
     const flyerInputRef = useRef<HTMLInputElement>(null);
     const attachmentInputRef = useRef<HTMLInputElement>(null);
@@ -475,6 +476,7 @@ export const ProcessEditorModal: React.FC<ProcessEditorModalProps> = ({ process,
             bulkConfig: {
                 ...(process?.bulkConfig || {}),
                 assessmentProfile: assessmentProfile || undefined,
+                behavioralAssessments: behavioralAssessments || undefined,
             },
         };
 
@@ -549,7 +551,12 @@ export const ProcessEditorModal: React.FC<ProcessEditorModalProps> = ({ process,
                             <div><label className="block text-sm font-medium text-gray-700">Nivel de experiencia</label><input type="text" placeholder="Ej: 5+ años" value={experienceLevel} onChange={e => setExperienceLevel(e.target.value)} className="mt-1 block w-full input"/></div>
                             <div><label className="block text-sm font-medium text-gray-700">Seniority</label><input type="text" placeholder="Ej: Senior, Mid-Level" value={seniority} onChange={e => setSeniority(e.target.value)} className="mt-1 block w-full input"/></div>
                             <div className="md:col-span-2">
-                                <AssessmentProfileField value={assessmentProfile} onChange={setAssessmentProfile} />
+                                <AssessmentProfileField
+                                    value={assessmentProfile}
+                                    onChange={setAssessmentProfile}
+                                    behavioral={behavioralAssessments}
+                                    onBehavioralChange={setBehavioralAssessments}
+                                />
                             </div>
                             <div><label className="block text-sm font-medium text-gray-700">Fecha de inicio</label><DateInput value={startDate} onChange={setStartDate} className="mt-1 block w-full input"/></div>
                             <div><label className="block text-sm font-medium text-gray-700">Fecha de fin</label><DateInput value={endDate} onChange={setEndDate} className="mt-1 block w-full input"/></div>

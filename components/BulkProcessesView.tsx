@@ -1112,9 +1112,12 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
 
     const columnConfigIds = useMemo(() => {
         const ids = buildColumnConfigIds(columnOrder, customColumns);
-        const extra = assessmentColumnsForProfile(process?.bulkConfig?.assessmentProfile).map((col) => col.id);
+        const extra = assessmentColumnsForProfile(
+            process?.bulkConfig?.assessmentProfile,
+            process?.bulkConfig?.behavioralAssessments
+        ).map((col) => col.id);
         return [...ids, ...extra.filter((id) => !ids.includes(id))];
-    }, [columnOrder, customColumns, process?.bulkConfig?.assessmentProfile]);
+    }, [columnOrder, customColumns, process?.bulkConfig?.assessmentProfile, process?.bulkConfig?.behavioralAssessments]);
 
     const persistBulkTableLayoutBackup = useCallback((
         processId: string,
@@ -3090,8 +3093,8 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
             'success',
             5000
         );
-        if (!process?.bulkConfig?.assessmentProfile) {
-            actions.showToast('Este proceso aún no tiene jerarquía de pruebas. Configúrala para que el candidato vea su batería.', 'info', 5000);
+        if (!process?.bulkConfig?.assessmentProfile && !process?.bulkConfig?.behavioralAssessments) {
+            actions.showToast('Este proceso aún no tiene pruebas. Elige la jerarquía o activa las pruebas de conducta.', 'info', 5000);
         }
     }, [selectedIds, candidates, actions, process?.title, process?.bulkConfig?.assessmentProfile, state.currentUser?.name, state.currentUser?.email]);
 
@@ -6793,10 +6796,10 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                                                 try {
                                                     await navigator.clipboard.writeText(url);
                                                     actions.showToast(
-                                                        process?.bulkConfig?.assessmentProfile
+                                                        process?.bulkConfig?.assessmentProfile || process?.bulkConfig?.behavioralAssessments
                                                             ? 'Enlace de pruebas copiado'
-                                                            : 'Enlace copiado. Elige la jerarquía en la edición del proceso para que el candidato vea sus pruebas.',
-                                                        process?.bulkConfig?.assessmentProfile ? 'success' : 'info',
+                                                            : 'Enlace copiado. Elige la jerarquía o activa las pruebas de conducta para que el candidato vea su batería.',
+                                                        process?.bulkConfig?.assessmentProfile || process?.bulkConfig?.behavioralAssessments ? 'success' : 'info',
                                                         4000
                                                     );
                                                 } catch {

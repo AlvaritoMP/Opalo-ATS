@@ -954,6 +954,13 @@ export const BulkProcessEditorModal: React.FC<BulkProcessEditorModalProps> = ({ 
                                         assessmentProfile: assessmentProfile || undefined,
                                     })
                                 }
+                                behavioral={Boolean(bulkConfig.behavioralAssessments)}
+                                onBehavioralChange={(behavioralAssessments) =>
+                                    setBulkConfig({
+                                        ...bulkConfig,
+                                        behavioralAssessments: behavioralAssessments || undefined,
+                                    })
+                                }
                             />
 
                             <PsycholaboralConfigSection

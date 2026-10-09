@@ -5,6 +5,7 @@ import {
     AssessmentLookupPayload,
     AssessmentTestCard,
     PublicQuestion,
+    isSingleAssessmentLookup,
     lookupAssessments,
     startAssessment,
     submitAssessment,
@@ -13,8 +14,10 @@ import { ensureAssessmentsMobileViewport } from '../lib/assessments/publicRoute'
 import { normalizeDniDigits } from '../lib/complementaryFicha';
 import type { AssessmentTestId } from '../lib/assessments/types';
 import { ASSESSMENT_PUBLIC_LABELS } from '../lib/assessments/types';
+import type { BehavioralPlan } from '../lib/api/assessments';
+import { BehavioralTaskRunner } from './assessments/BehavioralTasks';
 
-type Phase = 'dni' | 'pick' | 'list' | 'brief' | 'run' | 'done';
+type Phase = 'dni' | 'pick' | 'list' | 'brief' | 'run' | 'task' | 'done';
 
 function formatRemaining(ms: number): string {
     const total = Math.max(0, Math.ceil(ms / 1000));
@@ -50,6 +53,7 @@ export const PublicAssessments: React.FC = () => {
     const [active, setActive] = useState<AssessmentTestCard | null>(null);
     const [briefing, setBriefing] = useState<AssessmentTestCard | null>(null);
     const [questions, setQuestions] = useState<PublicQuestion[]>([]);
+    const [taskPlan, setTaskPlan] = useState<BehavioralPlan | null>(null);
     const [index, setIndex] = useState(0);
     const [answers, setAnswers] = useState<Record<string, unknown>>({});
     const [deadlineAt, setDeadlineAt] = useState<string | null>(null);
@@ -58,7 +62,7 @@ export const PublicAssessments: React.FC = () => {
     const autoSent = useRef(false);
 
     useEffect(() => {
-        if (phase !== 'run' || !deadlineAt) return;
+        if ((phase !== 'run' && phase !== 'task') || !deadlineAt) return;
         const timer = window.setInterval(() => setNow(Date.now()), 250);
         return () => window.clearInterval(timer);
     }, [phase, deadlineAt]);
@@ -72,7 +76,7 @@ export const PublicAssessments: React.FC = () => {
 
     const refreshList = async (candidateId: string, document = dni) => {
         const result = await lookupAssessments(document, candidateId);
-        if (result.multiple) {
+        if (!isSingleAssessmentLookup(result)) {
             setMatches(result.matches);
             setPhase('pick');
             return;
@@ -92,7 +96,7 @@ export const PublicAssessments: React.FC = () => {
         setError('');
         try {
             const result = await lookupAssessments(digits, candidateId);
-            if (result.multiple) {
+            if (!isSingleAssessmentLookup(result)) {
                 setMatches(result.matches);
                 setPhase('pick');
             } else {
@@ -125,6 +129,15 @@ export const PublicAssessments: React.FC = () => {
                 }
             }
             setActive(card);
+            if (started.plan && (started.plan.kind === 'riesgo' || started.plan.kind === 'atencion' || started.plan.kind === 'esfuerzo')) {
+                setTaskPlan(started.plan);
+                setDeadlineAt(started.deadlineAt);
+                setNow(Date.now());
+                autoSent.current = false;
+                setPhase('task');
+                return;
+            }
+            setTaskPlan(null);
             setQuestions(started.questions);
             setAnswers(draft);
             setDeadlineAt(started.deadlineAt);
@@ -234,6 +247,40 @@ export const PublicAssessments: React.FC = () => {
             )}
         </div>
     );
+
+    if (phase === 'task' && taskPlan && session && active) {
+        return (
+            <div className="min-h-[100dvh] overflow-x-hidden bg-slate-100 text-slate-900">
+                <header className="sticky top-0 z-20 bg-white border-b border-slate-200 px-4 pt-[max(0.75rem,env(safe-area-inset-top))] pb-3">
+                    <div className="max-w-lg mx-auto flex items-center justify-between gap-3">
+                        <p className="text-base font-semibold">{ASSESSMENT_PUBLIC_LABELS[active.id]}</p>
+                        {remainingMs != null && (
+                            <span className={`font-mono text-lg font-semibold ${remainingMs < 60_000 ? 'text-red-600' : 'text-slate-800'}`}>
+                                {formatRemaining(remainingMs)}
+                            </span>
+                        )}
+                    </div>
+                </header>
+                {error && <p className="max-w-lg mx-auto mt-3 px-4 text-sm text-red-700">{error}</p>}
+                <BehavioralTaskRunner
+                    plan={taskPlan}
+                    expired={remainingMs != null && remainingMs <= 0}
+                    onSubmit={(payload) => {
+                        if (!session || !active || submitting.current) return;
+                        submitting.current = true;
+                        setLoading(true);
+                        void submitAssessment(dni, session.candidateId, active.id, payload)
+                            .then(() => setPhase('done'))
+                            .catch((err) => setError(err instanceof Error ? err.message : 'No se pudo enviar la prueba.'))
+                            .finally(() => {
+                                submitting.current = false;
+                                setLoading(false);
+                            });
+                    }}
+                />
+            </div>
+        );
+    }
 
     if (phase === 'run' && question) {
         return (
@@ -433,7 +480,7 @@ export const PublicAssessments: React.FC = () => {
                     </div>
                 )}
 
-                {loading && phase !== 'run' && (
+                {loading && phase !== 'run' && phase !== 'task' && (
                     <p className="mt-4 flex items-center gap-2 text-sm text-slate-500">
                         <Loader2 className="w-4 h-4 animate-spin" /> Cargando
                     </p>
@@ -472,6 +519,31 @@ function ExampleBlock({ testId }: { testId: AssessmentTestCard['id'] }) {
                     </div>
                     <p>Si la pieza que completa el cuadro es la número 2, marcas <strong>2</strong>.</p>
                 </div>
+            </div>
+        );
+    }
+    if (testId === 'riesgo') {
+        return (
+            <div className="rounded-xl bg-slate-50 border border-slate-200 p-3 text-sm space-y-2">
+                <p className="font-medium">Así funciona</p>
+                <p>Inflar agranda el globo y suma puntos solo de esa ronda. Cobrar los guarda. Si revienta, esa ronda queda en cero.</p>
+            </div>
+        );
+    }
+    if (testId === 'atencion') {
+        return (
+            <div className="rounded-xl bg-slate-50 border border-slate-200 p-3 text-sm space-y-2">
+                <p className="font-medium">Así funciona</p>
+                <p className="text-2xl tracking-widest">→ → ← → →</p>
+                <p>La del centro apunta a la izquierda. Aunque las otras vayan a la derecha, respondes izquierda.</p>
+            </div>
+        );
+    }
+    if (testId === 'esfuerzo') {
+        return (
+            <div className="rounded-xl bg-slate-50 border border-slate-200 p-3 text-sm space-y-2">
+                <p className="font-medium">Así funciona</p>
+                <p>Eliges la tarea fácil, de crédito seguro, o la retadora, de más créditos y con una probabilidad visible. Luego tocas hasta completar o hasta que se acabe el tiempo.</p>
             </div>
         );
     }

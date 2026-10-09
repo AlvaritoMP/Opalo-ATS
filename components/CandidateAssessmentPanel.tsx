@@ -8,6 +8,8 @@ import {
 import {
     ASSESSMENT_PROFILE_LABELS,
     ASSESSMENT_TEST_LABELS,
+    BEHAVIORAL_METHOD,
+    BEHAVIORAL_TELEMETRY_LABELS,
     DISC_FACTOR_LABELS,
     type AssessmentResults,
     type AssessmentTestId,
@@ -123,6 +125,31 @@ export const CandidateAssessmentPanel: React.FC<Props> = ({ candidateId, candida
                                         </button>
                                     )}
                                 </div>
+                                {test.interpretation && (
+                                    <div className="rounded-lg border border-teal-200 bg-teal-50 px-3 py-3 space-y-2">
+                                        <p className="text-sm font-semibold text-teal-950">{test.interpretation.title}</p>
+                                        <p className="text-sm text-teal-950">{test.interpretation.summary}</p>
+                                        {BEHAVIORAL_METHOD[testId] && (
+                                            <p className="text-xs text-teal-900">{BEHAVIORAL_METHOD[testId]}</p>
+                                        )}
+                                        {test.interpretation.notes.length > 0 && (
+                                            <ul className="text-xs text-teal-900 list-disc pl-4 space-y-1">
+                                                {test.interpretation.notes.map((note) => <li key={note}>{note}</li>)}
+                                            </ul>
+                                        )}
+                                        <p className="text-[11px] text-teal-800">Estos resultados no se cargan al informe psicolaboral.</p>
+                                    </div>
+                                )}
+                                {test.telemetry && Object.keys(test.telemetry).length > 0 && (
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                        {Object.entries(test.telemetry).map(([key, value]) => (
+                                            <div key={key} className="rounded-lg bg-slate-50 border border-slate-100 px-2 py-1.5">
+                                                <p className="text-[11px] text-slate-500">{BEHAVIORAL_TELEMETRY_LABELS[key] || key}</p>
+                                                <p className="text-sm font-semibold">{value == null ? '—' : String(value)}</p>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
                                 {test.score != null && test.maxScore != null && (
                                     <p className="text-sm">
                                         Puntaje <strong>{test.score}</strong> de {test.maxScore}

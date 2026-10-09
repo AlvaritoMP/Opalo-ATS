@@ -5,6 +5,9 @@ export const ASSESSMENT_STATUS_COLUMNS: { id: string; testId: AssessmentTestId; 
     { id: 'assessmentBarsit', testId: 'barsit', label: 'Barsit' },
     { id: 'assessmentInteligencia', testId: 'inteligencia', label: 'Raven' },
     { id: 'assessmentPersonalidad', testId: 'personalidad', label: 'Personalidad D' },
+    { id: 'assessmentRiesgo', testId: 'riesgo', label: 'Riesgo' },
+    { id: 'assessmentAtencion', testId: 'atencion', label: 'Atención' },
+    { id: 'assessmentEsfuerzo', testId: 'esfuerzo', label: 'Esfuerzo' },
 ];
 
 const BY_ID = new Map(ASSESSMENT_STATUS_COLUMNS.map((col) => [col.id, col]));
@@ -17,14 +20,15 @@ export function assessmentColumnLabel(colId: string): string | undefined {
     return BY_ID.get(colId)?.label;
 }
 
-export function assessmentColumnsForProfile(profile?: AssessmentProfile | null): { id: string; label: string }[] {
-    if (profile === 'mandos') {
-        return ASSESSMENT_STATUS_COLUMNS.filter((col) => col.testId === 'barsit' || col.testId === 'personalidad');
-    }
-    if (profile === 'operativos') {
-        return ASSESSMENT_STATUS_COLUMNS.filter((col) => col.testId === 'inteligencia' || col.testId === 'personalidad');
-    }
-    return [];
+export function assessmentColumnsForProfile(profile?: AssessmentProfile | null, behavioral?: boolean): { id: string; label: string }[] {
+    const classic = profile === 'mandos'
+        ? ASSESSMENT_STATUS_COLUMNS.filter((col) => col.testId === 'barsit' || col.testId === 'personalidad')
+        : profile === 'operativos'
+            ? ASSESSMENT_STATUS_COLUMNS.filter((col) => col.testId === 'inteligencia' || col.testId === 'personalidad')
+            : [];
+    if (!behavioral) return classic;
+    const extra = ASSESSMENT_STATUS_COLUMNS.filter((col) => col.testId === 'riesgo' || col.testId === 'atencion' || col.testId === 'esfuerzo');
+    return [...classic, ...extra];
 }
 
 export function assessmentStatusColumnId(testId: AssessmentTestId): string {
