@@ -164,6 +164,7 @@ import { ManageCustomColumnsModal } from './ManageCustomColumnsModal';
 import { TableTemplateModal, BulkTableTemplateLayout } from './TableTemplateModal';
 import { PsycholaboralReportModal } from './PsycholaboralReportModal';
 import { CandidateAssessmentPanel } from './CandidateAssessmentPanel';
+import { AssessmentConsultantGuide } from './AssessmentConsultantGuide';
 import { buildPublicAssessmentsUrl } from '../lib/assessments/publicRoute';
 import { assessmentColumnsForProfile, isAssessmentColumnId } from '../lib/assessments/columns';
 import { AssessmentCheckCell } from './assessments/AssessmentCheckCell';
@@ -849,6 +850,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
     const [docsModalProcess, setDocsModalProcess] = useState<Process | null>(null);
     const [showExportModal, setShowExportModal] = useState(false);
     const [showIdealProfileModal, setShowIdealProfileModal] = useState(false);
+    const [showAssessmentGuide, setShowAssessmentGuide] = useState(false);
     const [showStatsModal, setShowStatsModal] = useState(false);
     const [showPerformanceModal, setShowPerformanceModal] = useState(false);
     const [showTransportFaresModal, setShowTransportFaresModal] = useState(false);
@@ -6819,6 +6821,15 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                                         </button>
                                         <button
                                             type="button"
+                                            onClick={() => setShowAssessmentGuide(true)}
+                                            className="bg-white border border-teal-300 text-teal-900 hover:bg-teal-50 transition-colors whitespace-nowrap"
+                                            title="Cómo se aplica cada prueba, qué mide, cómo se puntúa y cómo se interpreta"
+                                        >
+                                            <BookOpen className="w-4 h-4 shrink-0" />
+                                            Guía de pruebas
+                                        </button>
+                                        <button
+                                            type="button"
                                             onClick={() => { void inviteSelectedToAssessments(); }}
                                             className="bg-white border border-teal-300 text-teal-900 hover:bg-teal-50 transition-colors whitespace-nowrap"
                                             title="Abrir el correo del candidato en el programa de mail de esta PC, con el enlace de las pruebas"
@@ -8495,6 +8506,10 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                     customColumns={customColumns}
                     columnValues={columnValues}
                 />
+            )}
+
+            {showAssessmentGuide && (
+                <AssessmentConsultantGuide onClose={() => setShowAssessmentGuide(false)} />
             )}
 
             {showIdealProfileModal && process && (
