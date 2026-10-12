@@ -3147,6 +3147,23 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
         }
     }, [selectedIds, candidates, actions, process?.title, process?.bulkConfig?.assessmentProfile, state.currentUser?.name, state.currentUser?.email]);
 
+    const copyAssessmentLink = useCallback(async () => {
+        const url = buildPublicAssessmentsUrl();
+        const hasBattery = !!(process?.bulkConfig?.assessmentProfile || process?.bulkConfig?.behavioralAssessments);
+        try {
+            await navigator.clipboard.writeText(url);
+            actions.showToast(
+                hasBattery
+                    ? 'Enlace de pruebas copiado'
+                    : 'Enlace copiado. Elige la jerarquía o activa las pruebas de conducta para que el candidato vea su batería.',
+                hasBattery ? 'success' : 'info',
+                4000
+            );
+        } catch {
+            actions.showToast(url, 'info', 8000);
+        }
+    }, [actions, process?.bulkConfig?.assessmentProfile, process?.bulkConfig?.behavioralAssessments]);
+
     const openScheduleModal = useCallback((candidate: BulkCandidate) => {
         const eventId = candidate.nextInterviewEventId
             || (() => {
@@ -6363,8 +6380,9 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                                     canEditBulkInfoPins ||
                                     canEditBulkQuickReplies ||
                                     canEditClipboardPresets) && (
-                                <div className="bulk-inline-scroll flex items-center gap-3 w-full min-w-0 overflow-x-auto">
+                                <div className="flex items-center gap-2 w-full min-w-0">
                                     {(infoPins.length > 0 || canEditBulkInfoPins) && (
+                                        <div className="bulk-inline-scroll min-w-0 max-w-[34%] overflow-x-auto">
                                         <BulkInfoPinsBar
                                             pins={infoPins}
                                             canEdit={canEditBulkInfoPins && !isTableBootstrapping}
@@ -6384,10 +6402,12 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                                                 setInfoPinModal({ pin: createBulkInfoPin(), isNew: true });
                                             }}
                                         />
+                                        </div>
                                     )}
                                     {(quickReplies.length > 0 ||
                                         canEditBulkQuickReplies ||
                                         allQuickReplyEntries.length > 0) && (
+                                        <div className="bulk-inline-scroll min-w-0 flex-1 overflow-x-auto">
                                         <BulkQuickRepliesBar
                                             replies={quickReplies}
                                             canEdit={canEditBulkQuickReplies}
@@ -6408,8 +6428,10 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                                             }
                                             onOpenGlobalPanel={() => setShowGlobalQuickRepliesPanel(true)}
                                         />
+                                        </div>
                                     )}
                                     {(clipboardFieldPresets.length > 0 || canEditClipboardPresets) && (
+                                        <div className="bulk-inline-scroll min-w-0 flex-1 overflow-x-auto">
                                         <BulkClipboardPresetsBar
                                             presets={clipboardFieldPresets}
                                             canEdit={canEditClipboardPresets}
@@ -6426,6 +6448,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                                                 })
                                             }
                                         />
+                                        </div>
                                     )}
                                 </div>
                             )}
@@ -6660,22 +6683,6 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                                             <Download className="w-4 h-4" />
                                             Exportar
                                         </button>
-                                        {canEditClipboardPresets && (
-                                            <button
-                                                type="button"
-                                                onClick={() =>
-                                                    setClipboardPresetModal({
-                                                        preset: createBulkClipboardFieldPreset(),
-                                                        isNew: true,
-                                                    })
-                                                }
-                                                className="bg-emerald-600 text-white hover:bg-emerald-700 transition-colors"
-                                                title="Crear botón para copiar campos de candidatos seleccionados al portapapeles"
-                                            >
-                                                <ClipboardCopy className="w-4 h-4" />
-                                                Botón copia
-                                            </button>
-                                        )}
                                         <button
                                             type="button"
                                             onClick={handleNormalizeTextCase}
@@ -6845,44 +6852,12 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                                         </button>
                                         <button
                                             type="button"
-                                            onClick={async () => {
-                                                const url = buildPublicAssessmentsUrl();
-                                                try {
-                                                    await navigator.clipboard.writeText(url);
-                                                    actions.showToast(
-                                                        process?.bulkConfig?.assessmentProfile || process?.bulkConfig?.behavioralAssessments
-                                                            ? 'Enlace de pruebas copiado'
-                                                            : 'Enlace copiado. Elige la jerarquía o activa las pruebas de conducta para que el candidato vea su batería.',
-                                                        process?.bulkConfig?.assessmentProfile || process?.bulkConfig?.behavioralAssessments ? 'success' : 'info',
-                                                        4000
-                                                    );
-                                                } catch {
-                                                    actions.showToast(url, 'info', 8000);
-                                                }
-                                            }}
-                                            className="bg-white border border-teal-300 text-teal-900 hover:bg-teal-50 transition-colors whitespace-nowrap"
-                                            title="Copiar el enlace donde el candidato ingresa con su DNI"
-                                        >
-                                            <ClipboardCheck className="w-4 h-4 shrink-0" />
-                                            Link pruebas
-                                        </button>
-                                        <button
-                                            type="button"
                                             onClick={() => setShowAssessmentGuide(true)}
                                             className="bg-white border border-teal-300 text-teal-900 hover:bg-teal-50 transition-colors whitespace-nowrap"
                                             title="Cómo se aplica cada prueba, qué mide, cómo se puntúa y cómo se interpreta"
                                         >
                                             <BookOpen className="w-4 h-4 shrink-0" />
                                             Guía de pruebas
-                                        </button>
-                                        <button
-                                            type="button"
-                                            onClick={() => { void inviteSelectedToAssessments(); }}
-                                            className="bg-white border border-teal-300 text-teal-900 hover:bg-teal-50 transition-colors whitespace-nowrap"
-                                            title="Abrir el correo del candidato en el programa de mail de esta PC, con el enlace de las pruebas"
-                                        >
-                                            <Mail className="w-4 h-4 shrink-0" />
-                                            Invitar a pruebas
                                         </button>
                                         <button
                                             type="button"
@@ -6946,6 +6921,24 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                                             </>
                                         )}
                                     </BulkToolbarMenu>
+                                    <button
+                                        type="button"
+                                        onClick={() => { void copyAssessmentLink(); }}
+                                        className="inline-flex items-center gap-1 h-7 px-2 text-xs font-medium rounded-md shrink-0 whitespace-nowrap bg-white border border-teal-300 text-teal-900 hover:bg-teal-50"
+                                        title="Copiar el enlace donde el candidato ingresa con su DNI"
+                                    >
+                                        <ClipboardCheck className="w-3.5 h-3.5 shrink-0" />
+                                        Link pruebas
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => { void inviteSelectedToAssessments(); }}
+                                        className="inline-flex items-center gap-1 h-7 px-2 text-xs font-medium rounded-md shrink-0 whitespace-nowrap bg-white border border-teal-300 text-teal-900 hover:bg-teal-50"
+                                        title="Abrir el correo del candidato con el enlace de las pruebas, listo para enviar"
+                                    >
+                                        <Mail className="w-3.5 h-3.5 shrink-0" />
+                                        Invitar a pruebas
+                                    </button>
                                     <div className="flex items-center gap-1.5 min-w-[140px] flex-1 max-w-xs ml-auto">
                                         <label className="text-[11px] font-medium text-gray-600 shrink-0">Etapa</label>
                                         <select

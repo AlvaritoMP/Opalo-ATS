@@ -21,7 +21,7 @@ export const BulkInfoPinsBar: React.FC<BulkInfoPinsBarProps> = ({
     if (pins.length === 0 && !canEdit) return null;
 
     return (
-        <div className="flex items-center gap-1 min-w-0 shrink-0">
+        <div className="flex items-center gap-1 w-max">
             <div className="flex items-center gap-1 px-0.5 shrink-0">
                 <StickyNote className="w-3 h-3 text-amber-600 shrink-0" />
                 <span className="text-[10px] font-semibold uppercase tracking-wide text-gray-500 select-none whitespace-nowrap">
