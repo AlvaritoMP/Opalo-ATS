@@ -77,6 +77,8 @@ import {
 import { useDebouncedValue } from '../lib/useDebouncedValue';
 import { fetchWithRetry } from '../lib/fetchWithRetry';
 import { Check, X, Loader2, Send, Archive, Search, ChevronDown, ChevronUp, Plus, Edit, Trash2, ArrowLeft, MessageCircle, Phone, Upload, Download, Filter, Mail, Calendar, Settings, ArrowUp, ArrowDown, Pin, FileText, BookOpen, Paperclip, ClipboardList, ListPlus, RefreshCw, HardDrive, CaseSensitive, Package, History, Target, BarChart3, UserCheck, Coins, Bus, Undo2, ArrowRightLeft, LayoutGrid, LineChart, ClipboardCopy, PlayCircle, ClipboardCheck } from 'lucide-react';
+import { ScriptStructureEditor } from './persuasion/ScriptStructureEditor';
+import { openLienzoWindow, toLienzoCandidate } from '../lib/persuasion/popup';
 import { BulkCandidateTimeline } from './BulkCandidateTimeline';
 import { BulkContactologyHistory } from './BulkContactologyHistory';
 import { Process, ProcessStatus, CustomColumn, BulkProcessConfig, Candidate, IdealProfileConfig, BulkProcessStatChart, BulkInfoPin, BulkQuickReply, BulkClipboardFieldPreset } from '../types';
@@ -820,6 +822,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
     const [searchInput, setSearchInput] = useState('');
     const debouncedSearch = useDebouncedValue(searchInput, 300);
     const [drawerCandidate, setDrawerCandidate] = useState<BulkCandidate | null>(null);
+    const [scriptEditorOpen, setScriptEditorOpen] = useState(false);
     const [isDrawerOpen, setIsDrawerOpen] = useState(false);
     const [drawerInitialTab, setDrawerInitialTab] = useState<CandidateDrawerTab>('contactology');
     const [optimisticUpdates, setOptimisticUpdates] = useState<Map<string, Partial<BulkCandidate>>>(new Map());
@@ -950,6 +953,9 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
         displayCandidates: [] as BulkCandidate[],
         visibleColumns: [] as string[],
     });
+    const persuasionLockRef = useRef(false);
+    const bulkPersuasionEnabledRef = useRef(false);
+    const openPersuasionRef = useRef<(candidate: BulkCandidate) => void>(() => {});
     /** Refs actualizados de forma síncrona para navegación con teclado sin saltos */
     const activeCellNavRef = useRef<CellCoord | null>(null);
     const selectionAnchorNavRef = useRef<CellCoord | null>(null);
@@ -965,6 +971,23 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
         if (!selectedProcess) return undefined;
         return bulkProcesses.find(p => p.id === selectedProcess);
     }, [selectedProcess, bulkProcesses]);
+
+    persuasionLockRef.current = scriptEditorOpen;
+    bulkPersuasionEnabledRef.current = process?.isBulkProcess === true;
+    openPersuasionRef.current = candidate => {
+        if (!process?.isBulkProcess) return;
+        const rows = tableKeyboardRef.current.displayCandidates;
+        const list = rows.some(row => row.id === candidate.id) ? rows : [candidate, ...rows];
+        const opened = openLienzoWindow({
+            processId: process.id,
+            processTitle: process.title,
+            candidateId: candidate.id,
+            candidates: list.map(toLienzoCandidate),
+        });
+        if (!opened) {
+            actions.showToast('Permite ventanas emergentes para abrir el lienzo al lado de la tabla.', 'error', 4500);
+        }
+    };
 
     const visibleBulkProcesses = useMemo(() => {
         let filtered = statusFilter === 'all'
@@ -5861,10 +5884,26 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
     }, [editingCell, buildCellRange, syncSelectionToDom]);
 
     const handleTableKeyDown = useCallback((e: React.KeyboardEvent | KeyboardEvent) => {
+        if (persuasionLockRef.current) return;
         const ctx = tableKeyboardRef.current;
         if (ctx.editingCell) return;
         const target = e.target as HTMLElement;
         if (['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName)) return;
+
+        if (
+            (e.ctrlKey || e.metaKey) &&
+            e.shiftKey &&
+            e.key.toLowerCase() === 'l' &&
+            !e.altKey
+        ) {
+            if (!bulkPersuasionEnabledRef.current) return;
+            const id = ctx.activeCell?.candidateId ?? ctx.displayCandidates[0]?.id;
+            const row = ctx.displayCandidates.find(c => c.id === id);
+            if (!row) return;
+            e.preventDefault();
+            openPersuasionRef.current(row);
+            return;
+        }
 
         if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && !e.shiftKey) {
             e.preventDefault();
@@ -6741,6 +6780,17 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                                     </BulkToolbarMenu>
 
                                     <BulkToolbarMenu label="Herramientas">
+                                        {process?.isBulkProcess && (
+                                            <button
+                                                type="button"
+                                                onClick={() => setScriptEditorOpen(true)}
+                                                className="bg-violet-50 border border-violet-300 text-violet-900 hover:bg-violet-100 transition-colors whitespace-nowrap"
+                                                title="Armar las preguntas, las alternativas y los niveles de cada eje"
+                                            >
+                                                <BookOpen className="w-4 h-4 shrink-0" />
+                                                Estructura del guion
+                                            </button>
+                                        )}
                                         <button
                                             type="button"
                                             onClick={() => {
@@ -6981,6 +7031,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                     <>
                     <p className="bulk-table-hint text-[10px] text-gray-500 px-2 pt-1 pb-0.5 shrink-0 line-clamp-1" title="Flechas · Shift+arrastrar selección · Ctrl+clic múltiple · Clic derecho: color/comentario · Enter/doble clic editar · Ctrl+C copiar · Ctrl+V pegar · Ctrl+Z deshacer · Doble clic en fila abre detalle · Arrastre el borde del encabezado para ajustar ancho · Panel violeta = fidelización deslizable">
                         Flechas · Shift+arrastrar · Ctrl+clic · Clic derecho color/comentario · Enter editar · Ctrl+C/V · Ctrl+Z · Doble clic detalle · Arrastre borde encabezado = ancho · Panel violeta = columnas de fidelización (arrastrable)
+                        {process?.isBulkProcess && ' · Ctrl+Shift+L o el icono de la fila abre el lienzo en otra ventana'}
                     </p>
                     <div className="relative flex-1 min-h-0">
                     <div
@@ -6995,6 +7046,15 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                         <table className="w-full border-collapse notranslate" translate="no" style={{ tableLayout: 'fixed', width: 'max-content', minWidth: '100%' }}>
                             <thead className="bg-gray-50 sticky top-0 z-20">
                             <tr>
+                                {process?.isBulkProcess && (
+                                    <th
+                                        className={`${COMPACT_TH_CLASS} bg-gray-50`}
+                                        style={{ width: 36, minWidth: 36 }}
+                                        title="Abrir el lienzo en otra ventana (Ctrl+Shift+L)"
+                                    >
+                                        <ClipboardList className="w-3.5 h-3.5 mx-auto text-violet-700" />
+                                    </th>
+                                )}
                                 <th
                                     className={`${COMPACT_TH_CLASS} bg-gray-50`}
                                     style={{ width: CHECKBOX_COL_WIDTH, ...buildCheckboxStyle(true) }}
@@ -7421,6 +7481,28 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                                         }
                                         onDoubleClick={() => openDrawer(candidate, 'details')}
                                     >
+                                        {process?.isBulkProcess && (
+                                            <td
+                                                className={`${COMPACT_TD_CLASS} ${
+                                                    isSelected
+                                                        ? 'bg-primary-50'
+                                                        : isTransferPending
+                                                          ? 'bg-yellow-50'
+                                                          : 'bg-white'
+                                                }`}
+                                                onClick={e => e.stopPropagation()}
+                                                onDoubleClick={e => e.stopPropagation()}
+                                            >
+                                                <button
+                                                    type="button"
+                                                    onClick={() => openPersuasionRef.current(candidate)}
+                                                    className="p-1 text-violet-700 hover:bg-violet-50 rounded transition-colors"
+                                                    title="Abrir el lienzo en otra ventana (Ctrl+Shift+L)"
+                                                >
+                                                    <ClipboardList className="w-4 h-4" />
+                                                </button>
+                                            </td>
+                                        )}
                                         <td
                                             className={`${COMPACT_TD_CLASS} ${
                                                 isSelected
@@ -8185,6 +8267,14 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                 showOpsFlow={canSendToOpsFlow}
                 onOpsFlow={() => void openOpsFlowModal(Array.from(selectedIds))}
             />
+
+            {scriptEditorOpen && process?.isBulkProcess && (
+                <ScriptStructureEditor
+                    processId={process.id}
+                    processTitle={process.title}
+                    onClose={() => setScriptEditorOpen(false)}
+                />
+            )}
 
             <CandidateDrawer
                 candidate={drawerCandidate}

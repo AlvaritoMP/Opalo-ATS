@@ -20,6 +20,13 @@ export * from './userAlerts';
 export * from './userActivity';
 export * from './workPlanning';
 export { bulkTableTemplatesApi } from './bulkTableTemplates';
+export {
+    persuasionProcessRevision,
+    pushPersuasionBoard,
+    pushPersuasionProcess,
+    syncPersuasionBoard,
+    syncPersuasionProcess,
+} from './persuasion';
 
 // Exportar funciones helper de Supabase
 export { setCurrentUser } from '../supabase';
