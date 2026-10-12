@@ -259,21 +259,67 @@ interface BulkProcessesViewProps {
     onExitEmbedded?: () => void;
 }
 
-/** Estilos compactos aplicados a botones dentro de cada grupo de la barra */
+/** Estilos compactos aplicados a botones dentro de cada menú de la barra */
 const BULK_TOOLBAR_BTN_STYLES =
     '[&_button]:inline-flex [&_button]:items-center [&_button]:gap-1 [&_button]:!px-2 [&_button]:!py-1 [&_button]:!text-xs [&_button]:font-medium [&_button]:!rounded-md [&_button]:shrink-0 [&_button_svg:not([class*=animate])]:!w-3.5 [&_button_svg:not([class*=animate])]:!h-3.5 [&_button_svg]:shrink-0';
 
-const BULK_TOOLBAR_GROUP_INNER =
-    `flex flex-wrap items-center gap-1 rounded-md border border-gray-200 bg-gray-50/80 px-1 py-0.5 ${BULK_TOOLBAR_BTN_STYLES}`;
+const BulkToolbarMenu: React.FC<{
+    label: string;
+    align?: 'start' | 'end';
+    children: React.ReactNode;
+}> = ({ label, align = 'start', children }) => {
+    const [open, setOpen] = useState(false);
+    const rootRef = useRef<HTMLDivElement>(null);
 
-const BulkToolbarGroup: React.FC<{ label: string; children: React.ReactNode }> = ({ label, children }) => (
-    <div className="flex flex-col gap-0.5 min-w-0">
-        <span className="text-[10px] font-semibold uppercase tracking-wider text-gray-400 px-0.5 leading-none select-none">
-            {label}
-        </span>
-        <div className={BULK_TOOLBAR_GROUP_INNER}>{children}</div>
-    </div>
-);
+    useEffect(() => {
+        if (!open) return;
+        const onPointerDown = (event: MouseEvent) => {
+            if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
+        };
+        const onKeyDown = (event: KeyboardEvent) => {
+            if (event.key === 'Escape') setOpen(false);
+        };
+        document.addEventListener('mousedown', onPointerDown);
+        document.addEventListener('keydown', onKeyDown);
+        return () => {
+            document.removeEventListener('mousedown', onPointerDown);
+            document.removeEventListener('keydown', onKeyDown);
+        };
+    }, [open]);
+
+    return (
+        <div ref={rootRef} className="relative shrink-0">
+            <button
+                type="button"
+                onClick={() => setOpen(prev => !prev)}
+                className="inline-flex items-center gap-1 h-7 px-2 text-xs font-semibold rounded-md border border-gray-300 bg-white text-gray-800 hover:bg-gray-50"
+                aria-expanded={open}
+                aria-haspopup="menu"
+            >
+                {label}
+                <ChevronDown className={`w-3.5 h-3.5 text-gray-500 transition-transform ${open ? 'rotate-180' : ''}`} />
+            </button>
+            {open && (
+                <div
+                    role="menu"
+                    className={`absolute top-full mt-1 z-50 w-max min-w-[13.5rem] max-w-[19rem] max-h-[min(70vh,26rem)] overflow-y-auto rounded-lg border border-gray-200 bg-white shadow-xl p-1.5 ${
+                        align === 'end' ? 'right-0' : 'left-0'
+                    }`}
+                    onClick={event => {
+                        if ((event.target as HTMLElement).closest('[data-toolbar-keep]')) return;
+                        if ((event.target as HTMLElement).closest('button')) setOpen(false);
+                    }}
+                >
+                    <div
+                        className={`flex flex-col gap-1 ${BULK_TOOLBAR_BTN_STYLES} [&_button]:justify-start [&_button]:whitespace-nowrap [&>button]:w-full [&>div>button]:w-full`}
+                    >
+                        {children}
+                    </div>
+                </div>
+            )}
+        </div>
+    );
+};
 
 type CellCoord = { candidateId: string; colId: string };
 
@@ -6270,8 +6316,8 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                 </>
             ) : (
                 <>
-            <div className="border-b bg-white shrink-0 bulk-process-header px-2 py-2 space-y-2">
-                        <div className="flex flex-col gap-1.5 w-full min-w-0">
+            <div className="border-b bg-white shrink-0 relative z-30 bulk-process-header px-2 py-1 space-y-1">
+                        <div className="flex flex-col gap-1 w-full min-w-0">
                             <div className="flex items-center gap-2 min-w-0 flex-wrap">
                                 <button
                                     onClick={() => {
@@ -6317,7 +6363,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                                     canEditBulkInfoPins ||
                                     canEditBulkQuickReplies ||
                                     canEditClipboardPresets) && (
-                                <div className="flex flex-wrap items-start gap-x-4 gap-y-2 w-full min-w-0">
+                                <div className="bulk-inline-scroll flex items-center gap-3 w-full min-w-0 overflow-x-auto">
                                     {(infoPins.length > 0 || canEditBulkInfoPins) && (
                                         <BulkInfoPinsBar
                                             pins={infoPins}
@@ -6384,8 +6430,8 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                                 </div>
                             )}
                             {process && (
-                                <div className="flex flex-wrap items-end gap-2 w-full min-w-0">
-                                    <BulkToolbarGroup label="Proceso">
+                                <div className="flex flex-wrap items-center gap-1.5 w-full min-w-0">
+                                    <BulkToolbarMenu label="Proceso">
                                         <button
                                             onClick={() => handleEditProcess(process)}
                                             className="bg-gray-600 text-white hover:bg-gray-700 transition-colors"
@@ -6422,9 +6468,9 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                                                 </span>
                                             )}
                                         </button>
-                                    </BulkToolbarGroup>
+                                    </BulkToolbarMenu>
 
-                                    <BulkToolbarGroup label="Tabla">
+                                    <BulkToolbarMenu label="Tabla">
                                         <button
                                             type="button"
                                             onClick={() => void performUndo()}
@@ -6480,8 +6526,9 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                                             <HardDrive className="w-4 h-4" />
                                             Recuperar datos
                                         </button>
-                                        <div className="relative">
+                                        <div data-toolbar-keep="true" className="flex flex-col gap-1">
                                             <button
+                                                type="button"
                                                 onClick={() => setShowColumnConfig(!showColumnConfig)}
                                                 className="bg-gray-100 text-gray-700 border border-gray-300 hover:bg-gray-200 transition-colors"
                                                 title="Configurar columnas"
@@ -6490,7 +6537,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                                                 Columnas
                                             </button>
                                             {showColumnConfig && (
-                                                <div className="absolute left-0 mt-2 w-64 bg-white border border-gray-200 rounded-lg shadow-xl z-50 p-2 max-h-96 overflow-y-auto">
+                                                <div className="w-full bg-gray-50 border border-gray-200 rounded-md p-1.5 max-h-56 overflow-y-auto">
                                                     <div className="flex items-center justify-between gap-2 mb-1 px-2">
                                                         <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Columnas</div>
                                                         {hiddenColumns.length > 0 && (
@@ -6684,9 +6731,9 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                                             <RefreshCw className="w-4 h-4" />
                                             Actualizar
                                         </button>
-                                    </BulkToolbarGroup>
+                                    </BulkToolbarMenu>
 
-                                    <BulkToolbarGroup label="Herramientas">
+                                    <BulkToolbarMenu label="Herramientas">
                                         <button
                                             type="button"
                                             onClick={() => {
@@ -6898,19 +6945,13 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                                                 </button>
                                             </>
                                         )}
-                                    </BulkToolbarGroup>
-                                </div>
-                            )}
-                        </div>
-                        
-                        <div className="flex flex-wrap gap-2 items-center">
-                                {process && (
-                                    <div className="flex items-center gap-1.5 min-w-[120px] flex-1 max-w-xs">
-                                        <label className="text-xs font-medium text-gray-600 shrink-0">Etapa</label>
+                                    </BulkToolbarMenu>
+                                    <div className="flex items-center gap-1.5 min-w-[140px] flex-1 max-w-xs ml-auto">
+                                        <label className="text-[11px] font-medium text-gray-600 shrink-0">Etapa</label>
                                         <select
                                             value={selectedStage}
                                             onChange={(e) => setSelectedStage(e.target.value)}
-                                            className="flex-1 min-w-0 px-2 py-1 text-xs border border-gray-300 rounded-md focus:ring-1 focus:ring-primary-500 focus:border-transparent"
+                                            className="flex-1 min-w-0 h-7 px-2 text-xs border border-gray-300 rounded-md focus:ring-1 focus:ring-primary-500 focus:border-transparent"
                                         >
                                             <option value="">Todas</option>
                                             {process.stages.map(s => (
@@ -6918,21 +6959,22 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                                             ))}
                                         </select>
                                     </div>
-                                )}
-                                <div className="flex items-center gap-1.5 flex-1 min-w-[160px] max-w-md">
-                                    <label className="text-xs font-medium text-gray-600 shrink-0">Buscar</label>
-                                    <div className="relative flex-1 min-w-0">
-                                        <Search className="absolute left-2 top-1/2 transform -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
-                                        <input
-                                            type="text"
-                                            value={searchInput}
-                                            onChange={(e) => setSearchInput(e.target.value)}
-                                            placeholder="Nombre, teléfono..."
-                                            className="w-full pl-7 pr-2 py-1 text-xs border border-gray-300 rounded-md focus:ring-1 focus:ring-primary-500 focus:border-transparent"
-                                        />
+                                    <div className="flex items-center gap-1.5 flex-1 min-w-[180px] max-w-sm">
+                                        <label className="text-[11px] font-medium text-gray-600 shrink-0">Buscar</label>
+                                        <div className="relative flex-1 min-w-0">
+                                            <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
+                                            <input
+                                                type="text"
+                                                value={searchInput}
+                                                onChange={(e) => setSearchInput(e.target.value)}
+                                                placeholder="Nombre, teléfono..."
+                                                className="w-full h-7 pl-7 pr-2 text-xs border border-gray-300 rounded-md focus:ring-1 focus:ring-primary-500 focus:border-transparent"
+                                            />
+                                        </div>
                                     </div>
                                 </div>
-                            </div>
+                            )}
+                        </div>
             </div>
 
             {selectedProcess && (

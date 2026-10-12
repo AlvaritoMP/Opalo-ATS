@@ -25,30 +25,30 @@ export const BulkClipboardPresetsBar: React.FC<BulkClipboardPresetsBarProps> = (
     if (presets.length === 0 && !canEdit) return null;
 
     return (
-        <div className="flex flex-col gap-1 min-w-0">
-            <div className="flex items-center gap-1.5 px-0.5">
-                <ClipboardCopy className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                <span className="text-[10px] font-semibold uppercase tracking-wider text-gray-500 select-none">
+        <div className="flex items-center gap-1 min-w-0 shrink-0">
+            <div className="flex items-center gap-1 px-0.5 shrink-0">
+                <ClipboardCopy className="w-3 h-3 text-emerald-600 shrink-0" />
+                <span className="text-[10px] font-semibold uppercase tracking-wide text-gray-500 select-none whitespace-nowrap">
                     Copiar datos
                 </span>
                 {selectedCount > 0 && (
-                    <span className="text-[10px] text-emerald-700 font-medium tabular-nums">
-                        ({selectedCount} sel.)
+                    <span className="text-[10px] text-emerald-700 font-medium tabular-nums whitespace-nowrap">
+                        ({selectedCount})
                     </span>
                 )}
             </div>
-            <div className="flex flex-wrap items-center gap-1.5 min-w-0">
+            <div className="flex flex-nowrap items-center gap-1 min-w-0">
                 {presets.map(preset => {
                     const style = getBulkInfoPinStyle(preset.color);
                     const isCopying = isCopyingId === preset.id;
                     const disabled = isCopying || selectedCount === 0;
                     return (
-                        <div key={preset.id} className="inline-flex items-center max-w-[220px]">
+                        <div key={preset.id} className="inline-flex items-center max-w-[160px] shrink-0">
                             <button
                                 type="button"
                                 onClick={() => onCopyPreset(preset)}
                                 disabled={disabled}
-                                className={`inline-flex items-center flex-1 min-w-0 px-2.5 py-1 text-xs font-semibold border rounded-l-md shadow-sm transition-colors truncate ${style.button} ${
+                                className={`inline-flex items-center flex-1 min-w-0 h-7 px-2 text-[11px] font-semibold border rounded-l-md transition-colors truncate ${style.button} ${
                                     disabled ? 'opacity-50 cursor-not-allowed' : 'hover:brightness-95'
                                 }`}
                                 title={
@@ -64,7 +64,7 @@ export const BulkClipboardPresetsBar: React.FC<BulkClipboardPresetsBarProps> = (
                                 <button
                                     type="button"
                                     onClick={() => onEditPreset(preset)}
-                                    className={`inline-flex items-center px-1.5 py-1 text-xs border border-l-0 rounded-r-md shadow-sm transition-colors ${style.button} hover:brightness-95`}
+                                    className={`inline-flex items-center h-7 px-1.5 text-[11px] border border-l-0 rounded-r-md transition-colors ${style.button} hover:brightness-95`}
                                     title="Editar botón de copia"
                                 >
                                     <Pencil className="w-3 h-3 opacity-70" />
@@ -77,7 +77,7 @@ export const BulkClipboardPresetsBar: React.FC<BulkClipboardPresetsBarProps> = (
                     <button
                         type="button"
                         onClick={onAddPreset}
-                        className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-gray-600 bg-white border border-dashed border-gray-300 rounded-md hover:border-emerald-400 hover:text-emerald-700 hover:bg-emerald-50 transition-colors shrink-0"
+                        className="inline-flex items-center gap-1 h-7 px-2 text-[11px] font-medium text-gray-600 bg-white border border-dashed border-gray-300 rounded-md hover:border-emerald-400 hover:text-emerald-700 hover:bg-emerald-50 transition-colors shrink-0"
                         title="Agregar botón de copia de datos"
                     >
                         <Plus className="w-3.5 h-3.5" />
