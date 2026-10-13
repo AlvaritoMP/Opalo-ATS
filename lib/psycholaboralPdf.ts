@@ -3,17 +3,7 @@ import jsPDF from 'jspdf';
 
 /** Una sola página A4 en horizontal — escala todo el contenido para encajar mejor el aspect ratio. */
 export async function captureElementToPdf(element: HTMLElement): Promise<Blob> {
-    const canvas = await html2canvas(element, {
-        scale: 2,
-        useCORS: true,
-        allowTaint: true,
-        backgroundColor: '#ffffff',
-        logging: false,
-        width: element.scrollWidth,
-        height: element.scrollHeight,
-        windowWidth: element.scrollWidth,
-        windowHeight: element.scrollHeight,
-    });
+    const canvas = await renderReportCanvas(element, element.scrollWidth, element.scrollHeight);
 
     const imgData = canvas.toDataURL('image/png', 1.0);
     const pdf = new jsPDF('l', 'mm', 'a4');
@@ -84,6 +74,39 @@ function paginateBlocks(blocks: Range[], totalHeight: number, pageHeight: number
 }
 
 /**
+ * html2canvas calcula la línea base de cada fuente insertando en la página una <img> de 1×1 px
+ * (`width="1" height="1"`) junto a un texto de muestra. El CSS base de Tailwind fuerza `img { display: block }`,
+ * esa imagen deja de estar en la misma línea que el texto, la línea base sale mal calculada y TODO el texto
+ * se dibuja desplazado hacia abajo dentro de sus cajas (números, etiquetas, párrafos...).
+ * Mientras dura la captura se restablece `display: inline` solo para esa imagen de medición.
+ */
+async function html2canvasSafe(element: HTMLElement, options: Parameters<typeof html2canvas>[1]): Promise<HTMLCanvasElement> {
+    const fix = document.createElement('style');
+    fix.setAttribute('data-html2canvas-metrics-fix', '');
+    fix.textContent = 'img[width="1"][height="1"]{display:inline !important;vertical-align:baseline;}';
+    document.head.appendChild(fix);
+    try {
+        return await html2canvas(element, options);
+    } finally {
+        fix.remove();
+    }
+}
+
+export function renderReportCanvas(element: HTMLElement, cssW: number, cssH: number): Promise<HTMLCanvasElement> {
+    return html2canvasSafe(element, {
+        scale: 2,
+        useCORS: true,
+        allowTaint: true,
+        backgroundColor: '#ffffff',
+        logging: false,
+        width: cssW,
+        height: cssH,
+        windowWidth: cssW,
+        windowHeight: cssH,
+    });
+}
+
+/**
  * A4 vertical multipágina. Corta solo entre elementos `[data-pdf-block]` y, si reducir
  * ligeramente la escala ahorra hojas, la reduce.
  */
@@ -115,17 +138,7 @@ export async function captureElementToPaginatedPdf(
         blocks.push([top, bottom]);
     }
 
-    const canvas = await html2canvas(element, {
-        scale: 2,
-        useCORS: true,
-        allowTaint: true,
-        backgroundColor: '#ffffff',
-        logging: false,
-        width: cssW,
-        height: cssH,
-        windowWidth: cssW,
-        windowHeight: cssH,
-    });
+    const canvas = await renderReportCanvas(element, cssW, cssH);
 
     const pdf = new jsPDF('p', 'mm', 'a4');
     const pageW = pdf.internal.pageSize.getWidth();
@@ -191,3 +204,4 @@ export function downloadPsycholaboralPdf(blob: Blob, fileName: string) {
 export async function generatePsycholaboralPdf(): Promise<Blob> {
     throw new Error('Use captureElementToPdf con el componente PsycholaboralReportDocument');
 }
+
