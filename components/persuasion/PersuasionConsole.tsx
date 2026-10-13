@@ -141,12 +141,14 @@ export const PersuasionConsole: React.FC<PersuasionConsoleProps> = ({
     }, [processId, script, whatsappArguments]);
 
     useEffect(() => {
+        const id = candidate.id;
+        const switching = candidateIdRef.current !== id;
+        candidateIdRef.current = id;
+        if (switching) skipBoardSave.current = true;
         let cancel = false;
-        const startedBoard = JSON.stringify(loadBoard(candidate.id));
-        void syncPersuasionBoard(processId, candidate.id).then(next => {
+        const startedBoard = JSON.stringify(loadBoard(id));
+        void syncPersuasionBoard(processId, id).then(next => {
             if (cancel) return;
-            const switching = candidateIdRef.current !== candidate.id;
-            candidateIdRef.current = candidate.id;
             setBoard(current => {
                 const unchanged = JSON.stringify(current) === startedBoard;
                 skipBoardSave.current = unchanged;
@@ -522,7 +524,7 @@ export const PersuasionConsole: React.FC<PersuasionConsoleProps> = ({
             </header>
             {storageNote && <p className="shrink-0 bg-amber-50 px-3 py-1 text-xs text-amber-900">{storageNote}</p>}
             <div className="grid min-h-0 flex-1 grid-cols-3 grid-rows-2">
-                    <aside className="col-start-1 row-start-1 flex min-h-0 min-w-0 flex-col overflow-hidden border-r bg-slate-50">
+                    <aside className="relative z-10 col-start-1 row-start-1 flex min-h-0 min-w-0 flex-col overflow-hidden border-r bg-slate-50">
                         <div className="shrink-0 px-2 pt-2">
                             <h3 className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">Red</h3>
                         </div>

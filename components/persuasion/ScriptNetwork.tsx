@@ -101,15 +101,6 @@ function wedge(cx: number, cy: number, inner: number, outer: number, start: numb
     return `M ${a.x} ${a.y} L ${b.x} ${b.y} A ${outer} ${outer} 0 ${large} 1 ${c.x} ${c.y} L ${d.x} ${d.y} A ${inner} ${inner} 0 ${large} 0 ${a.x} ${a.y} Z`;
 }
 
-function rotateAround(x: number, y: number, cx: number, cy: number, degrees: number): { x: number; y: number } {
-    const radians = (degrees * Math.PI) / 180;
-    const dx = x - cx;
-    const dy = y - cy;
-    const cos = Math.cos(radians);
-    const sin = Math.sin(radians);
-    return { x: cx + dx * cos - dy * sin, y: cy + dx * sin + dy * cos };
-}
-
 function relatedKeys(groups: NetworkGroup[], loose: ScriptNode[], focusedId?: string, focusedAxis?: AxisId): Set<string> {
     const keys = new Set<string>();
     const owned = [
@@ -155,9 +146,7 @@ export const ScriptNetwork: React.FC<ScriptNetworkProps> = ({
     onFocusAxis,
 }) => {
     const spinRef = useRef(0);
-    const cameraRef = useRef({ spin: 0, zoom: 1, fx: 0, fy: 0 });
-    const [camera, setCamera] = useState(cameraRef.current);
-    const [overview, setOverview] = useState(false);
+    const [spin, setSpin] = useState(0);
 
     const layout = useMemo(() => {
         const sectors = [...groups.map(group => ({ group, nodes: group.nodes })), ...(loose.length ? [{ group: null, nodes: loose }] : [])];
@@ -272,8 +261,8 @@ export const ScriptNetwork: React.FC<ScriptNetworkProps> = ({
     }, [answers, groups, loose]);
 
     const related = useMemo(
-        () => (overview ? new Set<string>() : relatedKeys(groups, loose, focusedId, focusedAxis)),
-        [focusedAxis, focusedId, groups, loose, overview],
+        () => relatedKeys(groups, loose, focusedId, focusedAxis),
+        [focusedAxis, focusedId, groups, loose],
     );
 
     useEffect(() => {
@@ -282,68 +271,34 @@ export const ScriptNetwork: React.FC<ScriptNetworkProps> = ({
             : focusedAxis
               ? layout.placed.find(point => point.kind === 'axis' && point.axisId === focusedAxis)
               : undefined;
-        const keys = overview ? new Set<string>() : relatedKeys(groups, loose, focusedId, focusedAxis);
-        const fromSpin = spinRef.current;
-        const faceTop = target ? -90 - (target.angle * 180) / Math.PI : fromSpin;
-        const destSpin = target && !overview ? nearestSpin(fromSpin, faceTop) : fromSpin;
-        const sample = (spinValue: number) => {
-            if (!target || overview) return { zoom: 1, fx: layout.cx, fy: layout.cy };
-            const pool = layout.placed
-                .filter(point => keys.has(point.key))
-                .map(point => rotateAround(point.x, point.y, layout.cx, layout.cy, spinValue));
-            const selected = rotateAround(target.x, target.y, layout.cx, layout.cy, spinValue);
-            const points = pool.length ? pool : [selected];
-            const fx = selected.x * 0.42 + layout.cx * 0.58;
-            const fy = selected.y * 0.42 + layout.cy * 0.58;
-            let maxDist = 90;
-            for (const point of points) maxDist = Math.max(maxDist, Math.hypot(point.x - fx, point.y - fy));
-            const zoom = Math.max(1.12, Math.min(1.55, (layout.size * 0.46) / maxDist));
-            return { zoom, fx, fy };
-        };
-        const dest = sample(destSpin);
-        const fromZoom = cameraRef.current.zoom || 1;
-        const started = performance.now();
-        let frame = 0;
-        const step = (now: number) => {
-            const t = Math.min(1, (now - started) / 520);
-            const eased = 1 - (1 - t) ** 3;
-            const spinValue = fromSpin + (destSpin - fromSpin) * eased;
-            const live = sample(spinValue);
-            const next = {
-                spin: spinValue,
-                zoom: fromZoom + (dest.zoom - fromZoom) * eased,
-                fx: live.fx,
-                fy: live.fy,
-            };
-            spinRef.current = spinValue;
-            cameraRef.current = next;
-            setCamera(next);
-            if (t < 1) frame = requestAnimationFrame(step);
-        };
-        frame = requestAnimationFrame(step);
-        return () => cancelAnimationFrame(frame);
-    }, [focusedAxis, focusedId, groups, layout, loose, overview]);
+        if (!target) return;
+        const faceTop = -90 - (target.angle * 180) / Math.PI;
+        const dest = nearestSpin(spinRef.current, faceTop);
+        spinRef.current = dest;
+        setSpin(dest);
+    }, [focusedAxis, focusedId, layout.placed]);
 
-    const spin = camera.spin;
-    const focusQuestion = (id: string) => {
-        setOverview(false);
+    const chooseNode = (id: string) => {
         onFocusNode(id);
     };
-    const focusAxis = (id: AxisId) => {
-        setOverview(false);
+    const chooseAxis = (id: AxisId) => {
         onFocusAxis(id);
     };
 
     return (
         <div className="flex h-full min-h-0 flex-col">
-            <div className="flex shrink-0 flex-wrap gap-1 px-1 pt-1">
+            <div className="relative z-20 flex shrink-0 flex-wrap gap-1 px-1 pt-1">
                 {groups.map(group => {
                     const active = focusedAxis === group.id;
                     return (
                         <button
                             key={group.id}
                             type="button"
-                            onClick={() => focusAxis(group.id)}
+                            onPointerDown={event => {
+                                event.preventDefault();
+                                event.stopPropagation();
+                                chooseAxis(group.id);
+                            }}
                             className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
                                 active ? 'bg-indigo-700 text-white' : 'bg-white text-slate-600 ring-1 ring-slate-200 hover:bg-indigo-50'
                             }`}
@@ -353,18 +308,10 @@ export const ScriptNetwork: React.FC<ScriptNetworkProps> = ({
                     );
                 })}
             </div>
-            <div className="relative min-h-0 flex-1">
-            <button
-                type="button"
-                className="absolute right-1 top-1 z-10 rounded-full bg-white/95 px-2.5 py-1 text-[10px] font-semibold text-slate-600 shadow-sm ring-1 ring-slate-200"
-                onClick={() => setOverview(value => !value)}
-            >
-                {overview ? 'Acercar al nodo' : 'Ver toda la red'}
-            </button>
-            <svg viewBox={`0 0 ${layout.size} ${layout.size}`} className="h-full w-full" role="img" aria-label="Red circular de la llamada">
-                <g transform={`translate(${layout.cx} ${layout.cy}) scale(${camera.zoom || 1}) translate(${-(camera.fx || layout.cx)} ${-(camera.fy || layout.cy)})`}>
+            <div className="relative min-h-0 flex-1 overflow-hidden">
+            <svg viewBox={`0 0 ${layout.size} ${layout.size}`} className="block h-full w-full" role="img" aria-label="Red circular de la llamada">
                 {layout.rings.map(ring => (
-                    <g key={ring.label} pointerEvents="none" opacity={camera.zoom > 1.35 ? 0 : 1}>
+                    <g key={ring.label} pointerEvents="none">
                         <circle cx={layout.cx} cy={layout.cy} r={ring.radius} fill="none" stroke="#e2e8f0" strokeWidth="1" />
                         <text
                             x={layout.cx}
@@ -386,7 +333,7 @@ export const ScriptNetwork: React.FC<ScriptNetworkProps> = ({
                 </g>
                 <g transform={`rotate(${spin} ${layout.cx} ${layout.cy})`}>
                     {layout.wedges.map(item => (
-                        <path key={item.key} d={item.d} pointerEvents="none" fill={focusedAxis === item.key ? '#e0e7ff' : '#f8fafc'} stroke="none" opacity={overview || related.size === 0 || focusedAxis === item.key ? 1 : 0.35} />
+                        <path key={item.key} d={item.d} pointerEvents="none" fill={focusedAxis === item.key ? '#e0e7ff' : '#f8fafc'} stroke="none" />
                     ))}
                     {layout.edges.map(edge => {
                         const linked = related.size === 0 || related.has(edge.fromKey) || related.has(edge.toKey);
@@ -398,9 +345,9 @@ export const ScriptNetwork: React.FC<ScriptNetworkProps> = ({
                                 x2={edge.x2}
                                 y2={edge.y2}
                                 stroke={edge.hot ? '#059669' : '#cbd5e1'}
-                                strokeWidth={linked && !overview ? (edge.hot ? 3.2 : 2.2) : edge.hot ? 2.4 : 1.4}
+                                strokeWidth={linked ? (edge.hot ? 2.6 : 1.6) : 1.2}
                                 pointerEvents="none"
-                                opacity={linked ? 1 : 0.12}
+                                opacity={linked ? 1 : 0.35}
                             />
                         );
                     })}
@@ -409,17 +356,25 @@ export const ScriptNetwork: React.FC<ScriptNetworkProps> = ({
                         const heatColor = heatLevel !== undefined ? AXIS_HEAT_COLOR[heatLevel] : undefined;
                         const upright = `translate(${point.x} ${point.y}) rotate(${-spin})`;
                         const linked = related.size === 0 || related.has(point.key);
-                        const faded = linked ? 1 : 0.72;
                         if (point.kind === 'axis' && point.axisId) {
                             const group = groups.find(item => item.id === point.axisId);
                             const done = group ? group.nodes.filter(node => answers[node.id]).length : 0;
                             const total = group?.nodes.length ?? 0;
-                            const selected = focusedAxis === point.axisId && !focusedId;
-                            const near = linked && !overview;
+                            const selected = focusedAxis === point.axisId;
                             const [line1, line2] = axisLines(group?.label || '');
                             return (
-                                <g key={point.key} className="cursor-pointer" opacity={faded} transform={upright} onClick={() => focusAxis(point.axisId!)}>
-                                    <circle r={selected || near ? 24 : 16} fill={heatColor || '#ffffff'} stroke={selected ? '#312e81' : heatColor || '#64748b'} strokeWidth={selected ? 3.4 : 2} />
+                                <g key={point.key} className="cursor-pointer" transform={upright}>
+                                    <circle
+                                        r="22"
+                                        fill={heatColor || '#ffffff'}
+                                        stroke={selected ? '#312e81' : heatColor || '#64748b'}
+                                        strokeWidth={selected ? 3.4 : 2}
+                                        onPointerDown={event => {
+                                            event.preventDefault();
+                                            event.stopPropagation();
+                                            chooseAxis(point.axisId!);
+                                        }}
+                                    />
                                     <text y={32} pointerEvents="none" textAnchor="middle" fontSize="12" fontWeight="700" fill={selected ? '#312e81' : '#334155'}>
                                         <tspan x="0" dy="0">{line1}</tspan>
                                         {line2 && <tspan x="0" dy="13">{line2}</tspan>}
@@ -434,23 +389,26 @@ export const ScriptNetwork: React.FC<ScriptNetworkProps> = ({
                         const current = focusedId === node.id;
                         const say = interpolateSay(node.say, nombre, puesto);
                         const fill = current ? '#4338ca' : answered ? heatColor || '#059669' : '#ffffff';
-                        const radius = current ? 28 : linked && !overview ? 18 : 14;
                         return (
-                            <g key={point.key} className="cursor-pointer" opacity={faded} transform={upright} onClick={() => focusQuestion(node.id)}>
+                            <g key={point.key} className="cursor-pointer" opacity={linked || current ? 1 : 0.85} transform={upright}>
                                 <title>{`Nivel ${point.level}. ${answered ? `${say} — respondida` : say}`}</title>
-                                <circle r={radius} fill={fill} stroke={current ? '#1e1b4b' : heatColor || (answered ? '#065f46' : '#94a3b8')} strokeWidth={current ? 3.4 : 1.6} />
-                                <text y="5" pointerEvents="none" textAnchor="middle" fontSize={current ? 14 : 12} fontWeight="700" fill={current || answered ? '#ffffff' : '#475569'}>
+                                <circle
+                                    r={current ? 20 : 16}
+                                    fill={fill}
+                                    stroke={current ? '#1e1b4b' : heatColor || (answered ? '#065f46' : '#94a3b8')}
+                                    strokeWidth={current ? 3 : 1.6}
+                                    onPointerDown={event => {
+                                        event.preventDefault();
+                                        event.stopPropagation();
+                                        chooseNode(node.id);
+                                    }}
+                                />
+                                <text y="5" pointerEvents="none" textAnchor="middle" fontSize="12" fontWeight="700" fill={current || answered ? '#ffffff' : '#475569'}>
                                     {point.level}
                                 </text>
-                                {current && (
-                                    <text y="42" pointerEvents="none" textAnchor="middle" fontSize="12" fontWeight="600" fill="#312e81">
-                                        {say.length > 64 ? `${say.slice(0, 64)}…` : say}
-                                    </text>
-                                )}
                             </g>
                         );
                     })}
-                </g>
                 </g>
             </svg>
             </div>
