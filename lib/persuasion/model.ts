@@ -514,6 +514,16 @@ export function createSeedScript(): PersuasionScript {
     };
 }
 
+/** Si un eje quedó sin preguntas, recupera las 3 de ese tema. No toca los ejes que ya tienen. */
+export function fillEmptyAxes(script: PersuasionScript): PersuasionScript {
+    const present = new Set(script.nodes.map(node => node.axis).filter((axis): axis is AxisId => !!axis));
+    if (AXES.every(axis => present.has(axis.id))) return script;
+    const ids = new Set(script.nodes.map(node => node.id));
+    const extra = createSeedScript().nodes.filter(node => node.axis && !present.has(node.axis) && !ids.has(node.id));
+    if (extra.length === 0) return script;
+    return { nodes: [...script.nodes, ...extra] };
+}
+
 export function interpolateSay(say: string, nombre: string, puesto: string): string {
     return say.replaceAll('{nombre}', nombre || 'tú').replaceAll('{puesto}', puesto || 'el puesto');
 }

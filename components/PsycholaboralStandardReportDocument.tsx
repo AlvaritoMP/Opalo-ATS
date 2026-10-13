@@ -199,49 +199,9 @@ export const PsycholaboralStandardReportDocument = React.forwardRef<
         >
             {/* Portada compacta: marca, título y dictamen */}
             <div data-pdf-block>
-                <header
-                    style={{
-                        background: `linear-gradient(120deg, ${primaryColor} 0%, ${accentColor} 100%)`,
-                        color: '#fff',
-                        borderRadius: 14,
-                        padding: '18px 22px 20px',
-                        position: 'relative',
-                        overflow: 'hidden',
-                    }}
-                >
-                    <div
-                        style={{
-                            position: 'absolute',
-                            right: -60,
-                            top: -70,
-                            width: 220,
-                            height: 220,
-                            borderRadius: '50%',
-                            background: 'rgba(255,255,255,0.08)',
-                        }}
-                    />
-                    <div
-                        style={{
-                            position: 'absolute',
-                            right: 90,
-                            bottom: -90,
-                            width: 160,
-                            height: 160,
-                            borderRadius: '50%',
-                            background: 'rgba(255,255,255,0.06)',
-                        }}
-                    />
-                    <div style={{ position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16 }}>
-                        <div
-                            style={{
-                                background: '#fff',
-                                borderRadius: 10,
-                                padding: '7px 12px',
-                                display: 'flex',
-                                alignItems: 'center',
-                                gap: 8,
-                            }}
-                        >
+                <header style={{ background: '#fff' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, padding: '0 2px 10px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
                             {brandLogo ? (
                                 <img
                                     src={brandLogo}
@@ -261,18 +221,27 @@ export const PsycholaboralStandardReportDocument = React.forwardRef<
                                 </>
                             )}
                         </div>
-                        <div style={{ textAlign: 'right', fontSize: 10, lineHeight: 1.5 }}>
-                            <div style={{ fontWeight: 700, letterSpacing: 1.2, opacity: 0.85 }}>DOCUMENTO CONFIDENCIAL</div>
-                            <div style={{ opacity: 0.95 }}>Fecha de emisión: <strong>{reportDate}</strong></div>
+                        <div style={{ flex: 1, minWidth: 0, textAlign: 'center' }}>
+                            <div style={{ fontSize: 8.5, fontWeight: 700, letterSpacing: 2, color: MUTED }}>EVALUACIÓN DE SELECCIÓN</div>
+                            <h1 style={{ margin: 0, fontSize: 19, fontWeight: 800, letterSpacing: -0.3, lineHeight: 1.2, color: INK }}>
+                                Informe Psicolaboral
+                            </h1>
+                        </div>
+                        <div style={{ textAlign: 'right', fontSize: 9, lineHeight: 1.45, color: MUTED, flexShrink: 0 }}>
+                            <div style={{ fontWeight: 700, letterSpacing: 1.1 }}>DOCUMENTO CONFIDENCIAL</div>
+                            <div>
+                                Emisión: <strong style={{ color: INK }}>{reportDate}</strong>
+                            </div>
                         </div>
                     </div>
-                    <div style={{ position: 'relative', marginTop: 16 }}>
-                        <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: 2.4, opacity: 0.8 }}>EVALUACIÓN DE SELECCIÓN</div>
-                        <h1 style={{ margin: '2px 0 0', fontSize: 28, fontWeight: 800, letterSpacing: -0.6, lineHeight: 1.1 }}>
-                            Informe Psicolaboral
-                        </h1>
-                        <p style={{ margin: '6px 0 0', fontSize: 11, opacity: 0.92, maxWidth: 560 }}>{truncate(intro, 180)}</p>
-                    </div>
+                    <div
+                        style={{
+                            height: 3,
+                            borderRadius: 2,
+                            background: `linear-gradient(90deg, ${primaryColor} 0%, ${accentColor} 100%)`,
+                        }}
+                    />
+                    <p style={{ margin: '6px 2px 0', fontSize: 9.5, color: MUTED, textAlign: 'center' }}>{truncate(intro, 180)}</p>
                 </header>
 
                 {/* Ficha del evaluado + resultado */}
@@ -355,21 +324,10 @@ export const PsycholaboralStandardReportDocument = React.forwardRef<
                         }}
                     >
                         <div style={{ fontSize: 9, fontWeight: 700, color: suit.fg, letterSpacing: 1.4, opacity: 0.85 }}>RESULTADO</div>
-                        <div
-                            style={{
-                                width: 40,
-                                height: 40,
-                                borderRadius: '50%',
-                                background: suit.ring,
-                                color: '#fff',
-                                fontSize: 21,
-                                fontWeight: 800,
-                                lineHeight: '40px',
-                                textAlign: 'center',
-                                margin: '6px 0',
-                            }}
-                        >
-                            {suit.symbol}
+                        <div style={{ margin: '6px 0', display: 'flex', justifyContent: 'center' }}>
+                            <CenteredBox size={40} radius="50%" background={suit.ring} color="#fff" fontSize={21} fontWeight={800}>
+                                {suit.symbol}
+                            </CenteredBox>
                         </div>
                         <div style={{ fontSize: 15, fontWeight: 800, color: suit.fg, lineHeight: 1.15 }}>{suit.label}</div>
                         <div style={{ fontSize: 9.5, color: suit.fg, opacity: 0.85, marginTop: 2 }}>{suit.caption}</div>
@@ -517,7 +475,7 @@ export const PsycholaboralStandardReportDocument = React.forwardRef<
 
             {/* 3 · Competencias (cada fila es un bloque) */}
             {competencyRows.length > 0 && (
-                <div data-pdf-block style={{ marginTop: 18 }}>
+                <div data-pdf-block data-pdf-keep style={{ marginTop: 18 }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                         <SectionTitle n={3} title="Competencias psicolaborales" color={primaryColor} />
                         <div style={{ display: 'flex', gap: 12, fontSize: 9, color: MUTED, alignItems: 'center' }}>
@@ -563,7 +521,9 @@ export const PsycholaboralStandardReportDocument = React.forwardRef<
                             gap: 12,
                             alignItems: 'center',
                             padding: '9px 12px',
-                            borderBottom: `1px solid ${LINE}`,
+                            marginTop: 8,
+                            border: `1px solid ${LINE}`,
+                            borderRadius: 8,
                         }}
                     >
                         <div style={{ minWidth: 0 }}>
@@ -631,20 +591,20 @@ export const PsycholaboralStandardReportDocument = React.forwardRef<
                 );
             })}
 
-            {/* 4 · Conclusiones (cada párrafo es un bloque) */}
-            <div data-pdf-block style={{ marginTop: 18 }}>
+            {/* 4 · Conclusiones (cada párrafo es una tarjeta independiente: los cortes de página caen entre tarjetas) */}
+            <div data-pdf-block data-pdf-keep style={{ marginTop: 18 }}>
                 <SectionTitle n={4} title="Conclusiones" color={accentColor} />
             </div>
-            {(paragraphs.length ? paragraphs : ['Sin conclusiones registradas.']).map((p, i, arr) => (
+            {(paragraphs.length ? paragraphs : ['Sin conclusiones registradas.']).map((p, i) => (
                 <div
                     key={`c-${i}`}
                     data-pdf-block
                     style={{
                         background: withAlpha(accentColor, 0.05),
                         borderLeft: `3px solid ${accentColor}`,
-                        padding: `${i === 0 ? 12 : 4}px 16px ${i === arr.length - 1 ? 12 : 4}px`,
-                        marginTop: i === 0 ? 10 : 0,
-                        borderRadius: `${i === 0 ? 8 : 0}px ${i === 0 ? 8 : 0}px ${i === arr.length - 1 ? 8 : 0}px ${i === arr.length - 1 ? 8 : 0}px`,
+                        padding: '11px 16px',
+                        marginTop: 10,
+                        borderRadius: 8,
                         fontSize: 11,
                         color: '#1e293b',
                         textAlign: 'justify',
@@ -708,12 +668,6 @@ export const PsycholaboralStandardReportDocument = React.forwardRef<
                         )}
                     </div>
                 </div>
-                <div style={{ width: 210, textAlign: 'center', flexShrink: 0 }}>
-                    <div style={{ borderTop: `1px solid #94a3b8`, paddingTop: 5, fontSize: 9.5, fontWeight: 700, color: '#334155' }}>
-                        Psicólogo(a) evaluador(a)
-                    </div>
-                    <div style={{ fontSize: 8.5, color: MUTED }}>Firma y colegiatura</div>
-                </div>
             </div>
         </div>
     );
@@ -722,25 +676,66 @@ export const PsycholaboralStandardReportDocument = React.forwardRef<
 function SectionTitle({ n, title, color }: { n: number; title: string; color: string }) {
     return (
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <div
+            <CenteredBox size={26} radius={8} background={color} color="#fff" fontSize={12} fontWeight={800}>
+                {n}
+            </CenteredBox>
+            <div style={{ fontSize: 14, fontWeight: 800, color: INK, letterSpacing: -0.2 }}>{title}</div>
+        </div>
+    );
+}
+
+/**
+ * Centra texto/ícono en una caja fija. Usa celda de tabla porque html2canvas no centra
+ * de forma fiable con line-height ni con flex (el contenido sale desplazado hacia abajo/izquierda).
+ */
+function CenteredBox({
+    size,
+    radius,
+    background,
+    color,
+    fontSize,
+    fontWeight,
+    children,
+}: {
+    size: number;
+    radius: number | string;
+    background: string;
+    color: string;
+    fontSize: number;
+    fontWeight: number;
+    children: React.ReactNode;
+}) {
+    return (
+        <span
+            style={{
+                display: 'inline-table',
+                tableLayout: 'fixed',
+                width: size,
+                height: size,
+                borderRadius: radius,
+                background,
+                overflow: 'hidden',
+                flexShrink: 0,
+                boxSizing: 'border-box',
+            }}
+        >
+            <span
                 style={{
-                    width: 26,
-                    height: 26,
-                    borderRadius: 8,
-                    background: color,
-                    color: '#fff',
-                    fontSize: 12,
-                    fontWeight: 800,
-                    lineHeight: '26px',
+                    display: 'table-cell',
+                    width: size,
+                    height: size,
+                    verticalAlign: 'middle',
                     textAlign: 'center',
-                    flexShrink: 0,
+                    color,
+                    fontSize,
+                    fontWeight,
+                    lineHeight: 1,
+                    padding: 0,
                 }}
             >
-                {n}
-            </div>
-            <div style={{ fontSize: 14, fontWeight: 800, color: INK, letterSpacing: -0.2 }}>{title}</div>
-            <div style={{ width: 60, height: 2, background: withAlpha(color, 0.3), borderRadius: 1 }} />
-        </div>
+                {children}
+            </span>
+        </span>
     );
 }
 

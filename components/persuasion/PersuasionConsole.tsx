@@ -102,6 +102,7 @@ export const PersuasionConsole: React.FC<PersuasionConsoleProps> = ({
     const [storageNote, setStorageNote] = useState('');
     const [hiddenObjection, setHiddenObjection] = useState<ObjectionCode | null>(null);
     const [focusId, setFocusId] = useState<string | null>(null);
+    const [axisPick, setAxisPick] = useState<AxisId | null>(null);
     const [confirmClear, setConfirmClear] = useState(false);
     const [savedFlash, setSavedFlash] = useState(false);
     const [viewingEvidenceId, setViewingEvidenceId] = useState<string | null>(null);
@@ -157,6 +158,7 @@ export const PersuasionConsole: React.FC<PersuasionConsoleProps> = ({
             if (!switching) return;
             setHiddenObjection(null);
             setFocusId(null);
+            setAxisPick(null);
             setConfirmClear(false);
             setSavedFlash(false);
             setViewingEvidenceId(null);
@@ -187,12 +189,22 @@ export const PersuasionConsole: React.FC<PersuasionConsoleProps> = ({
 
     const snapshot = useMemo(() => projectCall(script, board), [script, board]);
     const prediction = useMemo(() => predictDay1(script, board, snapshot), [script, board, snapshot]);
+    const focusNode = (id: string) => {
+        setFocusId(id);
+        const node = script.nodes.find(item => item.id === id);
+        if (node?.axis) setAxisPick(node.axis);
+    };
     const focused = useMemo(() => {
+        if (axisPick) {
+            const nodes = script.nodes.filter(node => node.axis === axisPick);
+            const current = focusId ? nodes.find(node => node.id === focusId) : undefined;
+            return current ?? nodes.find(node => !board.answers[node.id]) ?? nodes[0];
+        }
         const picked = focusId ? script.nodes.find(node => node.id === focusId) : undefined;
         return picked ?? snapshot.active;
-    }, [focusId, script.nodes, snapshot.active]);
+    }, [axisPick, board.answers, focusId, script.nodes, snapshot.active]);
     const activeSay = focused ? interpolateSay(focused.say, candidate.name, processTitle) : '';
-    const focusedAxis = focused?.axis;
+    const focusedAxis = axisPick ?? focused?.axis;
     const focusedHeat = focusedAxis ? board.axisHeat?.[focusedAxis] : undefined;
 
     const axisNodes = useMemo(() => {
@@ -216,6 +228,7 @@ export const PersuasionConsole: React.FC<PersuasionConsoleProps> = ({
     };
 
     const focusAxis = (axis: AxisId) => {
+        setAxisPick(axis);
         const nodes = script.nodes.filter(node => node.axis === axis);
         const pending = nodes.find(node => !board.answers[node.id]);
         const target = pending ?? nodes[0];
@@ -228,7 +241,11 @@ export const PersuasionConsole: React.FC<PersuasionConsoleProps> = ({
         const alternative = node?.alternatives.find(item => item.id === alternativeId);
         patch(current => answerNode(current, nodeId, alternativeId));
         const next = alternative?.opens.find(id => script.nodes.some(item => item.id === id));
-        if (next) setFocusId(next);
+        if (next) {
+            setFocusId(next);
+            const nextNode = script.nodes.find(item => item.id === next);
+            setAxisPick(nextNode?.axis ?? null);
+        }
     };
 
     const moveCandidate = (delta: number) => {
@@ -254,7 +271,11 @@ export const PersuasionConsole: React.FC<PersuasionConsoleProps> = ({
                 event.preventDefault();
                 const last = board.answerOrder[board.answerOrder.length - 1];
                 patch(undoLastAnswer);
-                if (last) setFocusId(last);
+                if (last) {
+                    setFocusId(last);
+                    const node = script.nodes.find(item => item.id === last);
+                    setAxisPick(node?.axis ?? null);
+                }
                 return;
             }
             if (event.key === 'j' || event.key === 'J') {
@@ -456,6 +477,7 @@ export const PersuasionConsole: React.FC<PersuasionConsoleProps> = ({
             return fresh;
         });
         setFocusId(null);
+        setAxisPick(null);
         setConfirmClear(false);
     };
 
@@ -558,7 +580,7 @@ export const PersuasionConsole: React.FC<PersuasionConsoleProps> = ({
                                 heat={board.axisHeat}
                                 nombre={candidate.name}
                                 puesto={processTitle}
-                                onFocusNode={setFocusId}
+                                onFocusNode={focusNode}
                                 onFocusAxis={focusAxis}
                             />
                         </div>
@@ -588,7 +610,7 @@ export const PersuasionConsole: React.FC<PersuasionConsoleProps> = ({
                                 </div>
                             </div>
                         )}
-                        {focused && axisSteps && (
+                        {axisSteps && (
                             <div className="mb-3">
                                 <div className="flex items-baseline justify-between gap-3">
                                     <h3 className="text-sm font-semibold text-primary-800">{axisSteps.label}</h3>
@@ -600,12 +622,12 @@ export const PersuasionConsole: React.FC<PersuasionConsoleProps> = ({
                                 <div className="mt-2 flex flex-wrap gap-1">
                                     {axisSteps.nodes.map((node, index) => {
                                         const answered = board.answers[node.id];
-                                        const current = node.id === focused.id;
+                                        const current = node.id === focused?.id;
                                         return (
                                             <button
                                                 key={node.id}
                                                 type="button"
-                                                onClick={() => setFocusId(node.id)}
+                                                onClick={() => focusNode(node.id)}
                                                 className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${
                                                     current
                                                         ? 'bg-primary-600 text-white'
@@ -681,6 +703,10 @@ export const PersuasionConsole: React.FC<PersuasionConsoleProps> = ({
                                     }}
                                 />
                             </>
+                        ) : axisSteps && axisSteps.nodes.length === 0 ? (
+                            <div className="rounded-lg bg-gray-50 px-4 py-6 text-center">
+                                <p className="text-base font-medium text-gray-800">{axisSteps.label} todavía no tiene preguntas.</p>
+                            </div>
                         ) : (
                             <div className="rounded-lg bg-gray-50 px-4 py-6 text-center">
                                 <p className="text-base font-medium text-gray-800">

@@ -61,17 +61,23 @@ function paginateBlocks(blocks: Range[], totalHeight: number, pageHeight: number
             start += pageHeight;
         }
     };
-    for (const [top, bottom] of blocks) {
-        if (bottom - start <= pageHeight) continue;
-        if (top > start) {
-            cutUntil(top);
-            if (top > start) {
-                ranges.push([start, top]);
-                start = top;
+    blocks.forEach(([top, bottom], i) => {
+        if (bottom - start <= pageHeight) return;
+        /**
+         * El corte va en el centro del espacio libre entre el bloque anterior y este,
+         * nunca pegado al borde del texto (html2canvas desplaza el texto unos px y se verían letras cortadas).
+         */
+        const prevBottom = i > 0 ? Math.max(blocks[i - 1][1], start) : top;
+        const cut = Math.min(top, (prevBottom + top) / 2);
+        if (cut > start) {
+            cutUntil(cut);
+            if (cut > start) {
+                ranges.push([start, cut]);
+                start = cut;
             }
         }
         cutUntil(bottom);
-    }
+    });
     cutUntil(totalHeight);
     if (totalHeight - start > 8 || ranges.length === 0) ranges.push([start, totalHeight]);
     return ranges;
@@ -88,13 +94,26 @@ export async function captureElementToPaginatedPdf(
     const rootTop = element.getBoundingClientRect().top;
     const cssW = element.scrollWidth;
     const cssH = element.scrollHeight;
-    const blocks: Range[] = Array.from(element.querySelectorAll<HTMLElement>('[data-pdf-block]'))
+    const measured = Array.from(element.querySelectorAll<HTMLElement>('[data-pdf-block]'))
         .map(el => {
             const r = el.getBoundingClientRect();
-            return [r.top - rootTop, r.bottom - rootTop] as Range;
+            return { range: [r.top - rootTop, r.bottom - rootTop] as Range, keep: el.hasAttribute('data-pdf-keep') };
         })
-        .filter(([t, b]) => b > t)
-        .sort((a, b) => a[0] - b[0]);
+        .filter(m => m.range[1] > m.range[0])
+        .sort((a, b) => a.range[0] - b.range[0]);
+    /** `data-pdf-keep` une el bloque con el siguiente (p. ej. un título con su primera fila) para no dejarlo huérfano. */
+    const blocks: Range[] = [];
+    for (let i = 0; i < measured.length; i++) {
+        const top = measured[i].range[0];
+        let bottom = measured[i].range[1];
+        let j = i;
+        while (measured[j].keep && j + 1 < measured.length) {
+            j++;
+            bottom = measured[j].range[1];
+        }
+        i = j;
+        blocks.push([top, bottom]);
+    }
 
     const canvas = await html2canvas(element, {
         scale: 2,

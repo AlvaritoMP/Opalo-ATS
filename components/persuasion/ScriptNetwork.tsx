@@ -494,7 +494,7 @@ export const ScriptNetwork: React.FC<ScriptNetworkProps> = ({
                                 active ? 'bg-indigo-700 text-white' : 'bg-white text-slate-600 ring-1 ring-slate-200 hover:bg-indigo-50'
                             }`}
                         >
-                            {group.label}
+                            {group.label} <span className="opacity-70">{group.nodes.length}</span>
                         </button>
                     );
                 })}

@@ -1,5 +1,6 @@
 import {
     createSeedScript,
+    fillEmptyAxes,
     emptyBoard,
     PERSUASION_PHASES,
     AXES,
@@ -83,7 +84,7 @@ export function scriptFromPayload(payload: unknown): PersuasionScript | null {
         ? body.nodes.map(sanitizeNode).filter((node): node is ScriptNode => !!node)
         : [];
     if (nodes.length === 0) return null;
-    return { nodes };
+    return fillEmptyAxes({ nodes });
 }
 
 export function loadScript(processId: string): PersuasionScript {
