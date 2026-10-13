@@ -210,6 +210,14 @@ export const ScriptNetwork: React.FC<ScriptNetworkProps> = ({
                     level: 0,
                     radius: axisRadius,
                 });
+            } else {
+                placedDraft.push({
+                    key: 'loose-hub',
+                    angle: mid,
+                    kind: 'axis',
+                    level: 0,
+                    radius: axisRadius,
+                });
             }
             for (const [level, nodes] of byLevel) {
                 const countN = nodes.length;
@@ -256,10 +264,12 @@ export const ScriptNetwork: React.FC<ScriptNetworkProps> = ({
         sectors.forEach((item, sectorIndex) => {
             const mid = -Math.PI / 2 + sectorIndex * sector + sector / 2;
             const levelOf = levelMaps[sectorIndex];
-            const axisPoint = placed.find(point => point.kind === 'axis' && point.axisId === item.group?.id);
-            if (item.group && axisPoint) {
+            const hub = item.group
+                ? placed.find(point => point.kind === 'axis' && point.axisId === item.group?.id)
+                : placed.find(point => point.key === 'loose-hub');
+            if (hub) {
                 wedges.push({
-                    key: item.group.id,
+                    key: item.group?.id ?? 'loose',
                     d: wedge(cx, cy, 46, maxR + 16, mid - sector * 0.46, mid + sector * 0.46),
                     active: false,
                 });
@@ -268,15 +278,16 @@ export const ScriptNetwork: React.FC<ScriptNetworkProps> = ({
             const roots = item.nodes.filter(node => (levelOf.get(node.id) ?? 1) === 1);
             for (const root of roots) {
                 const point = positionOf.get(root.id);
-                if (!point || !item.group || !axisPoint) continue;
+                if (!point || !hub) continue;
+                const fromKey = item.group ? `axis-${item.group.id}` : 'loose-hub';
                 edges.push({
-                    key: `axis-${item.group.id}-${root.id}`,
-                    x1: axisPoint.x,
-                    y1: axisPoint.y,
+                    key: `${fromKey}-${root.id}`,
+                    x1: hub.x,
+                    y1: hub.y,
                     x2: point.x,
                     y2: point.y,
                     hot: !!answers[root.id],
-                    fromKey: `axis-${item.group.id}`,
+                    fromKey,
                     toKey: root.id,
                 });
             }
@@ -436,6 +447,10 @@ export const ScriptNetwork: React.FC<ScriptNetworkProps> = ({
         }
         onFocusNode(id);
     };
+    const chooseLoose = () => {
+        const pending = loose.find(node => !answers[node.id]) ?? loose[0];
+        if (pending) chooseNode(pending.id);
+    };
     const chooseAxis = (id: AxisId) => {
         const group = groups.find(item => item.id === id);
         const pending = group?.nodes.find(node => !answers[node.id]) ?? group?.nodes[0];
@@ -475,6 +490,7 @@ export const ScriptNetwork: React.FC<ScriptNetworkProps> = ({
     const endDrag = () => {
         dragRef.current = null;
     };
+    const looseActive = !focusedAxis && loose.some(node => node.id === focusedId);
 
     return (
         <div className="flex h-full min-h-0 flex-col">
@@ -498,6 +514,21 @@ export const ScriptNetwork: React.FC<ScriptNetworkProps> = ({
                         </button>
                     );
                 })}
+                {loose.length > 0 && (
+                    <button
+                        type="button"
+                        onPointerDown={event => {
+                            event.preventDefault();
+                            event.stopPropagation();
+                            chooseLoose();
+                        }}
+                        className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                            looseActive ? 'bg-indigo-700 text-white' : 'bg-white text-slate-600 ring-1 ring-slate-200 hover:bg-indigo-50'
+                        }`}
+                    >
+                        Sin eje <span className="opacity-70">{loose.length}</span>
+                    </button>
+                )}
             </div>
             <div ref={frameRef} className="relative min-h-0 flex-1 overflow-hidden" style={{ touchAction: 'none' }}>
             <svg
@@ -542,7 +573,7 @@ export const ScriptNetwork: React.FC<ScriptNetworkProps> = ({
                 </g>
                 <g transform={`rotate(${spin} ${layout.cx} ${layout.cy})`}>
                     {layout.wedges.map(item => (
-                        <path key={item.key} d={item.d} pointerEvents="none" fill={focusedAxis === item.key ? '#e0e7ff' : '#f8fafc'} stroke="none" />
+                        <path key={item.key} d={item.d} pointerEvents="none" fill={focusedAxis === item.key || (item.key === 'loose' && looseActive) ? '#e0e7ff' : '#f8fafc'} stroke="none" />
                     ))}
                     {layout.edges.map(edge => {
                         const linked = related.size === 0 || related.has(edge.fromKey) || related.has(edge.toKey);
@@ -565,6 +596,28 @@ export const ScriptNetwork: React.FC<ScriptNetworkProps> = ({
                         const heatColor = heatLevel !== undefined ? AXIS_HEAT_COLOR[heatLevel] : undefined;
                         const upright = `translate(${point.x} ${point.y}) rotate(${-spin})`;
                         const linked = related.size === 0 || related.has(point.key);
+                        if (point.key === 'loose-hub') {
+                            const done = loose.filter(node => answers[node.id]).length;
+                            return (
+                                <g key={point.key} className="cursor-pointer" transform={upright}>
+                                    <circle
+                                        r="30"
+                                        fill="transparent"
+                                        pointerEvents="all"
+                                        onPointerDown={event => {
+                                            event.preventDefault();
+                                            event.stopPropagation();
+                                            chooseLoose();
+                                        }}
+                                    />
+                                    <circle r="22" fill="#ffffff" stroke={looseActive ? '#312e81' : '#64748b'} strokeWidth={looseActive ? 3.4 : 2} pointerEvents="none" />
+                                    <text y="32" pointerEvents="none" textAnchor="middle" fontSize="12" fontWeight="700" fill={looseActive ? '#312e81' : '#334155'}>
+                                        <tspan x="0" dy="0">Sin eje</tspan>
+                                        <tspan x="0" dy="14" fontSize="11" fill="#64748b">{done}/{loose.length}</tspan>
+                                    </text>
+                                </g>
+                            );
+                        }
                         if (point.kind === 'axis' && point.axisId) {
                             const group = groups.find(item => item.id === point.axisId);
                             const done = group ? group.nodes.filter(node => answers[node.id]).length : 0;

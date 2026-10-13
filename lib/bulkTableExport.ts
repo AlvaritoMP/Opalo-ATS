@@ -252,6 +252,31 @@ function escapeHtml(value: string): string {
         .replace(/"/g, '&quot;');
 }
 
+/** Texto TSV + tabla HTML a partir de una matriz ya ordenada (filas y columnas visibles). */
+export function clipboardPayloadFromMatrix(grid: string[][]): { text: string; html: string } {
+    const rows = grid.filter(row => row.length > 0);
+    if (rows.length === 0) return { text: '', html: '' };
+    const width = Math.max(...rows.map(row => row.length));
+    const normalized = rows.map(row => {
+        const next = row.map(cell => cell.replace(/\s+/g, ' ').trim());
+        while (next.length < width) next.push('');
+        return next;
+    });
+    const text = normalized
+        .map(row => row.map(cell => escapeDelimitedField(cell, '\t')).join('\t'))
+        .join('\r\n');
+    const htmlRows = normalized
+        .map(row => {
+            const cells = row
+                .map(cell => `<td>${cell ? escapeHtml(cell) : '&nbsp;'}</td>`)
+                .join('');
+            return `<tr>${cells}</tr>`;
+        })
+        .join('');
+    const html = `<!DOCTYPE html><html><head><meta charset="utf-8"></head><body><!--StartFragment--><table><tbody>${htmlRows}</tbody></table><!--EndFragment--></body></html>`;
+    return { text, html };
+}
+
 /** Construye texto TSV desde celdas seleccionadas (Excel, bloc de notas, WhatsApp). */
 export function buildBulkSelectionClipboardText(
     cells: BulkSelectionCell[],

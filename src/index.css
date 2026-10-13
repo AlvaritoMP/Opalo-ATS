@@ -53,6 +53,44 @@ td[data-bulk-cell-selected="true"] {
   user-select: none;
 }
 
+/* Cualquier columna de texto se recorta al ancho de la celda.
+   Al hacer clic (celda activa) el texto se lee completo hacia abajo. */
+.bulk-data-table tbody td {
+  overflow: hidden;
+}
+
+.bulk-cell-text {
+  display: block;
+  width: 0;
+  min-width: 100%;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bulk-data-table tbody td[data-bulk-cell-active="true"] {
+  white-space: normal;
+  vertical-align: top;
+  height: auto;
+}
+
+.bulk-data-table tbody td[data-bulk-cell-active="true"] :where(*):not(button):not(input):not(select):not(textarea):not(svg):not(option) {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  text-overflow: clip;
+  max-width: 100%;
+}
+
+.bulk-data-table tbody td[data-bulk-cell-active="true"] .bulk-cell-text {
+  width: auto;
+  min-width: 0;
+  overflow: visible;
+  white-space: pre-wrap;
+  height: auto;
+}
+
 .bulk-data-table input,
 .bulk-data-table textarea,
 .bulk-data-table select,

@@ -514,6 +514,95 @@ export function createSeedScript(): PersuasionScript {
     };
 }
 
+const AXIS_CUES: Record<AxisId, string[]> = {
+    familia_hijos: ['familia', 'hijo', 'hija', 'padre', 'madre', 'hogar', 'apoyar', 'personas a cargo', 'mama', 'papa', 'casa'],
+    capacidades: ['experiencia', 'iniciativa', 'aprender', 'crecer', 'responsabilidad', 'capacidad', 'confiar', 'otra tarea'],
+    curriculum: ['cv', 'curriculum', 'entrevista', 'hoja de vida'],
+    rapidez: ['pronto', 'rapido', 'dia siguiente', 'talla', 'prioridad', 'empezar ya', 'disponible', 'venir ya', 'manana'],
+    competencia: ['otra oferta', 'compar', 'otra empresa', 'pago puntual', 'paga a tiempo', 'supervisor', 'competencia', 'sueldo minimo', 'otra opcion'],
+    contexto: ['formal', 'beneficio', 'inestable', 'continuidad', 'planilla', 'contrato', 'mas seguro', 'essalud', 'cts', 'gratificacion', 'boleta', 'quincena'],
+};
+
+function foldText(value: string): string {
+    return value.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+}
+
+function questionText(node: ScriptNode): string {
+    return foldText([node.say, ...node.alternatives.map(item => item.label)].filter(Boolean).join(' '));
+}
+
+function axisFromWording(node: ScriptNode): AxisId | undefined {
+    for (const alternative of node.alternatives) {
+        const effect = alternative.effect;
+        if (effect?.type === 'axis') return effect.axis;
+        if (effect?.type === 'lever' && effect.lever === 'familia') return 'familia_hijos';
+        if (effect?.type === 'lever' && effect.lever === 'urgencia') return 'rapidez';
+        if (effect?.type === 'lever' && effect.lever === 'estabilidad') {
+            const text = questionText(node);
+            return /oferta|compar|supervisor|empresa|puntual/.test(text) ? 'competencia' : 'contexto';
+        }
+    }
+    const text = questionText(node);
+    let best: AxisId | undefined;
+    let bestScore = 0;
+    for (const axis of AXES) {
+        let score = 0;
+        for (const cue of AXIS_CUES[axis.id]) {
+            if (text.includes(cue)) score += cue.length > 10 ? 2 : 1;
+        }
+        if (score > bestScore) {
+            bestScore = score;
+            best = axis.id;
+        }
+    }
+    return best;
+}
+
+/** Las preguntas sin eje entran al tema cuyo texto ayuda a convencer. */
+export function placeQuestionsOnAxes(script: PersuasionScript): PersuasionScript {
+    const nodes = script.nodes.map(node => ({
+        ...node,
+        alternatives: node.alternatives.map(alternative => ({ ...alternative })),
+    }));
+    const byId = new Map(nodes.map(node => [node.id, node]));
+    const parentOf = new Map<string, string>();
+    for (const node of nodes) {
+        for (const alternative of node.alternatives) {
+            for (const childId of alternative.opens) {
+                if (!parentOf.has(childId)) parentOf.set(childId, node.id);
+            }
+        }
+    }
+    for (let pass = 0; pass < nodes.length; pass += 1) {
+        let changed = false;
+        for (const node of nodes) {
+            if (node.axis) continue;
+            const worded = axisFromWording(node);
+            if (worded) {
+                node.axis = worded;
+                changed = true;
+                continue;
+            }
+            const parentAxis = byId.get(parentOf.get(node.id) || '')?.axis;
+            if (parentAxis) {
+                node.axis = parentAxis;
+                changed = true;
+            }
+        }
+        if (!changed) break;
+    }
+    const phaseAxis: Record<PersuasionPhase, AxisId> = {
+        rompehielo: 'familia_hijos',
+        sondeo: 'capacidades',
+        objecion: 'competencia',
+        cierre: 'rapidez',
+    };
+    for (const node of nodes) {
+        if (!node.axis) node.axis = phaseAxis[node.phase];
+    }
+    return { nodes };
+}
+
 /** Si un eje quedó sin preguntas, recupera las 3 de ese tema. No toca los ejes que ya tienen. */
 export function fillEmptyAxes(script: PersuasionScript): PersuasionScript {
     const present = new Set(script.nodes.map(node => node.axis).filter((axis): axis is AxisId => !!axis));

@@ -1,6 +1,7 @@
 import {
     createSeedScript,
     fillEmptyAxes,
+    placeQuestionsOnAxes,
     emptyBoard,
     PERSUASION_PHASES,
     AXES,
@@ -34,6 +35,23 @@ function isAxisId(value: unknown): value is AxisId {
     return typeof value === 'string' && AXES.some(axis => axis.id === value);
 }
 
+const LEGACY_AXIS: Record<string, AxisId> = {
+    children: 'familia_hijos',
+    hijos: 'familia_hijos',
+    caregiver: 'familia_hijos',
+    rent: 'contexto',
+    debts: 'contexto',
+    tuition: 'contexto',
+    pets: 'familia_hijos',
+    social: 'contexto',
+};
+
+function readAxis(value: unknown): AxisId | undefined {
+    if (isAxisId(value)) return value;
+    if (typeof value === 'string') return LEGACY_AXIS[value];
+    return undefined;
+}
+
 function isPhase(value: unknown): value is PersuasionPhase {
     return typeof value === 'string' && (PERSUASION_PHASES as readonly string[]).includes(value);
 }
@@ -63,7 +81,7 @@ function sanitizeNode(value: unknown): ScriptNode | null {
         phase: node.phase,
         say: node.say,
         entry: node.entry === true,
-        axis: isAxisId(node.axis) ? node.axis : undefined,
+        axis: readAxis(node.axis),
         alternatives,
     };
 }
@@ -84,7 +102,7 @@ export function scriptFromPayload(payload: unknown): PersuasionScript | null {
         ? body.nodes.map(sanitizeNode).filter((node): node is ScriptNode => !!node)
         : [];
     if (nodes.length === 0) return null;
-    return fillEmptyAxes({ nodes });
+    return fillEmptyAxes(placeQuestionsOnAxes({ nodes }));
 }
 
 export function loadScript(processId: string): PersuasionScript {

@@ -192,7 +192,7 @@ export const PersuasionConsole: React.FC<PersuasionConsoleProps> = ({
     const focusNode = (id: string) => {
         setFocusId(id);
         const node = script.nodes.find(item => item.id === id);
-        if (node?.axis) setAxisPick(node.axis);
+        setAxisPick(node?.axis ?? null);
     };
     const focused = useMemo(() => {
         if (axisPick) {
@@ -637,6 +637,40 @@ export const PersuasionConsole: React.FC<PersuasionConsoleProps> = ({
                                                 }`}
                                             >
                                                 {index + 1}. {answered ? answerLabel(node, answered) : 'Pendiente'}
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+                        )}
+                        {focused && !focused.axis && axisNodes.loose.length > 0 && (
+                            <div className="mb-3">
+                                <div className="flex items-baseline justify-between gap-3">
+                                    <h3 className="text-sm font-semibold text-primary-800">Sin eje</h3>
+                                    <span className="text-[11px] font-semibold text-gray-500">
+                                        {axisNodes.loose.filter(node => board.answers[node.id]).length}/{axisNodes.loose.length}
+                                    </span>
+                                </div>
+                                <p className="mt-0.5 text-sm leading-snug text-gray-600">Preguntas del guion que todavía no tienen eje temático.</p>
+                                <div className="mt-2 flex flex-wrap gap-1">
+                                    {axisNodes.loose.map((node, index) => {
+                                        const answered = board.answers[node.id];
+                                        const current = node.id === focused.id;
+                                        const title = node.say.trim() || 'Pregunta sin texto';
+                                        return (
+                                            <button
+                                                key={node.id}
+                                                type="button"
+                                                onClick={() => focusNode(node.id)}
+                                                className={`max-w-full truncate rounded-full px-2.5 py-1 text-left text-[11px] font-semibold ${
+                                                    current
+                                                        ? 'bg-primary-600 text-white'
+                                                        : answered
+                                                          ? 'bg-emerald-100 text-emerald-800'
+                                                          : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                                                }`}
+                                            >
+                                                {index + 1}. {title.length > 42 ? `${title.slice(0, 42)}…` : title}
                                             </button>
                                         );
                                     })}

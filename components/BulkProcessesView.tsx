@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef, useLayoutEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { useAppState } from '../App';
 import { bulkCandidatesApi, BulkCandidate } from '../lib/api/bulkCandidates';
 
@@ -229,7 +230,7 @@ import { isPsycholaboralEnabled } from '../lib/psycholaboralUtils';
 import { BulkProcessCard } from './BulkProcessCard';
 import { BulkProcessAttachmentsModal } from './BulkProcessAttachmentsModal';
 import { BulkTableExportModal } from './BulkTableExportModal';
-import { buildBulkSelectionClipboardHtml, buildBulkSelectionClipboardText } from '../lib/bulkTableExport';
+import { clipboardPayloadFromMatrix, getBulkExportCellValue } from '../lib/bulkTableExport';
 import { downloadCandidatesDocumentsZip } from '../lib/candidateDocumentsZip';
 import { BulkProcessActivityLog } from './BulkProcessActivityLog';
 import { BulkTransferCandidatesModal } from './BulkTransferCandidatesModal';
@@ -632,22 +633,39 @@ const MetadataTooltip: React.FC<{
     scoreIa?: number;
     children: React.ReactNode;
 }> = ({ metadata, scoreIa, children }) => {
-    const [isVisible, setIsVisible] = useState(false);
+    const anchorRef = useRef<HTMLDivElement>(null);
+    const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
     if (!metadata && scoreIa === undefined) return <>{children}</>;
-    
-    // Intentar parsear metadata como JSON o usar como texto plano
+
     let parsedMetadata: any = null;
     try {
         parsedMetadata = metadata ? JSON.parse(metadata) : null;
     } catch {
         // Si no es JSON, usar como texto
     }
-    
+
+    const show = () => {
+        const rect = anchorRef.current?.getBoundingClientRect();
+        if (!rect) return;
+        setPos({
+            top: rect.bottom + 8,
+            left: Math.max(8, Math.min(rect.left, window.innerWidth - 392)),
+        });
+    };
+
     return (
-        <div className="relative inline-block" onMouseEnter={() => setIsVisible(true)} onMouseLeave={() => setIsVisible(false)}>
+        <div
+            ref={anchorRef}
+            className="block max-w-full min-w-0"
+            onMouseEnter={show}
+            onMouseLeave={() => setPos(null)}
+        >
             {children}
-            {isVisible && (
-                <div className="absolute z-50 w-96 p-4 bg-gray-900 text-white text-sm rounded-lg shadow-xl left-0 top-full mt-2">
+            {pos && createPortal(
+                <div
+                    className="w-96 p-4 bg-gray-900 text-white text-sm rounded-lg shadow-xl"
+                    style={{ position: 'fixed', top: pos.top, left: pos.left, zIndex: 80 }}
+                >
                     {scoreIa !== undefined && (
                         <div className="mb-2 pb-2 border-b border-gray-700">
                             <span className="font-semibold">Score IA: </span>
@@ -674,8 +692,8 @@ const MetadataTooltip: React.FC<{
                     ) : (
                         <p className="whitespace-pre-wrap">{metadata}</p>
                     )}
-                    <div className="absolute -top-1 left-4 w-2 h-2 bg-gray-900 transform rotate-45" />
-                </div>
+                </div>,
+                document.body
             )}
         </div>
     );
@@ -976,6 +994,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
     const activeCellNavRef = useRef<CellCoord | null>(null);
     const selectionAnchorNavRef = useRef<CellCoord | null>(null);
     const selectedCellsNavRef = useRef<Set<string>>(new Set());
+    const copySelectedCellsRef = useRef<(event?: ClipboardEvent) => boolean>(() => false);
     const bulkProcessesRef = useRef(bulkProcesses);
     const candidatesRef = useRef(candidates);
     candidatesRef.current = candidates;
@@ -5641,15 +5660,25 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
         return { cells: selectedCells.size, rows: rowIds.size };
     }, [selectedCells]);
 
+    const columnIndexForCell = useCallback((colId: string) => {
+        const direct = visibleColumnIndex.get(colId);
+        if (direct != null) return direct;
+        if (colId === 'nombres') return visibleColumnIndex.get('name') ?? -1;
+        if (colId === 'name') return visibleColumnIndex.get('nombres') ?? -1;
+        return -1;
+    }, [visibleColumnIndex]);
+
     const getCellIndices = useCallback((candidateId: string, colId: string) => ({
         rowIdx: displayCandidateRowIndex.get(candidateId) ?? -1,
-        colIdx: visibleColumnIndex.get(colId) ?? -1,
-    }), [displayCandidateRowIndex, visibleColumnIndex]);
+        colIdx: columnIndexForCell(colId),
+    }), [displayCandidateRowIndex, columnIndexForCell]);
 
     const getCellAt = useCallback((rowIdx: number, colIdx: number): CellCoord | null => {
         if (rowIdx < 0 || rowIdx >= displayCandidates.length) return null;
         if (colIdx < 0 || colIdx >= visibleColumns.length) return null;
-        return { candidateId: displayCandidates[rowIdx].id, colId: visibleColumns[colIdx] };
+        const visibleId = visibleColumns[colIdx];
+        const colId = visibleId === 'name' ? 'nombres' : visibleId;
+        return { candidateId: displayCandidates[rowIdx].id, colId };
     }, [displayCandidates, visibleColumns]);
 
     const buildCellRange = useCallback((anchor: CellCoord, target: CellCoord): Set<string> => {
@@ -5876,6 +5905,10 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
 
     useEffect(() => {
         const stopDrag = () => {
+            if (isDraggingCells.current) {
+                window.getSelection()?.removeAllRanges();
+                tableContainerRef.current?.focus({ preventScroll: true });
+            }
             isDraggingCells.current = false;
             dragAnchorCell.current = null;
         };
@@ -5927,6 +5960,26 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
         if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && !e.shiftKey) {
             e.preventDefault();
             void performUndo();
+            return;
+        }
+
+        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'c' && !e.shiftKey && !e.altKey) {
+            const container = tableContainerRef.current;
+            const outsideField = target.closest('input, textarea, select, [contenteditable="true"]');
+            if (outsideField && container && !container.contains(outsideField)) return;
+            const focusInTable = !!container && (
+                document.activeElement === container ||
+                (document.activeElement != null && container.contains(document.activeElement)) ||
+                (target != null && container.contains(target))
+            );
+            const focusIdle = !document.activeElement
+                || document.activeElement === document.body
+                || document.activeElement === document.documentElement;
+            if (!focusInTable && !focusIdle) return;
+            if (selectedCellsNavRef.current.size === 0 && !activeCellNavRef.current) return;
+            e.preventDefault();
+            e.stopPropagation();
+            copySelectedCellsRef.current();
             return;
         }
 
@@ -6079,13 +6132,29 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                 e.stopPropagation();
                 if (editingCell || e.button !== 0) return;
                 if ((e.target as HTMLElement).closest('input, select, textarea, button, a')) return;
-                if (e.shiftKey || e.ctrlKey || e.metaKey) return;
+                if (e.ctrlKey || e.metaKey) return;
                 e.preventDefault();
                 window.getSelection()?.removeAllRanges();
                 isDraggingCells.current = true;
                 didDragSelect.current = false;
-                dragAnchorCell.current = coord;
-                selectSingleCell(coord);
+                const extendFrom = e.shiftKey ? selectionAnchorNavRef.current : null;
+                const anchor = extendFrom ?? coord;
+                dragAnchorCell.current = anchor;
+                if (extendFrom) {
+                    const selected = buildCellRange(anchor, coord);
+                    syncSelectionToDom(coord, selected);
+                    activeCellNavRef.current = coord;
+                    selectedCellsNavRef.current = selected;
+                    tableKeyboardRef.current = {
+                        ...tableKeyboardRef.current,
+                        activeCell: coord,
+                    };
+                    setActiveCell(coord);
+                    setSelectedCells(selected);
+                    focusTable();
+                } else {
+                    selectSingleCell(coord);
+                }
             },
             onClick: (e: React.MouseEvent) => {
                 e.stopPropagation();
@@ -6276,19 +6345,168 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
         getColumnValue,
     ]);
 
-    const handleBulkCopy = useCallback((e: ClipboardEvent) => {
-        if (editingCell) return;
+    const readCopyCellText = useCallback((el: HTMLElement): string => {
+        const select = el.querySelector('select');
+        if (select) {
+            const label = select.selectedOptions[0]?.textContent?.trim() || '';
+            const clone = el.cloneNode(true) as HTMLElement;
+            clone.querySelectorAll('select, button').forEach(node => node.remove());
+            const rest = (clone.innerText || '').replace(/\s+/g, ' ').trim();
+            return rest || label;
+        }
+        const clone = el.cloneNode(true) as HTMLElement;
+        clone.querySelectorAll('button').forEach(node => node.remove());
+        return (clone.innerText || '').replace(/\s+/g, ' ').trim();
+    }, []);
 
-        const target = e.target as HTMLElement;
-        if (['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName)) return;
+    const matrixFromCellKeys = useCallback((keys: string[]): string[][] => {
+        const container = tableContainerRef.current;
+        if (keys.length === 0) return [];
+        const items: { row: number; col: number; text: string }[] = [];
+        for (const key of keys) {
+            const { candidateId, colId } = parseCellKey(key);
+            const aliases = colId === 'nombres' ? ['nombres', 'name'] : colId === 'name' ? ['name', 'nombres'] : [colId];
+            let el: HTMLElement | null = null;
+            if (container) {
+                for (const alias of aliases) {
+                    el = container.querySelector(
+                        `[data-cell-row="${CSS.escape(candidateId)}"][data-cell-col="${CSS.escape(alias)}"]`
+                    ) as HTMLElement | null;
+                    if (el) break;
+                }
+            }
+            const rowIdx = displayCandidateRowIndex.get(candidateId) ?? 0;
+            const colIdx = columnIndexForCell(colId);
+            const candidate = displayCandidates.find(c => c.id === candidateId);
+            const exportColId = aliases.find(alias => visibleColumns.includes(alias)) || colId;
+            const fallback = candidate
+                ? getBulkExportCellValue(exportColId, candidate, {
+                    columnValues,
+                    customColumns,
+                    process,
+                    bulkConfig: process?.bulkConfig,
+                    hiringStageActors,
+                })
+                : '';
+            items.push({
+                row: rowIdx,
+                col: colIdx >= 0 ? colIdx : 1000 + items.length,
+                text: el ? readCopyCellText(el) : fallback,
+            });
+        }
+        if (items.length === 0) return [];
+        const columns = Array.from(new Set(items.map(item => item.col))).sort((a, b) => a - b);
+        const byRow = new Map<number, Map<number, string>>();
+        for (const item of items) {
+            const row = byRow.get(item.row) ?? new Map<number, string>();
+            row.set(item.col, item.text);
+            byRow.set(item.row, row);
+        }
+        return Array.from(byRow.entries())
+            .sort((a, b) => a[0] - b[0])
+            .map(([, row]) => columns.map(col => row.get(col) ?? ''));
+    }, [
+        columnIndexForCell,
+        columnValues,
+        customColumns,
+        displayCandidateRowIndex,
+        displayCandidates,
+        hiringStageActors,
+        process,
+        readCopyCellText,
+        visibleColumns,
+    ]);
 
-        const cellKeys =
+    const nativeSelectionCellKeys = useCallback((): string[] => {
+        const container = tableContainerRef.current;
+        const selection = window.getSelection();
+        if (!container || !selection || selection.rangeCount === 0 || selection.isCollapsed) return [];
+        const rects = Array.from(selection.getRangeAt(0).getClientRects());
+        if (rects.length === 0) return [];
+        const box = rects.reduce(
+            (acc, rect) => ({
+                left: Math.min(acc.left, rect.left),
+                right: Math.max(acc.right, rect.right),
+                top: Math.min(acc.top, rect.top),
+                bottom: Math.max(acc.bottom, rect.bottom),
+            }),
+            { left: Infinity, right: -Infinity, top: Infinity, bottom: -Infinity }
+        );
+        if (!Number.isFinite(box.left) || box.right - box.left < 2) return [];
+        const keys: string[] = [];
+        container.querySelectorAll('[data-cell-row][data-cell-col]').forEach(node => {
+            const el = node as HTMLElement;
+            const rect = el.getBoundingClientRect();
+            const overlapW = Math.min(rect.right, box.right) - Math.max(rect.left, box.left);
+            const overlapH = Math.min(rect.bottom, box.bottom) - Math.max(rect.top, box.top);
+            if (overlapW > 8 && overlapH > 8) {
+                const candidateId = el.getAttribute('data-cell-row');
+                const colId = el.getAttribute('data-cell-col');
+                if (candidateId && colId) keys.push(toCellKey({ candidateId, colId }));
+            }
+        });
+        return keys;
+    }, []);
+
+    const copySelectedCellsToClipboard = useCallback((event?: ClipboardEvent): boolean => {
+        const fromState =
             selectedCellsNavRef.current.size > 0
                 ? Array.from(selectedCellsNavRef.current)
                 : activeCellNavRef.current
                   ? [toCellKey(activeCellNavRef.current)]
                   : [];
-        if (cellKeys.length === 0) return;
+        const keys = Array.from(new Set([...fromState, ...nativeSelectionCellKeys()]));
+        const matrix = matrixFromCellKeys(keys);
+        const payload = clipboardPayloadFromMatrix(matrix);
+        if (!payload.text) return false;
+
+        const writeEvent = (clipboardEvent: ClipboardEvent) => {
+            clipboardEvent.preventDefault();
+            clipboardEvent.stopImmediatePropagation();
+            clipboardEvent.clipboardData?.setData('text/plain', payload.text);
+            clipboardEvent.clipboardData?.setData('text/html', payload.html);
+        };
+
+        if (event?.clipboardData) {
+            writeEvent(event);
+        } else {
+            const listener = (clipboardEvent: ClipboardEvent) => writeEvent(clipboardEvent);
+            document.addEventListener('copy', listener, true);
+            const holder = document.createElement('textarea');
+            holder.value = payload.text;
+            holder.setAttribute('readonly', 'true');
+            holder.style.position = 'fixed';
+            holder.style.top = '0';
+            holder.style.left = '-9999px';
+            document.body.appendChild(holder);
+            holder.focus();
+            holder.select();
+            try {
+                const copied = document.execCommand('copy');
+                if (!copied) void navigator.clipboard.writeText(payload.text);
+            } finally {
+                document.removeEventListener('copy', listener, true);
+                holder.remove();
+                tableContainerRef.current?.focus({ preventScroll: true });
+            }
+        }
+
+        window.getSelection()?.removeAllRanges();
+        actions.showToast(
+            keys.length === 1 ? 'Celda copiada al portapapeles' : `${keys.length} celdas copiadas al portapapeles`,
+            'success',
+            2000
+        );
+        return true;
+    }, [actions, matrixFromCellKeys, nativeSelectionCellKeys]);
+
+    copySelectedCellsRef.current = copySelectedCellsToClipboard;
+
+    const handleBulkCopy = useCallback((e: ClipboardEvent) => {
+        if (editingCell) return;
+
+        const target = e.target as HTMLElement;
+        if (['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName)) return;
 
         const container = tableContainerRef.current;
         const active = document.activeElement;
@@ -6299,40 +6517,10 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
             (active instanceof Node && container.contains(active))
         );
         if (!inTable) return;
+        if (selectedCellsNavRef.current.size === 0 && !activeCellNavRef.current && nativeSelectionCellKeys().length === 0) return;
 
-        const cells = cellKeys.map(parseCellKey);
-        const clipboardOpts = {
-            columnValues,
-            customColumns,
-            process,
-            bulkConfig: process?.bulkConfig,
-            hiringStageActors,
-        };
-        const text = buildBulkSelectionClipboardText(cells, displayCandidates, visibleColumns, clipboardOpts);
-        const html = buildBulkSelectionClipboardHtml(cells, displayCandidates, visibleColumns, clipboardOpts);
-        if (!text && !html) return;
-
-        e.preventDefault();
-        e.stopPropagation();
-        if (html) e.clipboardData?.setData('text/html', html);
-        e.clipboardData?.setData('text/plain', text);
-        window.getSelection()?.removeAllRanges();
-        actions.showToast(
-            cellKeys.length === 1 ? 'Celda copiada al portapapeles' : `${cellKeys.length} celdas copiadas al portapapeles`,
-            'success',
-            2000
-        );
-    }, [
-        editingCell,
-        selectedCells,
-        activeCell,
-        displayCandidates,
-        visibleColumns,
-        columnValues,
-        customColumns,
-        process,
-        actions,
-    ]);
+        copySelectedCellsToClipboard(e);
+    }, [editingCell, copySelectedCellsToClipboard, nativeSelectionCellKeys]);
 
     useEffect(() => {
         document.addEventListener('paste', handleBulkPaste);
@@ -7658,9 +7846,9 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                                                             />
                                                         ) : fieldKey === 'nombres' ? (
                                                             <MetadataTooltip metadata={displayCandidate.metadataIa || ''} scoreIa={scoreIaColumnVisible ? displayCandidate.scoreIa : undefined}>
-                                                                <span className="inline-flex items-center gap-0.5 min-w-0">
+                                                                <span className="flex items-center gap-0.5 min-w-0 max-w-full w-full overflow-hidden">
                                                                     <span
-                                                                        className="cursor-pointer hover:underline decoration-dotted truncate text-primary-800 hover:text-primary-900"
+                                                                        className="min-w-0 cursor-pointer hover:underline decoration-dotted truncate text-primary-800 hover:text-primary-900"
                                                                         onClick={(e) => { e.stopPropagation(); openDrawer(candidate, 'contactology'); }}
                                                                         onDoubleClick={(e) => { e.stopPropagation(); handleStartEdit(candidate.id, fieldKey, currentValue); }}
                                                                         title="Clic: historial de contactología · Doble clic: editar"
@@ -7678,7 +7866,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                                                             </MetadataTooltip>
                                                         ) : (
                                                             <span
-                                                                className="cursor-pointer hover:underline decoration-dotted truncate text-gray-700"
+                                                                className="bulk-cell-text cursor-pointer hover:underline decoration-dotted text-gray-700"
                                                                 onDoubleClick={(e) => { e.stopPropagation(); handleStartEdit(candidate.id, fieldKey, currentValue); }}
                                                                 title="Doble clic para editar"
                                                             >{currentValue || '-'}</span>
@@ -7697,7 +7885,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                                                                 onCancel={handleCancelEdit}
                                                             />
                                                         ) : (
-                                                            <span className="text-gray-600 hover:bg-gray-50 px-1 py-0.5 rounded cursor-pointer" onDoubleClick={() => handleStartEdit(candidate.id, 'dni', displayCandidate.dni || '')} title="Doble clic para editar">{displayCandidate.dni || '-'}</span>
+                                                            <span className="bulk-cell-text text-gray-600 hover:bg-gray-50 px-1 py-0.5 rounded cursor-pointer" onDoubleClick={() => handleStartEdit(candidate.id, 'dni', displayCandidate.dni || '')} title="Doble clic para editar">{displayCandidate.dni || '-'}</span>
                                                         )}
                                                     </td>
                                                 );
@@ -7714,9 +7902,9 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                                                                 onCancel={handleCancelEdit}
                                                             />
                                                         ) : displayEmail ? (
-                                                            <a href={`mailto:${displayEmail}`} onClick={(e) => e.stopPropagation()} onDoubleClick={(e) => { e.preventDefault(); handleStartEdit(candidate.id, 'email', displayEmail); }} className="text-blue-600 hover:text-blue-700 hover:underline" title="Doble clic para editar">{displayEmail}</a>
+                                                            <a href={`mailto:${displayEmail}`} onClick={(e) => e.stopPropagation()} onDoubleClick={(e) => { e.preventDefault(); handleStartEdit(candidate.id, 'email', displayEmail); }} className="bulk-cell-text text-blue-600 hover:text-blue-700 hover:underline" title="Doble clic para editar">{displayEmail}</a>
                                                         ) : (
-                                                            <span className="text-gray-400 hover:bg-gray-50 px-1 py-0.5 rounded cursor-pointer" onDoubleClick={() => handleStartEdit(candidate.id, 'email', '')} title="Doble clic para editar">{displayCandidate.email && isPlaceholderImportEmail(displayCandidate.email) ? 'Sin email' : 'N/A'}</span>
+                                                            <span className="bulk-cell-text text-gray-400 hover:bg-gray-50 px-1 py-0.5 rounded cursor-pointer" onDoubleClick={() => handleStartEdit(candidate.id, 'email', '')} title="Doble clic para editar">{displayCandidate.email && isPlaceholderImportEmail(displayCandidate.email) ? 'Sin email' : 'N/A'}</span>
                                                         )}
                                                     </td>
                                                 );
@@ -7785,7 +7973,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                                                                 onCancel={handleCancelEdit}
                                                             />
                                                         ) : (
-                                                            <span className="hover:bg-gray-50 px-1 py-0.5 rounded cursor-pointer" onDoubleClick={() => handleStartEdit(candidate.id, 'phone', displayCandidate.phone || '')} title="Doble clic para editar">{displayCandidate.phone || 'N/A'}</span>
+                                                            <span className="bulk-cell-text hover:bg-gray-50 px-1 py-0.5 rounded cursor-pointer" onDoubleClick={() => handleStartEdit(candidate.id, 'phone', displayCandidate.phone || '')} title="Doble clic para editar">{displayCandidate.phone || 'N/A'}</span>
                                                         )}
                                                     </td>
                                                 );
@@ -7861,7 +8049,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                                                         {...tdProps(candidate.id, colId)}
                                                         title={tooltip}
                                                     >
-                                                        <span className="truncate block max-w-full text-gray-800">
+                                                        <span className="bulk-cell-text text-gray-800">
                                                             {label}
                                                         </span>
                                                     </td>
@@ -7877,7 +8065,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                                                         {...tdProps(candidate.id, colId)}
                                                         title={tooltip}
                                                     >
-                                                        <span className="truncate block max-w-full text-gray-800">
+                                                        <span className="bulk-cell-text text-gray-800">
                                                             {label}
                                                         </span>
                                                     </td>
@@ -7894,7 +8082,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                                                                 onCancel={handleCancelEdit}
                                                             />
                                                         ) : (
-                                                            <span className="hover:bg-gray-50 px-1 py-0.5 rounded cursor-pointer" onDoubleClick={() => handleStartEdit(candidate.id, 'source', displaySource)} title="Doble clic para editar">{displaySource || '-'}</span>
+                                                            <span className="bulk-cell-text hover:bg-gray-50 px-1 py-0.5 rounded cursor-pointer" onDoubleClick={() => handleStartEdit(candidate.id, 'source', displaySource)} title="Doble clic para editar">{displaySource || '-'}</span>
                                                         )}
                                                     </td>
                                                 );
@@ -7939,7 +8127,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                                                                 onCancel={handleCancelEdit}
                                                             />
                                                         ) : (
-                                                            <span className="hover:bg-gray-50 px-1 py-0.5 rounded cursor-pointer" onDoubleClick={() => handleStartEdit(candidate.id, 'province', displayProvince)} title="Doble clic para editar">{displayProvince || '-'}</span>
+                                                            <span className="bulk-cell-text hover:bg-gray-50 px-1 py-0.5 rounded cursor-pointer" onDoubleClick={() => handleStartEdit(candidate.id, 'province', displayProvince)} title="Doble clic para editar">{displayProvince || '-'}</span>
                                                         )}
                                                     </td>
                                                 );
@@ -7955,7 +8143,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                                                                 onCancel={handleCancelEdit}
                                                             />
                                                         ) : (
-                                                            <span className="hover:bg-gray-50 px-1 py-0.5 rounded cursor-pointer" onDoubleClick={() => handleStartEdit(candidate.id, 'district', displayDistrict)} title="Doble clic para editar">{displayDistrict || '-'}</span>
+                                                            <span className="bulk-cell-text hover:bg-gray-50 px-1 py-0.5 rounded cursor-pointer" onDoubleClick={() => handleStartEdit(candidate.id, 'district', displayDistrict)} title="Doble clic para editar">{displayDistrict || '-'}</span>
                                                         )}
                                                     </td>
                                                 );
@@ -8232,9 +8420,9 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                                                             )
                                                         ) : (
                                                             <span
-                                                                className="text-gray-700 hover:bg-gray-50 px-1 py-0.5 rounded cursor-pointer inline-block min-w-[2rem]"
+                                                                className="bulk-cell-text text-gray-700 hover:bg-gray-50 px-1 py-0.5 rounded cursor-pointer"
                                                                 onDoubleClick={(e) => { e.stopPropagation(); handleStartEdit(candidate.id, fieldKey, value); }}
-                                                                title="Doble clic para editar"
+                                                                title="Clic para ver el texto completo · Doble clic para editar"
                                                             >
                                                                 {formatCustomCellDisplay(value, col)}
                                                             </span>

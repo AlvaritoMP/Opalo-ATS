@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { FileText, Download, Loader2, ChevronDown } from 'lucide-react';
 import { saveAs } from 'file-saver';
 import type { BulkDocumentTemplate, CustomColumn, Process } from '../types';
@@ -26,17 +27,31 @@ export const BulkDocumentsCell: React.FC<BulkDocumentsCellProps> = ({
 }) => {
     const [open, setOpen] = useState(false);
     const [generatingId, setGeneratingId] = useState<string | null>(null);
+    const [menuPos, setMenuPos] = useState<{ top: number; left: number } | null>(null);
+    const rootRef = useRef<HTMLDivElement>(null);
     const menuRef = useRef<HTMLDivElement>(null);
 
     useEffect(() => {
         if (!open) return;
+        const updatePos = () => {
+            const rect = rootRef.current?.getBoundingClientRect();
+            if (!rect) return;
+            setMenuPos({ top: rect.bottom + 4, left: rect.left });
+        };
+        updatePos();
         const handleClick = (e: MouseEvent) => {
-            if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
-                setOpen(false);
-            }
+            const target = e.target as Node;
+            if (rootRef.current?.contains(target) || menuRef.current?.contains(target)) return;
+            setOpen(false);
         };
         document.addEventListener('mousedown', handleClick);
-        return () => document.removeEventListener('mousedown', handleClick);
+        window.addEventListener('scroll', updatePos, true);
+        window.addEventListener('resize', updatePos);
+        return () => {
+            document.removeEventListener('mousedown', handleClick);
+            window.removeEventListener('scroll', updatePos, true);
+            window.removeEventListener('resize', updatePos);
+        };
     }, [open]);
 
     if (!templates.length) {
@@ -70,7 +85,7 @@ export const BulkDocumentsCell: React.FC<BulkDocumentsCellProps> = ({
     };
 
     return (
-        <div className="relative inline-block" ref={menuRef}>
+        <div className="relative inline-block max-w-full" ref={rootRef}>
             <button
                 type="button"
                 onClick={(e) => {
@@ -94,8 +109,12 @@ export const BulkDocumentsCell: React.FC<BulkDocumentsCellProps> = ({
                 {templates.length > 1 && <ChevronDown className="w-3 h-3" />}
             </button>
 
-            {open && templates.length > 1 && (
-                <div className="absolute left-0 top-full mt-1 z-50 min-w-[180px] bg-white border border-gray-200 rounded-lg shadow-lg py-1">
+            {open && templates.length > 1 && menuPos && createPortal(
+                <div
+                    ref={menuRef}
+                    className="min-w-[180px] bg-white border border-gray-200 rounded-lg shadow-lg py-1"
+                    style={{ position: 'fixed', top: menuPos.top, left: menuPos.left, zIndex: 80 }}
+                >
                     {templates.map(tpl => (
                         <button
                             key={tpl.id}
@@ -128,7 +147,8 @@ export const BulkDocumentsCell: React.FC<BulkDocumentsCellProps> = ({
                             Descargar todos
                         </button>
                     </div>
-                </div>
+                </div>,
+                document.body
             )}
         </div>
     );

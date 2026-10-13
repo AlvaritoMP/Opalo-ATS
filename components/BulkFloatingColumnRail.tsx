@@ -368,7 +368,7 @@ export const BulkFloatingColumnRail: React.FC<BulkFloatingColumnRailProps> = ({
                         {columnIds.map(colId => (
                             <div
                                 key={`${rowKey}-${colId}`}
-                                className={`${COMPACT_TD_CLASS} shrink-0 overflow-visible border-r border-gray-100 last:border-r-0 bg-inherit pointer-events-auto`}
+                                className={`${COMPACT_TD_CLASS} shrink-0 overflow-hidden border-r border-gray-100 last:border-r-0 bg-inherit pointer-events-auto`}
                                 style={{
                                     width: getColumnWidth(colId, columnWidths),
                                     minWidth: getColumnWidth(colId, columnWidths),
