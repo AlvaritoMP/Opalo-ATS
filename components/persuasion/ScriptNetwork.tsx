@@ -133,6 +133,30 @@ function nearestSpin(current: number, target: number): number {
     return next;
 }
 
+function clamp(value: number, min: number, max: number): number {
+    return Math.min(max, Math.max(min, value));
+}
+
+/** Giro horario de SVG: el nodo queda donde se ve después de `rotate(spin)`. */
+function rotatePoint(x: number, y: number, cx: number, cy: number, degrees: number): { x: number; y: number } {
+    const rad = (degrees * Math.PI) / 180;
+    const dx = x - cx;
+    const dy = y - cy;
+    const cos = Math.cos(rad);
+    const sin = Math.sin(rad);
+    return { x: cx + dx * cos - dy * sin, y: cy + dx * sin + dy * cos };
+}
+
+interface Camera {
+    scale: number;
+    x: number;
+    y: number;
+}
+
+const MIN_SCALE = 0.35;
+const MAX_SCALE = 16;
+const FRAME = 680;
+
 export const ScriptNetwork: React.FC<ScriptNetworkProps> = ({
     groups,
     loose,
@@ -147,6 +171,12 @@ export const ScriptNetwork: React.FC<ScriptNetworkProps> = ({
 }) => {
     const spinRef = useRef(0);
     const [spin, setSpin] = useState(0);
+    const frameRef = useRef<HTMLDivElement>(null);
+    const [cam, setCam] = useState<Camera>({ scale: 1, x: 0, y: 0 });
+    const camRef = useRef(cam);
+    camRef.current = cam;
+    const userMoved = useRef(false);
+    const dragRef = useRef<{ id: number; px: number; py: number; x: number; y: number } | null>(null);
 
     const layout = useMemo(() => {
         const sectors = [...groups.map(group => ({ group, nodes: group.nodes })), ...(loose.length ? [{ group: null, nodes: loose }] : [])];
@@ -154,17 +184,12 @@ export const ScriptNetwork: React.FC<ScriptNetworkProps> = ({
         const sector = (Math.PI * 2) / count;
         const levelMaps = sectors.map(item => levelsInGroup(item.nodes));
         const maxLevel = Math.max(1, ...levelMaps.flatMap(map => [...map.values()]));
-        const axisRadius = 78;
-        const step = 92;
-        const outer = axisRadius + maxLevel * step;
-        const pad = 28;
-        const size = (outer + pad) * 2;
-        const cx = size / 2;
-        const cy = size / 2;
+        const axisRadius = 86;
+        const step = 108;
+        const minChord = 52;
 
-        const placed: Placed[] = [];
-        const edges: Edge[] = [];
-        const wedges: { key: string; d: string; active: boolean }[] = [];
+        const placedDraft: Array<Omit<Placed, 'x' | 'y'> & { radius: number }> = [];
+        let maxR = axisRadius + 24;
 
         sectors.forEach((item, sectorIndex) => {
             const mid = -Math.PI / 2 + sectorIndex * sector + sector / 2;
@@ -176,48 +201,74 @@ export const ScriptNetwork: React.FC<ScriptNetworkProps> = ({
                 list.push(node);
                 byLevel.set(level, list);
             }
-            const axisPoint = polar(cx, cy, axisRadius, mid);
             if (item.group) {
-                placed.push({
+                placedDraft.push({
                     key: `axis-${item.group.id}`,
-                    ...axisPoint,
                     angle: mid,
                     kind: 'axis',
                     axisId: item.group.id,
                     level: 0,
-                });
-                wedges.push({
-                    key: item.group.id,
-                    d: wedge(cx, cy, 46, outer - 8, mid - sector * 0.46, mid + sector * 0.46),
-                    active: false,
+                    radius: axisRadius,
                 });
             }
-
-            const positionOf = new Map<string, { x: number; y: number }>();
             for (const [level, nodes] of byLevel) {
-                const span = sector * 0.62;
+                const countN = nodes.length;
+                const span = countN <= 1 ? 0 : Math.min(sector * 0.92, Math.max(sector * 0.62, (countN - 1) * 0.2));
+                const gap = countN <= 1 ? 0 : span / (countN - 1);
+                const needed = gap > 0.001 ? minChord / (2 * Math.sin(gap / 2)) : 0;
+                const radius = Math.max(axisRadius + level * step, needed);
+                maxR = Math.max(maxR, radius);
                 nodes.forEach((node, index) => {
-                    const offset = nodes.length === 1 ? 0 : -span / 2 + (index / (nodes.length - 1)) * span;
-                    const angle = mid + offset;
-                    const point = polar(cx, cy, axisRadius + level * step, angle);
-                    positionOf.set(node.id, point);
-                    placed.push({
+                    const offset = countN === 1 ? 0 : -span / 2 + index * gap;
+                    placedDraft.push({
                         key: node.id,
-                        ...point,
-                        angle,
+                        angle: mid + offset,
                         kind: 'question',
                         node,
                         index,
                         level,
                         axisId: item.group?.id,
+                        radius,
                     });
+                });
+            }
+        });
+
+        const pad = 72;
+        const outer = maxR + pad;
+        const size = outer * 2;
+        const cx = outer;
+        const cy = outer;
+        const placed: Placed[] = placedDraft.map(point => ({
+            ...polar(cx, cy, point.radius, point.angle),
+            key: point.key,
+            angle: point.angle,
+            kind: point.kind,
+            axisId: point.axisId,
+            node: point.node,
+            index: point.index,
+            level: point.level,
+        }));
+        const positionOf = new Map(placed.filter(point => point.node).map(point => [point.node!.id, point]));
+        const edges: Edge[] = [];
+        const wedges: { key: string; d: string; active: boolean }[] = [];
+
+        sectors.forEach((item, sectorIndex) => {
+            const mid = -Math.PI / 2 + sectorIndex * sector + sector / 2;
+            const levelOf = levelMaps[sectorIndex];
+            const axisPoint = placed.find(point => point.kind === 'axis' && point.axisId === item.group?.id);
+            if (item.group && axisPoint) {
+                wedges.push({
+                    key: item.group.id,
+                    d: wedge(cx, cy, 46, maxR + 16, mid - sector * 0.46, mid + sector * 0.46),
+                    active: false,
                 });
             }
 
             const roots = item.nodes.filter(node => (levelOf.get(node.id) ?? 1) === 1);
             for (const root of roots) {
                 const point = positionOf.get(root.id);
-                if (!point || !item.group) continue;
+                if (!point || !item.group || !axisPoint) continue;
                 edges.push({
                     key: `axis-${item.group.id}-${root.id}`,
                     x1: axisPoint.x,
@@ -255,7 +306,7 @@ export const ScriptNetwork: React.FC<ScriptNetworkProps> = ({
                 radius: axisRadius + (index + 1) * step,
                 label: `Nivel ${index + 1}`,
             })),
-        ];
+        ].filter(ring => ring.radius <= maxR + 8);
 
         return { size, cx, cy, placed, edges, wedges, rings, axisRadius };
     }, [answers, groups, loose]);
@@ -264,25 +315,165 @@ export const ScriptNetwork: React.FC<ScriptNetworkProps> = ({
         () => relatedKeys(groups, loose, focusedId, focusedAxis),
         [focusedAxis, focusedId, groups, loose],
     );
+    const layoutRef = useRef(layout);
+    layoutRef.current = layout;
+
+    const framePoint = (point: { x: number; y: number }, degrees: number, forceReadable: boolean) => {
+        const currentLayout = layoutRef.current;
+        const seen = rotatePoint(point.x, point.y, currentLayout.cx, currentLayout.cy, degrees);
+        setCam(current => {
+            const readable = clamp(currentLayout.size / FRAME, MIN_SCALE, MAX_SCALE);
+            const width = currentLayout.size / current.scale;
+            const inside =
+                seen.x > current.x + 48 &&
+                seen.x < current.x + width - 48 &&
+                seen.y > current.y + 48 &&
+                seen.y < current.y + width - 48;
+            const tooSmall = current.scale < readable * 0.85;
+            if (inside && !tooSmall && userMoved.current && !forceReadable) return current;
+            const scale = tooSmall || forceReadable || !userMoved.current ? readable : current.scale;
+            const next = currentLayout.size / scale;
+            return { scale, x: seen.x - next / 2, y: seen.y - next / 2 };
+        });
+    };
+
+    const shapeKey = `${groups.map(group => `${group.id}:${group.nodes.map(node => node.id).join('.')}`).join('|')}|${loose.map(node => node.id).join('.')}`;
 
     useEffect(() => {
+        if (userMoved.current) return;
+        const currentLayout = layoutRef.current;
         const target = focusedId
-            ? layout.placed.find(point => point.node?.id === focusedId)
+            ? currentLayout.placed.find(point => point.node?.id === focusedId)
             : focusedAxis
-              ? layout.placed.find(point => point.kind === 'axis' && point.axisId === focusedAxis)
+              ? currentLayout.placed.find(point => point.kind === 'axis' && point.axisId === focusedAxis)
               : undefined;
         if (!target) return;
         const faceTop = -90 - (target.angle * 180) / Math.PI;
         const dest = nearestSpin(spinRef.current, faceTop);
         spinRef.current = dest;
         setSpin(dest);
-    }, [focusedAxis, focusedId, layout.placed]);
+        framePoint(target, dest, true);
+    }, [focusedAxis, focusedId, shapeKey]);
+
+    useEffect(() => {
+        const el = frameRef.current;
+        if (!el) return;
+        const onWheel = (event: WheelEvent) => {
+            event.preventDefault();
+            const rect = el.getBoundingClientRect();
+            if (rect.width < 1 || rect.height < 1) return;
+            const currentLayout = layoutRef.current;
+            const current = camRef.current;
+            const vbW = currentLayout.size / current.scale;
+            const vbH = currentLayout.size / current.scale;
+            const fit = Math.min(rect.width / vbW, rect.height / vbH);
+            const contentW = vbW * fit;
+            const contentH = vbH * fit;
+            const ox = (rect.width - contentW) / 2;
+            const oy = (rect.height - contentH) / 2;
+            const px = (event.clientX - rect.left - ox) / contentW;
+            const py = (event.clientY - rect.top - oy) / contentH;
+            const factor = event.deltaY < 0 ? 1.16 : 1 / 1.16;
+            const nextScale = clamp(current.scale * factor, MIN_SCALE, MAX_SCALE);
+            const anchorX = current.x + px * vbW;
+            const anchorY = current.y + py * vbH;
+            const nextW = currentLayout.size / nextScale;
+            const nextH = currentLayout.size / nextScale;
+            userMoved.current = true;
+            setCam({ scale: nextScale, x: anchorX - px * nextW, y: anchorY - py * nextH });
+        };
+        el.addEventListener('wheel', onWheel, { passive: false });
+        return () => el.removeEventListener('wheel', onWheel);
+    }, []);
+
+    const zoomBy = (factor: number) => {
+        const currentLayout = layoutRef.current;
+        userMoved.current = true;
+        setCam(current => {
+            const nextScale = clamp(current.scale * factor, MIN_SCALE, MAX_SCALE);
+            const width = currentLayout.size / current.scale;
+            const midX = current.x + width / 2;
+            const midY = current.y + width / 2;
+            const next = currentLayout.size / nextScale;
+            return { scale: nextScale, x: midX - next / 2, y: midY - next / 2 };
+        });
+    };
+
+    const showAll = () => {
+        userMoved.current = true;
+        setCam({ scale: 1, x: 0, y: 0 });
+    };
+
+    const aimAt = (target: Placed, forceReadable: boolean) => {
+        const faceTop = -90 - (target.angle * 180) / Math.PI;
+        const dest = nearestSpin(spinRef.current, faceTop);
+        spinRef.current = dest;
+        setSpin(dest);
+        framePoint(target, dest, forceReadable);
+    };
+
+    const nodeIsReadable = (target: Placed) => {
+        const current = camRef.current;
+        const currentLayout = layoutRef.current;
+        const seen = rotatePoint(target.x, target.y, currentLayout.cx, currentLayout.cy, spinRef.current);
+        const width = currentLayout.size / current.scale;
+        const readable = clamp(currentLayout.size / FRAME, MIN_SCALE, MAX_SCALE);
+        const inside =
+            seen.x > current.x + 28 &&
+            seen.x < current.x + width - 28 &&
+            seen.y > current.y + 28 &&
+            seen.y < current.y + width - 28;
+        return inside && current.scale >= readable * 0.85;
+    };
 
     const chooseNode = (id: string) => {
+        const target = layoutRef.current.placed.find(point => point.node?.id === id);
+        if (target && nodeIsReadable(target)) {
+            userMoved.current = true;
+        } else if (target) {
+            userMoved.current = true;
+            aimAt(target, true);
+        }
         onFocusNode(id);
     };
     const chooseAxis = (id: AxisId) => {
+        const group = groups.find(item => item.id === id);
+        const pending = group?.nodes.find(node => !answers[node.id]) ?? group?.nodes[0];
+        const target = pending
+            ? layoutRef.current.placed.find(point => point.node?.id === pending.id)
+            : layoutRef.current.placed.find(point => point.kind === 'axis' && point.axisId === id);
+        userMoved.current = true;
+        if (target) aimAt(target, true);
         onFocusAxis(id);
+    };
+
+    const startDrag = (event: React.PointerEvent<SVGRectElement>) => {
+        dragRef.current = {
+            id: event.pointerId,
+            px: event.clientX,
+            py: event.clientY,
+            x: camRef.current.x,
+            y: camRef.current.y,
+        };
+        event.currentTarget.setPointerCapture(event.pointerId);
+    };
+    const moveDrag = (event: React.PointerEvent<SVGRectElement>) => {
+        const drag = dragRef.current;
+        const el = frameRef.current;
+        if (!drag || drag.id !== event.pointerId || !el) return;
+        const rect = el.getBoundingClientRect();
+        const currentLayout = layoutRef.current;
+        const scale = camRef.current.scale;
+        const vbW = currentLayout.size / scale;
+        const vbH = currentLayout.size / scale;
+        const fit = Math.min(rect.width / vbW, rect.height / vbH) || 1;
+        const dx = ((event.clientX - drag.px) / (vbW * fit)) * vbW;
+        const dy = ((event.clientY - drag.py) / (vbH * fit)) * vbH;
+        userMoved.current = true;
+        setCam({ scale, x: drag.x - dx, y: drag.y - dy });
+    };
+    const endDrag = () => {
+        dragRef.current = null;
     };
 
     return (
@@ -308,8 +499,26 @@ export const ScriptNetwork: React.FC<ScriptNetworkProps> = ({
                     );
                 })}
             </div>
-            <div className="relative min-h-0 flex-1 overflow-hidden">
-            <svg viewBox={`0 0 ${layout.size} ${layout.size}`} className="block h-full w-full" role="img" aria-label="Red circular de la llamada">
+            <div ref={frameRef} className="relative min-h-0 flex-1 overflow-hidden" style={{ touchAction: 'none' }}>
+            <svg
+                viewBox={`${cam.x} ${cam.y} ${layout.size / cam.scale} ${layout.size / cam.scale}`}
+                className="block h-full w-full"
+                role="img"
+                aria-label="Red circular de la llamada"
+            >
+                <rect
+                    x={cam.x}
+                    y={cam.y}
+                    width={layout.size / cam.scale}
+                    height={layout.size / cam.scale}
+                    fill="transparent"
+                    pointerEvents="all"
+                    className="cursor-grab"
+                    onPointerDown={startDrag}
+                    onPointerMove={moveDrag}
+                    onPointerUp={endDrag}
+                    onPointerCancel={endDrag}
+                />
                 {layout.rings.map(ring => (
                     <g key={ring.label} pointerEvents="none">
                         <circle cx={layout.cx} cy={layout.cy} r={ring.radius} fill="none" stroke="#e2e8f0" strokeWidth="1" />
@@ -365,15 +574,22 @@ export const ScriptNetwork: React.FC<ScriptNetworkProps> = ({
                             return (
                                 <g key={point.key} className="cursor-pointer" transform={upright}>
                                     <circle
-                                        r="22"
-                                        fill={heatColor || '#ffffff'}
-                                        stroke={selected ? '#312e81' : heatColor || '#64748b'}
-                                        strokeWidth={selected ? 3.4 : 2}
+                                        r="30"
+                                        fill="transparent"
+                                        pointerEvents="all"
+                                        data-hit="1"
                                         onPointerDown={event => {
                                             event.preventDefault();
                                             event.stopPropagation();
                                             chooseAxis(point.axisId!);
                                         }}
+                                    />
+                                    <circle
+                                        r="22"
+                                        fill={heatColor || '#ffffff'}
+                                        stroke={selected ? '#312e81' : heatColor || '#64748b'}
+                                        strokeWidth={selected ? 3.4 : 2}
+                                        pointerEvents="none"
                                     />
                                     <text y={32} pointerEvents="none" textAnchor="middle" fontSize="12" fontWeight="700" fill={selected ? '#312e81' : '#334155'}>
                                         <tspan x="0" dy="0">{line1}</tspan>
@@ -393,15 +609,22 @@ export const ScriptNetwork: React.FC<ScriptNetworkProps> = ({
                             <g key={point.key} className="cursor-pointer" opacity={linked || current ? 1 : 0.85} transform={upright}>
                                 <title>{`Nivel ${point.level}. ${answered ? `${say} — respondida` : say}`}</title>
                                 <circle
-                                    r={current ? 20 : 16}
-                                    fill={fill}
-                                    stroke={current ? '#1e1b4b' : heatColor || (answered ? '#065f46' : '#94a3b8')}
-                                    strokeWidth={current ? 3 : 1.6}
+                                    r="24"
+                                    fill="transparent"
+                                    pointerEvents="all"
+                                    data-hit="1"
                                     onPointerDown={event => {
                                         event.preventDefault();
                                         event.stopPropagation();
                                         chooseNode(node.id);
                                     }}
+                                />
+                                <circle
+                                    r={current ? 20 : 16}
+                                    fill={fill}
+                                    stroke={current ? '#1e1b4b' : heatColor || (answered ? '#065f46' : '#94a3b8')}
+                                    strokeWidth={current ? 3 : 1.6}
+                                    pointerEvents="none"
                                 />
                                 <text y="5" pointerEvents="none" textAnchor="middle" fontSize="12" fontWeight="700" fill={current || answered ? '#ffffff' : '#475569'}>
                                     {point.level}
@@ -411,6 +634,47 @@ export const ScriptNetwork: React.FC<ScriptNetworkProps> = ({
                     })}
                 </g>
             </svg>
+            <div className="absolute inset-x-1 bottom-1 z-20 flex items-center justify-between gap-1">
+                <p className="pointer-events-none text-[10px] text-slate-400">Rueda: zoom · arrastra el fondo</p>
+                <div className="flex gap-1">
+                    <button
+                        type="button"
+                        title="Alejar"
+                        onPointerDown={event => {
+                            event.preventDefault();
+                            event.stopPropagation();
+                            zoomBy(1 / 1.25);
+                        }}
+                        className="h-6 w-6 rounded-md bg-white text-sm font-bold text-slate-700 shadow ring-1 ring-slate-200 hover:bg-slate-50"
+                    >
+                        −
+                    </button>
+                    <button
+                        type="button"
+                        title="Acercar"
+                        onPointerDown={event => {
+                            event.preventDefault();
+                            event.stopPropagation();
+                            zoomBy(1.25);
+                        }}
+                        className="h-6 w-6 rounded-md bg-white text-sm font-bold text-slate-700 shadow ring-1 ring-slate-200 hover:bg-slate-50"
+                    >
+                        +
+                    </button>
+                    <button
+                        type="button"
+                        title="Ver toda la red"
+                        onPointerDown={event => {
+                            event.preventDefault();
+                            event.stopPropagation();
+                            showAll();
+                        }}
+                        className="h-6 rounded-md bg-white px-2 text-[10px] font-semibold text-slate-700 shadow ring-1 ring-slate-200 hover:bg-slate-50"
+                    >
+                        Toda
+                    </button>
+                </div>
+            </div>
             </div>
         </div>
     );
