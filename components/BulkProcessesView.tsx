@@ -1178,6 +1178,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
         if (!process || list.length === 0) return;
         setPsychBulkCandidates(list);
         setShowPsychBulkModal(true);
+        void psycholaboralApi.getInventory().then(setPsychInventory).catch(() => {});
     }, [process]);
 
     const baseColumns = BASE_COLUMNS;
@@ -1905,6 +1906,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
         });
         setPsychReportCandidates(enriched);
         setShowPsychReportModal(true);
+        void psycholaboralApi.getInventory().then(setPsychInventory).catch(() => {});
     }, [process, customColumns, columnValues, legacyColumnIdToName]);
 
     const syncColumnValuesFromDatabase = useCallback(async (
@@ -3564,6 +3566,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
         } else {
             await loadBulkProcesses();
         }
+        void psycholaboralApi.getInventory().then(setPsychInventory).catch(() => {});
         setShowProcessModal(false);
         setEditingProcess(null);
     };
@@ -8309,6 +8312,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                         setEditingProcess(null);
                     }}
                     onSave={handleProcessSaved}
+                    onInventorySaved={setPsychInventory}
                 />
             )}
 

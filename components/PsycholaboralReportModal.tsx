@@ -11,6 +11,7 @@ import {
     generateConclusionFromTemplate,
     mergePsycholaboralInventory,
     buildPsycholaboralDisplayName,
+    alignCompetencyRatings,
 } from '../lib/psycholaboralUtils';
 import {
     resolveCandidateAge,
@@ -50,8 +51,13 @@ export const PsycholaboralReportModal: React.FC<Props> = ({
     legacyColumnIdToName = {},
 }) => {
     const { state, actions } = useAppState();
-    const inventory = useMemo(() => mergePsycholaboralInventory(initialInventory), [initialInventory]);
+    const [inventorySource, setInventorySource] = useState(initialInventory);
+    const inventory = useMemo(() => mergePsycholaboralInventory(inventorySource), [inventorySource]);
     const competencies = useMemo(() => resolveProcessCompetencies(process, inventory), [process, inventory]);
+    const competenciesRef = useRef(competencies);
+    competenciesRef.current = competencies;
+    const inventoryRef = useRef(inventory);
+    inventoryRef.current = inventory;
 
     const [index, setIndex] = useState(0);
     const [evaluation, setEvaluation] = useState<PsycholaboralEvaluation | null>(null);
@@ -97,6 +103,38 @@ export const PsycholaboralReportModal: React.FC<Props> = ({
     }, [candidate, reportAge]);
 
     useEffect(() => {
+        setInventorySource(initialInventory);
+    }, [initialInventory]);
+
+    useEffect(() => {
+        if (!isOpen) return;
+        let cancelled = false;
+        psycholaboralApi.getInventory()
+            .then(inv => {
+                if (!cancelled) setInventorySource(inv);
+            })
+            .catch(() => {});
+        return () => {
+            cancelled = true;
+        };
+    }, [isOpen]);
+
+    useEffect(() => {
+        setEvaluation(prev => {
+            if (!prev) return prev;
+            const aligned = alignCompetencyRatings(competencies, prev.competencies);
+            const same = aligned.length === prev.competencies.length
+                && aligned.every((rating, i) => {
+                    const current = prev.competencies[i];
+                    return current?.competencyId === rating.competencyId
+                        && current.obtainedScore === rating.obtainedScore
+                        && (current.observations || '') === rating.observations;
+                });
+            return same ? prev : { ...prev, competencies: aligned };
+        });
+    }, [competencies]);
+
+    useEffect(() => {
         if (!isOpen || !candidate) {
             setBehaviorBlock('');
             return;
@@ -121,8 +159,8 @@ export const PsycholaboralReportModal: React.FC<Props> = ({
             .getEvaluation(candidate.id)
             .then(saved => {
                 const empty = createEmptyEvaluation(
-                    inventory,
-                    competencies,
+                    inventoryRef.current,
+                    competenciesRef.current,
                     saved,
                     process.bulkConfig?.psycholaboral?.defaultPositionTitle || process.title
                 );
@@ -203,11 +241,17 @@ export const PsycholaboralReportModal: React.FC<Props> = ({
         patch: Partial<{ obtainedScore: number; observations: string }>
     ) => {
         if (!evaluation) return;
+        const comp = competencies.find(c => c.id === competencyId);
+        const current = evaluation.competencies.find(c => c.competencyId === competencyId) || {
+            competencyId,
+            obtainedScore: comp?.expectedScore || 0,
+            observations: '',
+        };
+        const next = { ...current, ...patch };
+        const rest = evaluation.competencies.filter(c => c.competencyId !== competencyId);
         setEvaluation({
             ...evaluation,
-            competencies: evaluation.competencies.map(c =>
-                c.competencyId === competencyId ? { ...c, ...patch } : c
-            ),
+            competencies: alignCompetencyRatings(competencies, [...rest, next]),
         });
     };
 
@@ -398,10 +442,18 @@ export const PsycholaboralReportModal: React.FC<Props> = ({
                                 </span>
                             </h3>
                             <p className="text-xs text-gray-500 mb-2">Escala: 1-3 Bajo · 4-6 Promedio · 7-9 Alto</p>
+                            {competencies.length === 0 ? (
+                                <p className="text-sm text-gray-500 border border-dashed rounded-lg px-3 py-4">
+                                    Este proceso no tiene competencias en el set seleccionado. Ábrelas en la edición del proceso, guarda el inventario y vuelve a guardar el proceso.
+                                </p>
+                            ) : (
                             <div className="space-y-3">
                                 {competencies.map(comp => {
-                                    const rating = evaluation.competencies.find(c => c.competencyId === comp.id);
-                                    if (!rating) return null;
+                                    const rating = evaluation.competencies.find(c => c.competencyId === comp.id) || {
+                                        competencyId: comp.id,
+                                        obtainedScore: comp.expectedScore,
+                                        observations: '',
+                                    };
                                     return (
                                         <div key={comp.id} className="border rounded-lg p-3 grid md:grid-cols-[1fr,80px,80px,1fr] gap-2 items-start">
                                             <div>
@@ -443,6 +495,7 @@ export const PsycholaboralReportModal: React.FC<Props> = ({
                                     );
                                 })}
                             </div>
+                            )}
                         </section>
 
                         {/* Conclusiones */}

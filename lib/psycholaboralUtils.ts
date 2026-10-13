@@ -51,12 +51,48 @@ export function resolveProcessCompetencies(
     inventory: PsycholaboralInventory
 ): PsycholaboralCompetency[] {
     const config = process?.bulkConfig?.psycholaboral;
-    if (config?.competencies?.length) return config.competencies;
     if (config?.competencySetId) {
         const set = inventory.competencySets.find(s => s.id === config.competencySetId);
         if (set?.competencies?.length) return set.competencies;
     }
+    if (config?.competencies?.length) return config.competencies;
     return inventory.competencySets[0]?.competencies || [];
+}
+
+/** Copia el set elegido al proceso para que el informe no dependa de un inventario desactualizado. */
+export function snapshotPsycholaboralConfig(
+    psych: PsycholaboralProcessConfig | undefined,
+    inventory: PsycholaboralInventory
+): PsycholaboralProcessConfig {
+    const selectedId = psych?.competencySetId || inventory.competencySets[0]?.id;
+    const set = selectedId
+        ? inventory.competencySets.find(s => s.id === selectedId)
+        : undefined;
+    const competencies = set?.competencies?.length
+        ? set.competencies
+        : psych?.competencies;
+    return {
+        ...(psych || {}),
+        enabled: psych?.enabled !== false,
+        ...(selectedId ? { competencySetId: selectedId } : {}),
+        ...(competencies?.length ? { competencies } : {}),
+    };
+}
+
+/** Conserva puntajes ya cargados y agrega filas para competencias nuevas del set del proceso. */
+export function alignCompetencyRatings(
+    competencies: PsycholaboralCompetency[],
+    ratings: PsycholaboralEvaluation['competencies'] | undefined | null
+): PsycholaboralEvaluation['competencies'] {
+    const existing = Array.isArray(ratings) ? ratings : [];
+    return competencies.map(comp => {
+        const prev = existing.find(r => r.competencyId === comp.id);
+        return {
+            competencyId: comp.id,
+            obtainedScore: typeof prev?.obtainedScore === 'number' ? prev.obtainedScore : (comp.expectedScore || 0),
+            observations: prev?.observations || '',
+        };
+    });
 }
 
 export function calculateCompetencyTotals(
@@ -181,13 +217,7 @@ export function createEmptyEvaluation(
                     level: 'promedio' as PersonalityLevel,
                     observations: '',
                 })),
-            competencies: existing.competencies?.length
-                ? existing.competencies
-                : competencies.map(c => ({
-                    competencyId: c.id,
-                    obtainedScore: c.expectedScore,
-                    observations: '',
-                })),
+            competencies: alignCompetencyRatings(competencies, existing.competencies),
             conclusions: existing.conclusions ?? '',
             positionApplied: existing.positionApplied || positionApplied || '',
             reportDate: existing.reportDate || new Date().toISOString().split('T')[0],
@@ -201,11 +231,7 @@ export function createEmptyEvaluation(
             level: 'promedio' as PersonalityLevel,
             observations: '',
         })),
-        competencies: competencies.map(c => ({
-            competencyId: c.id,
-            obtainedScore: c.expectedScore,
-            observations: '',
-        })),
+        competencies: alignCompetencyRatings(competencies, null),
         conclusions: '',
         suitabilityStatus: 'apto',
         positionApplied: positionApplied || '',

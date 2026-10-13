@@ -8,6 +8,7 @@ import { clientsApi } from '../lib/api/clients';
 import { isScoreIaColumnVisible, pickBulkTableLayoutConfig } from '../lib/bulkTableColumns';
 import { psycholaboralApi } from '../lib/api/psycholaboral';
 import { createDefaultPsycholaboralInventory } from '../lib/psycholaboralDefaults';
+import { snapshotPsycholaboralConfig } from '../lib/psycholaboralUtils';
 import { PsycholaboralConfigSection } from './PsycholaboralConfigSection';
 import { AssessmentProfileField } from './AssessmentProfileField';
 import { PsycholaboralInventoryModal } from './PsycholaboralInventoryModal';
@@ -34,9 +35,10 @@ interface BulkProcessEditorModalProps {
     onSave: () => void;
     /** Solo actualiza bulkConfig y etapas; no convierte el proceso en masivo */
     configOnly?: boolean;
+    onInventorySaved?: (inventory: PsycholaboralInventory) => void;
 }
 
-export const BulkProcessEditorModal: React.FC<BulkProcessEditorModalProps> = ({ process, onClose, onSave, configOnly = false }) => {
+export const BulkProcessEditorModal: React.FC<BulkProcessEditorModalProps> = ({ process, onClose, onSave, configOnly = false, onInventorySaved }) => {
     const { state, actions } = useAppState();
     const [title, setTitle] = useState(process?.title || '');
     const [description, setDescription] = useState(process?.description || '');
@@ -61,6 +63,7 @@ export const BulkProcessEditorModal: React.FC<BulkProcessEditorModalProps> = ({ 
     
     const [killerQuestions, setKillerQuestions] = useState<KillerQuestion[]>(process?.bulkConfig?.killerQuestions || []);
     const [psychInventory, setPsychInventory] = useState<PsycholaboralInventory>(createDefaultPsycholaboralInventory());
+    const [psychInventoryReady, setPsychInventoryReady] = useState(false);
     const [showPsychInventory, setShowPsychInventory] = useState(false);
     const [flyerUrl, setFlyerUrl] = useState(process?.flyerUrl || '');
     const [flyerPosition, setFlyerPosition] = useState(process?.flyerPosition || 'center center');
@@ -75,7 +78,10 @@ export const BulkProcessEditorModal: React.FC<BulkProcessEditorModalProps> = ({ 
     const scoreIaColumnVisible = isScoreIaColumnVisible(bulkConfig);
 
     useEffect(() => {
-        psycholaboralApi.getInventory().then(setPsychInventory).catch(() => {});
+        psycholaboralApi.getInventory()
+            .then(setPsychInventory)
+            .catch(() => {})
+            .finally(() => setPsychInventoryReady(true));
     }, []);
 
     useEffect(() => {
@@ -369,9 +375,16 @@ export const BulkProcessEditorModal: React.FC<BulkProcessEditorModalProps> = ({ 
 
             const stageColorMaps = buildStageColorMaps(stagesPayload);
 
+            const configToSave: BulkProcessConfig = psychInventoryReady
+                ? {
+                    ...bulkConfig,
+                    psycholaboral: snapshotPsycholaboralConfig(bulkConfig.psycholaboral, psychInventory),
+                }
+                : bulkConfig;
+
             const mergedBulkConfig: BulkProcessConfig = {
                 ...pickBulkTableLayoutConfig(process?.bulkConfig),
-                ...bulkConfig,
+                ...configToSave,
                 ...stageColorMaps,
                 killerQuestions: killerQuestions,
                 ...(configOnly ? { highDensityTableEnabled: true } : {}),
@@ -1013,7 +1026,11 @@ export const BulkProcessEditorModal: React.FC<BulkProcessEditorModalProps> = ({ 
             <PsycholaboralInventoryModal
                 isOpen={showPsychInventory}
                 onClose={() => setShowPsychInventory(false)}
-                onSaved={setPsychInventory}
+                onSaved={inventory => {
+                    setPsychInventory(inventory);
+                    setPsychInventoryReady(true);
+                    onInventorySaved?.(inventory);
+                }}
             />
         </div>
     );

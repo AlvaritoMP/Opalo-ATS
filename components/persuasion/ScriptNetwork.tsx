@@ -293,14 +293,11 @@ export const ScriptNetwork: React.FC<ScriptNetworkProps> = ({
                 .map(point => rotateAround(point.x, point.y, layout.cx, layout.cy, spinValue));
             const selected = rotateAround(target.x, target.y, layout.cx, layout.cy, spinValue);
             const points = pool.length ? pool : [selected];
-            const centroid = points.reduce((acc, point) => ({ x: acc.x + point.x, y: acc.y + point.y }), { x: 0, y: 0 });
-            centroid.x /= points.length;
-            centroid.y /= points.length;
-            const fx = selected.x * 0.7 + centroid.x * 0.3;
-            const fy = selected.y * 0.7 + centroid.y * 0.3;
-            let maxDist = 64;
+            const fx = selected.x * 0.42 + layout.cx * 0.58;
+            const fy = selected.y * 0.42 + layout.cy * 0.58;
+            let maxDist = 90;
             for (const point of points) maxDist = Math.max(maxDist, Math.hypot(point.x - fx, point.y - fy));
-            const zoom = Math.max(1.55, Math.min(2.65, (layout.size * 0.32) / maxDist));
+            const zoom = Math.max(1.12, Math.min(1.55, (layout.size * 0.46) / maxDist));
             return { zoom, fx, fy };
         };
         const dest = sample(destSpin);
@@ -338,7 +335,25 @@ export const ScriptNetwork: React.FC<ScriptNetworkProps> = ({
     };
 
     return (
-        <div className="relative h-full min-h-0">
+        <div className="flex h-full min-h-0 flex-col">
+            <div className="flex shrink-0 flex-wrap gap-1 px-1 pt-1">
+                {groups.map(group => {
+                    const active = focusedAxis === group.id;
+                    return (
+                        <button
+                            key={group.id}
+                            type="button"
+                            onClick={() => focusAxis(group.id)}
+                            className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                                active ? 'bg-indigo-700 text-white' : 'bg-white text-slate-600 ring-1 ring-slate-200 hover:bg-indigo-50'
+                            }`}
+                        >
+                            {group.label}
+                        </button>
+                    );
+                })}
+            </div>
+            <div className="relative min-h-0 flex-1">
             <button
                 type="button"
                 className="absolute right-1 top-1 z-10 rounded-full bg-white/95 px-2.5 py-1 text-[10px] font-semibold text-slate-600 shadow-sm ring-1 ring-slate-200"
@@ -349,7 +364,7 @@ export const ScriptNetwork: React.FC<ScriptNetworkProps> = ({
             <svg viewBox={`0 0 ${layout.size} ${layout.size}`} className="h-full w-full" role="img" aria-label="Red circular de la llamada">
                 <g transform={`translate(${layout.cx} ${layout.cy}) scale(${camera.zoom || 1}) translate(${-(camera.fx || layout.cx)} ${-(camera.fy || layout.cy)})`}>
                 {layout.rings.map(ring => (
-                    <g key={ring.label} opacity={camera.zoom > 1.25 ? 0 : 1}>
+                    <g key={ring.label} pointerEvents="none" opacity={camera.zoom > 1.35 ? 0 : 1}>
                         <circle cx={layout.cx} cy={layout.cy} r={ring.radius} fill="none" stroke="#e2e8f0" strokeWidth="1" />
                         <text
                             x={layout.cx}
@@ -363,13 +378,15 @@ export const ScriptNetwork: React.FC<ScriptNetworkProps> = ({
                         </text>
                     </g>
                 ))}
-                <circle cx={layout.cx} cy={layout.cy} r="18" fill="#f8fafc" stroke="#cbd5e1" />
-                <text x={layout.cx} y={layout.cy + 4} textAnchor="middle" fontSize="9" fontWeight="700" fill="#64748b">
-                    Inicio
-                </text>
+                <g pointerEvents="none">
+                    <circle cx={layout.cx} cy={layout.cy} r="18" fill="#f8fafc" stroke="#cbd5e1" />
+                    <text x={layout.cx} y={layout.cy + 4} textAnchor="middle" fontSize="9" fontWeight="700" fill="#64748b">
+                        Inicio
+                    </text>
+                </g>
                 <g transform={`rotate(${spin} ${layout.cx} ${layout.cy})`}>
                     {layout.wedges.map(item => (
-                        <path key={item.key} d={item.d} fill={focusedAxis === item.key ? '#e0e7ff' : '#f8fafc'} stroke="none" opacity={overview || related.size === 0 || focusedAxis === item.key ? 1 : 0.35} />
+                        <path key={item.key} d={item.d} pointerEvents="none" fill={focusedAxis === item.key ? '#e0e7ff' : '#f8fafc'} stroke="none" opacity={overview || related.size === 0 || focusedAxis === item.key ? 1 : 0.35} />
                     ))}
                     {layout.edges.map(edge => {
                         const linked = related.size === 0 || related.has(edge.fromKey) || related.has(edge.toKey);
@@ -382,6 +399,7 @@ export const ScriptNetwork: React.FC<ScriptNetworkProps> = ({
                                 y2={edge.y2}
                                 stroke={edge.hot ? '#059669' : '#cbd5e1'}
                                 strokeWidth={linked && !overview ? (edge.hot ? 3.2 : 2.2) : edge.hot ? 2.4 : 1.4}
+                                pointerEvents="none"
                                 opacity={linked ? 1 : 0.12}
                             />
                         );
@@ -391,7 +409,7 @@ export const ScriptNetwork: React.FC<ScriptNetworkProps> = ({
                         const heatColor = heatLevel !== undefined ? AXIS_HEAT_COLOR[heatLevel] : undefined;
                         const upright = `translate(${point.x} ${point.y}) rotate(${-spin})`;
                         const linked = related.size === 0 || related.has(point.key);
-                        const faded = linked ? 1 : 0.2;
+                        const faded = linked ? 1 : 0.72;
                         if (point.kind === 'axis' && point.axisId) {
                             const group = groups.find(item => item.id === point.axisId);
                             const done = group ? group.nodes.filter(node => answers[node.id]).length : 0;
@@ -402,7 +420,7 @@ export const ScriptNetwork: React.FC<ScriptNetworkProps> = ({
                             return (
                                 <g key={point.key} className="cursor-pointer" opacity={faded} transform={upright} onClick={() => focusAxis(point.axisId!)}>
                                     <circle r={selected || near ? 24 : 16} fill={heatColor || '#ffffff'} stroke={selected ? '#312e81' : heatColor || '#64748b'} strokeWidth={selected ? 3.4 : 2} />
-                                    <text y={32} textAnchor="middle" fontSize="12" fontWeight="700" fill={selected ? '#312e81' : '#334155'}>
+                                    <text y={32} pointerEvents="none" textAnchor="middle" fontSize="12" fontWeight="700" fill={selected ? '#312e81' : '#334155'}>
                                         <tspan x="0" dy="0">{line1}</tspan>
                                         {line2 && <tspan x="0" dy="13">{line2}</tspan>}
                                         <tspan x="0" dy="14" fontSize="11" fill={heatColor || '#64748b'}>{done}/{total}</tspan>
@@ -421,11 +439,11 @@ export const ScriptNetwork: React.FC<ScriptNetworkProps> = ({
                             <g key={point.key} className="cursor-pointer" opacity={faded} transform={upright} onClick={() => focusQuestion(node.id)}>
                                 <title>{`Nivel ${point.level}. ${answered ? `${say} — respondida` : say}`}</title>
                                 <circle r={radius} fill={fill} stroke={current ? '#1e1b4b' : heatColor || (answered ? '#065f46' : '#94a3b8')} strokeWidth={current ? 3.4 : 1.6} />
-                                <text y="5" textAnchor="middle" fontSize={current ? 14 : 12} fontWeight="700" fill={current || answered ? '#ffffff' : '#475569'}>
+                                <text y="5" pointerEvents="none" textAnchor="middle" fontSize={current ? 14 : 12} fontWeight="700" fill={current || answered ? '#ffffff' : '#475569'}>
                                     {point.level}
                                 </text>
                                 {current && (
-                                    <text y="42" textAnchor="middle" fontSize="12" fontWeight="600" fill="#312e81">
+                                    <text y="42" pointerEvents="none" textAnchor="middle" fontSize="12" fontWeight="600" fill="#312e81">
                                         {say.length > 64 ? `${say.slice(0, 64)}…` : say}
                                     </text>
                                 )}
@@ -435,6 +453,7 @@ export const ScriptNetwork: React.FC<ScriptNetworkProps> = ({
                 </g>
                 </g>
             </svg>
+            </div>
         </div>
     );
 };

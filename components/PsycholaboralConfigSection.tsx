@@ -73,7 +73,13 @@ export const PsycholaboralConfigSection: React.FC<PsycholaboralConfigSectionProp
                         <label className="block text-sm font-medium text-gray-700 mb-1">Set de competencias</label>
                         <select
                             value={selectedSetId}
-                            onChange={e => updatePsych({ competencySetId: e.target.value, competencies: undefined })}
+                            onChange={e => {
+                                const set = inventory.competencySets.find(s => s.id === e.target.value);
+                                updatePsych({
+                                    competencySetId: e.target.value,
+                                    competencies: set?.competencies?.length ? set.competencies : undefined,
+                                });
+                            }}
                             className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
                         >
                             {inventory.competencySets.map(set => (
