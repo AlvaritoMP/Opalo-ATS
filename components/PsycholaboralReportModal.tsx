@@ -17,8 +17,13 @@ import {
     resolveCandidateAge,
     getCandidateCustomColumnValue,
 } from '../lib/bulkTableColumns';
-import { captureElementToPdf, downloadPsycholaboralPdf } from '../lib/psycholaboralPdf';
+import {
+    captureElementToPaginatedPdf,
+    captureElementToPdf,
+    downloadPsycholaboralPdf,
+} from '../lib/psycholaboralPdf';
 import { PsycholaboralReportDocument } from './PsycholaboralReportDocument';
+import { PsycholaboralStandardReportDocument } from './PsycholaboralStandardReportDocument';
 import { DateInput } from './DateInput';
 import { fetchAssessmentResults } from '../lib/api/assessments';
 import {
@@ -71,6 +76,8 @@ export const PsycholaboralReportModal: React.FC<Props> = ({
     const reportRef = useRef<HTMLDivElement>(null);
 
     const candidate = candidates[index];
+    const useStandardReport = process.isBulkProcess !== true;
+    const ReportDocument = useStandardReport ? PsycholaboralStandardReportDocument : PsycholaboralReportDocument;
     const primaryColor = state.settings?.reportTheme?.primaryColor || '#0f766e';
     const accentColor = state.settings?.reportTheme?.accentColor || '#4f46e5';
 
@@ -214,7 +221,11 @@ export const PsycholaboralReportModal: React.FC<Props> = ({
             await psycholaboralApi.saveEvaluation(candidate.id, evaluation);
             if (!reportRef.current) throw new Error('No se pudo preparar el documento');
             await new Promise(r => setTimeout(r, 400));
-            const blob = await captureElementToPdf(reportRef.current);
+            const blob = useStandardReport
+                ? await captureElementToPaginatedPdf(reportRef.current, {
+                      footerLabel: `Informe psicolaboral · ${fullNameForReport || candidate.name} · Confidencial`,
+                  })
+                : await captureElementToPdf(reportRef.current);
             const safeName = (fullNameForReport || candidate.name).replace(/[^a-z0-9_-]/gi, '_');
             downloadPsycholaboralPdf(blob, `informe_psicolaboral_${safeName}.pdf`);
             actions.showToast('PDF generado', 'success', 2500);
@@ -600,7 +611,7 @@ export const PsycholaboralReportModal: React.FC<Props> = ({
                         zIndex: -1,
                     }}
                 >
-                    <PsycholaboralReportDocument
+                    <ReportDocument
                         ref={reportRef}
                         candidate={candidateForReport}
                         process={process}

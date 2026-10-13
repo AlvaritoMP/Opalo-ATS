@@ -20,7 +20,8 @@ export function formatearFechaPeruana(date?: Date | string): string {
     if (!date) {
         fecha = new Date();
     } else if (typeof date === 'string') {
-        fecha = new Date(date);
+        const ymd = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date.trim());
+        fecha = ymd ? new Date(Number(ymd[1]), Number(ymd[2]) - 1, Number(ymd[3])) : new Date(date);
     } else {
         fecha = date;
     }
