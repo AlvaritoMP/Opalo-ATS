@@ -47,3 +47,15 @@ td[data-bulk-cell-selected="true"] {
   z-index: 25;
   position: relative;
 }
+
+/* La selección nativa del navegador en esta tabla solo conserva la última columna al copiar. */
+.bulk-data-table {
+  user-select: none;
+}
+
+.bulk-data-table input,
+.bulk-data-table textarea,
+.bulk-data-table select,
+.bulk-data-table [contenteditable='true'] {
+  user-select: text;
+}

@@ -26,6 +26,23 @@ export interface GoogleDriveFolder {
     parents?: string[];
 }
 
+const GOOGLE_APPS_EXPORT: Record<string, { mime: string; ext: string }> = {
+    'application/vnd.google-apps.document': {
+        mime: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        ext: '.docx',
+    },
+    'application/vnd.google-apps.spreadsheet': {
+        mime: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        ext: '.xlsx',
+    },
+    'application/vnd.google-apps.presentation': { mime: 'application/pdf', ext: '.pdf' },
+    'application/vnd.google-apps.drawing': { mime: 'image/png', ext: '.png' },
+};
+
+function driveQueryLiteral(value: string): string {
+    return value.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+}
+
 class GoogleDriveService {
     private accessToken: string | null = null;
     private refreshToken: string | null = null;
@@ -459,29 +476,161 @@ class GoogleDriveService {
 
         try {
             const query = `'${folderId}' in parents and trashed=false`;
-            const response = await fetch(
-                `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(query)}&fields=files(id,name,mimeType,webViewLink,webContentLink,size,createdTime,modifiedTime)&orderBy=modifiedTime desc`,
-                {
-                    headers: {
-                        'Authorization': `Bearer ${this.accessToken}`,
-                    },
-                }
-            );
+            const files: GoogleDriveFile[] = [];
+            let pageToken: string | undefined;
 
-            if (!response.ok) {
-                if (response.status === 401) {
-                    await this.refreshAccessToken();
-                    return this.listFilesInFolder(folderId);
-                }
-                throw new Error(`Error al listar archivos: ${response.statusText}`);
-            }
+            do {
+                const params = new URLSearchParams({
+                    q: query,
+                    fields: 'nextPageToken,files(id,name,mimeType,webViewLink,webContentLink,size,createdTime,modifiedTime)',
+                    orderBy: 'modifiedTime desc',
+                    pageSize: '1000',
+                });
+                if (pageToken) params.set('pageToken', pageToken);
 
-            const data = await response.json();
-            return (data.files || []) as GoogleDriveFile[];
+                const response = await fetch(
+                    `https://www.googleapis.com/drive/v3/files?${params.toString()}`,
+                    {
+                        headers: {
+                            'Authorization': `Bearer ${this.accessToken}`,
+                        },
+                    }
+                );
+
+                if (!response.ok) {
+                    if (response.status === 401) {
+                        await this.refreshAccessToken();
+                        return this.listFilesInFolder(folderId);
+                    }
+                    throw new Error(`Error al listar archivos: ${response.statusText}`);
+                }
+
+                const data = await response.json();
+                files.push(...((data.files || []) as GoogleDriveFile[]));
+                pageToken = data.nextPageToken as string | undefined;
+            } while (pageToken);
+
+            return files;
         } catch (error) {
             console.error('Error listando archivos en carpeta:', error);
             throw error;
         }
+    }
+
+    /** Archivos de una carpeta y de sus subcarpetas, con ruta relativa. */
+    async listFilesRecursive(
+        folderId: string,
+        prefix = '',
+        depth = 0
+    ): Promise<Array<GoogleDriveFile & { relativePath: string }>> {
+        const items = await this.listFilesInFolder(folderId);
+        const out: Array<GoogleDriveFile & { relativePath: string }> = [];
+        for (const item of items) {
+            if (item.mimeType === 'application/vnd.google-apps.folder') {
+                if (depth >= 4) continue;
+                const nested = await this.listFilesRecursive(item.id, `${prefix}${item.name}/`, depth + 1);
+                out.push(...nested);
+                continue;
+            }
+            if (item.mimeType === 'application/vnd.google-apps.shortcut') continue;
+            out.push({ ...item, relativePath: `${prefix}${item.name}` });
+        }
+        return out;
+    }
+
+    /** Busca la carpeta del candidato sin crearla. */
+    async findCandidateFolder(
+        candidateName: string,
+        processFolderId: string,
+        existingFolderId?: string
+    ): Promise<GoogleDriveFolder | null> {
+        if (!this.accessToken) return null;
+
+        if (existingFolderId && existingFolderId !== processFolderId) {
+            try {
+                const checkResponse = await fetch(
+                    `https://www.googleapis.com/drive/v3/files/${existingFolderId}?fields=id,name,mimeType,parents,trashed`,
+                    { headers: { Authorization: `Bearer ${this.accessToken}` } }
+                );
+                if (checkResponse.status === 401) {
+                    await this.refreshAccessToken();
+                    return this.findCandidateFolder(candidateName, processFolderId, existingFolderId);
+                }
+                if (checkResponse.ok) {
+                    const folder = await checkResponse.json();
+                    if (!folder.trashed && folder.mimeType === 'application/vnd.google-apps.folder') {
+                        return folder as GoogleDriveFolder;
+                    }
+                }
+            } catch (error) {
+                console.warn('No se pudo verificar la carpeta guardada del candidato:', error);
+            }
+        }
+
+        const sanitized = candidateName.replace(/[^a-zA-Z0-9_\- ]/g, '_').trim();
+        const names = Array.from(new Set([candidateName.trim(), sanitized].filter(Boolean)));
+        if (names.length === 0 || !processFolderId) return null;
+
+        const nameClause = names.map(name => `name='${driveQueryLiteral(name)}'`).join(' or ');
+        const query = `'${processFolderId}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false and (${nameClause})`;
+        const response = await fetch(
+            `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(query)}&fields=files(id,name,mimeType,parents)&pageSize=10`,
+            { headers: { Authorization: `Bearer ${this.accessToken}` } }
+        );
+        if (response.status === 401) {
+            await this.refreshAccessToken();
+            return this.findCandidateFolder(candidateName, processFolderId, existingFolderId);
+        }
+        if (!response.ok) return null;
+        const data = await response.json();
+        const files = (data.files || []) as GoogleDriveFolder[];
+        return files[0] || null;
+    }
+
+    /** Descarga el contenido binario de un archivo de Drive (exporta Docs/Sheets/Slides). */
+    async downloadFileContent(
+        file: Pick<GoogleDriveFile, 'id' | 'name' | 'mimeType'>
+    ): Promise<{ blob: Blob; fileName: string }> {
+        if (!this.accessToken) {
+            throw new Error('No hay conexión con Google Drive');
+        }
+
+        const exported = GOOGLE_APPS_EXPORT[file.mimeType];
+        const url = exported
+            ? `https://www.googleapis.com/drive/v3/files/${file.id}/export?mimeType=${encodeURIComponent(exported.mime)}`
+            : `https://www.googleapis.com/drive/v3/files/${file.id}?alt=media`;
+
+        let response = await fetch(url, {
+            headers: { Authorization: `Bearer ${this.accessToken}` },
+        });
+        if (response.status === 401) {
+            await this.refreshAccessToken();
+            response = await fetch(url, {
+                headers: { Authorization: `Bearer ${this.accessToken}` },
+            });
+        }
+
+        if (!response.ok && !exported && (response.status === 400 || response.status === 403)) {
+            const pdfUrl = `https://www.googleapis.com/drive/v3/files/${file.id}/export?mimeType=${encodeURIComponent('application/pdf')}`;
+            response = await fetch(pdfUrl, {
+                headers: { Authorization: `Bearer ${this.accessToken}` },
+            });
+            if (response.ok) {
+                const base = file.name || 'archivo';
+                const fileName = base.toLowerCase().endsWith('.pdf') ? base : `${base}.pdf`;
+                return { blob: await response.blob(), fileName };
+            }
+        }
+
+        if (!response.ok) {
+            throw new Error(`No se pudo descargar ${file.name || 'el archivo'}`);
+        }
+
+        let fileName = file.name || 'archivo';
+        if (exported && !fileName.toLowerCase().endsWith(exported.ext)) {
+            fileName += exported.ext;
+        }
+        return { blob: await response.blob(), fileName };
     }
 
     // Verificar si un archivo ya existe en una carpeta (por nombre)

@@ -229,7 +229,8 @@ import { isPsycholaboralEnabled } from '../lib/psycholaboralUtils';
 import { BulkProcessCard } from './BulkProcessCard';
 import { BulkProcessAttachmentsModal } from './BulkProcessAttachmentsModal';
 import { BulkTableExportModal } from './BulkTableExportModal';
-import { buildBulkSelectionClipboardText } from '../lib/bulkTableExport';
+import { buildBulkSelectionClipboardHtml, buildBulkSelectionClipboardText } from '../lib/bulkTableExport';
+import { downloadCandidatesDocumentsZip } from '../lib/candidateDocumentsZip';
 import { BulkProcessActivityLog } from './BulkProcessActivityLog';
 import { BulkTransferCandidatesModal } from './BulkTransferCandidatesModal';
 import { BulkContactStatusCell } from './BulkContactStatusCell';
@@ -697,6 +698,8 @@ const BulkActionsFAB: React.FC<{
     showPsychReport?: boolean;
     onOpsFlow?: () => void;
     showOpsFlow?: boolean;
+    onDownloadDocuments?: () => void;
+    downloadingDocuments?: boolean;
 }> = ({
     selectedIds,
     onApprove,
@@ -713,6 +716,8 @@ const BulkActionsFAB: React.FC<{
     showPsychReport,
     onOpsFlow,
     showOpsFlow,
+    onDownloadDocuments,
+    downloadingDocuments,
 }) => {
     const [isOpen, setIsOpen] = useState(false);
     if (selectedIds.length === 0) return null;
@@ -753,6 +758,16 @@ const BulkActionsFAB: React.FC<{
                     <button onClick={() => { onEmail(); setIsOpen(false); }} className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg shadow-lg hover:bg-blue-700 transition-colors">
                         <Mail className="w-4 h-4" /> Email ({selectedIds.length})
                     </button>
+                    {onDownloadDocuments && (
+                    <button
+                        onClick={() => { onDownloadDocuments(); setIsOpen(false); }}
+                        disabled={downloadingDocuments}
+                        className="flex items-center gap-2 px-4 py-2 bg-emerald-700 text-white rounded-lg shadow-lg hover:bg-emerald-800 transition-colors disabled:opacity-60"
+                    >
+                        {downloadingDocuments ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+                        Documentos ZIP ({selectedIds.length})
+                    </button>
+                    )}
                     {showOpsFlow && onOpsFlow && (
                     <button onClick={() => { onOpsFlow(); setIsOpen(false); }} className="flex items-center gap-2 px-4 py-2 bg-orange-600 text-white rounded-lg shadow-lg hover:bg-orange-700 transition-colors">
                         <Package className="w-4 h-4" /> Enviar a OpsFlow ({selectedIds.length})
@@ -807,6 +822,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
     const [total, setTotal] = useState(0);
     const [hasMore, setHasMore] = useState(false);
     const [isLoading, setIsLoading] = useState(false);
+    const [isDownloadingDocuments, setIsDownloadingDocuments] = useState(false);
     const [isLoadingProcesses, setIsLoadingProcesses] = useState(false);
     /** Evita destellos de layout al entrar o cambiar de proceso masivo */
     const [tableReadyProcessId, setTableReadyProcessId] = useState<string | null>(null);
@@ -6064,6 +6080,8 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                 if (editingCell || e.button !== 0) return;
                 if ((e.target as HTMLElement).closest('input, select, textarea, button, a')) return;
                 if (e.shiftKey || e.ctrlKey || e.metaKey) return;
+                e.preventDefault();
+                window.getSelection()?.removeAllRanges();
                 isDraggingCells.current = true;
                 didDragSelect.current = false;
                 dragAnchorCell.current = coord;
@@ -6194,6 +6212,70 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
         }
     }, [activeCell, editingCell, visibleColumns, selectedIds, selectedCells, displayCandidates, applyPastedCells, actions, sortSelectedCellKeys, logActivity]);
 
+    const handleDownloadSelectedDocuments = useCallback(async () => {
+        if (!process || selectedIds.size === 0 || isDownloadingDocuments) return;
+        const selected = displayCandidates.filter(c => selectedIds.has(c.id));
+        if (selected.length === 0) {
+            actions.showToast('Selecciona candidatos de la lista para descargar sus documentos', 'info', 3000);
+            return;
+        }
+
+        setIsDownloadingDocuments(true);
+        const toastId = actions.showToast(
+            `Preparando documentos de ${selected.length} candidato(s)...`,
+            'loading',
+            60000
+        );
+        try {
+            const result = await downloadCandidatesDocumentsZip({
+                candidates: selected,
+                process,
+                processTitle: process.title,
+                googleDriveConfig: state.settings?.googleDrive,
+                templates: documentTemplates,
+                companyName: state.settings?.appName || 'Opalo ATS',
+                customColumns,
+                getColumnValue: (candidateId, columnId, candidate) =>
+                    getColumnValue(candidateId, columnId, candidate),
+            });
+            if (result.fileCount === 0) {
+                actions.showToast(
+                    result.failureCount > 0
+                        ? 'No se pudieron descargar los documentos. Revisa que Google Drive esté conectado.'
+                        : 'Los candidatos seleccionados no tienen documentos para descargar',
+                    'info',
+                    4500
+                );
+                return;
+            }
+            const failNote = result.failureCount > 0
+                ? ` ${result.failureCount} archivo(s) no se pudieron incluir.`
+                : '';
+            actions.showToast(
+                `ZIP descargado con ${result.fileCount} documento(s) de ${result.candidatesWithFiles} candidato(s).${failNote}`,
+                result.failureCount > 0 ? 'info' : 'success',
+                5000
+            );
+        } catch (error) {
+            const message = error instanceof Error ? error.message : 'No se pudo crear el ZIP';
+            actions.showToast(message, 'error', 5000);
+        } finally {
+            actions.hideToast(toastId);
+            setIsDownloadingDocuments(false);
+        }
+    }, [
+        process,
+        selectedIds,
+        isDownloadingDocuments,
+        displayCandidates,
+        actions,
+        state.settings?.googleDrive,
+        state.settings?.appName,
+        documentTemplates,
+        customColumns,
+        getColumnValue,
+    ]);
+
     const handleBulkCopy = useCallback((e: ClipboardEvent) => {
         if (editingCell) return;
 
@@ -6208,23 +6290,33 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                   : [];
         if (cellKeys.length === 0) return;
 
-        const inTable =
-            tableContainerRef.current?.contains(target) ||
-            (document.activeElement != null && tableContainerRef.current?.contains(document.activeElement));
+        const container = tableContainerRef.current;
+        const active = document.activeElement;
+        const inTable = !!container && (
+            target === container ||
+            container.contains(target) ||
+            active === container ||
+            (active instanceof Node && container.contains(active))
+        );
         if (!inTable) return;
 
         const cells = cellKeys.map(parseCellKey);
-        const text = buildBulkSelectionClipboardText(cells, displayCandidates, visibleColumns, {
+        const clipboardOpts = {
             columnValues,
             customColumns,
             process,
             bulkConfig: process?.bulkConfig,
             hiringStageActors,
-        });
-        if (!text) return;
+        };
+        const text = buildBulkSelectionClipboardText(cells, displayCandidates, visibleColumns, clipboardOpts);
+        const html = buildBulkSelectionClipboardHtml(cells, displayCandidates, visibleColumns, clipboardOpts);
+        if (!text && !html) return;
 
         e.preventDefault();
+        e.stopPropagation();
+        if (html) e.clipboardData?.setData('text/html', html);
         e.clipboardData?.setData('text/plain', text);
+        window.getSelection()?.removeAllRanges();
         actions.showToast(
             cellKeys.length === 1 ? 'Celda copiada al portapapeles' : `${cellKeys.length} celdas copiadas al portapapeles`,
             'success',
@@ -6249,8 +6341,8 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
 
     useEffect(() => {
         if (!selectedProcess) return;
-        document.addEventListener('copy', handleBulkCopy);
-        return () => document.removeEventListener('copy', handleBulkCopy);
+        document.addEventListener('copy', handleBulkCopy, true);
+        return () => document.removeEventListener('copy', handleBulkCopy, true);
     }, [selectedProcess, handleBulkCopy]);
 
     const isTableBootstrapping = !!(selectedProcess && tableReadyProcessId !== selectedProcess);
@@ -6727,6 +6819,27 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                                         </button>
                                         <button
                                             type="button"
+                                            onClick={() => void handleDownloadSelectedDocuments()}
+                                            disabled={selectedIds.size === 0 || isDownloadingDocuments}
+                                            className="bg-emerald-700 text-white hover:bg-emerald-800 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                                            title={
+                                                selectedIds.size === 0
+                                                    ? 'Selecciona candidatos con la casilla para descargar sus documentos en un ZIP'
+                                                    : `Descargar documentos de ${selectedIds.size} candidato(s) en un ZIP`
+                                            }
+                                        >
+                                            {isDownloadingDocuments ? (
+                                                <Loader2 className="w-4 h-4 animate-spin" />
+                                            ) : (
+                                                <Download className="w-4 h-4" />
+                                            )}
+                                            Documentos ZIP
+                                            {selectedIds.size > 0 && (
+                                                <span className="ml-1 text-[10px] opacity-80">({selectedIds.size})</span>
+                                            )}
+                                        </button>
+                                        <button
+                                            type="button"
                                             onClick={handleNormalizeTextCase}
                                             disabled={isNormalizingTextCase || isLoading}
                                             className="bg-amber-600 text-white hover:bg-amber-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
@@ -7046,7 +7159,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                             focusTable();
                         }}
                     >
-                        <table className="w-full border-collapse notranslate" translate="no" style={{ tableLayout: 'fixed', width: 'max-content', minWidth: '100%' }}>
+                        <table className="bulk-data-table w-full border-collapse notranslate select-none" translate="no" style={{ tableLayout: 'fixed', width: 'max-content', minWidth: '100%' }}>
                             <thead className="bg-gray-50 sticky top-0 z-20">
                             <tr>
                                 {process?.isBulkProcess && (
@@ -8269,6 +8382,8 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                 }
                 showOpsFlow={canSendToOpsFlow}
                 onOpsFlow={() => void openOpsFlowModal(Array.from(selectedIds))}
+                onDownloadDocuments={() => void handleDownloadSelectedDocuments()}
+                downloadingDocuments={isDownloadingDocuments}
             />
 
             {scriptEditorOpen && process?.isBulkProcess && (

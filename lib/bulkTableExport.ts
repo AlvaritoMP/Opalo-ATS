@@ -194,14 +194,13 @@ type BulkExportCellOpts = {
 
 export type BulkSelectionCell = { candidateId: string; colId: string };
 
-/** Construye texto TSV desde celdas seleccionadas (compatible con Excel / WhatsApp). */
-export function buildBulkSelectionClipboardText(
+function buildBulkSelectionGrid(
     cells: BulkSelectionCell[],
     displayCandidates: BulkCandidate[],
     visibleColumns: string[],
     opts: BulkExportCellOpts
-): string {
-    if (cells.length === 0) return '';
+): string[][] {
+    if (cells.length === 0) return [];
 
     const sorted = [...cells].sort((a, b) => {
         const ra = displayCandidates.findIndex(c => c.id === a.candidateId);
@@ -212,18 +211,23 @@ export function buildBulkSelectionClipboardText(
 
     const rowIndices = sorted.map(c => displayCandidates.findIndex(cand => cand.id === c.candidateId));
     const colIndices = sorted.map(c => visibleColumns.indexOf(c.colId));
-    const minR = Math.min(...rowIndices);
-    const maxR = Math.max(...rowIndices);
-    const minC = Math.min(...colIndices);
-    const maxC = Math.max(...colIndices);
+    const validRows = rowIndices.filter(i => i >= 0);
+    const validCols = colIndices.filter(i => i >= 0);
+    if (validRows.length === 0 || validCols.length === 0) return [];
+
+    const minR = Math.min(...validRows);
+    const maxR = Math.max(...validRows);
+    const minC = Math.min(...validCols);
+    const maxC = Math.max(...validCols);
 
     const selectedSet = new Set(sorted.map(c => `${c.candidateId}::${c.colId}`));
-    const lines: string[] = [];
+    const grid: string[][] = [];
 
     for (let r = minR; r <= maxR; r++) {
         const candidate = displayCandidates[r];
         if (!candidate) continue;
         const rowCells: string[] = [];
+        let rowHasSelection = false;
         for (let c = minC; c <= maxC; c++) {
             const colId = visibleColumns[c];
             const key = `${candidate.id}::${colId}`;
@@ -231,13 +235,58 @@ export function buildBulkSelectionClipboardText(
                 rowCells.push('');
                 continue;
             }
-            const value = getBulkExportCellValue(colId, candidate, opts);
-            rowCells.push(escapeDelimitedField(value, '\t'));
+            rowHasSelection = true;
+            rowCells.push(getBulkExportCellValue(colId, candidate, opts));
         }
-        lines.push(rowCells.join('\t'));
+        if (rowHasSelection) grid.push(rowCells);
     }
 
-    return lines.join('\n');
+    return grid;
+}
+
+function escapeHtml(value: string): string {
+    return value
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+}
+
+/** Construye texto TSV desde celdas seleccionadas (Excel, bloc de notas, WhatsApp). */
+export function buildBulkSelectionClipboardText(
+    cells: BulkSelectionCell[],
+    displayCandidates: BulkCandidate[],
+    visibleColumns: string[],
+    opts: BulkExportCellOpts
+): string {
+    const grid = buildBulkSelectionGrid(cells, displayCandidates, visibleColumns, opts);
+    if (grid.length === 0) return '';
+    return grid
+        .map(row => row.map(cell => escapeDelimitedField(cell, '\t')).join('\t'))
+        .join('\r\n');
+}
+
+/**
+ * Tabla HTML de la misma selección.
+ * El correo y Word usan este formato; si solo va texto con tabuladores, suelen pegar solo la última columna.
+ */
+export function buildBulkSelectionClipboardHtml(
+    cells: BulkSelectionCell[],
+    displayCandidates: BulkCandidate[],
+    visibleColumns: string[],
+    opts: BulkExportCellOpts
+): string {
+    const grid = buildBulkSelectionGrid(cells, displayCandidates, visibleColumns, opts);
+    if (grid.length === 0) return '';
+    const rows = grid
+        .map(row => {
+            const cellsHtml = row
+                .map(cell => `<td>${escapeHtml(cell).replace(/\r\n|\r|\n/g, '<br>')}</td>`)
+                .join('');
+            return `<tr>${cellsHtml}</tr>`;
+        })
+        .join('');
+    return `<!DOCTYPE html><html><head><meta charset="utf-8"></head><body><!--StartFragment--><table>${rows}</table><!--EndFragment--></body></html>`;
 }
 
 export function buildBulkTableExportDocument(
