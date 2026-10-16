@@ -257,6 +257,8 @@ export function candidateToBulkRow(c: Candidate): BulkCandidate {
         createdBy: c.createdBy,
         description: c.description,
         attachments: c.attachments,
+        googleDriveFolderId: c.googleDriveFolderId,
+        googleDriveFolderName: c.googleDriveFolderName,
         scoreIa: c.scoreIa,
         metadataIa: c.metadataIa,
         bulkColumnValues: c.bulkColumnValues,

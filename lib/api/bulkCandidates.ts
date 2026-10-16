@@ -23,7 +23,7 @@ import { hydrateCandidateIdentity } from '../workerNameParts';
 
 /** Select mínimo — siempre disponible */
 const BULK_SELECT_BASE =
-    'id, name, nombres, apellido_paterno, apellido_materno, email, phone, dni, age, source, province, district, score_ia, metadata_ia, stage_id, process_id, last_whatsapp_interaction_at';
+    'id, name, nombres, apellido_paterno, apellido_materno, email, phone, dni, age, source, province, district, score_ia, metadata_ia, stage_id, process_id, last_whatsapp_interaction_at, google_drive_folder_id, google_drive_folder_name';
 const BULK_SELECT_BASE_NO_IDENTITY =
     'id, name, email, phone, dni, age, source, province, district, score_ia, metadata_ia, stage_id, process_id, last_whatsapp_interaction_at';
 
@@ -95,7 +95,8 @@ function getBulkSelectCandidates(): string[] {
         !cachedBulkSelect.includes('registration_origin') ||
         !cachedBulkSelect.includes('transfer_pending_review') ||
         !cachedBulkSelect.includes('opsflow_sent_at') ||
-        !cachedBulkSelect.includes('apellido_paterno')
+        !cachedBulkSelect.includes('apellido_paterno') ||
+        !cachedBulkSelect.includes('google_drive_folder_id')
     ) {
         return combined;
     }
@@ -156,6 +157,8 @@ function mapBulkCandidateRow(
         opsflowLastPackageId: (c.opsflow_last_package_id as string) || undefined,
         opsflowDeliveryStatus:
             (c.opsflow_delivery_status as BulkCandidate['opsflowDeliveryStatus']) || undefined,
+        googleDriveFolderId: (c.google_drive_folder_id as string) || undefined,
+        googleDriveFolderName: (c.google_drive_folder_name as string) || undefined,
     };
 }
 
@@ -222,6 +225,9 @@ export interface BulkCandidate {
     description?: string;
     attachments?: any[];
     history?: CandidateHistory[];
+    /** Carpeta del candidato en Google Drive, dentro de la carpeta del proceso */
+    googleDriveFolderId?: string;
+    googleDriveFolderName?: string;
 }
 
 // Resultado de la query paginada
@@ -826,6 +832,8 @@ export const bulkCandidatesApi = {
                 metadata_ia,
                 stage_id,
                 process_id,
+                google_drive_folder_id,
+                google_drive_folder_name,
                 attachments:attachments!candidate_id(id, name, url, type, size, category, uploaded_at),
                 history:candidate_history!candidate_id(stage_id, moved_at, moved_by)
             `)
@@ -845,9 +853,27 @@ export const bulkCandidatesApi = {
             metadataIa: data.metadata_ia || undefined,
             stageId: data.stage_id,
             processId: data.process_id,
+            googleDriveFolderId: data.google_drive_folder_id || undefined,
+            googleDriveFolderName: data.google_drive_folder_name || undefined,
             attachments: data.attachments || [],
             history: data.history || [],
         };
+    },
+
+    async saveGoogleDriveFolder(
+        candidateId: string,
+        folderId: string,
+        folderName: string
+    ): Promise<void> {
+        const { error } = await supabase
+            .from('candidates')
+            .update({
+                google_drive_folder_id: folderId,
+                google_drive_folder_name: folderName,
+            })
+            .eq('id', candidateId)
+            .eq('app_name', APP_NAME);
+        if (error) throw error;
     },
 
     /**

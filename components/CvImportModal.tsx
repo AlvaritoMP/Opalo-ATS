@@ -4,6 +4,10 @@ import type { Attachment, Candidate, Process } from '../types';
 import { FileText, Loader2, Upload, X } from 'lucide-react';
 import { bulkCandidatesApi } from '../lib/api/bulkCandidates';
 import {
+    isGoogleDriveReady,
+    storeFileInCandidateDriveFolder,
+} from '../lib/candidateDriveDocuments';
+import {
     applyNamePartToFields,
     buildCandidateFromCvDraft,
     buildCvAttachment,
@@ -35,6 +39,8 @@ interface CvImportModalProps {
     bulkRowOffset?: number;
     /** Layout de la tabla de alta densidad: la preview usa esas columnas. */
     tableLayout?: CvTableLayout;
+    /** La importación creó la carpeta de Google Drive del proceso. */
+    onProcessDriveFolder?: (folder: { id: string; name: string }) => void;
 }
 
 type RowStatus = 'pending' | 'reading' | 'ready' | 'error';
@@ -64,6 +70,7 @@ export const CvImportModal: React.FC<CvImportModalProps> = ({
     onCreatedCandidates,
     bulkRowOffset = 0,
     tableLayout,
+    onProcessDriveFolder,
 }) => {
     const { state, actions } = useAppState();
     const fileInputRef = useRef<HTMLInputElement>(null);
@@ -221,6 +228,10 @@ export const CvImportModal: React.FC<CvImportModalProps> = ({
         const created: Candidate[] = [];
         const errors: string[] = [];
         const importedIds: string[] = [];
+        const driveConfig = state.settings?.googleDrive;
+        const driveReady = mode === 'bulk' && isGoogleDriveReady(driveConfig);
+        let driveProcess = process;
+        let driveMisses = 0;
 
         for (let i = 0; i < selectedRows.length; i++) {
             const row = selectedRows[i];
@@ -235,6 +246,49 @@ export const CvImportModal: React.FC<CvImportModalProps> = ({
             if (!built.candidate) {
                 errors.push(`${row.fileName}: ${built.error || 'No se pudo crear'}`);
                 continue;
+            }
+
+            let attachment = row.attachment;
+            let folderId: string | undefined;
+            let folderName: string | undefined;
+
+            if (driveReady && driveConfig) {
+                const candidateName = built.candidate.name || row.fileName;
+                try {
+                    const stored = await storeFileInCandidateDriveFolder({
+                        process: driveProcess,
+                        config: driveConfig,
+                        candidateName,
+                        file: row.file,
+                        categoryId: cvCategory?.id,
+                    });
+                    attachment = stored.attachment;
+                    folderId = stored.folderId;
+                    folderName = stored.folderName;
+                    if (
+                        stored.processFolderCreated ||
+                        driveProcess.googleDriveFolderId !== stored.processFolderId
+                    ) {
+                        driveProcess = {
+                            ...driveProcess,
+                            googleDriveFolderId: stored.processFolderId,
+                            googleDriveFolderName: stored.processFolderName,
+                        };
+                        onProcessDriveFolder?.({
+                            id: stored.processFolderId,
+                            name: stored.processFolderName,
+                        });
+                    }
+                } catch (driveError) {
+                    console.warn('No se pudo guardar el CV en Google Drive:', driveError);
+                    driveMisses += 1;
+                }
+            }
+
+            if (folderId && attachment) {
+                built.candidate.attachments = [attachment];
+                built.candidate.googleDriveFolderId = folderId;
+                built.candidate.googleDriveFolderName = folderName;
             }
             try {
                 const candidate = await actions.addCandidate(built.candidate, {
@@ -276,6 +330,15 @@ export const CvImportModal: React.FC<CvImportModalProps> = ({
 
         if (created.length > 0) {
             onCreatedCandidates?.(created);
+            if (driveMisses > 0) {
+                actions.showToast(
+                    driveMisses === 1
+                        ? 'Un CV no se pudo guardar en Google Drive. El candidato sí quedó creado.'
+                        : `${driveMisses} CVs no se pudieron guardar en Google Drive. Los candidatos sí quedaron creados.`,
+                    'info',
+                    5000
+                );
+            }
             actions.showToast(
                 created.length === 1
                     ? 'Candidato importado desde CV'
@@ -454,6 +517,9 @@ export const CvImportModal: React.FC<CvImportModalProps> = ({
                     {mode === 'bulk' && (
                         <p className="text-xs text-gray-500">
                             Si falta el email se usará un placeholder (igual que «Añadir fila»). No se inventan correos reales.
+                            {isGoogleDriveReady(state.settings?.googleDrive)
+                                ? ' El PDF se guarda en la carpeta de Google Drive de ese candidato, dentro de la carpeta del proceso.'
+                                : ' Conecta Google Drive para dejar el CV en la carpeta del candidato.'}
                         </p>
                     )}
 

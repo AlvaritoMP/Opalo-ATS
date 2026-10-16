@@ -77,7 +77,7 @@ import {
 } from '../lib/bulkConfigBackup';
 import { useDebouncedValue } from '../lib/useDebouncedValue';
 import { fetchWithRetry } from '../lib/fetchWithRetry';
-import { Check, X, Loader2, Send, Archive, Search, ChevronDown, ChevronUp, Plus, Edit, Trash2, ArrowLeft, MessageCircle, Phone, Upload, Download, Filter, Mail, Calendar, Settings, ArrowUp, ArrowDown, Pin, FileText, BookOpen, Paperclip, ClipboardList, ListPlus, RefreshCw, HardDrive, CaseSensitive, Package, History, Target, BarChart3, UserCheck, Coins, Bus, Undo2, ArrowRightLeft, LayoutGrid, LineChart, ClipboardCopy, PlayCircle, ClipboardCheck } from 'lucide-react';
+import { Check, X, Loader2, Send, Archive, Search, ChevronDown, ChevronUp, Plus, Edit, Trash2, ArrowLeft, MessageCircle, Phone, Upload, Download, Filter, Mail, Calendar, Settings, ArrowUp, ArrowDown, Pin, FileText, BookOpen, Paperclip, ClipboardList, ListPlus, RefreshCw, HardDrive, CaseSensitive, Package, History, Target, BarChart3, UserCheck, Coins, Bus, Undo2, ArrowRightLeft, LayoutGrid, LineChart, ClipboardCopy, PlayCircle, ClipboardCheck, FolderOpen, ExternalLink } from 'lucide-react';
 import { ScriptStructureEditor } from './persuasion/ScriptStructureEditor';
 import { openLienzoWindow, toLienzoCandidate } from '../lib/persuasion/popup';
 import { BulkCandidateTimeline } from './BulkCandidateTimeline';
@@ -216,6 +216,12 @@ import {
 } from '../lib/applicationCountDisplay';
 import { openMailCompose, getMailComposeToastMessage } from '../lib/openMailto';
 import { openAttachment } from '../lib/openAttachment';
+import { attachmentsApi } from '../lib/api/attachments';
+import {
+    driveFolderUrl,
+    isGoogleDriveReady,
+    storeFileInCandidateDriveFolder,
+} from '../lib/candidateDriveDocuments';
 import {
     computeProfileMatch,
     computeProfileMatchSummary,
@@ -384,10 +390,15 @@ const CandidateDrawer: React.FC<{
     opsFlowRefreshToken?: number;
     activityLogRefreshToken?: number;
     userNameById?: Map<string, string>;
-}> = ({ candidate, isOpen, onClose, onLoadDetails, process, initialTab = 'contactology', onPsychReport, showPsychReport, showOpsFlow, onOpsFlowSend, opsFlowRefreshToken = 0, activityLogRefreshToken = 0, userNameById }) => {
+    onProcessDriveFolder?: (folder: { id: string; name: string }) => void;
+    onCandidateDriveFolder?: (candidateId: string, folderId: string, folderName: string) => void;
+}> = ({ candidate, isOpen, onClose, onLoadDetails, process, initialTab = 'contactology', onPsychReport, showPsychReport, showOpsFlow, onOpsFlowSend, opsFlowRefreshToken = 0, activityLogRefreshToken = 0, userNameById, onProcessDriveFolder, onCandidateDriveFolder }) => {
+    const { state, actions } = useAppState();
     const [isLoading, setIsLoading] = useState(false);
     const [fullCandidate, setFullCandidate] = useState<BulkCandidate | null>(null);
     const [activeTab, setActiveTab] = useState<CandidateDrawerTab>(initialTab);
+    const [isUploadingDocument, setIsUploadingDocument] = useState(false);
+    const documentInputRef = useRef<HTMLInputElement>(null);
 
     useEffect(() => {
         if (isOpen && candidate && !fullCandidate) {
@@ -419,6 +430,74 @@ const CandidateDrawer: React.FC<{
     const displayCandidate = fullCandidate || candidate;
     const stage = process?.stages.find(s => s.id === candidate.stageId);
     const showScoreIa = isScoreIaColumnVisible(process?.bulkConfig);
+    const driveConfig = state.settings?.googleDrive;
+    const driveReady = isGoogleDriveReady(driveConfig);
+    const folderId = displayCandidate.googleDriveFolderId || candidate.googleDriveFolderId;
+    const folderName = displayCandidate.googleDriveFolderName || candidate.googleDriveFolderName;
+
+    const handleAttachDocument = async (file: File) => {
+        if (!process || !driveConfig || !driveReady) {
+            actions.showToast('Conecta Google Drive para guardar documentos del candidato en su carpeta.', 'error', 4000);
+            return;
+        }
+        setIsUploadingDocument(true);
+        const loadingToastId = actions.showToast(`Subiendo ${file.name}...`, 'loading', 0);
+        try {
+            const stored = await storeFileInCandidateDriveFolder({
+                process: {
+                    id: process.id,
+                    title: process.title,
+                    googleDriveFolderId: process.googleDriveFolderId,
+                    googleDriveFolderName: process.googleDriveFolderName,
+                },
+                config: driveConfig,
+                candidateName: displayCandidate.name || file.name,
+                existingFolderId: folderId,
+                file,
+            });
+            const saved = await attachmentsApi.create(
+                {
+                    name: stored.attachment.name,
+                    url: stored.attachment.url,
+                    type: stored.attachment.type,
+                    size: stored.attachment.size,
+                    category: stored.attachment.category,
+                    candidateId: displayCandidate.id,
+                } as Parameters<typeof attachmentsApi.create>[0],
+                state.currentUser?.id
+            );
+            if (stored.processFolderCreated) {
+                onProcessDriveFolder?.({
+                    id: stored.processFolderId,
+                    name: stored.processFolderName,
+                });
+            }
+            if (stored.folderId !== folderId) {
+                await bulkCandidatesApi.saveGoogleDriveFolder(
+                    displayCandidate.id,
+                    stored.folderId,
+                    stored.folderName
+                );
+                onCandidateDriveFolder?.(displayCandidate.id, stored.folderId, stored.folderName);
+            }
+            setFullCandidate(prev => {
+                const base = prev || displayCandidate;
+                return {
+                    ...base,
+                    googleDriveFolderId: stored.folderId,
+                    googleDriveFolderName: stored.folderName,
+                    attachments: [...(base.attachments || []), saved],
+                };
+            });
+            actions.showToast(`"${file.name}" quedó en la carpeta de Google Drive`, 'success', 3000);
+        } catch (error) {
+            const message = error instanceof Error ? error.message : 'No se pudo subir el documento';
+            actions.showToast(message, 'error', 5000);
+        } finally {
+            actions.hideToast(loadingToastId);
+            setIsUploadingDocument(false);
+        }
+    };
 
     return (
         <div className="fixed inset-0 z-50 flex">
@@ -526,24 +605,93 @@ const CandidateDrawer: React.FC<{
                                     <p className="text-gray-900 mt-1 whitespace-pre-wrap">{displayCandidate.metadataIa}</p>
                                 </div>
                             )}
-                            {displayCandidate.attachments && displayCandidate.attachments.length > 0 && (
-                                <div>
-                                    <label className="text-sm font-medium text-gray-500">Documentos</label>
-                                    <div className="mt-2 space-y-2">
-                                        {displayCandidate.attachments.map((att: any) => (
-                                            <button
-                                                type="button"
-                                                key={att.id}
-                                                onClick={() => openAttachment(att)}
-                                                className="block w-full text-left p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors"
-                                            >
-                                                <p className="text-sm font-medium text-gray-900">{att.name}</p>
-                                                <p className="text-xs text-gray-500">{att.type}</p>
-                                            </button>
-                                        ))}
-                                    </div>
-                                </div>
-                            )}
+                            <div>
+                                <label className="text-sm font-medium text-gray-500">Documentos</label>
+                                <p className="text-xs text-gray-500 mt-1">
+                                    El CV y los demás archivos de este candidato quedan en su carpeta de Google Drive.
+                                    El enlace abre esa carpeta.
+                                </p>
+                                {folderId ? (
+                                    <a
+                                        href={driveFolderUrl(folderId)}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="mt-2 flex items-center gap-2 p-3 rounded-lg border border-green-200 bg-green-50 text-green-900 hover:bg-green-100"
+                                    >
+                                        <FolderOpen className="w-4 h-4 shrink-0" />
+                                        <span className="min-w-0">
+                                            <span className="block text-sm font-medium truncate">
+                                                {folderName || 'Carpeta del candidato'}
+                                            </span>
+                                            <span className="block text-xs text-green-800">
+                                                Abrir en Google Drive
+                                                {process?.googleDriveFolderName ? ` · dentro de ${process.googleDriveFolderName}` : ''}
+                                            </span>
+                                        </span>
+                                        <ExternalLink className="w-4 h-4 shrink-0 ml-auto" />
+                                    </a>
+                                ) : (
+                                    <p className="mt-2 text-xs text-gray-500">
+                                        {driveReady
+                                            ? 'Todavía no tiene carpeta. Al adjuntar un documento se crea dentro de la carpeta del proceso.'
+                                            : 'Conecta Google Drive para crear la carpeta de este candidato.'}
+                                    </p>
+                                )}
+                                {(displayCandidate.attachments?.length ?? 0) > 0 && (
+                                    <ul className="mt-2 space-y-1">
+                                        {displayCandidate.attachments!.map((att: { id: string; name: string; url?: string; type?: string }) => {
+                                            const isRemote = !!att.url && /^https?:/i.test(att.url);
+                                            return (
+                                                <li key={att.id} className="flex items-center gap-2 text-sm text-gray-800">
+                                                    <FileText className="w-3.5 h-3.5 text-gray-400 shrink-0" />
+                                                    {isRemote ? (
+                                                        <a
+                                                            href={att.url}
+                                                            target="_blank"
+                                                            rel="noopener noreferrer"
+                                                            className="truncate text-primary-700 hover:underline"
+                                                            title="Abrir el archivo en Google Drive"
+                                                        >
+                                                            {att.name}
+                                                        </a>
+                                                    ) : (
+                                                        <button
+                                                            type="button"
+                                                            className="truncate text-left text-primary-700 hover:underline"
+                                                            onClick={() => openAttachment(att)}
+                                                        >
+                                                            {att.name}
+                                                        </button>
+                                                    )}
+                                                </li>
+                                            );
+                                        })}
+                                    </ul>
+                                )}
+                                <input
+                                    ref={documentInputRef}
+                                    type="file"
+                                    className="hidden"
+                                    onChange={e => {
+                                        const file = e.target.files?.[0];
+                                        e.target.value = '';
+                                        if (file) void handleAttachDocument(file);
+                                    }}
+                                />
+                                <button
+                                    type="button"
+                                    disabled={!driveReady || isUploadingDocument}
+                                    onClick={() => documentInputRef.current?.click()}
+                                    className="mt-3 inline-flex items-center gap-2 px-3 py-2 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                                >
+                                    {isUploadingDocument ? (
+                                        <Loader2 className="w-4 h-4 animate-spin" />
+                                    ) : (
+                                        <Upload className="w-4 h-4" />
+                                    )}
+                                    Adjuntar documento a la misma carpeta
+                                </button>
+                            </div>
                             {showPsychReport && onPsychReport && candidate && (
                                 <button
                                     type="button"
@@ -818,6 +966,8 @@ function mergePreservingBulkConfig(prev: Process[], incoming: Process[]): Proces
             flyerUrl: p.flyerUrl || previous.flyerUrl,
             flyerPosition: p.flyerPosition || previous.flyerPosition,
             description: p.description || previous.description,
+            googleDriveFolderId: p.googleDriveFolderId || previous.googleDriveFolderId,
+            googleDriveFolderName: p.googleDriveFolderName || previous.googleDriveFolderName,
         };
     });
 }
@@ -7862,6 +8012,18 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                                                                         sentAt={displayCandidate.opsflowSentAt}
                                                                         deliveryStatus={displayCandidate.opsflowDeliveryStatus}
                                                                     />
+                                                                    {displayCandidate.googleDriveFolderId && (
+                                                                        <a
+                                                                            href={driveFolderUrl(displayCandidate.googleDriveFolderId)}
+                                                                            target="_blank"
+                                                                            rel="noopener noreferrer"
+                                                                            onClick={e => e.stopPropagation()}
+                                                                            className="ml-0.5 inline-flex shrink-0 text-green-700 hover:text-green-900"
+                                                                            title="Abrir la carpeta de documentos en Google Drive"
+                                                                        >
+                                                                            <FolderOpen className="w-3.5 h-3.5" />
+                                                                        </a>
+                                                                    )}
                                                                 </span>
                                                             </MetadataTooltip>
                                                         ) : (
@@ -8604,6 +8766,34 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                 opsFlowRefreshToken={opsFlowRefreshToken}
                 activityLogRefreshToken={activityLogRefreshToken}
                 userNameById={userNameById}
+                onProcessDriveFolder={folder => {
+                    if (!process) return;
+                    setBulkProcesses(prev =>
+                        prev.map(p =>
+                            p.id === process.id
+                                ? {
+                                      ...p,
+                                      googleDriveFolderId: folder.id,
+                                      googleDriveFolderName: folder.name,
+                                  }
+                                : p
+                        )
+                    );
+                }}
+                onCandidateDriveFolder={(candidateId, folderId, folderName) => {
+                    setCandidates(prev =>
+                        prev.map(c =>
+                            c.id === candidateId
+                                ? { ...c, googleDriveFolderId: folderId, googleDriveFolderName: folderName }
+                                : c
+                        )
+                    );
+                    setDrawerCandidate(prev =>
+                        prev && prev.id === candidateId
+                            ? { ...prev, googleDriveFolderId: folderId, googleDriveFolderName: folderName }
+                            : prev
+                    );
+                }}
             />
 
             {showProcessModal && (
@@ -8650,6 +8840,20 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                     bulkRowOffset={total}
                     tableLayout={{ customColumns, visibleColumns }}
                     onClose={() => setShowCvImportModal(false)}
+                    onProcessDriveFolder={folder => {
+                        if (!process) return;
+                        setBulkProcesses(prev =>
+                            prev.map(p =>
+                                p.id === process.id
+                                    ? {
+                                          ...p,
+                                          googleDriveFolderId: folder.id,
+                                          googleDriveFolderName: folder.name,
+                                      }
+                                    : p
+                            )
+                        );
+                    }}
                     onCreatedCandidates={created => {
                         const rows = created.map(candidateToBulkRow);
                         setCandidates(prev => [...rows, ...prev]);

@@ -329,7 +329,8 @@ class GoogleDriveService {
     async getOrCreateCandidateFolder(
         candidateName: string, 
         processFolderId: string, 
-        existingFolderId?: string
+        existingFolderId?: string,
+        options?: { exactOnly?: boolean }
     ): Promise<GoogleDriveFolder> {
         if (!this.accessToken) {
             throw new Error('No hay conexión con Google Drive');
@@ -377,15 +378,15 @@ class GoogleDriveService {
             if (!response.ok) {
                 if (response.status === 401) {
                     await this.refreshAccessToken();
-                    return this.getOrCreateCandidateFolder(candidateName, processFolderId, existingFolderId);
+                    return this.getOrCreateCandidateFolder(candidateName, processFolderId, existingFolderId, options);
                 }
                 throw new Error(`Error al buscar carpeta de candidato: ${response.statusText}`);
             }
 
             let data = await response.json();
             
-            // Si no encontró con búsqueda exacta, intentar búsqueda flexible (contiene el nombre)
-            if (!data.files || data.files.length === 0) {
+            // Sin carpeta previa, la búsqueda flexible puede mezclar homónimos. exactOnly crea una carpeta nueva.
+            if ((!data.files || data.files.length === 0) && !options?.exactOnly) {
                 // Extraer palabras clave del nombre (primera palabra o primeras dos palabras)
                 const nameWords = candidateName.trim().split(/\s+/).filter(w => w.length > 2);
                 if (nameWords.length > 0) {
