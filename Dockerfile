@@ -3,11 +3,29 @@ FROM node:20-alpine AS builder
 
 WORKDIR /app
 
+# El VPS corta descargas largas. IPv4 primero y reintentos con caché de npm.
+ENV NODE_OPTIONS=--dns-result-order=ipv4first \
+    NPM_CONFIG_FETCH_RETRIES=5 \
+    NPM_CONFIG_FETCH_RETRY_MINTIMEOUT=20000 \
+    NPM_CONFIG_FETCH_RETRY_MAXTIMEOUT=120000 \
+    NPM_CONFIG_FETCH_TIMEOUT=180000 \
+    NPM_CONFIG_MAXSOCKETS=3 \
+    NPM_CONFIG_AUDIT=false \
+    NPM_CONFIG_FUND=false
+
 # Copy package files
 COPY package*.json ./
 
-# Install dependencies
-RUN npm ci
+# Install dependencies. La caché sobrevive a un corte, así el reintento no empieza de cero.
+RUN --mount=type=cache,target=/root/.npm \
+    n=0; \
+    until npm ci; do \
+      n=$((n+1)); \
+      if [ "$n" -ge 4 ]; then exit 1; fi; \
+      echo "npm ci fallo, reintento ${n}"; \
+      rm -rf node_modules; \
+      sleep 20; \
+    done
 
 # Copy source code
 COPY . .
