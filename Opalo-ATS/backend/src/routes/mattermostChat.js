@@ -23,6 +23,26 @@ const ATS_LOOKUP_TIMEOUT_MS = 2_500;
 
 const directoryCache = new Map();
 
+const DM_CACHE_TTL_MS = 8_000;
+const DM_CHANNEL_LIMIT = 25;
+const DM_POSTS_PER_CHANNEL = 20;
+const DM_FETCH_CONCURRENCY = 4;
+const DM_HYDRATE_BUDGET_MS = 10_000;
+const dmSnapshotCache = new Map();
+const dmSnapshotInflight = new Map();
+
+function dmSnapshotPrefix(appName, mmUserId) {
+    return `${appName}:${mmUserId}:`;
+}
+
+function invalidateDmSnapshot(appName, mmUserId) {
+    if (!mmUserId) return;
+    const prefix = dmSnapshotPrefix(appName, mmUserId);
+    for (const key of dmSnapshotCache.keys()) {
+        if (key.startsWith(prefix)) dmSnapshotCache.delete(key);
+    }
+}
+
 function isOriginUnavailable(error) {
     const msg = String(error?.message || error || '');
     return (
@@ -175,6 +195,7 @@ async function getUsersByIds(token, ids) {
         const users = await mmFetch(token, '/api/v4/users/ids', {
             method: 'POST',
             body: JSON.stringify(unique),
+            timeoutMs: 8_000,
         });
         return Array.isArray(users) ? users : [];
     } catch (err) {
@@ -212,15 +233,19 @@ async function listDirectChannels(token, userId) {
         (channels || []).filter((ch) => ch && ch.type === 'D' && !ch.delete_at);
 
     try {
-        return asDirect(await mmFetch(token, `/api/v4/users/${userId}/channels`));
+        return asDirect(
+            await mmFetch(token, `/api/v4/users/${userId}/channels`, { timeoutMs: 10_000 }),
+        );
     } catch (err) {
-        if (err.status && err.status !== 404 && err.status !== 400 && err.status !== 501) {
-            console.warn('GET /users/{id}/channels falló, usando equipos:', err.message);
-        }
-        const teams = await mmFetch(token, `/api/v4/users/${userId}/teams`);
+        const status = Number(err?.status) || 0;
+        if (status !== 400 && status !== 404 && status !== 501) throw err;
+        console.warn('GET /users/{id}/channels no disponible, usando equipos:', err.message);
+        const teams = await mmFetch(token, `/api/v4/users/${userId}/teams`, { timeoutMs: 8_000 });
         const nested = await Promise.all(
             (teams || []).map((team) =>
-                mmFetch(token, `/api/v4/users/${userId}/teams/${team.id}/channels`).catch(() => []),
+                mmFetch(token, `/api/v4/users/${userId}/teams/${team.id}/channels`, {
+                    timeoutMs: 8_000,
+                }).catch(() => []),
             ),
         );
         const seen = new Set();
@@ -232,8 +257,12 @@ async function listDirectChannels(token, userId) {
     }
 }
 
-async function getChannelPosts(token, channelId, perPage = 40) {
-    const data = await mmFetch(token, `/api/v4/channels/${channelId}/posts?per_page=${perPage}&page=0`);
+async function getChannelPosts(token, channelId, perPage = 40, timeoutMs = 12_000) {
+    const data = await mmFetch(
+        token,
+        `/api/v4/channels/${channelId}/posts?per_page=${perPage}&page=0`,
+        { timeoutMs },
+    );
     const order = Array.isArray(data?.order) ? data.order : [];
     const posts = data?.posts || {};
     return order
@@ -269,95 +298,143 @@ router.get('/peers', async (req, res) => {
     }
 });
 
+async function loadChannelThread(token, me, meAts, info, timeoutMs) {
+    const { channel, partner } = info;
+    const callTimeout = Math.max(800, Math.min(6_000, timeoutMs));
+    const [posts, unread] = await Promise.all([
+        channel.last_post_at
+            ? getChannelPosts(token, channel.id, DM_POSTS_PER_CHANNEL, callTimeout)
+            : Promise.resolve([]),
+        mmFetch(token, `/api/v4/users/${me.id}/channels/${channel.id}/unread`, {
+            timeoutMs: callTimeout,
+        }).catch(() => ({ msg_count: 0 })),
+    ]);
+    const unreadCount = Number(unread?.msg_count) || 0;
+    const incoming = posts.filter((p) => p.user_id !== me.id);
+    const unreadIncomingIds = new Set(incoming.slice(-unreadCount).map((p) => p.id));
+    const messages = posts.map((post) => {
+        const mine = post.user_id === me.id;
+        return {
+            id: post.id,
+            senderId: mine ? meAts.id : partner.id,
+            recipientId: mine ? partner.id : meAts.id,
+            text: postDisplayText(post),
+            createdAt: isoFromMillis(post.create_at),
+            readAt: mine || !unreadIncomingIds.has(post.id) ? isoFromMillis(post.create_at) : undefined,
+            channelId: channel.id,
+        };
+    });
+    const last = messages[messages.length - 1];
+    return {
+        partnerId: partner.id,
+        partnerName: partner.name,
+        channelId: channel.id,
+        unread: unreadCount,
+        lastMessage: last || null,
+        messages,
+    };
+}
+
+async function hydrateChannelThreads(token, me, meAts, channelInfos) {
+    const deadline = Date.now() + DM_HYDRATE_BUDGET_MS;
+    const details = [];
+    let cursor = 0;
+    const workerCount = Math.min(DM_FETCH_CONCURRENCY, channelInfos.length);
+    await Promise.all(
+        Array.from({ length: workerCount }, async () => {
+            while (cursor < channelInfos.length && Date.now() + 400 < deadline) {
+                const info = channelInfos[cursor++];
+                const remaining = deadline - Date.now();
+                try {
+                    details.push(await loadChannelThread(token, me, meAts, info, remaining));
+                } catch (err) {
+                    console.warn('DM omitido:', info.channel?.id, err.message);
+                }
+            }
+        }),
+    );
+    details.sort((a, b) => {
+        const ta = a.lastMessage ? Date.parse(a.lastMessage.createdAt) : 0;
+        const tb = b.lastMessage ? Date.parse(b.lastMessage.createdAt) : 0;
+        return tb - ta;
+    });
+    return details;
+}
+
+async function buildDmSnapshot({ token, appName, headerAtsId, me }) {
+    const [directory, dms] = await Promise.all([
+        loadDirectory(appName),
+        listDirectChannels(token, me.id),
+    ]);
+    const { atsUsers, byMmId } = directory;
+    const meAts = await resolveMeAts({
+        me,
+        directory,
+        headerAtsId,
+        appName,
+    });
+
+    const recent = [...dms]
+        .sort((a, b) => (Number(b.last_post_at) || 0) - (Number(a.last_post_at) || 0))
+        .slice(0, DM_CHANNEL_LIMIT);
+    const otherMmIds = recent
+        .map((channel) => otherUserIdFromDirectChannel(channel, me.id))
+        .filter(Boolean);
+    const unknownMmIds = otherMmIds.filter((id) => !byMmId.has(id));
+    const mmProfiles = await getUsersByIds(token, unknownMmIds);
+    for (const mmUser of mmProfiles) {
+        if (!mmUser?.id || byMmId.has(mmUser.id)) continue;
+        byMmId.set(mmUser.id, syntheticUserFromMm(mmUser));
+    }
+
+    const channelInfos = [];
+    for (const channel of recent) {
+        const otherMmId = otherUserIdFromDirectChannel(channel, me.id);
+        if (!otherMmId) continue;
+        const partner = byMmId.get(otherMmId) || syntheticUserFromMm({ id: otherMmId, username: 'Usuario' });
+        channelInfos.push({ channel, partner, otherMmId });
+    }
+
+    const details = await hydrateChannelThreads(token, me, meAts, channelInfos);
+    const peerMap = new Map();
+    for (const u of atsUsers) {
+        if (u.id !== meAts.id && u.mattermost_user_id) peerMap.set(u.id, toPublicUser(u));
+    }
+    for (const { partner } of channelInfos) {
+        if (partner.id !== meAts.id) peerMap.set(partner.id, toPublicUser(partner));
+    }
+
+    return {
+        me: toPublicUser(meAts),
+        threads: details.map(({ messages, ...thread }) => thread),
+        messages: details.flatMap((d) => d.messages),
+        peers: [...peerMap.values()],
+    };
+}
+
 router.get('/dms', async (req, res) => {
     const token = requireToken(req, res);
     if (!token) return;
     try {
         const appName = appNameFromReq(req);
-        const me = await mmFetch(token, '/api/v4/users/me');
-        const directory = await loadDirectory(appName);
-        const { atsUsers, byMmId } = directory;
-        const meAts = await resolveMeAts({
-            me,
-            directory,
-            headerAtsId: atsUserIdFromReq(req),
-            appName,
-        });
-
-        const dms = await listDirectChannels(token, me.id);
-        const otherMmIds = dms
-            .map((channel) => otherUserIdFromDirectChannel(channel, me.id))
-            .filter(Boolean);
-        const unknownMmIds = otherMmIds.filter((id) => !byMmId.has(id));
-        const mmProfiles = await getUsersByIds(token, unknownMmIds);
-        for (const mmUser of mmProfiles) {
-            if (!mmUser?.id || byMmId.has(mmUser.id)) continue;
-            byMmId.set(mmUser.id, syntheticUserFromMm(mmUser));
+        const headerAtsId = atsUserIdFromReq(req);
+        const me = await mmFetch(token, '/api/v4/users/me', { timeoutMs: 10_000 });
+        const cacheKey = `${dmSnapshotPrefix(appName, me.id)}${headerAtsId}`;
+        const cached = dmSnapshotCache.get(cacheKey);
+        if (cached && Date.now() - cached.at < DM_CACHE_TTL_MS) {
+            return res.json(cached.payload);
         }
 
-        const channelInfos = [];
-        for (const channel of dms) {
-            const otherMmId = otherUserIdFromDirectChannel(channel, me.id);
-            if (!otherMmId) continue;
-            const partner = byMmId.get(otherMmId) || syntheticUserFromMm({ id: otherMmId, username: 'Usuario' });
-            channelInfos.push({ channel, partner, otherMmId });
+        let pending = dmSnapshotInflight.get(cacheKey);
+        if (!pending) {
+            pending = buildDmSnapshot({ token, appName, headerAtsId, me }).finally(() => {
+                dmSnapshotInflight.delete(cacheKey);
+            });
+            dmSnapshotInflight.set(cacheKey, pending);
         }
-
-        const details = await Promise.all(
-            channelInfos.map(async ({ channel, partner }) => {
-                const [posts, unread] = await Promise.all([
-                    getChannelPosts(token, channel.id, 40),
-                    mmFetch(token, `/api/v4/users/${me.id}/channels/${channel.id}/unread`).catch(() => ({
-                        msg_count: 0,
-                    })),
-                ]);
-                const unreadCount = Number(unread?.msg_count) || 0;
-                const incoming = posts.filter((p) => p.user_id !== me.id);
-                const unreadIncomingIds = new Set(incoming.slice(-unreadCount).map((p) => p.id));
-                const messages = posts.map((post) => {
-                    const mine = post.user_id === me.id;
-                    return {
-                        id: post.id,
-                        senderId: mine ? meAts.id : partner.id,
-                        recipientId: mine ? partner.id : meAts.id,
-                        text: postDisplayText(post),
-                        createdAt: isoFromMillis(post.create_at),
-                        readAt: mine || !unreadIncomingIds.has(post.id) ? isoFromMillis(post.create_at) : undefined,
-                        channelId: channel.id,
-                    };
-                });
-                const last = messages[messages.length - 1];
-                return {
-                    partnerId: partner.id,
-                    partnerName: partner.name,
-                    channelId: channel.id,
-                    unread: unreadCount,
-                    lastMessage: last || null,
-                    messages,
-                };
-            }),
-        );
-
-        details.sort((a, b) => {
-            const ta = a.lastMessage ? Date.parse(a.lastMessage.createdAt) : 0;
-            const tb = b.lastMessage ? Date.parse(b.lastMessage.createdAt) : 0;
-            return tb - ta;
-        });
-
-        const peerMap = new Map();
-        for (const u of atsUsers) {
-            if (u.id !== meAts.id && u.mattermost_user_id) peerMap.set(u.id, toPublicUser(u));
-        }
-        for (const { partner } of channelInfos) {
-            if (partner.id !== meAts.id) peerMap.set(partner.id, toPublicUser(partner));
-        }
-
-        res.json({
-            me: toPublicUser(meAts),
-            threads: details.map(({ messages, ...thread }) => thread),
-            messages: details.flatMap((d) => d.messages),
-            peers: [...peerMap.values()],
-        });
+        const payload = await pending;
+        dmSnapshotCache.set(cacheKey, { at: Date.now(), payload });
+        res.json(payload);
     } catch (error) {
         console.error('Error cargando DMs Mattermost:', error);
         const { status, message } = publicRouteError(error, 'No se pudieron cargar los mensajes');
@@ -480,6 +557,7 @@ router.post('/posts', async (req, res) => {
             method: 'POST',
             body: JSON.stringify({ channel_id: channel.id, message: text }),
         });
+        invalidateDmSnapshot(appName, me.id);
         res.json({
             id: post.id,
             senderId: meAts?.id,
@@ -502,6 +580,7 @@ router.post('/read', async (req, res) => {
     try {
         const { me, channel } = await openDirectChannel(req);
         await markDirectChannelRead(token, me.id, channel.id);
+        invalidateDmSnapshot(appNameFromReq(req), me.id);
         res.json({ ok: true, channelId: channel.id });
     } catch (error) {
         console.error('Error marcando leído Mattermost:', error);

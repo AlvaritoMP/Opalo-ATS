@@ -254,6 +254,37 @@ function parseLatestMs(value: unknown): number | null {
     return Number.isFinite(ms) && ms > 0 ? ms : null;
 }
 
+const AGG_SKIP_KEY = 'ats_skip_created_at_agg';
+
+function aggregationUnsupported(): boolean {
+    try {
+        return sessionStorage.getItem(AGG_SKIP_KEY) === '1';
+    } catch {
+        return false;
+    }
+}
+
+function rememberAggregationUnsupported(): void {
+    try {
+        sessionStorage.setItem(AGG_SKIP_KEY, '1');
+    } catch {
+        /* ignore */
+    }
+}
+
+function aggregationErrorText(error: unknown): string {
+    if (!error || typeof error !== 'object') return String(error || 'error');
+    const row = error as { message?: string; code?: string; details?: string; hint?: string; status?: number };
+    const text = [row.code, row.status, row.message, row.details, row.hint].filter(Boolean).join(' | ');
+    return text || 'error';
+}
+
+/** Timeout de Postgres: reintentar la agregación más adelante. Un 400 de PostgREST no. */
+function shouldStopAggregating(error: unknown): boolean {
+    const text = aggregationErrorText(error);
+    return !/timeout|aborted|57014|canceling statement/i.test(text);
+}
+
 /** Una query agregada por lote en lugar de N consultas `limit 1`. */
 async function fetchLatestViaAggregation(
     processIds: string[],
@@ -362,10 +393,18 @@ export const userAlertsApi = {
     ): Promise<Map<string, number>> {
         if (processIds.length === 0) return new Map();
 
+        if (aggregationUnsupported()) {
+            return fetchLatestPerProcess(processIds, abortSignal);
+        }
+
         try {
             return await fetchLatestViaAggregation(processIds, abortSignal);
         } catch (aggError) {
-            console.warn('Avisos: agregación de created_at falló, usando fallback por proceso:', aggError);
+            if (shouldStopAggregating(aggError)) rememberAggregationUnsupported();
+            console.warn(
+                'Avisos: agregación de created_at falló, usando fallback por proceso:',
+                aggregationErrorText(aggError)
+            );
             try {
                 return await fetchLatestPerProcess(processIds, abortSignal);
             } catch (fallbackError) {

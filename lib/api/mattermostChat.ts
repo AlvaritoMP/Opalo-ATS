@@ -78,13 +78,21 @@ async function refreshSession(): Promise<MattermostSession | null> {
     return next;
 }
 
-async function chatFetch(path: string, init: RequestInit = {}, retry = true): Promise<Response> {
+async function chatFetch(
+    path: string,
+    init: RequestInit = {},
+    retry = true,
+    timeoutMs = 25_000
+): Promise<Response> {
     const session = getMattermostSession();
     if (!session?.accessToken) {
         throw new Error('No hay sesión de Mattermost');
     }
     const timeout = new AbortController();
-    const timer = setTimeout(() => timeout.abort(), 8_000);
+    const timer = setTimeout(
+        () => timeout.abort(new DOMException('Mattermost no respondió a tiempo', 'TimeoutError')),
+        timeoutMs
+    );
     let res: Response;
     try {
         res = await fetch(chatUrl(path), {
@@ -103,7 +111,7 @@ async function chatFetch(path: string, init: RequestInit = {}, retry = true): Pr
     }
     if (res.status === 401 && retry) {
         const refreshed = await refreshSession();
-        if (refreshed) return chatFetch(path, init, false);
+        if (refreshed) return chatFetch(path, init, false, timeoutMs);
     }
     return res;
 }

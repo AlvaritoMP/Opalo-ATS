@@ -36,14 +36,41 @@ export async function mmFetch(token, path, options = {}) {
         err.status = 503;
         throw err;
     }
+    const timeoutMs = Number(options.timeoutMs) > 0 ? Number(options.timeoutMs) : 12_000;
+    const { timeoutMs: _timeoutMs, signal: externalSignal, ...fetchOptions } = options;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    const onExternalAbort = () => controller.abort();
+    if (externalSignal) {
+        if (externalSignal.aborted) controller.abort();
+        else externalSignal.addEventListener('abort', onExternalAbort, { once: true });
+    }
     const headers = {
         Authorization: `Bearer ${token}`,
-        ...(options.body && !(options.body instanceof URLSearchParams)
+        ...(fetchOptions.body && !(fetchOptions.body instanceof URLSearchParams)
             ? { 'Content-Type': 'application/json' }
             : {}),
-        ...(options.headers || {}),
+        ...(fetchOptions.headers || {}),
     };
-    const res = await fetch(`${baseUrl}${path}`, { ...options, headers });
+    let res;
+    try {
+        res = await fetch(`${baseUrl}${path}`, {
+            ...fetchOptions,
+            headers,
+            signal: controller.signal,
+        });
+    } catch (error) {
+        if (error?.name === 'AbortError' || error?.name === 'TimeoutError') {
+            const err = new Error('Mattermost no respondió a tiempo');
+            err.status = 504;
+            err.code = 'TIMEOUT';
+            throw err;
+        }
+        throw error;
+    } finally {
+        clearTimeout(timer);
+        if (externalSignal) externalSignal.removeEventListener('abort', onExternalAbort);
+    }
     if (!res.ok) {
         const text = await res.text().catch(() => '');
         let message = text || res.statusText;
