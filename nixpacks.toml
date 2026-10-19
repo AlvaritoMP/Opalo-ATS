@@ -1,15 +1,16 @@
+[variables]
+# Nixpacks, al ver una app Vite, instala Caddy desde Nix. En el VPS esa
+# descarga se queda decenas de minutos. El estático lo sirve Node.
+NIXPACKS_SPA_CADDY = "false"
+
 [phases.setup]
 nixPkgs = ["nodejs_20"]
-# No incluir "caddy" aquí: Nixpacks lo instala solo al detectar Caddyfile.
-# Tenerlo en ambos sitios provoca conflicto de versiones en el build de Docker.
 
 [phases.install]
 cmds = ["npm ci"]
 
 [phases.build]
 cmds = ["npm run build"]
-# Las variables de entorno VITE_* se pasan automáticamente desde Easypanel
 
 [start]
-cmd = "caddy run --config /app/Caddyfile --adapter caddyfile"
-
+cmd = "node scripts/serve-spa.mjs"
