@@ -167,7 +167,7 @@ import { ManageCustomColumnsModal } from './ManageCustomColumnsModal';
 import { TableTemplateModal, BulkTableTemplateLayout } from './TableTemplateModal';
 import { PsycholaboralReportModal } from './PsycholaboralReportModal';
 import { CandidateAssessmentPanel } from './CandidateAssessmentPanel';
-import { AssessmentConsultantGuide } from './AssessmentConsultantGuide';
+import { AppHelpManual } from './AppHelpManual';
 import { buildPublicAssessmentsUrl } from '../lib/assessments/publicRoute';
 import { assessmentColumnsForProfile, isAssessmentColumnId } from '../lib/assessments/columns';
 import { AssessmentCheckCell } from './assessments/AssessmentCheckCell';
@@ -7358,7 +7358,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                                             type="button"
                                             onClick={() => setShowAssessmentGuide(true)}
                                             className="bg-white border border-teal-300 text-teal-900 hover:bg-teal-50 transition-colors whitespace-nowrap"
-                                            title="Cómo se aplica cada prueba, qué mide, cómo se puntúa y cómo se interpreta"
+                                            title="Abre el manual en la ejecución de las pruebas: batería, enlace, puntaje y qué alimenta el informe"
                                         >
                                             <BookOpen className="w-4 h-4 shrink-0" />
                                             Guía de pruebas
@@ -9145,7 +9145,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
             )}
 
             {showAssessmentGuide && (
-                <AssessmentConsultantGuide onClose={() => setShowAssessmentGuide(false)} />
+                <AppHelpManual initialSectionId="pruebas" onClose={() => setShowAssessmentGuide(false)} />
             )}
 
             {showIdealProfileModal && process && (

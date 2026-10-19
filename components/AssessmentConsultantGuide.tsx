@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { X } from 'lucide-react';
 
-interface GuideSection {
+export interface GuideSection {
     id: string;
     title: string;
     body: React.ReactNode;
@@ -48,7 +48,7 @@ function Table({ headers, rows }: { headers: string[]; rows: string[][] }) {
     );
 }
 
-const SECTIONS: GuideSection[] = [
+export const ASSESSMENT_GUIDE_SECTIONS: GuideSection[] = [
     {
         id: 'uso',
         title: 'Cómo se aplica',
@@ -365,8 +365,8 @@ const SECTIONS: GuideSection[] = [
 ];
 
 export const AssessmentConsultantGuide: React.FC<{ onClose: () => void }> = ({ onClose }) => {
-    const [activeId, setActiveId] = useState(SECTIONS[0].id);
-    const active = SECTIONS.find((section) => section.id === activeId) || SECTIONS[0];
+    const [activeId, setActiveId] = useState(ASSESSMENT_GUIDE_SECTIONS[0].id);
+    const active = ASSESSMENT_GUIDE_SECTIONS.find((section) => section.id === activeId) || ASSESSMENT_GUIDE_SECTIONS[0];
 
     return (
         <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40 p-0 sm:p-4" onClick={onClose}>
@@ -386,7 +386,7 @@ export const AssessmentConsultantGuide: React.FC<{ onClose: () => void }> = ({ o
                 </header>
                 <div className="flex min-h-0 flex-1 flex-col sm:flex-row">
                     <nav className="flex gap-1 overflow-x-auto border-b border-slate-200 px-3 py-2 sm:w-56 sm:flex-col sm:overflow-y-auto sm:border-b-0 sm:border-r sm:py-3">
-                        {SECTIONS.map((section) => (
+                        {ASSESSMENT_GUIDE_SECTIONS.map((section) => (
                             <button
                                 key={section.id}
                                 type="button"

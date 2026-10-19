@@ -55,7 +55,8 @@ import { Letters } from './components/Letters';
 import { ToastContainer } from './components/Toast';
 import { MessagingBar } from './components/MessagingBar';
 import { UserAlertsPanel } from './components/UserAlertsPanel';
-import { LayoutDashboard, Briefcase, FileText, Settings as SettingsIcon, Users as UsersIcon, ChevronsLeft, ChevronsRight, BarChart2, Calendar, CalendarDays, LogOut, X, Archive, RefreshCw, Menu, Grid3x3, Send, Brain, Activity } from 'lucide-react';
+import { AppHelpManual } from './components/AppHelpManual';
+import { LayoutDashboard, Briefcase, FileText, Settings as SettingsIcon, Users as UsersIcon, ChevronsLeft, ChevronsRight, BarChart2, Calendar, CalendarDays, LogOut, X, Archive, RefreshCw, Menu, Grid3x3, Send, Brain, Activity, CircleHelp } from 'lucide-react';
 import { CandidateComparator } from './components/CandidateComparator';
 
 
@@ -435,6 +436,7 @@ const Sidebar: React.FC = () => {
     const { state, actions, getLabel } = useAppState();
     const [isCollapsed, setIsCollapsed] = React.useState(false);
     const [isMobileOpen, setIsMobileOpen] = React.useState(false);
+    const [helpOpen, setHelpOpen] = React.useState(false);
     
     if (!state.currentUser) return null;
     
@@ -505,6 +507,17 @@ const Sidebar: React.FC = () => {
                 {canSeeSection('compare') && <NavItem icon={BarChart2} label={getLabel('sidebar_compare', 'Comparador')} view="compare" currentView={state.view.type} setView={actions.setView} isCollapsed={isCollapsed} />}
             </nav>
             <div className="p-2 border-t space-y-2">
+                <div className="px-2">
+                    <button
+                        type="button"
+                        onClick={() => setHelpOpen(true)}
+                        className={`w-full flex items-center px-4 py-2.5 text-sm font-medium rounded-lg transition-colors text-teal-800 hover:bg-teal-50 ${isCollapsed ? 'justify-center' : ''}`}
+                        title="Manual de la aplicación"
+                    >
+                        <CircleHelp className={`w-5 h-5 ${isCollapsed ? '' : 'mr-3'}`} />
+                        {!isCollapsed && 'Ayuda'}
+                    </button>
+                </div>
                  <div className="p-2">
                     {canSeeSection('user-activity') && <NavItem icon={Activity} label={getLabel('sidebar_user_activity', 'Actividad')} view="user-activity" currentView={state.view.type} setView={actions.setView} isCollapsed={isCollapsed} />}
                     {canSeeSection('users') && <NavItem icon={UsersIcon} label={getLabel('sidebar_users', 'Usuarios')} view="users" currentView={state.view.type} setView={actions.setView} isCollapsed={isCollapsed} />}
@@ -598,6 +611,7 @@ const Sidebar: React.FC = () => {
                 )}
             </div>
         </div>
+        {helpOpen && <AppHelpManual onClose={() => setHelpOpen(false)} />}
         </>
     );
 };
