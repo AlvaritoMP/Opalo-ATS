@@ -5,6 +5,7 @@ import { fileToBase64 } from './fileUtils';
 import { applyImportTextCaseToCandidate } from './importTextCase';
 import {
     BASE_COLUMNS,
+    FICHA_DATOS_COLUMN_ID,
     enrichBulkColumnValuesForStorage,
     getColumnLabel,
     mapImportHeader,
@@ -304,6 +305,7 @@ const SKIP_TABLE_COL_IDS = new Set([
     'stage',
     'hiredStageUser',
     'registrationOrigin',
+    FICHA_DATOS_COLUMN_ID,
     BULK_DOCUMENTS_COLUMN_ID,
 ]);
 

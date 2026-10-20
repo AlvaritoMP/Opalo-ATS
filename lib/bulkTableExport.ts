@@ -17,6 +17,7 @@ import {
     mapImportHeader,
     resolveStandardFieldValue,
     shouldApplyScoreAutoFilter,
+    FICHA_DATOS_COLUMN_ID,
 } from './bulkTableColumns';
 import { formatRegistrationOrigin, resolveRegistrationOrigin, registrationOriginInputFromBulkCandidate } from './candidateRegistrationOrigin';
 import { buildRouteColumnLink } from './transitRouteLinks';
@@ -69,6 +70,7 @@ export function getBulkExportCellValue(
 
     if (colId === 'name') return candidate.name || '';
     if (colId === 'dni') return candidate.dni || '';
+    if (colId === FICHA_DATOS_COLUMN_ID) return candidate.complementaryFilledAt ? 'Sí' : 'No';
     if (colId === 'email') {
         const em = getDisplayEmail(candidate.email);
         return em || '';

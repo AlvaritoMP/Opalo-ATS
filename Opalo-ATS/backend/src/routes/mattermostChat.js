@@ -258,9 +258,15 @@ async function listDirectChannels(token, userId) {
 }
 
 async function getChannelPosts(token, channelId, perPage = 40, timeoutMs = 12_000) {
+    const params = new URLSearchParams({
+        per_page: String(perPage),
+        page: '0',
+        collapsedThreads: 'true',
+        skipFetchThreads: 'true',
+    });
     const data = await mmFetch(
         token,
-        `/api/v4/channels/${channelId}/posts?per_page=${perPage}&page=0`,
+        `/api/v4/channels/${channelId}/posts?${params}`,
         { timeoutMs },
     );
     const order = Array.isArray(data?.order) ? data.order : [];
@@ -335,9 +341,27 @@ async function loadChannelThread(token, me, meAts, info, timeoutMs) {
     };
 }
 
-async function hydrateChannelThreads(token, me, meAts, channelInfos) {
+function previousChannelThread(previous, info) {
+    if (!previous) return null;
+    const channelId = info.channel?.id;
+    if (!channelId) return null;
+    const messages = (previous.messages || []).filter((message) => message.channelId === channelId);
+    const thread = (previous.threads || []).find((item) => item.channelId === channelId);
+    if (!thread && messages.length === 0) return null;
+    return {
+        partnerId: thread?.partnerId || info.partner.id,
+        partnerName: thread?.partnerName || info.partner.name,
+        channelId,
+        unread: thread?.unread || 0,
+        lastMessage: thread?.lastMessage || messages[messages.length - 1] || null,
+        messages,
+    };
+}
+
+async function hydrateChannelThreads(token, me, meAts, channelInfos, previous) {
     const deadline = Date.now() + DM_HYDRATE_BUDGET_MS;
     const details = [];
+    const loaded = new Set();
     let cursor = 0;
     const workerCount = Math.min(DM_FETCH_CONCURRENCY, channelInfos.length);
     await Promise.all(
@@ -347,21 +371,35 @@ async function hydrateChannelThreads(token, me, meAts, channelInfos) {
                 const remaining = deadline - Date.now();
                 try {
                     details.push(await loadChannelThread(token, me, meAts, info, remaining));
+                    loaded.add(info.channel.id);
                 } catch (err) {
+                    const reused = previousChannelThread(previous, info);
+                    if (reused) {
+                        details.push(reused);
+                        loaded.add(info.channel.id);
+                    }
                     console.warn('DM omitido:', info.channel?.id, err.message);
                 }
             }
         }),
     );
+    for (const info of channelInfos) {
+        if (!info.channel?.id || loaded.has(info.channel.id)) continue;
+        const reused = previousChannelThread(previous, info);
+        if (!reused) continue;
+        details.push(reused);
+        loaded.add(info.channel.id);
+    }
     details.sort((a, b) => {
         const ta = a.lastMessage ? Date.parse(a.lastMessage.createdAt) : 0;
         const tb = b.lastMessage ? Date.parse(b.lastMessage.createdAt) : 0;
-        return tb - ta;
+        if (tb !== ta) return tb - ta;
+        return String(a.channelId).localeCompare(String(b.channelId));
     });
     return details;
 }
 
-async function buildDmSnapshot({ token, appName, headerAtsId, me }) {
+async function buildDmSnapshot({ token, appName, headerAtsId, me, previous }) {
     const [directory, dms] = await Promise.all([
         loadDirectory(appName),
         listDirectChannels(token, me.id),
@@ -382,20 +420,25 @@ async function buildDmSnapshot({ token, appName, headerAtsId, me }) {
         .filter(Boolean);
     const unknownMmIds = otherMmIds.filter((id) => !byMmId.has(id));
     const mmProfiles = await getUsersByIds(token, unknownMmIds);
+    const botIds = new Set();
     for (const mmUser of mmProfiles) {
-        if (!mmUser?.id || byMmId.has(mmUser.id)) continue;
-        byMmId.set(mmUser.id, syntheticUserFromMm(mmUser));
+        if (!mmUser?.id) continue;
+        if (mmUser.is_bot) {
+            botIds.add(mmUser.id);
+            continue;
+        }
+        if (!byMmId.has(mmUser.id)) byMmId.set(mmUser.id, syntheticUserFromMm(mmUser));
     }
 
     const channelInfos = [];
     for (const channel of recent) {
         const otherMmId = otherUserIdFromDirectChannel(channel, me.id);
-        if (!otherMmId) continue;
+        if (!otherMmId || botIds.has(otherMmId)) continue;
         const partner = byMmId.get(otherMmId) || syntheticUserFromMm({ id: otherMmId, username: 'Usuario' });
         channelInfos.push({ channel, partner, otherMmId });
     }
 
-    const details = await hydrateChannelThreads(token, me, meAts, channelInfos);
+    const details = await hydrateChannelThreads(token, me, meAts, channelInfos, previous);
     const peerMap = new Map();
     for (const u of atsUsers) {
         if (u.id !== meAts.id && u.mattermost_user_id) peerMap.set(u.id, toPublicUser(u));
@@ -427,7 +470,13 @@ router.get('/dms', async (req, res) => {
 
         let pending = dmSnapshotInflight.get(cacheKey);
         if (!pending) {
-            pending = buildDmSnapshot({ token, appName, headerAtsId, me }).finally(() => {
+            pending = buildDmSnapshot({
+                token,
+                appName,
+                headerAtsId,
+                me,
+                previous: cached?.payload,
+            }).finally(() => {
                 dmSnapshotInflight.delete(cacheKey);
             });
             dmSnapshotInflight.set(cacheKey, pending);

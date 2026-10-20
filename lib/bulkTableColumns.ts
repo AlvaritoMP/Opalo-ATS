@@ -776,11 +776,28 @@ export interface BaseColumn {
     importKey?: string;
 }
 
+/** Columna de solo lectura: el candidato envió la ficha complementaria. */
+export const FICHA_DATOS_COLUMN_ID = 'fichaDatos';
+
+/** Inserta Ficha de datos junto al DNI la primera vez que se muestra. */
+export function ensureFichaDatosColumnInOrder(order: string[]): string[] {
+    if (order.includes(FICHA_DATOS_COLUMN_ID)) return order;
+    const clean = order.filter((id): id is string => typeof id === 'string' && id.length > 0);
+    const dniIdx = clean.indexOf(DNI_COLUMN_ID);
+    if (dniIdx >= 0) {
+        const next = [...clean];
+        next.splice(dniIdx + 1, 0, FICHA_DATOS_COLUMN_ID);
+        return next;
+    }
+    return [...clean, FICHA_DATOS_COLUMN_ID];
+}
+
 export const BASE_COLUMNS: BaseColumn[] = [
     { id: GIVEN_NAMES_COLUMN_ID, label: 'Nombres', importKey: 'nombres' },
     { id: 'apellidoPaterno', label: 'Apellido Paterno', importKey: 'apellidoPaterno' },
     { id: 'apellidoMaterno', label: 'Apellido Materno', importKey: 'apellidoMaterno' },
     { id: DNI_COLUMN_ID, label: 'DNI', importKey: 'dni' },
+    { id: FICHA_DATOS_COLUMN_ID, label: 'Ficha de datos' },
     { id: 'email', label: 'Email', importKey: 'email' },
     { id: 'contactEmail', label: 'Correo' },
     { id: 'scoreIa', label: 'Score IA' },
@@ -816,6 +833,7 @@ export const COLUMN_WIDTHS: Record<string, number> = {
     apellidoPaterno: 120,
     apellidoMaterno: 120,
     dni: 72,
+    fichaDatos: 136,
     email: 140,
     scoreIa: 64,
     profileMatch: 72,

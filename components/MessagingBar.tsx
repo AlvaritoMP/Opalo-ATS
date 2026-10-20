@@ -14,6 +14,20 @@ function formatTime(iso: string): string {
     return d.toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' });
 }
 
+function messageSnapshotKey(list: UserMessage[]): string {
+    return [...list]
+        .sort((a, b) => a.id.localeCompare(b.id))
+        .map(m => `${m.id}\u0001${m.text}\u0001${m.createdAt}\u0001${m.readAt || ''}\u0001${m.senderId}\u0001${m.recipientId}`)
+        .join('\n');
+}
+
+function peerSnapshotKey(list: Array<{ id: string; name: string }>): string {
+    return [...list]
+        .map(u => `${u.id}\u0001${u.name}`)
+        .sort()
+        .join('\n');
+}
+
 function formatDay(iso: string): string {
     const d = new Date(iso);
     const today = new Date();
@@ -62,7 +76,11 @@ export const MessagingBar: React.FC<MessagingBarProps> = ({
     const [selfId, setSelfId] = useState(currentUser.id);
     const mmEnabled = hasMattermostSession();
     const messagesEndRef = useRef<HTMLDivElement>(null);
+    const messagesRef = useRef<UserMessage[]>([]);
+    const selfIdRef = useRef(currentUser.id);
     const knownIdsRef = useRef<Set<string>>(new Set());
+    const sessionStartedAtRef = useRef(0);
+    const lastScrollKeyRef = useRef('');
     const mmInitializedRef = useRef(false);
     const readUntilRef = useRef<Map<string, number>>(new Map());
     const markedReadPartnersRef = useRef<Set<string>>(new Set());
@@ -70,25 +88,23 @@ export const MessagingBar: React.FC<MessagingBarProps> = ({
     const onSendErrorRef = useRef(onSendError);
     onNewMessageRef.current = onNewMessage;
     onSendErrorRef.current = onSendError;
-
-    const unhideChat = useCallback(() => {
-        setHidden(false);
-        try {
-            localStorage.removeItem(`${STORAGE_KEY_PREFIX}${currentUser.id}`);
-        } catch { /* ignore */ }
-    }, [currentUser.id]);
+    messagesRef.current = messages;
+    selfIdRef.current = selfId;
 
     const applyLocalReadState = useCallback((list: UserMessage[]): UserMessage[] => {
         const readUntil = readUntilRef.current;
         if (readUntil.size === 0) return list;
-        return list.map(msg => {
+        let changed = false;
+        const next = list.map(msg => {
             if (msg.recipientId !== selfId || msg.readAt) return msg;
             const until = readUntil.get(msg.senderId);
             if (until != null && Date.parse(msg.createdAt) <= until) {
-                return { ...msg, readAt: new Date(until).toISOString() };
+                changed = true;
+                return { ...msg, readAt: msg.createdAt };
             }
             return msg;
         });
+        return changed ? next : list;
     }, [selfId]);
 
     const directoryUsers = mmPeers.length > 0 ? mmPeers : users;
@@ -156,29 +172,31 @@ export const MessagingBar: React.FC<MessagingBarProps> = ({
         mmInFlightRef.current = true;
         try {
             const data = await mattermostChatApi.getDms(currentUser.id);
-            setAvailable(true);
-            if (data.me?.id) setSelfId(data.me.id);
-            setMmPeers(
-                (data.peers || []).map(peer => ({
-                    id: peer.id,
-                    name: peer.name,
-                    email: peer.email,
-                    role: 'recruiter',
-                    mattermostUserId: peer.mattermostUserId,
-                    mattermostUsername: peer.mattermostUsername,
-                    avatarUrl: peer.avatarUrl,
-                }))
-            );
-            const meId = data.me?.id || currentUser.id;
+            setAvailable(prev => (prev ? prev : true));
+            if (data.me?.id && data.me.id !== selfIdRef.current) setSelfId(data.me.id);
+            const meId = data.me?.id || selfIdRef.current;
             const incoming = applyLocalReadState(data.messages || []);
-            const previousIds = knownIdsRef.current;
-            if (mmInitializedRef.current) {
+            const peers = (data.peers || []).map(peer => ({
+                id: peer.id,
+                name: peer.name,
+                email: peer.email,
+                role: 'recruiter' as const,
+                mattermostUserId: peer.mattermostUserId,
+                mattermostUsername: peer.mattermostUsername,
+                avatarUrl: peer.avatarUrl,
+            }));
+            setMmPeers(prev => (peerSnapshotKey(prev) === peerSnapshotKey(peers) ? prev : peers));
+            if (!mmInitializedRef.current) {
+                mmInitializedRef.current = true;
+                sessionStartedAtRef.current = Date.now();
+            } else {
                 const newestIncoming = incoming
                     .filter(
                         msg =>
-                            !previousIds.has(msg.id) &&
+                            !knownIdsRef.current.has(msg.id) &&
                             msg.senderId !== meId &&
-                            msg.recipientId === meId
+                            msg.recipientId === meId &&
+                            Date.parse(msg.createdAt) > sessionStartedAtRef.current
                     )
                     .sort(
                         (a, b) =>
@@ -189,15 +207,12 @@ export const MessagingBar: React.FC<MessagingBarProps> = ({
                         data.threads.find(t => t.partnerId === newestIncoming.senderId)?.partnerName ||
                         'Un usuario';
                     onNewMessageRef.current?.(fromName);
-                    unhideChat();
-                    setExpanded(true);
-                    setActivePartnerId(newestIncoming.senderId);
-                    markedReadPartnersRef.current.delete(newestIncoming.senderId);
                 }
             }
-            mmInitializedRef.current = true;
-            knownIdsRef.current = new Set(incoming.map(m => m.id));
-            setMessages(incoming);
+            for (const msg of incoming) knownIdsRef.current.add(msg.id);
+            if (messageSnapshotKey(messagesRef.current) !== messageSnapshotKey(incoming)) {
+                setMessages(incoming);
+            }
             mmFailStreakRef.current = 0;
         } catch (err) {
             mmFailStreakRef.current = Math.min(mmFailStreakRef.current + 1, 5);
@@ -206,7 +221,7 @@ export const MessagingBar: React.FC<MessagingBarProps> = ({
         } finally {
             mmInFlightRef.current = false;
         }
-    }, [mmEnabled, currentUser.id, applyLocalReadState, unhideChat]);
+    }, [mmEnabled, currentUser.id, applyLocalReadState]);
 
     useEffect(() => {
         if (!mmEnabled) return;
@@ -215,6 +230,10 @@ export const MessagingBar: React.FC<MessagingBarProps> = ({
         const schedule = (delay: number) => {
             timer = window.setTimeout(() => {
                 if (cancelled) return;
+                if (document.hidden) {
+                    schedule(POLL_MM_MS);
+                    return;
+                }
                 void loadMessages().finally(() => {
                     if (cancelled) return;
                     const base = expanded ? POLL_MM_OPEN_MS : POLL_MM_MS;
@@ -225,10 +244,17 @@ export const MessagingBar: React.FC<MessagingBarProps> = ({
                 });
             }, delay);
         };
+        const onVisible = () => {
+            if (cancelled || document.hidden) return;
+            window.clearTimeout(timer);
+            schedule(0);
+        };
+        document.addEventListener('visibilitychange', onVisible);
         schedule(0);
         return () => {
             cancelled = true;
             window.clearTimeout(timer);
+            document.removeEventListener('visibilitychange', onVisible);
         };
     }, [mmEnabled, expanded, loadMessages]);
 
@@ -255,11 +281,15 @@ export const MessagingBar: React.FC<MessagingBarProps> = ({
         });
     }, [expanded, activePartnerId, conversationMessages, selfId, currentUser.id, applyLocalReadState]);
 
+    const lastMessageId = conversationMessages[conversationMessages.length - 1]?.id ?? '';
+
     useEffect(() => {
-        if (expanded && activePartnerId) {
-            messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-        }
-    }, [conversationMessages, expanded, activePartnerId]);
+        if (!expanded || !activePartnerId || !lastMessageId) return;
+        const scrollKey = `${activePartnerId}:${lastMessageId}`;
+        if (lastScrollKeyRef.current === scrollKey) return;
+        lastScrollKeyRef.current = scrollKey;
+        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }, [lastMessageId, expanded, activePartnerId]);
 
     const handleSend = async () => {
         if (!activePartnerId || !draft.trim() || sending) return;

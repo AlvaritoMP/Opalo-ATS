@@ -147,6 +147,8 @@ import {
     ensureProfileMatchInColumnOrder,
     reconcileCustomColumns,
     ensureBulkTableLayoutConfig,
+    FICHA_DATOS_COLUMN_ID,
+    ensureFichaDatosColumnInOrder,
 } from '../lib/bulkTableColumns';
 import { BULK_DOCUMENTS_COLUMN_ID } from '../lib/bulkDocumentData';
 import { getStageSelectClass } from '../lib/stageColors';
@@ -372,6 +374,32 @@ const BulkTh: React.FC<{
         />
     </th>
 );
+
+const FichaDatosCheck: React.FC<{ filledAt?: string }> = ({ filledAt }) => {
+    const filled = Boolean(filledAt);
+    let title = 'Ficha pendiente';
+    if (filled && filledAt) {
+        const when = new Date(filledAt);
+        title = Number.isNaN(when.getTime())
+            ? 'Ficha enviada'
+            : `Ficha enviada · ${when.toLocaleString('es-PE')}`;
+    }
+    return (
+        <input
+            type="checkbox"
+            checked={filled}
+            readOnly
+            onChange={() => undefined}
+            onClick={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+            }}
+            className="w-4 h-4 accent-green-700 cursor-default"
+            title={title}
+            aria-label={filled ? 'Ficha de datos enviada' : 'Ficha de datos pendiente'}
+        />
+    );
+};
 
 type CandidateDrawerTab = 'contactology' | 'timeline' | 'details';
 
@@ -4531,14 +4559,26 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
     };
 
     const toggleColumnVisibility = async (colId: string) => {
-        if (isAssessmentColumnId(colId)) {
+        if (isAssessmentColumnId(colId) || colId === FICHA_DATOS_COLUMN_ID) {
             const currentlyVisible = columnOrder.includes(colId) && !hiddenColumns.includes(colId);
             const previousHidden = hiddenColumns;
             const previousOrder = columnOrder;
             const newHidden = currentlyVisible
                 ? [...hiddenColumns, colId]
                 : hiddenColumns.filter((id) => id !== colId);
-            const newOrder = currentlyVisible || columnOrder.includes(colId) ? columnOrder : [...columnOrder, colId];
+            const newOrder = currentlyVisible || columnOrder.includes(colId)
+                ? columnOrder
+                : colId === FICHA_DATOS_COLUMN_ID
+                    ? ensureFichaDatosColumnInOrder(columnOrder)
+                    : [...columnOrder, colId];
+            if (colId === FICHA_DATOS_COLUMN_ID && currentlyVisible) {
+                setColumnFilterDraft(prev => {
+                    if (!prev[FICHA_DATOS_COLUMN_ID]) return prev;
+                    const next = { ...prev };
+                    delete next[FICHA_DATOS_COLUMN_ID];
+                    return next;
+                });
+            }
             setHiddenColumns(newHidden);
             setColumnOrder(newOrder);
             try {
@@ -5141,6 +5181,10 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                     valueA = (candidateA.dni || '').toLowerCase();
                     valueB = (candidateB.dni || '').toLowerCase();
                     break;
+                case FICHA_DATOS_COLUMN_ID:
+                    valueA = candidateA.complementaryFilledAt ? 1 : 0;
+                    valueB = candidateB.complementaryFilledAt ? 1 : 0;
+                    break;
                 case 'email':
                     valueA = (candidateA.email || '').toLowerCase();
                     valueB = (candidateB.email || '').toLowerCase();
@@ -5276,6 +5320,11 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
             }
             if (columnFilters.dni && !(displayCandidate.dni || '').toLowerCase().includes(columnFilters.dni.toLowerCase())) {
                 return false;
+            }
+            if (columnFilters[FICHA_DATOS_COLUMN_ID]) {
+                const filled = Boolean(displayCandidate.complementaryFilledAt);
+                if (columnFilters[FICHA_DATOS_COLUMN_ID] === 'true' && !filled) return false;
+                if (columnFilters[FICHA_DATOS_COLUMN_ID] === 'false' && filled) return false;
             }
             if (columnFilters.email && !(displayCandidate.email || '').toLowerCase().includes(columnFilters.email.toLowerCase())) {
                 return false;
@@ -5741,6 +5790,13 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
             if (colId === 'createdAt') {
                 return (
                     <span className="text-xs text-gray-700">{formatBulkDateTime(displayCandidate.createdAt)}</span>
+                );
+            }
+            if (colId === FICHA_DATOS_COLUMN_ID) {
+                return (
+                    <span className="inline-flex justify-center w-full">
+                        <FichaDatosCheck filledAt={displayCandidate.complementaryFilledAt} />
+                    </span>
                 );
             }
             if (colId === CONTACT_LAST_USER_COLUMN_ID) {
@@ -7068,7 +7124,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                                                                     <input
                                                                         type="checkbox"
                                                                         checked={
-                                                                            isAssessmentColumnId(colId)
+                                                                            isAssessmentColumnId(colId) || colId === FICHA_DATOS_COLUMN_ID
                                                                                 ? columnOrder.includes(colId) && !hiddenColumns.includes(colId)
                                                                                 : !hiddenColumns.includes(colId) || isIdentitySystemColumnId(colId)
                                                                         }
@@ -7561,6 +7617,40 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                                             </BulkTh>
                                         );
                                     }
+                                    if (colId === FICHA_DATOS_COLUMN_ID) {
+                                        return (
+                                            <BulkTh
+                                                colId={colId}
+                                                headerProps={{
+                                                    ...commonProps,
+                                                    className: `${COMPACT_TH_CLASS} normal-case cursor-move transition-colors bg-gray-50`,
+                                                }}
+                                                style={thStyle()}
+                                                onResizeStart={handleColumnResizeStart}
+                                            >
+                                                <div className="flex flex-col gap-1">
+                                                    <button
+                                                        onClick={() => handleSort(FICHA_DATOS_COLUMN_ID)}
+                                                        className="flex items-center gap-1 hover:text-primary-600 transition-colors"
+                                                        title="Marcada si el candidato envió la ficha complementaria"
+                                                    >
+                                                        <span>Ficha de datos</span>
+                                                        {sortColumn === FICHA_DATOS_COLUMN_ID ? (sortDirection === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />) : <div className="w-3 h-3 opacity-30"><ArrowUp className="w-3 h-3" /></div>}
+                                                    </button>
+                                                    <select
+                                                        value={columnFilterDraft[FICHA_DATOS_COLUMN_ID] || ''}
+                                                        onChange={(e) => setColumnFilterDraft(prev => ({ ...prev, [FICHA_DATOS_COLUMN_ID]: e.target.value }))}
+                                                        className="text-xs px-2 py-1 border border-gray-300 rounded focus:ring-1 focus:ring-primary-500 focus:border-primary-500 font-normal normal-case"
+                                                        onClick={(e) => e.stopPropagation()}
+                                                    >
+                                                        <option value="">Todos</option>
+                                                        <option value="true">Sí</option>
+                                                        <option value="false">No</option>
+                                                    </select>
+                                                </div>
+                                            </BulkTh>
+                                        );
+                                    }
                                     if (colId === 'email') {
                                         return (
                                             <BulkTh colId={colId} headerProps={commonProps} style={thStyle()} onResizeStart={handleColumnResizeStart}>
@@ -8049,6 +8139,15 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                                                         ) : (
                                                             <span className="bulk-cell-text text-gray-600 hover:bg-gray-50 px-1 py-0.5 rounded cursor-pointer" onDoubleClick={() => handleStartEdit(candidate.id, 'dni', displayCandidate.dni || '')} title="Doble clic para editar">{displayCandidate.dni || '-'}</span>
                                                         )}
+                                                    </td>
+                                                );
+                                            }
+                                            if (colId === FICHA_DATOS_COLUMN_ID) {
+                                                return (
+                                                    <td key={FICHA_DATOS_COLUMN_ID} {...tdProps(candidate.id, FICHA_DATOS_COLUMN_ID)}>
+                                                        <span className="inline-flex justify-center w-full">
+                                                            <FichaDatosCheck filledAt={displayCandidate.complementaryFilledAt} />
+                                                        </span>
                                                     </td>
                                                 );
                                             }

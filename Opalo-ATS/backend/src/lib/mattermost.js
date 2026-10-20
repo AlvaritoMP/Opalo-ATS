@@ -186,10 +186,17 @@ export function postDisplayText(post) {
     return '';
 }
 
+function propFlag(value) {
+    return value === true || value === 'true';
+}
+
+/** Post que Mattermost muestra en la conversación principal, no de bot, webhook ni hilo. */
 export function isUserPost(post) {
-    if (!post || post.delete_at) return false;
+    if (!post || post.delete_at || post.root_id) return false;
     const type = String(post.type || '');
     if (type && type.startsWith('system_')) return false;
+    const props = post.props || {};
+    if (propFlag(props.from_bot) || propFlag(props.from_webhook) || props.webhook_id) return false;
     return Boolean(postDisplayText(post));
 }
 

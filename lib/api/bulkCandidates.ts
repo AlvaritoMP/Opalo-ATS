@@ -42,7 +42,7 @@ const BULK_SELECT_WITH_APPLICATION = `${BULK_SELECT_WITH_CREATED}, application_c
 const BULK_SELECT_WITH_REGISTRATION = `${BULK_SELECT_WITH_APPLICATION}, registration_origin, created_by, contact_lock_user_id, contact_lock_user_name, contact_lock_until, contact_lock_reason`;
 const BULK_SELECT_WITH_TRANSFER = `${BULK_SELECT_WITH_REGISTRATION}, transfer_pending_review`;
 const BULK_SELECT_WITH_OPSFLOW = `${BULK_SELECT_WITH_TRANSFER}, opsflow_sent_at, opsflow_last_package_id, opsflow_delivery_status`;
-const BULK_SELECT_FULL = `${BULK_SELECT_WITH_OPSFLOW}, bulk_column_values`;
+const BULK_SELECT_FULL = `${BULK_SELECT_WITH_OPSFLOW}, bulk_column_values, complementary_filled_at`;
 const BULK_EFFICIENCY_FIELDS =
     'hire_date, offer_accepted_date, application_started_date, application_completed_date';
 const BULK_SELECT_FULL_EFFICIENCY = `${BULK_SELECT_FULL}, ${BULK_EFFICIENCY_FIELDS}`;
@@ -157,6 +157,7 @@ function mapBulkCandidateRow(
         opsflowLastPackageId: (c.opsflow_last_package_id as string) || undefined,
         opsflowDeliveryStatus:
             (c.opsflow_delivery_status as BulkCandidate['opsflowDeliveryStatus']) || undefined,
+        complementaryFilledAt: (c.complementary_filled_at as string) || undefined,
         googleDriveFolderId: (c.google_drive_folder_id as string) || undefined,
         googleDriveFolderName: (c.google_drive_folder_name as string) || undefined,
     };
@@ -221,6 +222,8 @@ export interface BulkCandidate {
     opsflowSentAt?: string;
     opsflowLastPackageId?: string;
     opsflowDeliveryStatus?: 'pending' | 'delivered' | 'failed';
+    /** Envío de la ficha complementaria pública. Vacío si todavía no la llenó. */
+    complementaryFilledAt?: string;
     // Campos adicionales para el drawer (se cargan bajo demanda)
     description?: string;
     attachments?: any[];
@@ -366,6 +369,40 @@ export const bulkCandidatesApi = {
                 data = data.map(row => {
                     const extra = originById.get(row.id as string);
                     return extra ? { ...row, ...extra } : row;
+                });
+            }
+        }
+
+        if (data && data.length > 0 && data[0].complementary_filled_at === undefined) {
+            const ids = data.map(row => row.id as string);
+            const fichaById = new Map<string, string | null>();
+            let fichaSupported = true;
+            for (let offset = 0; offset < ids.length; offset += 200) {
+                const chunk = ids.slice(offset, offset + 200);
+                const { data: fichaRows, error: fichaError } = await supabase
+                    .from('candidates')
+                    .select('id, complementary_filled_at')
+                    .in('id', chunk)
+                    .eq('app_name', APP_NAME);
+                if (fichaError) {
+                    if (!isMissingColumnError(fichaError)) break;
+                    fichaSupported = false;
+                    break;
+                }
+                for (const row of fichaRows || []) {
+                    fichaById.set(
+                        row.id as string,
+                        (row.complementary_filled_at as string | null) ?? null
+                    );
+                }
+            }
+            if (fichaSupported && fichaById.size > 0) {
+                data = data.map(row => {
+                    if (!fichaById.has(row.id as string)) return row;
+                    return {
+                        ...row,
+                        complementary_filled_at: fichaById.get(row.id as string),
+                    };
                 });
             }
         }
