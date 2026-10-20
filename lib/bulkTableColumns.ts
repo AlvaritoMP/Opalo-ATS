@@ -1150,7 +1150,7 @@ export function buildColumnConfigIds(
     for (const colId of allIds) {
         if (!seen.has(colId)) out.push(colId);
     }
-    return out;
+    return ensureFichaDatosColumnInOrder(out);
 }
 
 /** Columnas visibles en la tabla: respeta columnOrder e hiddenColumns de bulk_config. */
@@ -1343,10 +1343,10 @@ export function resolveColumnOrder(
         for (const id of getCustomColumnIds(customColumns)) {
             if (!present.has(id)) ordered.push(id);
         }
-        return ensureIdentityColumnsInOrder(ordered);
+        return ensureFichaDatosColumnInOrder(ensureIdentityColumnsInOrder(ordered));
     }
 
-    return ensureIdentityColumnsInOrder(allIds);
+    return ensureFichaDatosColumnInOrder(ensureIdentityColumnsInOrder(allIds));
 }
 
 /** Orden inicial: columnas custom justo después de las de identidad. */

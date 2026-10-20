@@ -77,7 +77,7 @@ import {
 } from '../lib/bulkConfigBackup';
 import { useDebouncedValue } from '../lib/useDebouncedValue';
 import { fetchWithRetry } from '../lib/fetchWithRetry';
-import { Check, X, Loader2, Send, Archive, Search, ChevronDown, ChevronUp, Plus, Edit, Trash2, ArrowLeft, MessageCircle, Phone, Upload, Download, Filter, Mail, Calendar, Settings, ArrowUp, ArrowDown, Pin, FileText, BookOpen, Paperclip, ClipboardList, ListPlus, RefreshCw, HardDrive, CaseSensitive, Package, History, Target, BarChart3, UserCheck, Coins, Bus, Undo2, ArrowRightLeft, LayoutGrid, LineChart, ClipboardCopy, PlayCircle, ClipboardCheck, FolderOpen, ExternalLink } from 'lucide-react';
+import { Check, X, Loader2, Send, Archive, Search, ChevronDown, ChevronUp, Plus, Edit, Trash2, ArrowLeft, MessageCircle, Phone, Upload, Download, Columns3, Mail, Calendar, Settings, ArrowUp, ArrowDown, Pin, FileText, BookOpen, Paperclip, ClipboardList, ListPlus, RefreshCw, HardDrive, CaseSensitive, Package, History, Target, BarChart3, UserCheck, Coins, Bus, Undo2, ArrowRightLeft, LayoutGrid, LineChart, ClipboardCopy, PlayCircle, ClipboardCheck, FolderOpen, ExternalLink } from 'lucide-react';
 import { ScriptStructureEditor } from './persuasion/ScriptStructureEditor';
 import { openLienzoWindow, toLienzoCandidate } from '../lib/persuasion/popup';
 import { BulkCandidateTimeline } from './BulkCandidateTimeline';
@@ -166,6 +166,7 @@ import { QuickScheduleModal } from './QuickScheduleModal';
 import { BulkScheduleModal } from './BulkScheduleModal';
 import { AddColumnModal } from './AddColumnModal';
 import { ManageCustomColumnsModal } from './ManageCustomColumnsModal';
+import { BulkColumnVisibilityModal } from './BulkColumnVisibilityModal';
 import { TableTemplateModal, BulkTableTemplateLayout } from './TableTemplateModal';
 import { PsycholaboralReportModal } from './PsycholaboralReportModal';
 import { CandidateAssessmentPanel } from './CandidateAssessmentPanel';
@@ -7038,7 +7039,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                                         <button
                                             onClick={openAddColumnModal}
                                             className="bg-blue-600 text-white hover:bg-blue-700 transition-colors"
-                                            title="Agregar columna personalizada"
+                                            title="Crear un dato extra de este proceso. La ventana explica para qué sirven la clasificación del Panel y el informe psicolaboral."
                                         >
                                             <Plus className="w-4 h-4" />
                                             Agregar Columna
@@ -7046,10 +7047,10 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                                         <button
                                             onClick={() => setShowManageColumnsModal(true)}
                                             className="bg-indigo-600 text-white hover:bg-indigo-700 transition-colors"
-                                            title="Editar columnas existentes (nombre, tipo, opciones de listas)"
+                                            title="Cambiar nombre, tipo y opciones de las columnas creadas en este proceso. No muestra ni oculta columnas."
                                         >
                                             <Edit className="w-4 h-4" />
-                                            Gestionar columnas
+                                            Editar columnas propias
                                         </button>
                                         <button
                                             onClick={() => setShowTemplateModal(true)}
@@ -7077,92 +7078,15 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                                             <HardDrive className="w-4 h-4" />
                                             Recuperar datos
                                         </button>
-                                        <div data-toolbar-keep="true" className="flex flex-col gap-1">
-                                            <button
-                                                type="button"
-                                                onClick={() => setShowColumnConfig(!showColumnConfig)}
-                                                className="bg-gray-100 text-gray-700 border border-gray-300 hover:bg-gray-200 transition-colors"
-                                                title="Configurar columnas"
-                                            >
-                                                <Filter className="w-4 h-4" />
-                                                Columnas
-                                            </button>
-                                            {showColumnConfig && (
-                                                <div className="w-full bg-gray-50 border border-gray-200 rounded-md p-1.5 max-h-56 overflow-y-auto">
-                                                    <div className="flex items-center justify-between gap-2 mb-1 px-2">
-                                                        <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Columnas</div>
-                                                        {hiddenColumns.length > 0 && (
-                                                            <button
-                                                                type="button"
-                                                                onClick={() => void showAllColumns()}
-                                                                className="text-[10px] text-primary-600 hover:text-primary-700 font-medium whitespace-nowrap"
-                                                            >
-                                                                Mostrar todas
-                                                            </button>
-                                                        )}
-                                                    </div>
-                                                    <p className="text-[10px] text-gray-400 px-2 mb-2">
-                                                        📌 = fijar al scroll · ✎ = editar columna (tipo y opciones)
-                                                    </p>
-                                                    {columnConfigIds.map(colId => {
-                                                        const colName = getColumnLabel(colId, customColumns);
-                                                        const isCustom = colId.startsWith('custom_');
-                                                        const customColId = isCustom ? colId.replace('custom_', '') : null;
-                                                        const isPinned = pinnedColumns.includes(colId);
-
-                                                        return (
-                                                            <div key={colId} className="flex items-center gap-1 px-2 py-1 hover:bg-gray-50 rounded">
-                                                                <button
-                                                                    type="button"
-                                                                    onClick={() => togglePinColumn(colId)}
-                                                                    className={`p-0.5 rounded shrink-0 ${isPinned ? 'text-primary-600 bg-primary-50' : 'text-gray-300 hover:text-gray-500'}`}
-                                                                    title={isPinned ? 'Desfijar columna' : 'Fijar columna'}
-                                                                >
-                                                                    <Pin className="w-3.5 h-3.5" />
-                                                                </button>
-                                                                <label className="flex items-center gap-2 flex-1 cursor-pointer min-w-0">
-                                                                    <input
-                                                                        type="checkbox"
-                                                                        checked={
-                                                                            isAssessmentColumnId(colId) || colId === FICHA_DATOS_COLUMN_ID
-                                                                                ? columnOrder.includes(colId) && !hiddenColumns.includes(colId)
-                                                                                : !hiddenColumns.includes(colId) || isIdentitySystemColumnId(colId)
-                                                                        }
-                                                                        disabled={isIdentitySystemColumnId(colId)}
-                                                                        onChange={() => toggleColumnVisibility(colId)}
-                                                                        className="w-3.5 h-3.5 text-primary-600 rounded focus:ring-primary-500 disabled:opacity-60"
-                                                                    />
-                                                                    <span className="text-xs text-gray-700 truncate" title={colName}>{colName}</span>
-                                                                </label>
-                                                                {isCustom && customColId && (
-                                                                    <div className="flex gap-0.5 shrink-0">
-                                                                        <button
-                                                                            type="button"
-                                                                            onClick={() => {
-                                                                                const col = customColumns.find(c => c.id === customColId);
-                                                                                if (col) openEditColumnModal(col);
-                                                                            }}
-                                                                            className="p-1 text-gray-500 hover:text-primary-600 hover:bg-primary-50 rounded"
-                                                                            title="Editar columna"
-                                                                        >
-                                                                            <Edit className="w-3.5 h-3.5" />
-                                                                        </button>
-                                                                        <button
-                                                                            type="button"
-                                                                            onClick={() => handleDeleteColumn(customColId)}
-                                                                            className="p-1 text-gray-500 hover:text-red-600 hover:bg-red-50 rounded"
-                                                                            title="Eliminar columna"
-                                                                        >
-                                                                            <Trash2 className="w-3.5 h-3.5" />
-                                                                        </button>
-                                                                    </div>
-                                                                )}
-                                                            </div>
-                                                        );
-                                                    })}
-                                                </div>
-                                            )}
-                                        </div>
+                                        <button
+                                            type="button"
+                                            onClick={() => setShowColumnConfig(true)}
+                                            className="bg-gray-100 text-gray-700 border border-gray-300 hover:bg-gray-200 transition-colors"
+                                            title="Mostrar, ocultar o fijar columnas. Incluye las del sistema y explica los nombres parecidos."
+                                        >
+                                            <Columns3 className="w-4 h-4" />
+                                            Mostrar columnas
+                                        </button>
                                         <button
                                             onClick={() => setShowAddRowModal(true)}
                                             className="bg-primary-600 text-white hover:bg-primary-700 transition-colors"
@@ -9132,6 +9056,19 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                     onAdd={openAddColumnModal}
                 />
             )}
+
+            <BulkColumnVisibilityModal
+                isOpen={showColumnConfig}
+                onClose={() => setShowColumnConfig(false)}
+                columnIds={columnConfigIds}
+                customColumns={customColumns}
+                columnOrder={columnOrder}
+                hiddenColumns={hiddenColumns}
+                pinnedColumns={pinnedColumns}
+                onShowAll={() => void showAllColumns()}
+                onToggleVisibility={(colId) => void toggleColumnVisibility(colId)}
+                onTogglePin={(colId) => void togglePinColumn(colId)}
+            />
 
             {showAddColumnModal && (
                 <AddColumnModal

@@ -181,7 +181,9 @@ const FLOW_SECTIONS: HelpSection[] = [
                 <Table
                     headers={['Acción', 'Efecto']}
                     rows={[
-                        ['Columnas', 'Muestra u oculta campos, incluidas las de estado de cada prueba: Pendiente, En curso o Realizada, con puntaje cuando existe.'],
+                        ['Agregar columna', 'Crea un dato extra del proceso. Clasificación para el Panel e Informe psicolaboral son opcionales: no crean otra columna. Dicen a los gráficos y al PDF cómo leer el valor. En Automático, el sistema usa el título.'],
+                        ['Editar columnas propias', 'Cambia nombre, tipo y opciones de las columnas creadas en el proceso. No muestra ni oculta columnas. Las columnas fijas (Nombres, Teléfono, Llamadas, pruebas) no están en esta lista.'],
+                        ['Mostrar columnas', 'Enciende, apaga o fija columnas de la tabla, del sistema y propias. Agrupa las que se parecen (Email y Correo, Teléfono y Llamadas, estado de una prueba y una casilla) y explica por qué conviven.'],
                         ['Link pruebas', 'Copia el enlace público del ATS (?pruebas=1). La persona escribe su DNI ahí. Es distinto de la URL de Tally.'],
                         ['Invitar a pruebas', 'Abre el correo de las filas seleccionadas que tienen email, con los pasos y el enlace. Si el proceso aún no tiene batería, el sistema lo avisa.'],
                         ['Resultados pruebas', 'Abre la batería de la fila seleccionada: puntaje, ítems, clave y opción de reevaluación.'],
@@ -302,7 +304,7 @@ const TESTS_FLOW_SECTION: HelpSection = {
                 'Mandos medios y superiores asigna Barsit y Personalidad D. Operativos y básicos asigna Figuras (Raven) y Personalidad D.',
                 'Marque Incluir pruebas de conducta si además deben rendir Riesgo y recompensa, Atención bajo presión, y Esfuerzo y retorno. Se suman a la jerarquía, en mandos y en operativos.',
                 'Guarde el proceso. Hasta ese guardado, Link pruebas e Invitar a pruebas no tienen una batería que mostrar.',
-                'En la tabla, menú Columnas, active las columnas de estado de las pruebas que correspondan: Barsit, Raven, Personalidad D, Riesgo, Atención, Esfuerzo. Cada celda pasa por Pendiente, En curso y Realizada.',
+                'En la tabla, abra Mostrar columnas y active, en Estado de las pruebas, Barsit, Raven, Personalidad D, Riesgo, Atención o Esfuerzo. Cada celda pasa por Pendiente, En curso y Realizada. Una casilla propia marcada al completar la prueba es otro dato: un sí/no, no el avance.',
             ]} />
             <H3>Llevar a la persona al enlace</H3>
             <Ul items={[
