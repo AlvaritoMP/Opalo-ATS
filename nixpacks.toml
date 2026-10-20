@@ -2,12 +2,16 @@
 # Nixpacks, al ver una app Vite, instala Caddy desde Nix. En el VPS esa
 # descarga se queda decenas de minutos. El estático lo sirve Node.
 NIXPACKS_SPA_CADDY = "false"
+NPM_CONFIG_FETCH_TIMEOUT = "60000"
+NPM_CONFIG_FETCH_RETRIES = "2"
+NPM_CONFIG_AUDIT = "false"
+NPM_CONFIG_FUND = "false"
 
 [phases.setup]
 nixPkgs = ["nodejs_20"]
 
 [phases.install]
-cmds = ["npm ci"]
+cmds = ["npm ci --no-audit --no-fund"]
 
 [phases.build]
 cmds = ["npm run build"]

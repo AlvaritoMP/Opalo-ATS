@@ -3,29 +3,24 @@ FROM node:20-alpine AS builder
 
 WORKDIR /app
 
-# El VPS corta descargas largas. IPv4 primero y reintentos con caché de npm.
+# IPv4 primero: en este VPS una ruta IPv6 deja la descarga colgada.
+# Cada paquete espera como máximo 1 minuto y npm reintenta 2 veces.
+# No repetir el install entero: eso convertía un corte de red en media hora de deploy.
 ENV NODE_OPTIONS=--dns-result-order=ipv4first \
-    NPM_CONFIG_FETCH_RETRIES=5 \
-    NPM_CONFIG_FETCH_RETRY_MINTIMEOUT=20000 \
-    NPM_CONFIG_FETCH_RETRY_MAXTIMEOUT=120000 \
-    NPM_CONFIG_FETCH_TIMEOUT=180000 \
-    NPM_CONFIG_MAXSOCKETS=3 \
+    NPM_CONFIG_FETCH_RETRIES=2 \
+    NPM_CONFIG_FETCH_RETRY_MINTIMEOUT=2000 \
+    NPM_CONFIG_FETCH_RETRY_MAXTIMEOUT=10000 \
+    NPM_CONFIG_FETCH_TIMEOUT=60000 \
     NPM_CONFIG_AUDIT=false \
-    NPM_CONFIG_FUND=false
+    NPM_CONFIG_FUND=false \
+    NPM_CONFIG_PROGRESS=false \
+    NPM_CONFIG_LOGLEVEL=warn
 
 # Copy package files
-COPY package*.json ./
+COPY package.json package-lock.json ./
 
-# Install dependencies. La caché sobrevive a un corte, así el reintento no empieza de cero.
 RUN --mount=type=cache,target=/root/.npm \
-    n=0; \
-    until npm ci; do \
-      n=$((n+1)); \
-      if [ "$n" -ge 4 ]; then exit 1; fi; \
-      echo "npm ci fallo, reintento ${n}"; \
-      rm -rf node_modules; \
-      sleep 20; \
-    done
+    npm ci --no-audit --no-fund
 
 # Copy source code
 COPY . .
