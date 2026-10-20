@@ -337,12 +337,23 @@ export const MessagingBar: React.FC<MessagingBarProps> = ({
         } catch { /* ignore */ }
     };
 
-    if (!mmEnabled) return null;
-
-    if (!available) {
+    if (!mmEnabled) {
         return (
-            <div className="fixed bottom-4 right-4 z-[45] max-w-xs bg-white border border-amber-200 text-amber-800 text-xs rounded-lg shadow px-3 py-2">
-                No se pudo conectar el chat de Mattermost. Reintentando…
+            <div className="fixed bottom-4 right-4 z-[60] flex flex-col items-end gap-2">
+                {expanded && (
+                    <div className="w-72 bg-white border border-gray-200 rounded-xl shadow-2xl px-3 py-3 text-sm text-gray-700">
+                        El chat se activa al entrar con el botón <strong>Entrar con Mattermost</strong>. Con el acceso local de emergencia no hay sesión de chat.
+                    </div>
+                )}
+                <button
+                    type="button"
+                    onClick={() => setExpanded(open => !open)}
+                    className="flex items-center gap-2 px-3 py-2 bg-primary-600 text-white rounded-full shadow-lg hover:bg-primary-700 transition-all text-sm font-medium"
+                    title="Abrir chat"
+                >
+                    <MessageCircle className="w-4 h-4" />
+                    Chat
+                </button>
             </div>
         );
     }
@@ -351,10 +362,13 @@ export const MessagingBar: React.FC<MessagingBarProps> = ({
         return (
             <button
                 onClick={handleShow}
-                className="fixed bottom-4 right-4 z-[45] flex items-center gap-2 px-3 py-2 bg-primary-600 text-white rounded-full shadow-lg hover:bg-primary-700 transition-all text-sm font-medium"
-                title="Abrir mensajería"
+                className="fixed bottom-4 right-4 z-[60] flex items-center gap-2 px-3 py-2 bg-primary-600 text-white rounded-full shadow-lg hover:bg-primary-700 transition-all text-sm font-medium"
+                title={available ? 'Abrir mensajería' : 'Chat sin conexión. Reintentando…'}
             >
                 <MessageCircle className="w-4 h-4" />
+                {!available && (
+                    <span className="text-[10px] font-medium text-amber-100">Reconectando</span>
+                )}
                 {totalUnread > 0 && (
                     <span className="bg-red-500 text-white text-xs rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1">
                         {totalUnread > 9 ? '9+' : totalUnread}
@@ -366,7 +380,7 @@ export const MessagingBar: React.FC<MessagingBarProps> = ({
 
     return (
         <div
-            className={`fixed z-[45] transition-all duration-200 ${
+            className={`fixed z-[60] transition-all duration-200 ${
                 expanded
                     ? 'bottom-4 right-4 w-80 sm:w-96'
                     : 'bottom-0 left-0 right-0 md:left-64'
@@ -417,6 +431,11 @@ export const MessagingBar: React.FC<MessagingBarProps> = ({
 
                     {!activePartnerId ? (
                         <div className="flex-1 overflow-y-auto min-h-0">
+                            {!available && (
+                                <p className="text-xs text-amber-800 bg-amber-50 border-b border-amber-100 px-3 py-2">
+                                    No se pudo conectar el chat. Reintentando…
+                                </p>
+                            )}
                             {threads.length === 0 ? (
                                 <p className="text-sm text-gray-500 p-4 text-center">
                                     Sin conversaciones. Selecciona un usuario para empezar.
@@ -542,6 +561,9 @@ export const MessagingBar: React.FC<MessagingBarProps> = ({
                     <div className="flex items-center gap-2 text-gray-700">
                         <MessageCircle className="w-4 h-4 text-primary-600" />
                         <span className="font-medium">Mattermost</span>
+                        {!available && (
+                            <span className="text-xs text-amber-700">Reconectando…</span>
+                        )}
                         {totalUnread > 0 && (
                             <span className="bg-red-500 text-white text-xs rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1">
                                 {totalUnread > 9 ? '9+' : totalUnread}
