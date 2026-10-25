@@ -390,12 +390,26 @@ export const BulkProcessEditorModal: React.FC<BulkProcessEditorModalProps> = ({ 
                 ...(configOnly ? { highDensityTableEnabled: true } : {}),
             };
 
+            const unchangedFlyer = (flyerUrl || '') === (process?.flyerUrl || '');
+            const unchangedFlyerPosition = (flyerPosition || 'center center') === (process?.flyerPosition || 'center center');
+
             if (process?.id && configOnly) {
-                await processesApi.update(process.id, {
+                await actions.updateProcess({
+                    id: process.id,
+                    title: title.trim(),
+                    description: description.trim(),
                     stages: stagesPayload,
+                    status,
+                    vacancies,
+                    startDate: startDate || undefined,
+                    publishedDate: publishedDate || undefined,
+                    needIdentifiedDate: needIdentifiedDate || undefined,
+                    clientId: selectedClientId || '',
                     bulkConfig: mergedBulkConfig,
-                });
-                actions.showToast('Configuración de tabla actualizada', 'success', 3000);
+                    ...(unchangedFlyer ? {} : { flyerUrl: flyerUrl || undefined }),
+                    ...(unchangedFlyerPosition ? {} : { flyerPosition: flyerPosition || undefined }),
+                } as Process, { silent: true });
+                actions.showToast('Proceso masivo actualizado', 'success', 3000);
             } else {
                 const processPayload: Omit<Process, 'id'> = {
                     title: title.trim(),
@@ -407,18 +421,22 @@ export const BulkProcessEditorModal: React.FC<BulkProcessEditorModalProps> = ({ 
                     publishedDate: publishedDate || undefined,
                     needIdentifiedDate: needIdentifiedDate || undefined,
                     attachments,
-                    flyerUrl: flyerUrl || undefined,
-                    flyerPosition: flyerPosition || undefined,
                     clientId: selectedClientId || undefined,
                     isBulkProcess: true,
                     bulkConfig: mergedBulkConfig,
+                    ...(unchangedFlyer ? {} : { flyerUrl: flyerUrl || undefined }),
+                    ...(unchangedFlyerPosition ? {} : { flyerPosition: flyerPosition || undefined }),
                 };
 
                 if (process?.id) {
-                    await processesApi.update(process.id, processPayload);
+                    await actions.updateProcess({ id: process.id, ...processPayload } as Process, { silent: true });
                     actions.showToast('Proceso masivo actualizado', 'success', 3000);
                 } else {
-                    await processesApi.create(processPayload);
+                    await processesApi.create({
+                        ...processPayload,
+                        flyerUrl: flyerUrl || undefined,
+                        flyerPosition: flyerPosition || undefined,
+                    });
                     actions.showToast('Proceso masivo creado', 'success', 3000);
                 }
             }
@@ -434,6 +452,17 @@ export const BulkProcessEditorModal: React.FC<BulkProcessEditorModalProps> = ({ 
                 'error',
                 7000
             );
+            if (process?.id && status !== (process.status || 'en_proceso')) {
+                try {
+                    const stored = error?.statusPersisted || await processesApi.getStatus(process.id);
+                    if (stored === status) {
+                        onSave();
+                        onClose();
+                    }
+                } catch {
+                    /* si no se puede confirmar, el formulario sigue abierto */
+                }
+            }
         } finally {
             setIsSaving(false);
         }

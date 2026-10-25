@@ -1,4 +1,5 @@
 import type { Process, UserAlertSettings } from '../types';
+import { isProcessActive } from './processStatus';
 
 export const EMPTY_USER_ALERT_SETTINGS: UserAlertSettings = {
     disabledClientIds: [],
@@ -19,11 +20,12 @@ export function normalizeUserAlertSettings(raw: unknown): UserAlertSettings {
     };
 }
 
-/** Un proceso no genera avisos si él o su cliente están apagados. */
+/** Un proceso no genera avisos si está fuera de En Proceso, o si él o su cliente están apagados. */
 export function areAlertsEnabledForProcess(
-    process: Pick<Process, 'id' | 'clientId'>,
+    process: Pick<Process, 'id' | 'clientId'> & { status?: Process['status'] },
     settings?: UserAlertSettings | null
 ): boolean {
+    if (process.status && !isProcessActive(process.status)) return false;
     const config = settings ?? EMPTY_USER_ALERT_SETTINGS;
     if (process.clientId && config.disabledClientIds.includes(process.clientId)) return false;
     if (config.disabledProcessIds.includes(process.id)) return false;

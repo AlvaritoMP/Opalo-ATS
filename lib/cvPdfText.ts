@@ -98,17 +98,20 @@ function itemsToVisualLines(items: PositionedItem[]): string[] {
         .filter(Boolean);
 }
 
+/** URL estable: el asset hasheado de Vite no se sirve como módulo en el hosting. */
+function pdfWorkerSrc(): string {
+    const base = import.meta.env.BASE_URL || '/';
+    return `${base.endsWith('/') ? base : `${base}/`}pdf.worker.min.mjs`;
+}
+
 /**
  * Extrae texto seleccionable de un PDF en el cliente (pdf.js).
  * Agrupa por posición visual para que el nombre del encabezado salga primero
  * aunque el PDF lo haya escrito en otro orden de contenido.
  */
 export async function extractPdfContent(file: File): Promise<ExtractedPdfContent> {
-    const [{ getDocument, GlobalWorkerOptions }, workerMod] = await Promise.all([
-        import('pdfjs-dist'),
-        import('pdfjs-dist/build/pdf.worker.min.mjs?url'),
-    ]);
-    GlobalWorkerOptions.workerSrc = workerMod.default;
+    const { getDocument, GlobalWorkerOptions } = await import('pdfjs-dist');
+    GlobalWorkerOptions.workerSrc = pdfWorkerSrc();
 
     const buffer = await file.arrayBuffer();
     const data = new Uint8Array(buffer);

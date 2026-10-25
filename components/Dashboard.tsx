@@ -563,14 +563,14 @@ export const Dashboard: React.FC = () => {
         return dashboardCache.schedulingCycles.filter(cycle => targetProcessIdSet.has(cycle.processId));
     }, [dashboardCache, targetProcessIds, targetProcessIdSet]);
 
-    const contactStatsLoading = dashboardCacheLoading && !dashboardCache;
-    const schedulingStatsLoading = dashboardCacheLoading && !dashboardCache;
+    const contactStatsLoading = dashboardCacheLoading && contactAttempts.length === 0;
+    const schedulingStatsLoading = dashboardCacheLoading && schedulingLogs.length === 0;
 
     useEffect(() => {
         if (!dashboardCache && !dashboardCacheLoading) {
             const timer = window.setTimeout(() => {
                 void actions.loadDashboardCache();
-            }, 2000);
+            }, 400);
             return () => window.clearTimeout(timer);
         }
     }, [dashboardCache, dashboardCacheLoading, actions]);

@@ -15,6 +15,7 @@ import { userAlertsApi } from '../lib/api/userAlerts';
 import { computeUserAlerts, getSporadicAlerts } from '../lib/userAlerts';
 import { getProcessesVisibleToUser } from '../lib/userAlertAccess';
 import { areAlertsEnabledForProcess } from '../lib/userAlertSettings';
+import { isProcessActive } from '../lib/processStatus';
 import {
     filterPendingAlerts,
     isAlertPending,
@@ -126,21 +127,24 @@ export const UserAlertsPanel: React.FC<UserAlertsPanelProps> = ({
     currentUserRef.current = currentUser;
     const alertSettingsRef = useRef(alertSettings);
     alertSettingsRef.current = alertSettings;
-    const alertSettingsKey = JSON.stringify(alertSettings ?? null);
-    const alertSettingsKeyRef = useRef(alertSettingsKey);
 
     const pendingAlerts = useMemo(
-        () => filterPendingAlerts(alerts, acks),
-        [alerts, acks]
+        () =>
+            filterPendingAlerts(alerts, acks).filter(alert => {
+                const process = processes.find(item => item.id === alert.processId);
+                return !!process && isProcessActive(process.status) && areAlertsEnabledForProcess(process, alertSettings);
+            }),
+        [alerts, acks, processes, alertSettings]
     );
 
-    const processIdsKey = useMemo(
+    const activeProcessKey = useMemo(
         () =>
             processes
+                .filter(process => isProcessActive(process.status) && areAlertsEnabledForProcess(process, alertSettings))
                 .map(p => p.id)
                 .sort()
                 .join(','),
-        [processes]
+        [processes, alertSettings]
     );
 
     const loadAlerts = useCallback(async (options?: { force?: boolean }) => {
@@ -215,18 +219,23 @@ export const UserAlertsPanel: React.FC<UserAlertsPanelProps> = ({
         [currentUser.id]
     );
 
-    // Carga / modal automáticos: tope de 1 hora (persiste aunque se recargue la página).
+    const activeProcessKeyRef = useRef<string | null>(null);
+
+    // Stand By sale de los avisos al momento. Si cambia el conjunto en curso, se vuelve a calcular.
     useEffect(() => {
-        if (!processIdsKey) {
+        if (!activeProcessKey) {
+            activeProcessKeyRef.current = '';
+            setAlerts([]);
             setLoading(false);
             return;
         }
-        const settingsChanged = alertSettingsKeyRef.current !== alertSettingsKey;
-        alertSettingsKeyRef.current = alertSettingsKey;
-        void loadAlerts({ force: settingsChanged }).then(computed => {
+        const previous = activeProcessKeyRef.current;
+        activeProcessKeyRef.current = activeProcessKey;
+        const activeSetChanged = previous !== null && previous !== activeProcessKey;
+        void loadAlerts({ force: activeSetChanged }).then(computed => {
             maybeShowAutoModal(computed);
         });
-    }, [currentUser.id, processIdsKey, alertSettingsKey, loadAlerts, maybeShowAutoModal]);
+    }, [currentUser.id, activeProcessKey, loadAlerts, maybeShowAutoModal]);
 
     // Polling horario estable (no se reinicia al confirmar avisos).
     useEffect(() => {

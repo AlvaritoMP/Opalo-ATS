@@ -325,7 +325,12 @@ async function insertProcessRow(dbData: Record<string, any>): Promise<{ id: stri
 /** Actualiza el proceso en un solo request. Si falta flyer_position, reintenta sin esa columna. */
 async function updateProcessRow(id: string, dbData: Record<string, any>): Promise<void> {
     const attempt = (data: Record<string, any>) =>
-        supabase.from('processes').update(data).eq('id', id).eq('app_name', APP_NAME);
+        supabase
+            .from('processes')
+            .update(data)
+            .eq('id', id)
+            .eq('app_name', APP_NAME)
+            .select('id');
 
     let result = await attempt(dbData);
     if (result.error && dbData.flyer_position !== undefined && isFlyerPositionColumnError(result.error)) {
@@ -334,6 +339,9 @@ async function updateProcessRow(id: string, dbData: Record<string, any>): Promis
         result = await attempt(rest);
     }
     if (result.error) throw result.error;
+    if (!result.data || result.data.length === 0) {
+        throw new Error('No se pudo actualizar el proceso. Revisa permisos o si el proceso sigue existiendo.');
+    }
 }
 
 function categorySignature(
@@ -739,19 +747,40 @@ export const processesApi = {
     // Obtener un proceso por ID
     async getById(id: string, options?: { includeAttachments?: boolean; omitFlyer?: boolean }): Promise<Process | null> {
         const includeAttachments = options?.includeAttachments ?? false;
-        const selectFields = options?.omitFlyer
+        const fullFields = options?.omitFlyer
             ? BULK_PROCESS_FULL_FIELDS.replace('flyer_url, ', '')
             : BULK_PROCESS_FULL_FIELDS;
-        const { data: process, error } = await fetchWithRetry(async () => {
-            const result = await supabase
-                .from('processes')
-                .select(selectFields)
-                .eq('id', id)
-                .eq('app_name', APP_NAME)
-                .single();
-            if (result.error && result.error.code !== 'PGRST116') throw result.error;
-            return result;
-        });
+        const lightFields = options?.omitFlyer
+            ? BULK_PROCESS_DETAIL_FIELDS.replace('flyer_url, ', '')
+            : BULK_PROCESS_DETAIL_FIELDS;
+
+        const readRow = async (selectFields: string) => {
+            const { data: process, error } = await fetchWithRetry(async () => {
+                const result = await supabase
+                    .from('processes')
+                    .select(selectFields)
+                    .eq('id', id)
+                    .eq('app_name', APP_NAME)
+                    .single();
+                if (result.error && result.error.code !== 'PGRST116') throw result.error;
+                return result;
+            });
+            return { process, error };
+        };
+
+        let process: any = null;
+        let error: { code?: string; message?: string } | null = null;
+        try {
+            const row = await readRow(fullFields);
+            process = row.process;
+            error = row.error;
+        } catch (err) {
+            if (!isStatementTimeout(err)) throw err;
+            console.warn(`⚠️ Lectura de proceso ${id} demasiado pesada. Se reintenta sin la configuración masiva.`);
+            const light = await readRow(lightFields);
+            process = light.process;
+            error = light.error;
+        }
 
         if (error) {
             if (error.code === 'PGRST116') return null;
@@ -945,12 +974,38 @@ export const processesApi = {
         return applyFlyerFromPayload(saved, processData);
     },
 
+    async getStatus(id: string): Promise<ProcessStatus | null> {
+        const { data, error } = await supabase
+            .from('processes')
+            .select('status')
+            .eq('id', id)
+            .eq('app_name', APP_NAME)
+            .maybeSingle();
+        if (error) throw error;
+        return (data?.status as ProcessStatus) || null;
+    },
+
     // Actualizar proceso
     async update(id: string, processData: Partial<Process>): Promise<Process> {
         const dbData = processToDb(processData);
         delete dbData.app_name;
-        if (Object.keys(dbData).length > 0) {
-            await updateProcessRow(id, dbData);
+        let statusPersisted: ProcessStatus | undefined;
+        try {
+            // El estado va en un request corto. Si el payload grande (flyer o bulk_config) falla,
+            // Stand By igual queda guardado y la UI puede reflejarlo.
+            if (dbData.status !== undefined) {
+                await updateProcessRow(id, { status: dbData.status });
+                statusPersisted = dbData.status as ProcessStatus;
+                delete dbData.status;
+            }
+            if (Object.keys(dbData).length > 0) {
+                await updateProcessRow(id, dbData);
+            }
+        } catch (error) {
+            if (statusPersisted) {
+                (error as { statusPersisted?: ProcessStatus }).statusPersisted = statusPersisted;
+            }
+            throw error;
         }
 
         // Actualizar stages si se proporcionan
@@ -1241,6 +1296,8 @@ export const processesApi = {
 
         const saved = await this.getById(id, { omitFlyer: true });
         if (!saved) throw new Error('No se pudo leer el proceso guardado');
+        if (!saved.bulkConfig && processData.bulkConfig) saved.bulkConfig = processData.bulkConfig;
+        if (processData.status && saved.status !== processData.status) saved.status = processData.status;
         return applyFlyerFromPayload(saved, processData);
     },
 

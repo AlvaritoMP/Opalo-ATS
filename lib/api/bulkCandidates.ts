@@ -258,6 +258,10 @@ export const bulkCandidatesApi = {
             archived?: boolean;
             discarded?: boolean;
             signal?: AbortSignal;
+            /** El panel carga la agenda aparte; evita una consulta de entrevistas por página. */
+            includeInterviews?: boolean;
+            /** Al recorrer todas las páginas no hace falta el conteo exacto en cada una. */
+            withCount?: boolean;
         }
     ): Promise<BulkCandidatesResult> {
         const from = page * pageSize;
@@ -287,9 +291,10 @@ export const bulkCandidatesApi = {
             if (filters?.signal?.aborted) {
                 throw new DOMException('The operation was aborted.', 'AbortError');
             }
-            let request = applyFilters(
-                supabase.from('candidates').select(selectFields, { count: 'exact' })
-            );
+            const selected = filters?.withCount === false
+                ? supabase.from('candidates').select(selectFields)
+                : supabase.from('candidates').select(selectFields, { count: 'exact' });
+            let request = applyFilters(selected as ReturnType<typeof supabase.from>);
             if (filters?.signal) {
                 request = request.abortSignal(filters.signal);
             }
@@ -411,7 +416,7 @@ export const bulkCandidatesApi = {
         const candidateIds = (data || []).map(c => c.id as string);
         let nextInterviews: Map<string, { start: string; interviewerId: string; eventId: string }> = new Map();
         
-        if (candidateIds.length > 0) {
+        if (candidateIds.length > 0 && filters?.includeInterviews !== false) {
             const { data: interviews, error: interviewsError } = await supabase
                 .from('interview_events')
                 .select('id, candidate_id, start_time, interviewer_id')
@@ -437,10 +442,11 @@ export const bulkCandidatesApi = {
             mapBulkCandidateRow(c, nextInterviews)
         );
 
+        const pageRows = candidates.length;
         return {
             candidates,
-            total: count || 0,
-            hasMore: (count || 0) > to + 1,
+            total: count || pageRows,
+            hasMore: filters?.withCount === false ? pageRows >= pageSize : (count || 0) > to + 1,
         };
     },
 
@@ -453,6 +459,8 @@ export const bulkCandidatesApi = {
             archived?: boolean;
             discarded?: boolean;
             signal?: AbortSignal;
+            includeInterviews?: boolean;
+            withCount?: boolean;
         }
     ): Promise<BulkCandidate[]> {
         const pageSize = 400;

@@ -21,7 +21,10 @@ import type { BulkSchedulingCandidateRow } from './interviewSchedulingReconcile'
 import type { ContactAttempt } from './contactTracking';
 import { buildUserLookupForStats, type DashboardActorUser } from './dashboardActorNames';
 
-const PROCESS_LOAD_MS = 20_000;
+const CANDIDATE_LOAD_MS = 60_000;
+const HISTORY_LOAD_MS = 45_000;
+const TAIL_LOAD_MS = 45_000;
+const DASHBOARD_CONCURRENCY = 2;
 
 function startAbortTimer(ms: number, parent?: AbortSignal): { signal: AbortSignal; done: () => void } {
     const controller = new AbortController();
@@ -64,7 +67,8 @@ export async function fetchDashboardData(
     processes: Process[],
     users: User[],
     currentUser: User | null,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    onPartial?: (cache: DashboardDataCache) => void
 ): Promise<DashboardDataCache> {
     // Stand By / cerrados: sin cargas de candidatos, contactos ni scheduling.
     const activeProcesses = processes.filter(p => isProcessActive(p.status));
@@ -78,56 +82,101 @@ export async function fetchDashboardData(
     const summaries: Record<string, ContactSummaryCandidate> = {};
     const schedulingRows: BulkSchedulingCandidateRow[] = [];
 
-    // Procesos masivos en serie para no saturar I/O de Supabase al abrir el panel
-    for (const processId of bulkProcessIds) {
-        if (signal?.aborted) break;
-        const deadline = startAbortTimer(PROCESS_LOAD_MS, signal);
-        try {
-            const process = processMap.get(processId);
-            const all = await bulkCandidatesApi.getAllCandidates(processId, { signal: deadline.signal });
-            const candidateIds = all.map(c => c.id);
-            const columnValuesMap = await bulkCandidatesApi.loadAllBulkColumnValues(processId, deadline.signal);
-            const historyByCandidate = await bulkCandidatesApi.loadCandidateHistoryByIds(candidateIds, deadline.signal);
-            for (const c of all) {
-                const columnRow = columnValuesMap[c.id] || {};
-                const withHistory = {
-                    ...c,
-                    history: historyByCandidate[c.id] ?? [],
-                };
-                const mapped = enrichBulkCandidateForDashboard(withHistory, process, columnRow);
-                pool.push(mapped);
-                fields[c.id] = bulkDashboardFieldExtrasFromCandidate(mapped);
-                summaries[c.id] = {
-                    id: c.id,
-                    processId: c.processId,
-                    contactPhone: c.contactPhone,
-                    contactWhatsapp: c.contactWhatsapp,
-                    contactEmail: c.contactEmail,
-                };
-                schedulingRows.push({
-                    id: c.id,
-                    processId: c.processId,
-                    bulkColumnValues: {
-                        ...(c.bulkColumnValues || {}),
-                        ...columnRow,
-                    },
-                    nextInterviewAt: c.nextInterviewAt,
-                    nextInterviewerId: c.nextInterviewerId,
-                });
+    const snapshot = (): DashboardDataCache => ({
+        loadedAt: new Date().toISOString(),
+        bulkPoolCandidates: pool.slice(),
+        bulkCandidateFields: { ...fields },
+        bulkContactSummaries: { ...summaries },
+        bulkSchedulingRows: schedulingRows.slice(),
+        bulkHiringActorsByProcess: {},
+        contactAttempts: [],
+        schedulingLogs: [],
+        schedulingCycles: [],
+    });
+
+    const publish = () => {
+        if (signal?.aborted) return;
+        onPartial?.(snapshot());
+    };
+
+    let nextProcess = 0;
+    const workers = Array.from(
+        { length: Math.min(DASHBOARD_CONCURRENCY, bulkProcessIds.length) },
+        async () => {
+            while (!signal?.aborted) {
+                const index = nextProcess++;
+                if (index >= bulkProcessIds.length) return;
+                const processId = bulkProcessIds[index];
+                const deadline = startAbortTimer(CANDIDATE_LOAD_MS, signal);
+                try {
+                    const process = processMap.get(processId);
+                    const all = await bulkCandidatesApi.getAllCandidates(processId, {
+                        signal: deadline.signal,
+                        withCount: false,
+                    });
+                    const alreadyHasColumns = all.some(
+                        candidate => candidate.bulkColumnValues && Object.keys(candidate.bulkColumnValues).length > 0
+                    );
+                    const columnValuesMap = alreadyHasColumns
+                        ? {}
+                        : await bulkCandidatesApi.loadAllBulkColumnValues(processId, deadline.signal);
+                    let historyByCandidate: Awaited<ReturnType<typeof bulkCandidatesApi.loadCandidateHistoryByIds>> = {};
+                    const historyDeadline = startAbortTimer(HISTORY_LOAD_MS, signal);
+                    try {
+                        historyByCandidate = await bulkCandidatesApi.loadCandidateHistoryByIds(
+                            all.map(c => c.id),
+                            historyDeadline.signal
+                        );
+                    } catch (historyErr) {
+                        if (signal?.aborted) throw historyErr;
+                        console.warn(`Inteligencia/Panel: historial omitido en ${processId}`, historyErr);
+                    } finally {
+                        historyDeadline.done();
+                    }
+                    for (const c of all) {
+                        const columnRow = columnValuesMap[c.id] || {};
+                        const withHistory = {
+                            ...c,
+                            history: historyByCandidate[c.id] ?? [],
+                        };
+                        const mapped = enrichBulkCandidateForDashboard(withHistory, process, columnRow);
+                        pool.push(mapped);
+                        fields[c.id] = bulkDashboardFieldExtrasFromCandidate(mapped);
+                        summaries[c.id] = {
+                            id: c.id,
+                            processId: c.processId,
+                            contactPhone: c.contactPhone,
+                            contactWhatsapp: c.contactWhatsapp,
+                            contactEmail: c.contactEmail,
+                        };
+                        schedulingRows.push({
+                            id: c.id,
+                            processId: c.processId,
+                            bulkColumnValues: {
+                                ...(c.bulkColumnValues || {}),
+                                ...columnRow,
+                            },
+                            nextInterviewAt: c.nextInterviewAt,
+                            nextInterviewerId: c.nextInterviewerId,
+                        });
+                    }
+                    publish();
+                } catch (err) {
+                    if (signal?.aborted) return;
+                    const timedOut = deadline.signal.aborted;
+                    console.warn(
+                        timedOut
+                            ? `Inteligencia/Panel: el proceso masivo ${processId} superó ${CANDIDATE_LOAD_MS / 1000}s y se omitió`
+                            : `Inteligencia/Panel: no se pudo cargar el proceso masivo ${processId}`,
+                        err
+                    );
+                } finally {
+                    deadline.done();
+                }
             }
-        } catch (err) {
-            if (signal?.aborted) break;
-            const timedOut = deadline.signal.aborted;
-            console.warn(
-                timedOut
-                    ? `Inteligencia/Panel: el proceso masivo ${processId} superó ${PROCESS_LOAD_MS / 1000}s y se omitió`
-                    : `Inteligencia/Panel: no se pudo cargar el proceso masivo ${processId}`,
-                err
-            );
-        } finally {
-            deadline.done();
         }
-    }
+    );
+    await Promise.all(workers);
 
     const byProcess: Record<string, Record<string, HiredStageActor>> = {};
     for (const processId of bulkProcessIds) {
@@ -139,7 +188,7 @@ export async function fetchDashboardData(
             continue;
         }
         try {
-            const actorDeadline = startAbortTimer(PROCESS_LOAD_MS, signal);
+            const actorDeadline = startAbortTimer(HISTORY_LOAD_MS, signal);
             let rows: Awaited<ReturnType<typeof bulkCandidatesApi.getHiringStageActorsForProcess>> = [];
             try {
                 rows = await bulkCandidatesApi.getHiringStageActorsForProcess(
@@ -161,7 +210,7 @@ export async function fetchDashboardData(
     let schedulingCycles: DashboardDataCache['schedulingCycles'] = [];
 
     if (allProcessIds.length > 0) {
-        const tailDeadline = startAbortTimer(PROCESS_LOAD_MS, signal);
+        const tailDeadline = startAbortTimer(TAIL_LOAD_MS, signal);
         const loadTail = async () => {
             const summaryList = Object.values(summaries);
             if (summaryList.length > 0) {

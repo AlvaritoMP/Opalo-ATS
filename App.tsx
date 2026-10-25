@@ -90,7 +90,7 @@ interface AppActions {
     completeExternalLogin: (user: User) => Promise<boolean>;
     logout: () => void;
     addProcess: (processData: Omit<Process, 'id'>) => Promise<Process>;
-    updateProcess: (processData: Process) => Promise<void>;
+    updateProcess: (processData: Process, options?: { silent?: boolean }) => Promise<void>;
     deleteProcess: (processId: string) => Promise<void>;
     reloadProcesses: () => Promise<void>;
     reloadCandidates: () => Promise<void>;
@@ -1091,25 +1091,35 @@ const App: React.FC = () => {
                 toastCleared = true;
                 hideToastHelper(toastId);
             };
-            const unblockTimer = window.setTimeout(() => {
-                setState(prev => ({ ...prev, dashboardCacheLoading: false }));
-                clearLoadingToast();
-                if (force) {
-                    showToastHelper(
-                        'La actualización sigue en segundo plano. Puedes usar los datos ya cargados.',
-                        'info',
-                        4000
-                    );
-                }
-            }, 20_000);
             try {
                 const cache = await fetchDashboardData(
                     s.processes,
                     s.users,
                     s.currentUser,
-                    dashboardAbort.signal
+                    dashboardAbort.signal,
+                    partial => {
+                        if (dashboardAbort.signal.aborted) return;
+                        setState(prev => {
+                            const previous = prev.dashboardCache;
+                            const cache = previous && partial.contactAttempts.length === 0
+                                ? {
+                                    ...partial,
+                                    contactAttempts: previous.contactAttempts,
+                                    schedulingLogs: previous.schedulingLogs,
+                                    schedulingCycles: previous.schedulingCycles,
+                                    bulkHiringActorsByProcess: Object.keys(partial.bulkHiringActorsByProcess).length > 0
+                                        ? partial.bulkHiringActorsByProcess
+                                        : previous.bulkHiringActorsByProcess,
+                                }
+                                : partial;
+                            return {
+                                ...prev,
+                                dashboardCache: cache,
+                                dashboardCacheLoading: true,
+                            };
+                        });
+                    }
                 );
-                window.clearTimeout(unblockTimer);
                 setState(prev => ({
                     ...prev,
                     dashboardCache: cache,
@@ -1120,7 +1130,6 @@ const App: React.FC = () => {
                     showToastHelper('Panel de datos actualizado', 'success', 2500);
                 }
             } catch (error) {
-                window.clearTimeout(unblockTimer);
                 if (isAbortOrTimeoutError(error) && dashboardAbort.signal.aborted) {
                     setState(prev => ({ ...prev, dashboardCacheLoading: false }));
                     clearLoadingToast();
@@ -1228,18 +1237,23 @@ const App: React.FC = () => {
                 throw error;
             }
         },
-        updateProcess: async (processData) => {
-            const loadingToastId = showToastHelper('Guardando cambios del proceso...', 'loading', 0);
-            try {
-                const updated = await processesApi.update(processData.id, processData);
+        updateProcess: async (processData, options) => {
+            const silent = options?.silent === true;
+            const loadingToastId = silent ? null : showToastHelper('Guardando cambios del proceso...', 'loading', 0);
+            const applyProcess = (patch: Partial<Process>) => {
                 setState(s => {
                     const previous = s.processes.find(p => p.id === processData.id);
+                    if (!previous && !patch.id) return s;
                     const nextProcess = {
-                        ...updated,
-                        flyerUrl: updated.flyerUrl ?? previous?.flyerUrl,
-                        flyerPosition: updated.flyerPosition ?? previous?.flyerPosition,
-                    };
-                    const processes = s.processes.map(p => p.id === processData.id ? nextProcess : p);
+                        ...(previous || { id: processData.id }),
+                        ...patch,
+                        flyerUrl: patch.flyerUrl ?? previous?.flyerUrl,
+                        flyerPosition: patch.flyerPosition ?? previous?.flyerPosition,
+                        bulkConfig: patch.bulkConfig ?? previous?.bulkConfig,
+                    } as Process;
+                    const processes = previous
+                        ? s.processes.map(p => p.id === processData.id ? nextProcess : p)
+                        : [...s.processes, nextProcess];
                     if (isProcessActive(nextProcess.status)) {
                         return { ...s, processes };
                     }
@@ -1250,26 +1264,38 @@ const App: React.FC = () => {
                         loadedStandardProcessIds: s.loadedStandardProcessIds.filter(id => id !== processData.id),
                     };
                 });
+            };
+            try {
+                const updated = await processesApi.update(processData.id, processData);
+                applyProcess(updated);
                 
-                hideToastHelper(loadingToastId);
-                showToastHelper('Proceso actualizado exitosamente', 'success');
+                if (loadingToastId) hideToastHelper(loadingToastId);
+                if (!silent) showToastHelper('Proceso actualizado exitosamente', 'success');
                 trackActivity('processes', 'update_process', `Actualizó el proceso ${processData.title || ''}`.trim());
             } catch (error: any) {
                 console.error('Error updating process:', error);
-                hideToastHelper(loadingToastId);
-                
-                // Verificar si es un error de permisos
-                const errorMessage = error.message || 'No se pudo actualizar el proceso en la base de datos.';
-                const isPermissionError = error.code === '42501' || error.code === 'PGRST301' || errorMessage.toLowerCase().includes('permission') || errorMessage.toLowerCase().includes('permiso');
-                
-                if (isPermissionError) {
-                    showToastHelper('Error de permisos: No tienes permisos para actualizar procesos. Verifica tu rol de usuario.', 'error', 7000);
-                } else {
-                    showToastHelper(`Error al actualizar proceso: ${errorMessage}`, 'error', 7000);
+                if (loadingToastId) hideToastHelper(loadingToastId);
+                const persistedStatus = error?.statusPersisted as Process['status'] | undefined;
+                if (persistedStatus) {
+                    applyProcess({ id: processData.id, status: persistedStatus });
+                } else if (processData.status) {
+                    try {
+                        const stored = await processesApi.getStatus(processData.id);
+                        if (stored) applyProcess({ id: processData.id, status: stored });
+                    } catch {
+                        /* el listado se queda como estaba si no se puede confirmar */
+                    }
                 }
                 
-                // NO actualizar estado local si falla en BD - esto causa que parezca guardado pero no se guarde
-                // Re-lanzar el error para que el componente pueda manejarlo
+                if (!silent) {
+                    const errorMessage = error.message || 'No se pudo actualizar el proceso en la base de datos.';
+                    const isPermissionError = error.code === '42501' || error.code === 'PGRST301' || errorMessage.toLowerCase().includes('permission') || errorMessage.toLowerCase().includes('permiso');
+                    if (isPermissionError) {
+                        showToastHelper('Error de permisos: No tienes permisos para actualizar procesos. Verifica tu rol de usuario.', 'error', 7000);
+                    } else {
+                        showToastHelper(`Error al actualizar proceso: ${errorMessage}`, 'error', 7000);
+                    }
+                }
                 throw error;
             }
         },
