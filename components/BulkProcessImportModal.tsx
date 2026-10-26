@@ -7,6 +7,7 @@ import { getImportHeaders,
     mapImportHeader,
     OPTIONAL_IMPORT_FIELDS,
     formatBulkDate,
+    isDisplayDateColumn,
     normalizeBulkDateInput,
     DB_PRIORITY_IMPORT_FIELDS,
     enrichBulkColumnValuesForStorage,
@@ -96,7 +97,7 @@ const parseRow = (
         if (cellValue === undefined || cellValue === null || cellValue === '') return;
 
         const customColByHeader = findCustomColumnByHeader(header, customColumns);
-        if (customColByHeader?.type === 'date') {
+        if (customColByHeader && isDisplayDateColumn(customColByHeader)) {
             customValues[customColByHeader.id] = normalizeBulkDateInput(cellValue);
             return;
         }

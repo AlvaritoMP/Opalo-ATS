@@ -110,6 +110,7 @@ import {
     getDisplayEmail,
     resolveStandardFieldValue,
     isPlaceholderImportEmail,
+    isoCalendarDateToDisplay,
     repairDateColumnValues,
     mergeColumnValuesFromCandidates,
     normalizeBulkColumnValueKeys,
@@ -1917,6 +1918,34 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
         actions.showToast('Gráficos guardados', 'success', 2500);
     }, [process, persistBulkConfig, logActivity, actions]);
 
+    const repairedDateProcessIds = useRef(new Set<string>());
+    const repairStoredDatesForProcesses = useCallback(async (processes: Process[]) => {
+        const pending = processes.filter(p => p.id && !repairedDateProcessIds.current.has(p.id));
+        if (pending.length === 0) return;
+        for (const p of pending) repairedDateProcessIds.current.add(p.id);
+        let total = 0;
+        for (const p of pending) {
+            try {
+                total += await bulkCandidatesApi.repairStoredDateFormats(
+                    p.id,
+                    p.bulkConfig?.customColumns || []
+                );
+            } catch (error) {
+                repairedDateProcessIds.current.delete(p.id);
+                console.warn('No se pudieron corregir fechas del proceso', p.id, error);
+            }
+        }
+        if (total > 0) {
+            actions.showToast(
+                total === 1
+                    ? 'Se corrigió 1 fecha al formato dd/mm/aaaa'
+                    : `Se corrigieron ${total} fechas al formato dd/mm/aaaa`,
+                'success',
+                4500
+            );
+        }
+    }, [actions]);
+
     useEffect(() => {
         if (!embeddedProcessId) return;
 
@@ -1931,12 +1960,15 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
 
         void fetchWithRetry(() => processesApi.getById(embeddedProcessId), { attempts: 4, delayMs: 1000 })
             .then(fresh => {
-                if (fresh) applyProcess(fresh);
+                if (fresh) {
+                    applyProcess(fresh);
+                    void repairStoredDatesForProcesses([fresh]);
+                }
             })
             .catch(err => {
                 console.warn('No se pudo cargar el proceso embebido:', err);
             });
-    }, [embeddedProcessId, state.processes]);
+    }, [embeddedProcessId, state.processes, repairStoredDatesForProcesses]);
 
     // Cargar procesos masivos
     const loadBulkProcesses = useCallback(async () => {
@@ -1950,6 +1982,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                 filteredProcesses = processes.filter(p => p.clientId && allowedClientIdsSet.has(p.clientId));
             }
             setBulkProcesses(prev => mergePreservingBulkConfig(prev, filteredProcesses));
+            void repairStoredDatesForProcesses(filteredProcesses);
             void processesApi.hydrateBulkProcessCardFields(
                 filteredProcesses.map(p => p.id),
                 extras => {
@@ -1989,7 +2022,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
         } finally {
             setIsLoadingProcesses(false);
         }
-    }, [selectedProcess, actions, state.currentUser, state.lastViewedBulkProcessId]);
+    }, [selectedProcess, actions, state.currentUser, state.lastViewedBulkProcessId, repairStoredDatesForProcesses]);
 
     useEffect(() => {
         if (isEmbedded) return;
@@ -2156,14 +2189,24 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
             clearLocalColumnValuesForProcess(processId);
 
             const repairs: Record<string, Record<string, unknown>> = {};
-            for (const [candidateId, row] of Object.entries(scopedMerged)) {
+            for (const [candidateId, row] of Object.entries(repaired)) {
                 const raw = fromDb[candidateId] || {};
+                const pre = scopedMerged[candidateId] || {};
                 const needsRepair = cols.some(col => {
-                    const resolved = resolveColumnValueFromRow(row, col, legacy);
+                    const resolved = resolveColumnValueFromRow(pre, col, legacy);
                     if (resolved === undefined || resolved === '') return false;
                     return raw[col.id] === undefined || raw[col.id] === '';
                 });
-                if (needsRepair) {
+                const dateChanged = Object.entries(raw).some(([key, value]) => {
+                    const display = isoCalendarDateToDisplay(value);
+                    return !!display && String(row[key] ?? '') !== String(value);
+                }) || cols.some(col => {
+                    const before = resolveColumnValueFromRow(raw, col, legacy);
+                    const after = row[col.id];
+                    if (after === undefined || after === null || after === '') return false;
+                    return String(before ?? '') !== String(after);
+                });
+                if (needsRepair || dateChanged) {
                     repairs[candidateId] = enrichBulkColumnValuesForStorage(row, cols);
                 }
             }

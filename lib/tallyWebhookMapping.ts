@@ -7,6 +7,7 @@ import {
     getColumnLabel,
     getTallyIntegrationMappingFields,
     mapImportHeader,
+    isDisplayDateColumn,
     normalizeBulkDateInput,
     normalizeColumnNameKey,
     normalizeTallyFieldMapping,
@@ -97,6 +98,17 @@ export function normalizeWebhookProcess(
     };
 }
 
+function isTallyDateFieldType(type?: string): boolean {
+    return !!type && type.toUpperCase().includes('DATE');
+}
+
+/** Tally manda el date picker (INPUT_DATE) como yyyy-mm-dd. El proceso guarda dd/mm/aaaa. */
+function presentTallyDate(text: string, type?: string): string {
+    const trimmed = text.trim();
+    if (!trimmed || !isTallyDateFieldType(type)) return trimmed;
+    return normalizeBulkDateInput(trimmed) || trimmed;
+}
+
 /** Extrae texto legible de un campo Tally (resuelve IDs de opciones en choice fields) */
 export function extractTallyFieldText(field: TallyFieldRow): string {
     const { value, type, options } = field;
@@ -117,17 +129,20 @@ export function extractTallyFieldText(field: TallyFieldRow): string {
         if (opt?.label) return String(opt.label).trim();
     }
 
-    if (typeof value === 'string') return value.trim();
-    if (typeof value === 'number' || typeof value === 'boolean') return String(value);
-    if (Array.isArray(value)) {
-        return value.map((v) => extractTallyFieldText({ value: v, options })).filter(Boolean).join(', ');
-    }
-    if (typeof value === 'object') {
+    let text = '';
+    if (typeof value === 'string') text = value.trim();
+    else if (typeof value === 'number' || typeof value === 'boolean') text = String(value);
+    else if (Array.isArray(value)) {
+        text = value.map((v) => extractTallyFieldText({ value: v, options })).filter(Boolean).join(', ');
+    } else if (typeof value === 'object') {
         const o = value as Record<string, unknown>;
-        if (typeof o.text === 'string') return o.text.trim();
-        if (typeof o.label === 'string') return o.label.trim();
+        if (typeof o.text === 'string') text = o.text.trim();
+        else if (typeof o.label === 'string') text = o.label.trim();
+        else text = String(value).trim();
+    } else {
+        text = String(value).trim();
     }
-    return String(value).trim();
+    return presentTallyDate(text, type);
 }
 
 export interface TallyFieldsIndex {
@@ -406,7 +421,7 @@ function fillEmptyCustomColumnsFromTally(
 
 function parseValueForCustomColumn(raw: string, col: CustomColumn): unknown {
     if (!raw) return '';
-    if (col.type === 'date') return normalizeBulkDateInput(raw);
+    if (isDisplayDateColumn(col)) return normalizeBulkDateInput(raw);
     const parsed = parseCustomCellInput(raw, col);
     if (col.type === 'text' && typeof parsed === 'string' && parsed.trim()) {
         const mapped = mapImportHeader(col.name.toLowerCase());

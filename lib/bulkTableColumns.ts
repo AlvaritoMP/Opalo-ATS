@@ -2064,6 +2064,33 @@ export function isBirthDateColumn(col: CustomColumn): boolean {
     return aliases.some(a => normalizeColumnNameKey(a) === norm);
 }
 
+const NON_DATE_COLUMN_TYPES = new Set<string>(['number', 'checkbox', 'select', 'route', 'route_cost']);
+
+/** Columna que debe persistir fechas como dd/mm/aaaa (tipo fecha o encabezado de fecha). */
+export function isDisplayDateColumn(col: { type?: string; name?: string }): boolean {
+    const type = (col.type || '').toLowerCase();
+    if (type === 'date') return true;
+    if (NON_DATE_COLUMN_TYPES.has(type)) return false;
+    const norm = normalizeColumnNameKey(col.name || '');
+    if (!norm) return false;
+    const compact = norm.replace(/[^a-z0-9]/g, '');
+    if (
+        norm.includes('fecha') ||
+        norm.includes('nacimiento') ||
+        norm.includes('birth') ||
+        norm.includes('fnac') ||
+        norm.includes('fec nac') ||
+        compact === 'fnac' ||
+        compact === 'fecnac' ||
+        compact.includes('fechanac') ||
+        compact.includes('nacimiento')
+    ) {
+        return true;
+    }
+    const aliases = CUSTOM_COLUMN_HEADER_ALIASES['f nac'] || [];
+    return aliases.some(a => normalizeColumnNameKey(a) === norm || normalizeColumnNameKey(a).replace(/[^a-z0-9]/g, '') === compact);
+}
+
 function ageFromBirthDateValue(value: unknown): number | undefined {
     if (value === undefined || value === null || value === '') return undefined;
     const raw = String(value).trim();
@@ -2443,28 +2470,58 @@ export function buildStandardFieldTextCasePatch(
     return patch;
 }
 
-/** Repara fechas almacenadas en columnValues para columnas tipo date */
+/** Fecha de calendario guardada como aaaa-mm-dd (o medianoche ISO). No toca horas reales. */
+export function isoCalendarDateToDisplay(value: unknown): string | null {
+    if (typeof value !== 'string') return null;
+    const match = value.trim().match(/^(\d{4})-(\d{2})-(\d{2})(?:T00:00:00(?:\.\d+)?(?:Z|[+-]00:?00)?)?$/);
+    if (!match) return null;
+    const year = Number(match[1]);
+    const month = Number(match[2]);
+    const day = Number(match[3]);
+    if (year < 1900 || year > 2100 || month < 1 || month > 12 || day < 1 || day > 31) return null;
+    return `${match[3]}/${match[2]}/${match[1]}`;
+}
+
+/** Repara fechas a dd/mm/aaaa: ISO de Tally en cualquier celda, y el resto de formatos en columnas de fecha. */
 export function repairDateColumnValues(
     columnValues: Record<string, Record<string, any>>,
     customColumns: CustomColumn[]
 ): Record<string, Record<string, any>> {
-    const dateCols = customColumns.filter(c => c.type === 'date');
-    if (dateCols.length === 0) return columnValues;
-
+    const dateCols = customColumns.filter(c => isDisplayDateColumn(c));
     let changed = false;
     const repaired: Record<string, Record<string, any>> = {};
 
     for (const [candidateId, values] of Object.entries(columnValues)) {
         const row = { ...values };
-        for (const col of dateCols) {
-            const raw = row[col.id];
-            if (raw === undefined || raw === null || raw === '') continue;
-            const fixed = normalizeBulkDateInput(raw);
-            if (fixed && fixed !== raw) {
-                row[col.id] = fixed;
-                changed = true;
+        let rowChanged = false;
+
+        for (const [key, raw] of Object.entries(row)) {
+            const iso = isoCalendarDateToDisplay(raw);
+            if (iso && iso !== raw) {
+                row[key] = iso;
+                rowChanged = true;
             }
         }
+
+        for (const col of dateCols) {
+            const raw = resolveColumnValueFromRow(row, col);
+            if (raw === undefined || raw === null || raw === '') continue;
+            const fixed = normalizeBulkDateInput(raw);
+            if (!fixed) continue;
+            if (String(row[col.id] ?? '') !== fixed) {
+                row[col.id] = fixed;
+                rowChanged = true;
+            }
+            if (col.name) {
+                const nameKey = bulkColumnNameKey(col.name);
+                if (String(row[nameKey] ?? '') !== fixed) {
+                    row[nameKey] = fixed;
+                    rowChanged = true;
+                }
+            }
+        }
+
+        if (rowChanged) changed = true;
         repaired[candidateId] = row;
     }
 
@@ -2551,7 +2608,7 @@ export function formatCustomCellDisplay(value: any, col: CustomColumn): string {
         if (value === false) return 'No';
         return '-';
     }
-    if (col.type === 'date') return formatBulkDate(value) || '-';
+    if (isDisplayDateColumn(col)) return formatBulkDate(value) || '-';
     if (value === undefined || value === null || value === '') return '-';
     return String(value);
 }
@@ -2567,7 +2624,7 @@ export function parseCustomCellInput(rawValue: string, col: CustomColumn): any {
     if (col.type === 'checkbox') {
         return ['true', '1', 'si', 'sí', 'yes', 's'].includes(trimmed.toLowerCase());
     }
-    if (col.type === 'date') return normalizeBulkDateInput(trimmed);
+    if (isDisplayDateColumn(col)) return normalizeBulkDateInput(trimmed);
     if (col.type === 'select' && col.options?.length) {
         const match = col.options.find(o => o.toLowerCase() === trimmed.toLowerCase());
         return match ?? trimmed;

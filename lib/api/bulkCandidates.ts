@@ -11,6 +11,7 @@ import {
     buildLegacyColumnIdToName,
     buildStandardFieldTextCasePatch,
     repairTextCaseColumnValues,
+    repairDateColumnValues,
 } from '../bulkTableColumns';
 import type { BulkProcessConfig, CandidateHistory } from '../../types';
 import { readChannelSummaryFromRow } from '../contactChannelConfig';
@@ -514,7 +515,8 @@ export const bulkCandidatesApi = {
     /** Carga bulk_column_values de TODOS los candidatos del proceso (sin paginación de tabla) */
     async loadAllBulkColumnValues(
         processId: string,
-        signal?: AbortSignal
+        signal?: AbortSignal,
+        options?: { includeInactive?: boolean }
     ): Promise<Record<string, Record<string, unknown>>> {
         const out: Record<string, Record<string, unknown>> = {};
         const pageSize = 500;
@@ -531,9 +533,10 @@ export const bulkCandidatesApi = {
                 .select('id, bulk_column_values')
                 .eq('app_name', APP_NAME)
                 .eq('process_id', processId)
-                .eq('archived', false)
-                .eq('discarded', false)
                 .range(from, to);
+            if (!options?.includeInactive) {
+                columnQuery = columnQuery.eq('archived', false).eq('discarded', false);
+            }
             if (signal) columnQuery = columnQuery.abortSignal(signal);
             const { data, error } = await columnQuery;
 
@@ -553,6 +556,31 @@ export const bulkCandidatesApi = {
         cachedBulkSelect = BULK_SELECT_FULL;
         bulkColumnValuesWriteSupported = true;
         return out;
+    },
+
+    /**
+     * Reescribe en BD las fechas de calendario guardadas como aaaa-mm-dd (Tally)
+     * al formato dd/mm/aaaa. Incluye archivados y descartados.
+     */
+    async repairStoredDateFormats(
+        processId: string,
+        customColumns: CustomColumn[] = []
+    ): Promise<number> {
+        const fromDb = await this.loadAllBulkColumnValues(processId, undefined, { includeInactive: true });
+        const repaired = repairDateColumnValues(
+            fromDb as Record<string, Record<string, any>>,
+            customColumns
+        );
+        const updates: Record<string, Record<string, unknown>> = {};
+        for (const [candidateId, row] of Object.entries(repaired)) {
+            const before = fromDb[candidateId] || {};
+            const keys = new Set([...Object.keys(before), ...Object.keys(row)]);
+            const changed = [...keys].some(key => String(before[key] ?? '') !== String(row[key] ?? ''));
+            if (changed) updates[candidateId] = row;
+        }
+        if (Object.keys(updates).length === 0) return 0;
+        await this.batchSetBulkColumnValues(updates, customColumns, { replace: true });
+        return Object.keys(updates).length;
     },
 
     /**
