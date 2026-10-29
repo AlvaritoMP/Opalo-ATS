@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { AXES, AXIS_HEAT_COLOR, interpolateSay, type AxisHeat, type AxisId, type ScriptNode } from '../../lib/persuasion/model';
+import { AXES, AXIS_HEAT_COLOR, interpolateSay, looseSectionLabel, type AxisHeat, type AxisId, type ScriptNode } from '../../lib/persuasion/model';
 
 export interface NetworkGroup {
     id: AxisId;
@@ -178,6 +178,7 @@ export const ScriptNetwork: React.FC<ScriptNetworkProps> = ({
     const userMoved = useRef(false);
     const dragRef = useRef<{ id: number; px: number; py: number; x: number; y: number } | null>(null);
 
+    const looseLabel = looseSectionLabel(loose);
     const layout = useMemo(() => {
         const sectors = [...groups.map(group => ({ group, nodes: group.nodes })), ...(loose.length ? [{ group: null, nodes: loose }] : [])];
         const count = Math.max(1, sectors.length);
@@ -526,7 +527,7 @@ export const ScriptNetwork: React.FC<ScriptNetworkProps> = ({
                             looseActive ? 'bg-indigo-700 text-white' : 'bg-white text-slate-600 ring-1 ring-slate-200 hover:bg-indigo-50'
                         }`}
                     >
-                        Sin eje <span className="opacity-70">{loose.length}</span>
+                        {looseLabel} <span className="opacity-70">{loose.length}</span>
                     </button>
                 )}
             </div>
@@ -612,7 +613,7 @@ export const ScriptNetwork: React.FC<ScriptNetworkProps> = ({
                                     />
                                     <circle r="22" fill="#ffffff" stroke={looseActive ? '#312e81' : '#64748b'} strokeWidth={looseActive ? 3.4 : 2} pointerEvents="none" />
                                     <text y="32" pointerEvents="none" textAnchor="middle" fontSize="12" fontWeight="700" fill={looseActive ? '#312e81' : '#334155'}>
-                                        <tspan x="0" dy="0">Sin eje</tspan>
+                                        <tspan x="0" dy="0">{looseLabel}</tspan>
                                         <tspan x="0" dy="14" fontSize="11" fill="#64748b">{done}/{loose.length}</tspan>
                                     </text>
                                 </g>

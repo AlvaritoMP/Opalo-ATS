@@ -81,7 +81,7 @@ function sanitizeNode(value: unknown): ScriptNode | null {
         phase: node.phase,
         say: node.say,
         entry: node.entry === true,
-        axis: readAxis(node.axis),
+        axis: node.axis === null ? null : readAxis(node.axis),
         alternatives,
     };
 }
@@ -245,6 +245,9 @@ export function normalizeBoard(parsed: Partial<CandidateBoard> | null | undefine
         ...source,
         answers: source.answers || {},
         answerOrder: Array.isArray(source.answerOrder) ? source.answerOrder : [],
+        typedAdvances: Array.isArray(source.typedAdvances)
+            ? source.typedAdvances.filter((id): id is string => typeof id === 'string')
+            : [],
         notes: Array.isArray(source.notes) ? source.notes : [],
         customAnswers: Array.isArray(source.customAnswers) ? source.customAnswers : [],
         evidence: Array.isArray(source.evidence) ? source.evidence : [],

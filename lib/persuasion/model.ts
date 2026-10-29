@@ -94,8 +94,11 @@ export interface ScriptNode {
     phase: PersuasionPhase;
     /** Texto que el consultor lee. Acepta {nombre} y {puesto}. */
     say: string;
-    /** Eje de esta pregunta. Enciende el chip aunque todavía no haya respuesta. */
-    axis?: AxisId;
+    /**
+     * Eje de esta pregunta. Enciende el chip aunque todavía no haya respuesta.
+     * `null` la deja en la apertura, fuera de los ejes.
+     */
+    axis?: AxisId | null;
     /** Primera pregunta visible de la llamada. */
     entry?: boolean;
     alternatives: ScriptAlternative[];
@@ -129,6 +132,9 @@ export interface FreeAnswer {
     /** Si viene de una pregunta del guion cuya respuesta no estaba en los botones. */
     nodeId?: string;
 }
+
+/** Respuesta anotada a mano, distinta de los botones del guion. */
+export const TYPED_ANSWER = '__typed__';
 
 /** Avance guardado de un postulante, con el momento en que se registró. */
 export interface BoardCheckpoint {
@@ -225,6 +231,8 @@ export interface NextAction {
 export interface CandidateBoard {
     answers: Record<string, string>;
     answerOrder: string[];
+    /** Preguntas con respuesta libre desde las que ya se pasó a la siguiente. */
+    typedAdvances: string[];
     anchorPhrase: string;
     dirtyNote: string;
     notes: BoardNote[];
@@ -270,6 +278,7 @@ export function emptyBoard(): CandidateBoard {
     return {
         answers: {},
         answerOrder: [],
+        typedAdvances: [],
         anchorPhrase: '',
         dirtyNote: '',
         notes: [],
@@ -514,6 +523,255 @@ export function createSeedScript(): PersuasionScript {
     };
 }
 
+const CAPACIDADES_PREGUNTA_INICIO =
+    'Postulaste enseguida, y eso ya dice iniciativa. ¿Qué te hizo dar el paso?';
+
+const SALUD_LABEL =
+    'No, tengo una operación reciente o alguna condición de salud que no me lo permite';
+
+const LIMPIEZA_ESFUERZO_SAY =
+    'El puesto requiere cierto nivel de esfuerzo físico (subir escaleras, levantar peso, balde, tacho de basura con residuos, etc.) ¿De acuerdo a lo indicado consideras que el puesto es para ti?';
+
+const PRODUCCION_ESFUERZO_SAY =
+    'El puesto requiere cierto nivel de esfuerzo físico hasta el límite reglamentario (levantar jabas, trasladar productos a la zona de apilado, etc.) ¿De acuerdo a lo indicado consideras que el puesto es para ti?';
+
+const DISPONIBILIDAD_SAY = '{nombre}, ¿cuál describe mejor tu disponibilidad para trabajar?';
+
+export type ScriptProfile = 'limpieza' | 'produccion' | 'general';
+
+export function scriptProfileFromTitle(title: string): ScriptProfile {
+    const text = foldText(title);
+    if (text.includes('limpieza')) return 'limpieza';
+    if (text.includes('produccion')) return 'produccion';
+    return 'general';
+}
+
+export function looseSectionLabel(nodes: ScriptNode[]): string {
+    if (nodes.length > 0 && nodes.every(node => node.phase === 'rompehielo')) return 'Apertura';
+    return 'Sin eje';
+}
+
+function disponibilidadNode(opens: string[]): ScriptNode {
+    const options: { id: string; label: string; effect?: AlternativeEffect }[] = [
+        { id: 'disp-ya', label: 'Sí, cuento con disponibilidad inmediata', effect: { type: 'lever', lever: 'urgencia' } },
+        { id: 'disp-eval', label: 'Estoy evaluando propuestas', effect: { type: 'commitment', commitment: 'medio' } },
+        { id: 'disp-contrato', label: 'Mi contrato vence pronto', effect: { type: 'commitment', commitment: 'medio' } },
+        { id: 'disp-eventual', label: 'Busco trabajo eventual con pago diario', effect: { type: 'commitment', commitment: 'medio' } },
+    ];
+    return {
+        id: 'disp-inmediata',
+        phase: 'rompehielo',
+        axis: null,
+        say: DISPONIBILIDAD_SAY,
+        alternatives: options.map(item => ({ id: item.id, label: item.label, opens: [...opens], effect: item.effect })),
+    };
+}
+
+function saludoNode(say: string, alternatives: { id: string; label: string }[]): ScriptNode {
+    return {
+        id: 'saludo',
+        phase: 'rompehielo',
+        axis: null,
+        entry: true,
+        say,
+        alternatives: alternatives.map(item => ({ id: item.id, label: item.label, opens: ['disp-inmediata'] })),
+    };
+}
+
+function limpiezaGreeting(): ScriptNode {
+    return saludoNode('{nombre}, te llamo de Opalo por tu postulación a {puesto}. ¿Puedes hablar un momento?', [
+        { id: 'saludo-si', label: 'Sí, puedo hablar ahora' },
+        { id: 'saludo-wa', label: 'Estoy ocupada: envíenme la información del puesto por WhatsApp' },
+    ]);
+}
+
+function produccionGreeting(): ScriptNode {
+    return saludoNode(
+        '{nombre}, te llamo de Opalo por tu postulación a {puesto}. ¿Tienes disponibilidad para escuchar la propuesta en esta llamada?',
+        [
+            { id: 'saludo-escucha', label: 'Sí, puedo escuchar la propuesta' },
+            { id: 'saludo-no', label: 'Ahora no puedo atender' },
+        ]
+    );
+}
+
+function produccionEffort(opens: string[]): ScriptNode {
+    return {
+        id: 'esfuerzo-produccion',
+        phase: 'rompehielo',
+        axis: null,
+        say: PRODUCCION_ESFUERZO_SAY,
+        alternatives: [
+            {
+                id: 'esf-prod-si',
+                label: 'Sí, estoy acostumbrado al esfuerzo físico',
+                opens: [...opens],
+                effect: { type: 'commitment', commitment: 'alto' },
+            },
+            { id: 'esf-prod-no', label: SALUD_LABEL, opens: [...opens] },
+            {
+                id: 'esf-prod-adapta',
+                label: 'Podría adaptarme al puesto',
+                opens: [...opens],
+                effect: { type: 'commitment', commitment: 'medio' },
+            },
+        ],
+    };
+}
+
+function copyNode(node: ScriptNode, entry: boolean): ScriptNode {
+    return {
+        ...node,
+        entry,
+        alternatives: node.alternatives.map(item => ({ ...item, opens: [...item.opens] })),
+    };
+}
+
+/** El saludo abre la disponibilidad y, si hace falta, el esfuerzo. La pregunta que ya era inicio queda después. */
+function withOpening(script: PersuasionScript, greeting: ScriptNode, effort?: ScriptNode): PersuasionScript {
+    if (script.nodes.some(node => node.id === greeting.id)) return script;
+    const entry = script.nodes.find(node => node.entry) ?? script.nodes[0];
+    const after = effort ? [effort.id] : entry ? [entry.id] : [];
+    const disp = disponibilidadNode(after);
+    const esfuerzo = effort
+        ? {
+              ...effort,
+              alternatives: effort.alternatives.map(item => ({
+                  ...item,
+                  opens: entry ? [entry.id] : [],
+              })),
+          }
+        : null;
+    const nodes = script.nodes.map(node => copyNode(node, false));
+    return { nodes: [greeting, disp, ...(esfuerzo ? [esfuerzo] : []), ...nodes] };
+}
+
+function ensureProduccionEffort(script: PersuasionScript): PersuasionScript {
+    if (script.nodes.some(node => node.id === 'esfuerzo-produccion')) return script;
+    const dispIndex = script.nodes.findIndex(node => node.id === 'disp-inmediata');
+    if (dispIndex < 0) return script;
+    const target = script.nodes[dispIndex].alternatives[0]?.opens[0];
+    const effort = produccionEffort(target ? [target] : []);
+    const nodes = script.nodes.map(node =>
+        node.id === 'disp-inmediata'
+            ? { ...node, alternatives: node.alternatives.map(item => ({ ...item, opens: ['esfuerzo-produccion'] })) }
+            : node
+    );
+    nodes.splice(dispIndex + 1, 0, effort);
+    return { nodes };
+}
+
+function ensureFamilySection(script: PersuasionScript): PersuasionScript {
+    if (script.nodes.some(node => node.axis === 'familia_hijos')) return script;
+    const family = createSeedScript()
+        .nodes.filter(node => node.axis === 'familia_hijos')
+        .map(node => copyNode(node, false));
+    const disp = script.nodes.find(node => node.id === 'disp-inmediata');
+    const previous = disp?.alternatives[0]?.opens[0];
+    const linked = family.map(node => {
+        if (node.id !== 'fam-3' || !previous || previous === 'fam-1') return node;
+        return { ...node, alternatives: node.alternatives.map(item => ({ ...item, opens: [previous] })) };
+    });
+    const nodes = disp
+        ? script.nodes.map(node =>
+              node.id === 'disp-inmediata'
+                  ? { ...node, alternatives: node.alternatives.map(item => ({ ...item, opens: ['fam-1'] })) }
+                  : node
+          )
+        : script.nodes;
+    return { nodes: [...nodes, ...linked] };
+}
+
+/** La cuarta pregunta del guion base (después de las tres de familia) pasa a ser el esfuerzo físico. */
+function reformulateLimpiezaEffort(script: PersuasionScript): PersuasionScript {
+    const node = script.nodes.find(item => item.id === 'cap-1');
+    if (!node) return script;
+    const hasHealth = node.alternatives.some(item => foldText(item.label).includes('operacion reciente'));
+    if (node.say === LIMPIEZA_ESFUERZO_SAY && hasHealth) return script;
+    const opens = [...(node.alternatives[0]?.opens ?? [])];
+    if (node.say !== CAPACIDADES_PREGUNTA_INICIO && node.say !== LIMPIEZA_ESFUERZO_SAY) {
+        if (hasHealth) return script;
+        return {
+            nodes: script.nodes.map(item =>
+                item.id === 'cap-1'
+                    ? { ...item, alternatives: [...item.alternatives, { id: 'cap-1-salud', label: SALUD_LABEL, opens }] }
+                    : item
+            ),
+        };
+    }
+    return {
+        nodes: script.nodes.map(item =>
+            item.id !== 'cap-1'
+                ? item
+                : {
+                      ...item,
+                      say: LIMPIEZA_ESFUERZO_SAY,
+                      alternatives: [
+                          {
+                              id: 'cap-1-si',
+                              label: 'Sí, de acuerdo a lo indicado el puesto es para mí',
+                              opens,
+                              effect: { type: 'commitment', commitment: 'alto' },
+                          },
+                          { id: 'cap-1-salud', label: SALUD_LABEL, opens },
+                      ],
+                  }
+        ),
+    };
+}
+
+function singleEntry(script: PersuasionScript, entryId: string): PersuasionScript {
+    if (!script.nodes.some(node => node.id === entryId)) return script;
+    if (script.nodes.every(node => (node.entry === true) === (node.id === entryId))) return script;
+    return { nodes: script.nodes.map(node => ({ ...node, entry: node.id === entryId })) };
+}
+
+function scriptShape(script: PersuasionScript): string {
+    return JSON.stringify(
+        script.nodes.map(node => ({
+            id: node.id,
+            say: node.say,
+            entry: node.entry === true,
+            alternatives: node.alternatives.map(item => ({
+                id: item.id,
+                label: item.label,
+                opens: item.opens,
+                effect: effectValue(item.effect),
+            })),
+        }))
+    );
+}
+
+function isGenericSeed(script: PersuasionScript): boolean {
+    return scriptShape(script) === scriptShape(createSeedScript());
+}
+
+export function createLimpiezaScript(): PersuasionScript {
+    return reformulateLimpiezaEffort(withOpening(createSeedScript(), limpiezaGreeting()));
+}
+
+export function createProduccionScript(): PersuasionScript {
+    return withOpening(createSeedScript(), produccionGreeting(), produccionEffort([]));
+}
+
+export function createScriptForTitle(processTitle: string): PersuasionScript {
+    const profile = scriptProfileFromTitle(processTitle);
+    if (profile === 'limpieza') return createLimpiezaScript();
+    if (profile === 'produccion') return createProduccionScript();
+    return createSeedScript();
+}
+
+/** Completa el guion del puesto sin borrar un árbol que el proceso ya personalizó. */
+export function ensureProcessScript(script: PersuasionScript, processTitle: string): PersuasionScript {
+    const profile = scriptProfileFromTitle(processTitle);
+    if (profile === 'general') return script;
+    if (isGenericSeed(script)) return createScriptForTitle(processTitle);
+    if (profile === 'limpieza') {
+        return singleEntry(reformulateLimpiezaEffort(ensureFamilySection(withOpening(script, limpiezaGreeting()))), 'saludo');
+    }
+    return singleEntry(ensureProduccionEffort(withOpening(script, produccionGreeting(), produccionEffort([]))), 'saludo');
+}
+
 const AXIS_CUES: Record<AxisId, string[]> = {
     familia_hijos: ['familia', 'hijo', 'hija', 'padre', 'madre', 'hogar', 'apoyar', 'personas a cargo', 'mama', 'papa', 'casa'],
     capacidades: ['experiencia', 'iniciativa', 'aprender', 'crecer', 'responsabilidad', 'capacidad', 'confiar', 'otra tarea'],
@@ -576,7 +834,7 @@ export function placeQuestionsOnAxes(script: PersuasionScript): PersuasionScript
     for (let pass = 0; pass < nodes.length; pass += 1) {
         let changed = false;
         for (const node of nodes) {
-            if (node.axis) continue;
+            if (node.axis !== undefined) continue;
             const worded = axisFromWording(node);
             if (worded) {
                 node.axis = worded;
@@ -598,7 +856,8 @@ export function placeQuestionsOnAxes(script: PersuasionScript): PersuasionScript
         cierre: 'rapidez',
     };
     for (const node of nodes) {
-        if (!node.axis) node.axis = phaseAxis[node.phase];
+        if (node.axis !== undefined) continue;
+        node.axis = phaseAxis[node.phase];
     }
     return { nodes };
 }
@@ -709,7 +968,15 @@ export function projectCall(script: PersuasionScript, board: CandidateBoard): Ca
     }
     for (const nodeId of board.answerOrder) {
         const node = findNode(script, nodeId);
-        const alternative = node?.alternatives.find(a => a.id === board.answers[nodeId]);
+        const answerId = board.answers[nodeId];
+        if (answerId === TYPED_ANSWER) {
+            if ((board.typedAdvances ?? []).includes(nodeId)) {
+                const nextId = defaultNextNodeId(script, node);
+                if (nextId) reveal(nextId);
+            }
+            continue;
+        }
+        const alternative = node?.alternatives.find(a => a.id === answerId);
         if (!alternative) continue;
         for (const id of alternative.opens) {
             reveal(id);
@@ -813,11 +1080,47 @@ export function predictDay1(script: PersuasionScript, board: CandidateBoard, sna
     return { base, delta, value: Math.max(0, Math.min(100, base + delta)) };
 }
 
+export function defaultNextNodeId(script: PersuasionScript, node: ScriptNode | undefined): string | null {
+    if (!node) return null;
+    const counts = new Map<string, number>();
+    for (const alternative of node.alternatives) {
+        const id = alternative.opens.find(openId => script.nodes.some(item => item.id === openId));
+        if (!id) continue;
+        counts.set(id, (counts.get(id) ?? 0) + 1);
+    }
+    let best: string | null = null;
+    let bestCount = 0;
+    for (const [id, count] of counts) {
+        if (count > bestCount) {
+            best = id;
+            bestCount = count;
+        }
+    }
+    if (best) return best;
+    if (node.axis) {
+        const same = script.nodes.filter(item => item.axis === node.axis);
+        const index = same.findIndex(item => item.id === node.id);
+        if (index >= 0 && same[index + 1]) return same[index + 1].id;
+    }
+    const index = script.nodes.findIndex(item => item.id === node.id);
+    return script.nodes[index + 1]?.id ?? null;
+}
+
 export function answerNode(board: CandidateBoard, nodeId: string, alternativeId: string): CandidateBoard {
     const answers = { ...board.answers, [nodeId]: alternativeId };
     const answerOrder = board.answerOrder.filter(id => id !== nodeId);
     answerOrder.push(nodeId);
-    return { ...board, answers, answerOrder };
+    const typedAdvances =
+        alternativeId === TYPED_ANSWER
+            ? board.typedAdvances ?? []
+            : (board.typedAdvances ?? []).filter(id => id !== nodeId);
+    return { ...board, answers, answerOrder, typedAdvances };
+}
+
+export function advanceTypedAnswer(board: CandidateBoard, nodeId: string): CandidateBoard {
+    const typedAdvances = board.typedAdvances ?? [];
+    if (typedAdvances.includes(nodeId)) return board;
+    return { ...board, typedAdvances: [...typedAdvances, nodeId] };
 }
 
 export function undoLastAnswer(board: CandidateBoard): CandidateBoard {
@@ -826,7 +1129,8 @@ export function undoLastAnswer(board: CandidateBoard): CandidateBoard {
     const removed = board.answerOrder[board.answerOrder.length - 1];
     const answers = { ...board.answers };
     delete answers[removed];
-    return { ...board, answers, answerOrder };
+    const typedAdvances = (board.typedAdvances ?? []).filter(id => id !== removed);
+    return { ...board, answers, answerOrder, typedAdvances };
 }
 
 export function objectionLabel(code: ObjectionCode): string {

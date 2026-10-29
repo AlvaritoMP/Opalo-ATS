@@ -12,9 +12,12 @@ import {
     NEXT_ACTION_PRESETS,
     PREDICTION_DELTA_LIMIT,
     answerNode,
+    advanceTypedAnswer,
     clampPredictionDelta,
+    defaultNextNodeId,
     emptyBoard,
     interpolateSay,
+    looseSectionLabel,
     newPersuasionId,
     objectionLabel,
     predictDay1,
@@ -33,6 +36,8 @@ import {
     type PersuasionScript,
     type ScriptNode,
     type WhatsappArgument,
+    TYPED_ANSWER,
+    ensureProcessScript,
 } from '../../lib/persuasion/model';
 import { fileToEvidenceUrl, loadBoard, loadScript, loadWhatsappArguments, saveBoard, saveScript, saveWhatsappArguments } from '../../lib/persuasion/storage';
 import { queuePersuasionBoardPush, queuePersuasionProcessPush, syncPersuasionBoard, syncPersuasionProcess } from '../../lib/api/persuasion';
@@ -64,7 +69,7 @@ function isTypingTarget(target: EventTarget | null): boolean {
 
 function answerLabel(node: ScriptNode, alternativeId: string | undefined): string {
     if (!alternativeId) return '';
-    if (alternativeId === '__typed__') return 'Respuesta anotada';
+    if (alternativeId === TYPED_ANSWER) return 'Respuesta anotada';
     return node.alternatives.find(item => item.id === alternativeId)?.label || 'Respondida';
 }
 
@@ -96,7 +101,7 @@ export const PersuasionConsole: React.FC<PersuasionConsoleProps> = ({
     onCandidateChange,
 }) => {
     const panelRef = useRef<HTMLDivElement>(null);
-    const [script, setScript] = useState<PersuasionScript>(() => loadScript(processId));
+    const [script, setScript] = useState<PersuasionScript>(() => ensureProcessScript(loadScript(processId), processTitle));
     const [board, setBoard] = useState<CandidateBoard>(() => loadBoard(candidate.id));
     const [whatsappArguments, setWhatsappArguments] = useState<WhatsappArgument[]>(() => loadWhatsappArguments(processId));
     const [storageNote, setStorageNote] = useState('');
@@ -116,20 +121,33 @@ export const PersuasionConsole: React.FC<PersuasionConsoleProps> = ({
 
     useEffect(() => {
         let cancel = false;
-        const startedScript = JSON.stringify(loadScript(processId).nodes);
-        const startedArguments = JSON.stringify(loadWhatsappArguments(processId));
+        const startedScript = JSON.stringify(scriptRef.current.nodes);
+        const startedArguments = JSON.stringify(argumentsRef.current);
         void syncPersuasionProcess(processId).then(snapshot => {
             if (cancel) return;
-            const scriptSame = JSON.stringify(scriptRef.current.nodes) === startedScript;
-            const argumentsSame = JSON.stringify(argumentsRef.current) === startedArguments;
-            skipProcessSave.current = scriptSame && argumentsSame;
-            if (scriptSame) setScript(snapshot.script);
-            if (argumentsSame) setWhatsappArguments(snapshot.arguments);
+            const ensured = ensureProcessScript(snapshot.script, processTitle);
+            const scriptUntouched = JSON.stringify(scriptRef.current.nodes) === startedScript;
+            const argumentsUntouched = JSON.stringify(argumentsRef.current) === startedArguments;
+            if (!scriptUntouched) return;
+            const ensuredJson = JSON.stringify(ensured.nodes);
+            const storedBehind = ensuredJson !== JSON.stringify(loadScript(processId).nodes);
+            if (ensuredJson === startedScript && !storedBehind) {
+                if (argumentsUntouched && JSON.stringify(snapshot.arguments) !== startedArguments) {
+                    skipProcessSave.current = false;
+                    setWhatsappArguments(snapshot.arguments);
+                }
+                return;
+            }
+            skipProcessSave.current = false;
+            setScript(ensured);
+            if (argumentsUntouched && JSON.stringify(snapshot.arguments) !== startedArguments) {
+                setWhatsappArguments(snapshot.arguments);
+            }
         });
         return () => {
             cancel = true;
         };
-    }, [processId, scriptTick]);
+    }, [processId, processTitle, scriptTick]);
 
     useEffect(() => {
         if (skipProcessSave.current) {
@@ -204,7 +222,7 @@ export const PersuasionConsole: React.FC<PersuasionConsoleProps> = ({
         return picked ?? snapshot.active;
     }, [axisPick, board.answers, focusId, script.nodes, snapshot.active]);
     const activeSay = focused ? interpolateSay(focused.say, candidate.name, processTitle) : '';
-    const focusedAxis = axisPick ?? focused?.axis;
+    const focusedAxis = (axisPick ?? focused?.axis) || undefined;
     const focusedHeat = focusedAxis ? board.axisHeat?.[focusedAxis] : undefined;
 
     const axisNodes = useMemo(() => {
@@ -646,12 +664,16 @@ export const PersuasionConsole: React.FC<PersuasionConsoleProps> = ({
                         {focused && !focused.axis && axisNodes.loose.length > 0 && (
                             <div className="mb-3">
                                 <div className="flex items-baseline justify-between gap-3">
-                                    <h3 className="text-sm font-semibold text-primary-800">Sin eje</h3>
+                                    <h3 className="text-sm font-semibold text-primary-800">{looseSectionLabel(axisNodes.loose)}</h3>
                                     <span className="text-[11px] font-semibold text-gray-500">
                                         {axisNodes.loose.filter(node => board.answers[node.id]).length}/{axisNodes.loose.length}
                                     </span>
                                 </div>
-                                <p className="mt-0.5 text-sm leading-snug text-gray-600">Preguntas del guion que todavía no tienen eje temático.</p>
+                                <p className="mt-0.5 text-sm leading-snug text-gray-600">
+                                    {looseSectionLabel(axisNodes.loose) === 'Apertura'
+                                        ? 'Saludo y primeras respuestas, antes de pasar a un eje.'
+                                        : 'Preguntas del guion que todavía no tienen eje temático.'}
+                                </p>
                                 <div className="mt-2 flex flex-wrap gap-1">
                                     {axisNodes.loose.map((node, index) => {
                                         const answered = board.answers[node.id];
@@ -712,9 +734,13 @@ export const PersuasionConsole: React.FC<PersuasionConsoleProps> = ({
                                 </div>
                                 <TypedScriptAnswer
                                     nodeId={focused.id}
+                                    alreadyNoted={board.answers[focused.id] === TYPED_ANSWER}
+                                    canAdvance={!!defaultNextNodeId(script, focused)}
                                     onSave={text => {
                                         const nodeId = focused.id;
                                         const question = activeSay;
+                                        setFocusId(nodeId);
+                                        setAxisPick(focused.axis ?? null);
                                         patch(current =>
                                             answerNode(
                                                 {
@@ -731,9 +757,18 @@ export const PersuasionConsole: React.FC<PersuasionConsoleProps> = ({
                                                     ],
                                                 },
                                                 nodeId,
-                                                '__typed__'
+                                                TYPED_ANSWER
                                             )
                                         );
+                                    }}
+                                    onAdvance={() => {
+                                        const nodeId = focused.id;
+                                        const nextId = defaultNextNodeId(script, focused);
+                                        patch(current => advanceTypedAnswer(current, nodeId));
+                                        if (!nextId) return;
+                                        setFocusId(nextId);
+                                        const nextNode = script.nodes.find(item => item.id === nextId);
+                                        setAxisPick(nextNode?.axis ?? null);
                                     }}
                                 />
                             </>
@@ -1197,7 +1232,13 @@ const CriticalPointsEditor: React.FC<{
     </section>
 );
 
-const TypedScriptAnswer: React.FC<{ nodeId: string; onSave: (text: string) => void }> = ({ nodeId, onSave }) => {
+const TypedScriptAnswer: React.FC<{
+    nodeId: string;
+    alreadyNoted: boolean;
+    canAdvance: boolean;
+    onSave: (text: string) => void;
+    onAdvance: () => void;
+}> = ({ nodeId, alreadyNoted, canAdvance, onSave, onAdvance }) => {
     const [text, setText] = useState('');
 
     useEffect(() => {
@@ -1211,19 +1252,33 @@ const TypedScriptAnswer: React.FC<{ nodeId: string; onSave: (text: string) => vo
         setText('');
     };
 
+    const advance = () => {
+        const value = text.trim();
+        if (value) {
+            onSave(value);
+            setText('');
+        } else if (!alreadyNoted) {
+            return;
+        }
+        onAdvance();
+    };
+
+    const ready = text.trim().length > 0 || alreadyNoted;
+
     return (
-        <div className="mt-2 flex items-center gap-2">
+        <div className="mt-2 flex flex-wrap items-center gap-2">
             <input
                 value={text}
                 onChange={e => setText(e.target.value)}
                 onKeyDown={e => {
                     if (e.key === 'Enter') {
                         e.preventDefault();
-                        save();
+                        if (canAdvance && ready) advance();
+                        else save();
                     }
                 }}
                 placeholder="Otra respuesta, si no está en los botones"
-                className="min-w-0 flex-1 rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-200"
+                className="min-w-[12rem] flex-1 rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-200"
             />
             <button
                 type="button"
@@ -1232,6 +1287,15 @@ const TypedScriptAnswer: React.FC<{ nodeId: string; onSave: (text: string) => vo
             >
                 Anotar
             </button>
+            {canAdvance && ready && (
+                <button
+                    type="button"
+                    onClick={advance}
+                    className="shrink-0 rounded-lg bg-primary-600 px-3 py-2 text-sm font-semibold text-white hover:bg-primary-700"
+                >
+                    Siguiente pregunta
+                </button>
+            )}
         </div>
     );
 };

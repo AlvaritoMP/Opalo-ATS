@@ -7,10 +7,13 @@ import {
     PERSUASION_PHASES,
     PHASE_LABEL,
     AXES,
-    createSeedScript,
+    createScriptForTitle,
     effectFromValue,
     effectValue,
+    ensureProcessScript,
+    looseSectionLabel,
     newPersuasionId,
+    scriptProfileFromTitle,
     type AxisId,
     type PersuasionPhase,
     type PersuasionScript,
@@ -31,32 +34,36 @@ export const ScriptStructureEditor: React.FC<ScriptStructureEditorProps> = ({
     processTitle,
     onClose,
 }) => {
-    const [script, setScript] = useState<PersuasionScript>(() => loadScript(processId));
-    const [selectedId, setSelectedId] = useState<string>(() => loadScript(processId).nodes.find(n => n.entry)?.id || loadScript(processId).nodes[0]?.id || '');
+    const [script, setScript] = useState<PersuasionScript>(() => ensureProcessScript(loadScript(processId), processTitle));
+    const [selectedId, setSelectedId] = useState<string>(() => {
+        const initial = ensureProcessScript(loadScript(processId), processTitle);
+        return initial.nodes.find(n => n.entry)?.id || initial.nodes[0]?.id || '';
+    });
     const skipScriptSave = useRef(true);
     const scriptRef = useRef(script);
     scriptRef.current = script;
 
     useEffect(() => {
         let cancel = false;
-        const startedNodes = JSON.stringify(loadScript(processId).nodes);
+        const startedNodes = JSON.stringify(scriptRef.current.nodes);
         void syncPersuasionProcess(processId).then(snapshot => {
             if (cancel) return;
-            const unchanged = JSON.stringify(scriptRef.current.nodes) === startedNodes;
-            skipScriptSave.current = unchanged;
-            if (unchanged) {
-                setScript(snapshot.script);
-                setSelectedId(current =>
-                    snapshot.script.nodes.some(node => node.id === current)
-                        ? current
-                        : snapshot.script.nodes.find(node => node.entry)?.id || snapshot.script.nodes[0]?.id || ''
-                );
-            }
+            const ensured = ensureProcessScript(snapshot.script, processTitle);
+            if (JSON.stringify(scriptRef.current.nodes) !== startedNodes) return;
+            const ensuredJson = JSON.stringify(ensured.nodes);
+            if (ensuredJson === startedNodes && ensuredJson === JSON.stringify(loadScript(processId).nodes)) return;
+            skipScriptSave.current = false;
+            setScript(ensured);
+            setSelectedId(current =>
+                ensured.nodes.some(node => node.id === current)
+                    ? current
+                    : ensured.nodes.find(node => node.entry)?.id || ensured.nodes[0]?.id || ''
+            );
         });
         return () => {
             cancel = true;
         };
-    }, [processId]);
+    }, [processId, processTitle]);
 
     useEffect(() => {
         if (skipScriptSave.current) {
@@ -198,20 +205,24 @@ export const ScriptStructureEditor: React.FC<ScriptStructureEditorProps> = ({
                         <p className="text-[11px] font-semibold uppercase tracking-wide text-violet-700">Estructura del guion</p>
                         <h2 className="truncate text-lg font-semibold text-gray-900">{processTitle}</h2>
                         <p className="text-xs text-gray-500">
-                            Este árbol es del proceso y lo comparten los consultores. La consola de la llamada solo lo recorre.
+                            {scriptProfileFromTitle(processTitle) === 'limpieza'
+                                ? 'Guion de operarios de limpieza. Los cambios quedan solo en este proceso.'
+                                : scriptProfileFromTitle(processTitle) === 'produccion'
+                                  ? 'Guion de operarios de producción. Los cambios quedan solo en este proceso.'
+                                  : 'Este árbol es del proceso y lo comparten los consultores. La consola de la llamada solo lo recorre.'}
                         </p>
                     </div>
                     <button
                         type="button"
                         onClick={() => {
-                            const seed = createSeedScript();
+                            const seed = createScriptForTitle(processTitle);
                             setScript(seed);
-                            setSelectedId(seed.nodes[0]?.id || '');
+                            setSelectedId(seed.nodes.find(node => node.entry)?.id || seed.nodes[0]?.id || '');
                         }}
                         className="inline-flex items-center gap-1 rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
                     >
                         <RotateCcw className="h-4 w-4" />
-                        Restaurar ejemplo
+                        {scriptProfileFromTitle(processTitle) === 'general' ? 'Restaurar ejemplo' : 'Restaurar guion del puesto'}
                     </button>
                     <button type="button" onClick={onClose} className="rounded-lg p-2 hover:bg-gray-100" title="Cerrar">
                         <X className="h-5 w-5 text-gray-500" />
@@ -264,8 +275,8 @@ export const ScriptStructureEditor: React.FC<ScriptStructureEditorProps> = ({
                         ))}
                         {looseNodes.length > 0 && (
                             <section>
-                                <h3 className="mb-1 text-xs font-semibold text-gray-500">Sin eje</h3>
-                                {looseNodes.map(node => (
+                                <h3 className="mb-1 text-xs font-semibold text-gray-500">{looseSectionLabel(looseNodes)}</h3>
+                                {looseNodes.map((node, index) => (
                                     <button
                                         key={node.id}
                                         type="button"
@@ -275,7 +286,7 @@ export const ScriptStructureEditor: React.FC<ScriptStructureEditorProps> = ({
                                             node.id === selectedId ? 'bg-violet-600 text-white' : 'bg-white text-gray-800'
                                         }`}
                                     >
-                                        <span className="line-clamp-2">{node.say || 'Pregunta sin texto'}</span>
+                                        <span className="line-clamp-2">{index + 1}. {node.say || 'Pregunta sin texto'}</span>
                                     </button>
                                 ))}
                             </section>
