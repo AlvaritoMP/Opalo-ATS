@@ -9,6 +9,7 @@ import {
     Users,
 } from 'lucide-react';
 import { useAppState } from '../App';
+import { SectionHelpButton } from './AppHelpManual';
 import { userActivityApi, type UserActivityEvent } from '../lib/api/userActivity';
 import {
     eventBelongsToUser,
@@ -279,7 +280,10 @@ export const UserActivityView: React.FC = () => {
         <div className="p-4 md:p-8 h-full flex flex-col overflow-hidden gap-4">
             <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-3">
                 <div>
-                    <h1 className="text-2xl md:text-3xl font-bold text-gray-800">Actividad de usuarios</h1>
+                    <div className="flex items-center gap-3">
+                        <h1 className="text-2xl md:text-3xl font-bold text-gray-800">Actividad de usuarios</h1>
+                        <SectionHelpButton sectionId="actividad" />
+                    </div>
                     <p className="text-sm text-gray-500 mt-1">
                         Ingresos al sistema y últimas interacciones, agrupadas por categoría.
                     </p>

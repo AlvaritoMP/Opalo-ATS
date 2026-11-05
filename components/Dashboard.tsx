@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { useAppState } from '../App';
+import { SectionHelpButton } from './AppHelpManual';
 import { Briefcase, Users, FileText, CheckCircle, Calendar, Grid3x3, Phone, TrendingUp, UserCheck, Headphones, UserPlus, MessageCircle, Mail, Clock, Target, Zap, RefreshCw } from 'lucide-react';
 import { Tooltip, Legend, BarChart, CartesianGrid, XAxis, YAxis, Bar, LineChart, Line, ComposedChart, Cell } from 'recharts';
 import { Candidate, Process } from '../types';
@@ -1226,6 +1227,7 @@ export const Dashboard: React.FC = () => {
                             })}
                         </span>
                     )}
+                    <SectionHelpButton sectionId="panel" />
                     <button
                         type="button"
                         onClick={() => void actions.loadDashboardCache(true)}

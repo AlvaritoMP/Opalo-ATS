@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useAppState } from '../App';
+import { SectionHelpButton } from './AppHelpManual';
 import { Candidate } from '../types';
 import { Undo2, Eye, Archive } from 'lucide-react';
 import { CandidateDetailsModal } from './CandidateDetailsModal';
@@ -61,7 +62,10 @@ export const ArchivedCandidates: React.FC = () => {
         <div className="p-8 space-y-6">
             <div className="flex items-center justify-between">
                 <div>
-                    <h1 className="text-3xl font-bold text-gray-800">Candidatos Archivados</h1>
+                    <div className="flex items-center gap-3">
+                        <h1 className="text-3xl font-bold text-gray-800">Candidatos Archivados</h1>
+                        <SectionHelpButton sectionId="archivados" />
+                    </div>
                     <p className="text-gray-500 mt-1">Accede al historial de candidatos archivados y restáuralos cuando sea necesario.</p>
                 </div>
                 <div className="px-4 py-2 bg-gray-100 rounded-full text-sm text-gray-600">

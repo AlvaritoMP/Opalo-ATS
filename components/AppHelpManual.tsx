@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { Search, X } from 'lucide-react';
+import { CircleHelp, Search, X } from 'lucide-react';
 import { ASSESSMENT_GUIDE_SECTIONS, type GuideSection } from './AssessmentConsultantGuide';
 
 interface HelpSection extends GuideSection {
@@ -95,7 +95,7 @@ const FLOW_SECTIONS: HelpSection[] = [
                     ]}
                 />
                 <P>
-                    El menú lateral cambia según el rol y las secciones habilitadas para ese usuario. Ayuda está disponible en todas las sesiones.
+                    El menú lateral cambia según el rol y las secciones habilitadas para ese usuario. Cada pantalla tiene un botón Ayuda junto al título. Abre este manual en el capítulo de esa pantalla: qué hace, cómo se usa y cómo lo hace el sistema. El botón Ayuda del menú abre el capítulo de la pantalla en la que está.
                 </P>
             </>
         ),
@@ -401,39 +401,420 @@ const COMPETENCY_SECTION: HelpSection = {
     ),
 };
 
-const OTHER_SECTION: HelpSection = {
-    id: 'otras',
-    title: 'Resto de la aplicación',
-    keywords: 'panel inteligencia archivados calendario planeamiento reportes comparador cartas usuarios configuración opsflow',
-    body: (
-        <>
-            <P>
-                El resto del menú consulta o completa el mismo flujo. Lo que se escribe en el proceso (etapa, origen, pruebas, informe) es lo que estas pantallas leen.
-            </P>
-            <Table
-                headers={['Pantalla', 'Qué resuelve']}
-                rows={[
-                    ['Panel', 'Volúmenes, etapas y origen de las altas. Formulario cuenta postulaciones Tally por la hora de la primera postulación. Manual (ATS) cuenta altas hechas por el equipo.'],
-                    ['Inteligencia', 'Lecturas cruzadas para administración. Visible para quien tiene esa sección.'],
-                    ['Archivados', 'Personas sacadas del trabajo activo. Desde ahí se restauran.'],
-                    ['Candidatos', 'Listado transversal, fuera de un solo tablero.'],
-                    ['Envíos OpsFlow', 'Historial de lo que se mandó a operación desde la tabla, con Enviar a OpsFlow.'],
-                    ['Formularios', 'Integraciones. El capítulo Integración con Tally es el procedimiento completo.'],
-                    ['Cartas', 'Plantillas Word de cartas. Esa pantalla tiene su propia guía de marcadores.'],
-                    ['Calendario', 'Entrevistas agendadas desde la ficha o desde la selección masiva.'],
-                    ['Planeamiento', 'Organización del equipo sobre los procesos.'],
-                    ['Reportes y Comparador', 'Salidas para revisar un proceso o contrastar personas. El comparador también admite una tabla cargada a mano, separada de la base.'],
-                    ['Actividad', 'Qué hizo cada usuario en el sistema.'],
-                    ['Usuarios', 'Altas, roles y qué secciones ve cada persona.'],
-                    ['Configuración', 'Nombre, logos, Drive y ajustes de la instalación.'],
-                ]}
-            />
-            <P>
-                La campana junto al nombre muestra alertas de los procesos según lo configurado. Cerrar sesión está en el mismo bloque. Actualizar vuelve a pedir procesos y candidatos a la base.
-            </P>
-        </>
-    ),
+const SCREEN_SECTIONS: HelpSection[] = [
+    {
+        id: 'panel',
+        title: 'Panel',
+        keywords: 'panel dashboard indicadores contactología registros citas contratados filtros actualizar',
+        body: (
+            <>
+                <H3>Qué hace</H3>
+                <P>
+                    Resume la operación sin editar fichas. Arriba están los volúmenes (procesos activos, candidatos en alcance, descartados y contratados). Después vienen contactología, canales de atención, generación de registros, agendamiento de citas, ingresos a contratación y el perfil promedio de quien fue contratado.
+                </P>
+                <H3>Cómo se usa</H3>
+                <Ol items={[
+                    'Recorra cada bloque de arriba hacia abajo. El título del bloque dice qué pregunta responde.',
+                    'Cuando un bloque ofrece semana, mes o año, ese periodo acota las tarjetas y los gráficos de ese bloque.',
+                    'Pase el cursor por el signo de ayuda de una tarjeta para leer la definición exacta de ese número.',
+                    'Actualizar vuelve a leer el panel. «Datos al…» es la hora de esa lectura.',
+                    'Los filtros que deje puestos se recuerdan en este navegador.',
+                ]} />
+                <H3>Cómo lo hace</H3>
+                <Ul items={[
+                    'Lee candidatos, etapas, intentos de contacto (llamada, WhatsApp, correo) y agendas que ya están guardados. No tiene una base aparte.',
+                    'Formulario cuenta postulaciones Tally por la hora de la primera postulación. Manual (ATS) cuenta altas hechas por el equipo.',
+                    'El tiempo al primer contacto mide desde el alta hasta el primer intento hecho con el botón de contacto. Cambiar el estado a mano no cuenta como intento.',
+                    'Contratados salen de la etapa de contratación o de la lista de contratados del proceso.',
+                ]} />
+            </>
+        ),
+    },
+    {
+        id: 'inteligencia',
+        title: 'Inteligencia',
+        keywords: 'inteligencia flujo postulantes desempeño cartera procesos llamadas contrataciones periodo',
+        body: (
+            <>
+                <H3>Qué hace</H3>
+                <P>
+                    Es la lectura ejecutiva para administración y supervisión. Cruza el flujo de postulantes, el desempeño de quien contacta y la salud de la cartera de procesos. No mueve etapas ni edita fichas.
+                </P>
+                <H3>Cómo se usa</H3>
+                <Ol items={[
+                    'Elija últimos 7 días, último mes o último año. Ese periodo acota ingresos, llamadas y contrataciones.',
+                    'Lea las tarjetas de arriba y después el flujo diario, el desempeño por usuario y el resumen de procesos.',
+                    'En el resumen filtre por estado del proceso y ordene columnas para ver qué vacante pide atención.',
+                    'Actualizar vuelve a pedir flujo, traspasos e intentos de contacto.',
+                ]} />
+                <H3>Cómo lo hace</H3>
+                <Ul items={[
+                    'El flujo diario cuenta altas por día. Compara hasta ocho procesos con más ingreso y, al lado, el total de todos.',
+                    'Desempeño por usuario suma llamadas, llamadas que terminaron en interesado, interés, desistimiento y contrataciones del periodo.',
+                    'La cartera cuenta procesos en proceso, en stand by y terminados.',
+                    'Solo quien tiene la sección Inteligencia la ve. El administrador la tiene siempre.',
+                ]} />
+            </>
+        ),
+    },
+    {
+        id: 'tablero',
+        title: 'Tablero de un proceso',
+        keywords: 'tablero kanban arrastrar etapa ficha comunicar cartas importar performance modo tabla finalizar',
+        body: (
+            <>
+                <H3>Qué hace</H3>
+                <P>
+                    Es el tablero de una vacante: una columna por etapa y una tarjeta por persona. Sirve para mover pocas personas, abrir la ficha y lanzar acciones de ese proceso.
+                </P>
+                <H3>Cómo se usa</H3>
+                <Ol items={[
+                    'Arrastre una tarjeta de una columna a otra para cambiarle la etapa.',
+                    'Abra la tarjeta para ver ficha, comentarios, documentos e historial.',
+                    'Marque varias tarjetas para emitir cartas o comunicar solo a esa selección. Comunicación masiva escribe a todo el proceso.',
+                    'Performance abre cobertura y desempeño. Ver documentos abre los archivos del proceso. Editar proceso cambia título, cliente y etapas.',
+                    'Importar candidatos carga un archivo. Importar CV lee un currículum hacia la ficha.',
+                    'Modo tabla, cuando el proceso lo admite, pasa a la mesa de alta densidad. Finalizar cierra la operación. Si ya no está En proceso, Reactivar lo devuelve.',
+                ]} />
+                <H3>Cómo lo hace</H3>
+                <Ul items={[
+                    'Mover una tarjeta guarda la etapa nueva y deja el movimiento en el historial de la persona.',
+                    'La primera etapa, según el orden guardado al editar el proceso, es la bandeja donde cae cada postulación de Tally.',
+                    'Un proceso que no está En proceso deja de aceptar la gestión habitual hasta reactivarlo. Al reactivarlo vuelven las alertas de esa vacante.',
+                ]} />
+            </>
+        ),
+    },
+    {
+        id: 'archivados',
+        title: 'Archivados',
+        keywords: 'archivados restaurar historial sacar del tablero',
+        body: (
+            <>
+                <H3>Qué hace</H3>
+                <P>
+                    Lista a las personas que se sacaron del trabajo activo, de cualquier proceso. Desde aquí se lee el historial y se puede devolverlas al proceso.
+                </P>
+                <H3>Cómo se usa</H3>
+                <Ol items={[
+                    'Busque a la persona en la lista.',
+                    'Ábrala para leer la ficha y el historial.',
+                    'Restaure si debe volver al trabajo activo.',
+                ]} />
+                <H3>Cómo lo hace</H3>
+                <Ul items={[
+                    'Archivar marca la ficha y la quita de tableros y tablas activas. No la borra.',
+                    'Restaurar la devuelve a su proceso y a la etapa en la que estaba.',
+                    'Una postulación nueva por Tally no reabre una ficha archivada: entra como registro nuevo.',
+                ]} />
+            </>
+        ),
+    },
+    {
+        id: 'listado',
+        title: 'Candidatos',
+        keywords: 'candidatos listado buscar filtro opsflow ficha transversal',
+        body: (
+            <>
+                <H3>Qué hace</H3>
+                <P>
+                    Muestra a todas las personas fuera de un solo tablero. Sirve para encontrar a alguien sin saber en qué proceso está y para armar un envío al área operativa.
+                </P>
+                <H3>Cómo se usa</H3>
+                <Ol items={[
+                    'Escriba nombre, correo, teléfono, DNI o proceso.',
+                    'Filtre por proceso y, si eligió uno, por etapa.',
+                    'Abra la fila para ver la ficha.',
+                    'Marque filas y use Enviar a OpsFlow. El historial de ese envío queda en Envíos OpsFlow.',
+                ]} />
+                <H3>Cómo lo hace</H3>
+                <Ul items={[
+                    'La lista lee las fichas que la sesión ya cargó. No crea personas nuevas.',
+                    'Enviar a OpsFlow arma un paquete con los datos de las filas marcadas y lo entrega a operación.',
+                    'El envío no cambia la etapa por sí solo.',
+                ]} />
+            </>
+        ),
+    },
+    {
+        id: 'opsflow',
+        title: 'Envíos a OpsFlow',
+        keywords: 'opsflow paquete entrega reintentar operación historial',
+        body: (
+            <>
+                <H3>Qué hace</H3>
+                <P>
+                    Guarda el historial de paquetes enviados a OpsFlow desde Candidatos o desde la tabla de un proceso masivo. Aquí se consulta si operación recibió el paquete.
+                </P>
+                <H3>Cómo se usa</H3>
+                <Ol items={[
+                    'Actualizar vuelve a leer el historial.',
+                    'Abra un paquete para ver a quién incluía, quién lo envió y el estado de entrega.',
+                    'Si la entrega falló, Reintentar vuelve a enviarlo.',
+                ]} />
+                <H3>Cómo lo hace</H3>
+                <Ul items={[
+                    'Cada envío guarda un paquete: personas, fecha, autor y si OpsFlow lo recibió.',
+                    'Reintentar entrega ese mismo paquete. No crea fichas nuevas en el ATS ni duplica el envío en el historial como si fuera otro lote.',
+                ]} />
+            </>
+        ),
+    },
+    {
+        id: 'cartas',
+        title: 'Cartas',
+        keywords: 'cartas word plantilla marcadores docx salario fecha nombre dni',
+        body: (
+            <>
+                <H3>Qué hace</H3>
+                <P>
+                    Arma una carta de Word con los datos de una persona. Usted escribe la plantilla. El sistema solo rellena los marcadores.
+                </P>
+                <H3>Cómo se usa</H3>
+                <Ol items={[
+                    'En Word escriba el texto y deje marcadores con doble llave, por ejemplo {{Nombre}} o {{DNI}}.',
+                    'Suba el archivo .docx, elija a la persona y revise los avisos de campos vacíos.',
+                    'Descargue la carta. Puede guardar la plantilla para usarla otra vez.',
+                    'Ver guía de plantillas, en esta misma pantalla, lista cada marcador y las variaciones de nombre que el sistema reconoce.',
+                ]} />
+                <H3>Cómo lo hace</H3>
+                <Ul items={[
+                    'Lee el Word y detecta cada {{campo}}, aunque Word lo haya partido en varios trozos internos.',
+                    'Sustituye el marcador con la ficha: nombre, correo, teléfono, DNI, dirección, puesto, empresa, fechas y salario.',
+                    'El salario en letras se genera al guardar el salario acordado en la ficha. La fecha de emisión se arma al generar la carta, en formato «26 de noviembre de 2025».',
+                ]} />
+            </>
+        ),
+    },
+    {
+        id: 'calendario',
+        title: 'Calendario',
+        keywords: 'calendario entrevista agendar cita entrevistador hueco',
+        body: (
+            <>
+                <H3>Qué hace</H3>
+                <P>
+                    Muestra las entrevistas en un calendario. Cada evento es una cita con una persona. No es el acuerdo de equipo de Planeamiento.
+                </P>
+                <H3>Cómo se usa</H3>
+                <Ol items={[
+                    'Agendar entrevista abre el formulario de una cita nueva.',
+                    'Pulse un hueco del calendario para agendar en ese horario.',
+                    'Pulse un evento ya puesto para abrirlo o cambiarlo.',
+                ]} />
+                <H3>Cómo lo hace</H3>
+                <Ul items={[
+                    'Cada evento guarda candidato, entrevistador, inicio y fin.',
+                    'Las citas se crean desde esta pantalla, desde la ficha o desde la selección en la tabla masiva.',
+                    'El calendario las dibuja. Abrir un evento vuelve a esa misma cita, no crea otra.',
+                ]} />
+            </>
+        ),
+    },
+    {
+        id: 'planeamiento',
+        title: 'Planeamiento',
+        keywords: 'planeamiento asignación consultores reunión horario color proceso semana',
+        body: (
+            <>
+                <H3>Qué hace</H3>
+                <P>
+                    Es el acuerdo de la reunión de equipo: qué proceso trabaja cada consultor y en qué horario. No mueve candidatos ni agenda entrevistas.
+                </P>
+                <H3>Cómo se usa</H3>
+                <Ol items={[
+                    'Nueva asignación elige proceso, color, consultores y el rango de fecha y hora.',
+                    'Cambie de semana o de mes para ver la carga.',
+                    'Abra una asignación ya puesta para corregirla o quitarla.',
+                ]} />
+                <H3>Cómo lo hace</H3>
+                <Ul items={[
+                    'Guarda proceso, personas, inicio y fin. El color pertenece al proceso.',
+                    'Los consultores se muestran como etiquetas debajo del nombre del proceso.',
+                    'No cambia etapas y no aparece como entrevista en el Calendario.',
+                ]} />
+            </>
+        ),
+    },
+    {
+        id: 'reportes',
+        title: 'Reportes',
+        keywords: 'reportes exportar json columnas candidatos procesos descarga',
+        body: (
+            <>
+                <H3>Qué hace</H3>
+                <P>
+                    Ofrece dos tablas de consulta: todos los candidatos y todos los procesos. Sirve para llevarse una copia de lo que hay en el sistema.
+                </P>
+                <H3>Cómo se usa</H3>
+                <Ol items={[
+                    'En cada tabla abra Seleccionar columnas y deje marcadas las que necesita.',
+                    'Exporte. El archivo descargado es JSON con esas columnas.',
+                ]} />
+                <H3>Cómo lo hace</H3>
+                <P>
+                    Arma las filas con las fichas y los procesos ya cargados en la sesión. Exportar no modifica nada en el ATS: solo descarga lo que está en la tabla.
+                </P>
+            </>
+        ),
+    },
+    {
+        id: 'comparador',
+        title: 'Comparador',
+        keywords: 'comparador widgets gráficos radar informe pdf datos manuales candidatos',
+        body: (
+            <>
+                <H3>Qué hace</H3>
+                <P>
+                    Contrasta varias personas con gráficos, tablas y un texto para el informe. También puede comparar cifras escritas a mano, sin tomarlas de una ficha.
+                </P>
+                <H3>Cómo se usa</H3>
+                <Ol items={[
+                    'Busque y marque a las personas que quiere contrastar.',
+                    'Agregue un widget (barras, línea, radar, torta, área, tabla, resumen o lista) y elija qué campos entran.',
+                    'Si el widget debe usar cifras sueltas, active datos manuales y escriba las filas.',
+                    'Exporte el informe cuando el contraste esté listo.',
+                ]} />
+                <H3>Cómo lo hace</H3>
+                <Ul items={[
+                    'Lee de cada ficha los campos elegidos: edad, salario, etapa, días en el proceso, documentos y el resto de la lista del widget.',
+                    'Los gráficos salen de esos valores. No recalcula pruebas ni competencias.',
+                    'Un widget con datos manuales ignora la base y dibuja solo lo que usted escribió.',
+                    'Si adjunta el PDF generado a la ficha, ese archivo queda entre los documentos de esa persona.',
+                ]} />
+            </>
+        ),
+    },
+    {
+        id: 'actividad',
+        title: 'Actividad',
+        keywords: 'actividad usuarios ingresos bitácora administrador sesión',
+        body: (
+            <>
+                <H3>Qué hace</H3>
+                <P>
+                    Muestra quién entró y qué hizo en el sistema. Solo la ve un administrador.
+                </P>
+                <H3>Cómo se usa</H3>
+                <Ol items={[
+                    'Elija Hoy, 7 días o 30 días.',
+                    'Busque por nombre y filtre por categoría: sesión, navegación o cambios.',
+                    'Lea el resumen de cada fila. La hora es la del hecho, no la de abrir esta pantalla.',
+                ]} />
+                <H3>Cómo lo hace</H3>
+                <Ul items={[
+                    'Cada ingreso, el cierre por inactividad y las acciones relevantes se guardan con usuario, categoría, resumen y hora.',
+                    'Esta pantalla solo consulta ese registro. No deshace lo que la persona hizo.',
+                ]} />
+            </>
+        ),
+    },
+    {
+        id: 'usuarios',
+        title: 'Usuarios',
+        keywords: 'usuarios rol admin reclutador cliente visor mattermost secciones permisos',
+        body: (
+            <>
+                <H3>Qué hace</H3>
+                <P>
+                    Da de alta a quien puede entrar, le asigna un rol y decide qué secciones del menú ve.
+                </P>
+                <H3>Cómo se usa</H3>
+                <Ol items={[
+                    'Añadir usuario con el mismo correo que esa persona tiene en Mattermost.',
+                    'No escriba su clave. Al primer ingreso con Mattermost el ATS la vincula.',
+                    'Edite el rol y, si hace falta, la lista de secciones visibles.',
+                    'Un usuario no puede borrarse a sí mismo.',
+                ]} />
+                <H3>Cómo lo hace</H3>
+                <Ul items={[
+                    'Administrador ve todo, incluidas Inteligencia, Actividad, Usuarios y Configuración.',
+                    'Reclutador trabaja procesos, masivos, formularios, cartas, calendario, planeamiento, reportes y OpsFlow.',
+                    'Cliente consulta panel, procesos, candidatos, calendario, reportes y comparador.',
+                    'Visor consulta panel, procesos, candidatos, calendario, planeamiento y reportes, sin gestionar altas.',
+                    'Si alguien tiene una lista propia de secciones, esa lista manda sobre el rol. Actividad sigue siendo solo de administrador. Planeamiento se conserva para administrador y reclutador.',
+                ]} />
+            </>
+        ),
+    },
+    {
+        id: 'configuracion',
+        title: 'Configuración',
+        keywords: 'configuración branding logo drive alertas clientes sedes etiquetas guardar',
+        body: (
+            <>
+                <H3>Qué hace</H3>
+                <P>
+                    Guarda los ajustes de toda la instalación: aspecto, listas compartidas, Drive y alertas. No configura una sola vacante.
+                </P>
+                <H3>Cómo se usa</H3>
+                <Ol items={[
+                    'Cambie el bloque que necesite.',
+                    'Pulse Save Changes. Hasta guardar, el resto del sistema sigue con los valores anteriores.',
+                ]} />
+                <H3>Cómo lo hace</H3>
+                <Ul items={[
+                    'Branding cambia el nombre y los logos del menú, incluido «Powered by».',
+                    'Informe (PDF) define el membrete de los documentos que se exportan.',
+                    'Fuentes, clientes, sedes, provincias y distritos son las listas que aparecen al crear procesos, fichas y entrevistas.',
+                    'Las etiquetas de la interfaz renombran entradas del menú.',
+                    'Si Google Drive está conectado, al crear un proceso el sistema abre una carpeta para los archivos de esa vacante.',
+                    'Las alertas arman la campana junto al nombre: candidatos nuevos, sin contacto y el resto de reglas guardadas.',
+                ]} />
+            </>
+        ),
+    },
+    {
+        id: 'importacion',
+        title: 'Importación de candidatos',
+        keywords: 'importar excel archivo masivo etapa celdas vacías origen',
+        body: (
+            <>
+                <H3>Qué hace</H3>
+                <P>
+                    Carga varias personas desde un archivo hacia un proceso. Esta entrada suelta ya no está en el menú: la importación se abre dentro del proceso.
+                </P>
+                <H3>Cómo se usa</H3>
+                <Ol items={[
+                    'Abra el proceso en Procesos y use Importar candidatos.',
+                    'En un proceso masivo, use la importación de filas de la tabla.',
+                    'Revise el proceso y la etapa de destino antes de confirmar.',
+                ]} />
+                <H3>Cómo lo hace</H3>
+                <Ul items={[
+                    'Crea fichas nuevas o completa las que ya existen en ese proceso.',
+                    'Si la ficha ya tenía un valor en una celda, ese valor se conserva. El archivo solo rellena lo vacío.',
+                    'El origen de esas altas queda como masivo, distinto de una postulación por formulario y de una fila escrita a mano.',
+                ]} />
+            </>
+        ),
+    },
+];
+
+const VIEW_HELP_SECTION: Record<string, string> = {
+    dashboard: 'panel',
+    intelligence: 'inteligencia',
+    processes: 'procesos',
+    'process-view': 'tablero',
+    'bulk-processes': 'masivos',
+    archived: 'archivados',
+    candidates: 'listado',
+    'opsflow-handoffs': 'opsflow',
+    forms: 'tally',
+    letters: 'cartas',
+    calendar: 'calendario',
+    planning: 'planeamiento',
+    reports: 'reportes',
+    compare: 'comparador',
+    'user-activity': 'actividad',
+    users: 'usuarios',
+    settings: 'configuracion',
+    'bulk-import': 'importacion',
 };
+
+export function helpSectionIdForView(viewType: string): string {
+    return VIEW_HELP_SECTION[viewType] || 'mapa';
+}
 
 const ASSESSMENT_KEYWORDS: Record<string, string> = {
     uso: 'batería candidato enlace reloj reevaluación informe operativos mandos',
@@ -452,10 +833,10 @@ function buildGroups(): HelpGroup[] {
     }));
     return [
         { id: 'recorrido', label: 'Recorrido', sections: FLOW_SECTIONS },
+        { id: 'pantallas', label: 'Pantallas', sections: SCREEN_SECTIONS },
         { id: 'integraciones', label: 'Integraciones', sections: [TALLY_SECTION] },
         { id: 'pruebas', label: 'Pruebas', sections: [TESTS_FLOW_SECTION, ...assessmentSections] },
         { id: 'informe', label: 'Informe', sections: [COMPETENCY_SECTION] },
-        { id: 'otras', label: 'Otras pantallas', sections: [OTHER_SECTION] },
     ];
 }
 
@@ -500,7 +881,7 @@ export const AppHelpManual: React.FC<{ onClose: () => void; initialSectionId?: s
                     <div>
                         <p className="text-xs font-semibold uppercase tracking-wide text-teal-700">Manual de la aplicación</p>
                         <h2 id="app-help-title" className="text-lg font-semibold text-slate-900">Ayuda</h2>
-                        <p className="text-sm text-slate-500">Recorrido de cada parte, Tally, pruebas y competencias. El candidato no ve esta pantalla.</p>
+                        <p className="text-sm text-slate-500">Qué hace cada pantalla, cómo se usa y cómo lo hace el sistema. El candidato no ve esta pantalla.</p>
                     </div>
                     <button type="button" onClick={onClose} className="rounded-lg p-2 text-slate-500 hover:bg-slate-100" aria-label="Cerrar">
                         <X className="w-5 h-5" />
@@ -552,5 +933,30 @@ export const AppHelpManual: React.FC<{ onClose: () => void; initialSectionId?: s
                 </div>
             </div>
         </div>
+    );
+};
+
+export const SectionHelpButton: React.FC<{ sectionId: string; className?: string }> = ({
+    sectionId,
+    className,
+}) => {
+    const [open, setOpen] = useState(false);
+    return (
+        <>
+            <button
+                type="button"
+                onClick={() => setOpen(true)}
+                title="Qué hace esta sección, cómo usarla y cómo funciona"
+                aria-label="Ayuda de esta sección"
+                className={
+                    className ||
+                    'inline-flex items-center gap-1.5 shrink-0 rounded-lg border border-teal-200 bg-teal-50 px-3 py-2 text-sm font-medium text-teal-800 hover:bg-teal-100'
+                }
+            >
+                <CircleHelp className="w-4 h-4" />
+                Ayuda
+            </button>
+            {open && <AppHelpManual initialSectionId={sectionId} onClose={() => setOpen(false)} />}
+        </>
     );
 };

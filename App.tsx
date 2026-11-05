@@ -55,7 +55,7 @@ import { Letters } from './components/Letters';
 import { ToastContainer } from './components/Toast';
 import { MessagingBar } from './components/MessagingBar';
 import { UserAlertsPanel } from './components/UserAlertsPanel';
-import { AppHelpManual } from './components/AppHelpManual';
+import { AppHelpManual, helpSectionIdForView } from './components/AppHelpManual';
 import { LayoutDashboard, Briefcase, FileText, Settings as SettingsIcon, Users as UsersIcon, ChevronsLeft, ChevronsRight, BarChart2, Calendar, CalendarDays, LogOut, X, Archive, RefreshCw, Menu, Grid3x3, Send, Brain, Activity, CircleHelp } from 'lucide-react';
 import { CandidateComparator } from './components/CandidateComparator';
 
@@ -512,7 +512,7 @@ const Sidebar: React.FC = () => {
                         type="button"
                         onClick={() => setHelpOpen(true)}
                         className={`w-full flex items-center px-4 py-2.5 text-sm font-medium rounded-lg transition-colors text-teal-800 hover:bg-teal-50 ${isCollapsed ? 'justify-center' : ''}`}
-                        title="Manual de la aplicación"
+                        title="Ayuda de la sección en la que está"
                     >
                         <CircleHelp className={`w-5 h-5 ${isCollapsed ? '' : 'mr-3'}`} />
                         {!isCollapsed && 'Ayuda'}
@@ -611,7 +611,12 @@ const Sidebar: React.FC = () => {
                 )}
             </div>
         </div>
-        {helpOpen && <AppHelpManual onClose={() => setHelpOpen(false)} />}
+        {helpOpen && (
+            <AppHelpManual
+                initialSectionId={helpSectionIdForView(state.view.type)}
+                onClose={() => setHelpOpen(false)}
+            />
+        )}
         </>
     );
 };

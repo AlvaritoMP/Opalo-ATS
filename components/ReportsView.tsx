@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { useAppState } from '../App';
+import { SectionHelpButton } from './AppHelpManual';
 import { Download, Users, Briefcase, ChevronDown } from 'lucide-react';
 import { Candidate } from '../types';
 
@@ -72,7 +73,10 @@ export const ReportsView: React.FC = () => {
 
     return (
         <div className="p-4 md:p-8 h-full flex flex-col overflow-hidden">
-            <h1 className="text-2xl md:text-3xl font-bold text-gray-800 mb-4 md:mb-8">{getLabel('sidebar_reports', 'Reportes')}</h1>
+            <div className="flex items-center justify-between gap-3 mb-4 md:mb-8">
+                <h1 className="text-2xl md:text-3xl font-bold text-gray-800">{getLabel('sidebar_reports', 'Reportes')}</h1>
+                <SectionHelpButton sectionId="reportes" />
+            </div>
 
             <div className="space-y-6 md:space-y-8 flex-1 overflow-y-auto pr-1">
                 {/* Candidates Report */}

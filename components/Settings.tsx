@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useAppState } from '../App';
+import { SectionHelpButton } from './AppHelpManual';
 import { AppSettings, Client, InterviewLocation } from '../types';
 import { Save, Database, HardDrive, Globe, Brush, Type, Building2, Plus, Trash2, Edit2, MapPin } from 'lucide-react';
 import { GoogleDriveSettings } from './GoogleDriveSettings';
@@ -237,7 +238,10 @@ export const Settings: React.FC = () => {
     return (
         <div className="p-8 h-full overflow-y-auto">
             <div className="flex justify-between items-center mb-8">
-                <h1 className="text-3xl font-bold text-gray-800">Settings</h1>
+                <div className="flex items-center gap-3">
+                    <h1 className="text-3xl font-bold text-gray-800">Settings</h1>
+                    <SectionHelpButton sectionId="configuracion" />
+                </div>
                 <button
                     onClick={handleSave}
                     disabled={isSaving}

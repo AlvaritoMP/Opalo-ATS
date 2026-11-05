@@ -1,5 +1,6 @@
 import React, { useMemo, useState, useEffect } from 'react';
 import { useAppState } from '../App';
+import { SectionHelpButton } from './AppHelpManual';
 import { Candidate, Process } from '../types';
 import { FileText, Download, Upload, AlertCircle, CheckCircle, HelpCircle, Info, Edit2 } from 'lucide-react';
 import { saveAs } from 'file-saver';
@@ -654,6 +655,8 @@ export const Letters: React.FC = () => {
                     <FileText className="w-7 h-7 mr-3" />
                     {getLabel('letters_title', 'Cartas')}
                 </h1>
+                <div className="flex items-center gap-2">
+                    <SectionHelpButton sectionId="cartas" />
                 <button
                     onClick={() => setShowGuide(!showGuide)}
                     className="flex items-center gap-2 px-4 py-2 bg-blue-50 text-blue-700 rounded-md hover:bg-blue-100"
@@ -661,6 +664,7 @@ export const Letters: React.FC = () => {
                     <HelpCircle className="w-5 h-5" />
                     {showGuide ? 'Ocultar guía' : 'Ver guía de plantillas'}
                 </button>
+                </div>
             </div>
 
             {/* Guía de cómo crear plantillas */}

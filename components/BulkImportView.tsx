@@ -1,6 +1,7 @@
 
 import React, { useState } from 'react';
 import { useAppState } from '../App';
+import { SectionHelpButton } from './AppHelpManual';
 import { Upload, FileText, UserPlus, X, Download } from 'lucide-react';
 import { Candidate, Process } from '../types';
 import * as XLSX from 'xlsx';
@@ -441,9 +442,12 @@ export const BulkImportView: React.FC = () => {
 
     return (
         <div className="p-8">
-            <h1 className="text-3xl font-bold text-gray-800 mb-4">
-                {getLabel('sidebar_bulk_import', 'Importación masiva de candidatos')}
-            </h1>
+            <div className="flex items-center gap-3 mb-4">
+                <h1 className="text-3xl font-bold text-gray-800">
+                    {getLabel('sidebar_bulk_import', 'Importación masiva de candidatos')}
+                </h1>
+                <SectionHelpButton sectionId="importacion" />
+            </div>
             <p className="text-gray-600 max-w-2xl">
                 La importación masiva está disponible dentro de cada proceso específico.
                 Abra un proceso desde <strong>Procesos</strong> y use el botón <strong>Importar candidatos</strong>.

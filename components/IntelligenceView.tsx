@@ -23,6 +23,7 @@ import {
     Users,
 } from 'lucide-react';
 import { useAppState } from '../App';
+import { SectionHelpButton } from './AppHelpManual';
 import type { ContactConsultantPeriod } from '../lib/contactDashboardStats';
 import {
     buildUserLookupForStats,
@@ -458,6 +459,7 @@ export const IntelligenceView: React.FC = () => {
                     </p>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
+                    <SectionHelpButton sectionId="inteligencia" />
                     <div className="flex flex-col gap-1">
                         <select
                             value={period}

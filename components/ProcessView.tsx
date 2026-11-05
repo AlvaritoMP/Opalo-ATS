@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useAppState } from '../App';
+import { SectionHelpButton } from './AppHelpManual';
 import { CandidateCard } from './CandidateCard';
 import { Plus, Edit, Briefcase, DollarSign, BarChart, Clock, Paperclip, X, FileText, ClipboardList, Tag, Users, ArrowLeft, CheckCircle, Mail, MessageCircle, Download, FileUp, Table2, LineChart, PlayCircle } from 'lucide-react';
 import { AddCandidateModal } from './AddCandidateModal';
@@ -545,6 +546,7 @@ export const ProcessView: React.FC<ProcessViewProps> = ({ processId }) => {
                         <span className={`px-2 md:px-3 py-1 rounded-full text-xs font-semibold ${statusColors[currentStatus]} whitespace-nowrap`}>
                             {statusLabels[currentStatus]}
                         </span>
+                        <SectionHelpButton sectionId="tablero" />
                      </div>
                      <div className="flex flex-wrap items-center gap-2 md:gap-3">
                             <button

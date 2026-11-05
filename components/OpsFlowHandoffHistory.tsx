@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { RefreshCw, ChevronDown, ChevronRight, Loader2, Package, RotateCcw } from 'lucide-react';
 import { useAppState } from '../App';
+import { SectionHelpButton } from './AppHelpManual';
 import { workerHandoffApi } from '../lib/api/workerHandoff';
 import { DELIVERY_STATUS_LABELS } from '../lib/workerHandoffFields';
 import type { WorkerHandoffPackage } from '../types';
@@ -108,7 +109,10 @@ export const OpsFlowHandoffHistory: React.FC = () => {
         <div className="p-4 md:p-8 h-full flex flex-col overflow-hidden">
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4 md:mb-6">
                 <div>
-                    <h1 className="text-2xl md:text-3xl font-bold text-gray-800">Envíos a OpsFlow</h1>
+                    <div className="flex items-center gap-3">
+                        <h1 className="text-2xl md:text-3xl font-bold text-gray-800">Envíos a OpsFlow</h1>
+                        <SectionHelpButton sectionId="opsflow" />
+                    </div>
                     <p className="text-sm text-gray-500 mt-1">
                         Historial de paquetes enviados al área operativa.
                     </p>

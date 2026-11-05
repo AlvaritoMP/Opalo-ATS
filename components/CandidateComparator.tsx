@@ -1,5 +1,6 @@
 import React, { useMemo, useState, useRef } from 'react';
 import { useAppState } from '../App';
+import { SectionHelpButton } from './AppHelpManual';
 import { Candidate, Process } from '../types';
 import { BarChart2, Download, Plus, Trash2, GripVertical, Settings, Image as ImageIcon, Table, TrendingUp, PieChart, LayoutGrid, FileText, X } from 'lucide-react';
 import { 
@@ -1438,10 +1439,13 @@ ${relationships.join('\n')}
 
     return (
         <div className="p-8 flex-1 min-h-0 flex flex-col">
-            <h1 className="text-3xl font-bold text-gray-800 mb-6 flex items-center">
+            <div className="flex items-center justify-between gap-3 mb-6">
+            <h1 className="text-3xl font-bold text-gray-800 flex items-center">
                 <BarChart2 className="w-7 h-7 mr-3" /> 
                 {getLabel('compare_title', 'Comparador de candidatos')}
             </h1>
+                <SectionHelpButton sectionId="comparador" />
+            </div>
 
             <div className="flex-1 min-h-0 overflow-y-auto space-y-6">
                 {/* Selección de candidatos */}

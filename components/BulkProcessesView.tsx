@@ -171,7 +171,7 @@ import { BulkColumnVisibilityModal } from './BulkColumnVisibilityModal';
 import { TableTemplateModal, BulkTableTemplateLayout } from './TableTemplateModal';
 import { PsycholaboralReportModal } from './PsycholaboralReportModal';
 import { CandidateAssessmentPanel } from './CandidateAssessmentPanel';
-import { AppHelpManual } from './AppHelpManual';
+import { AppHelpManual, SectionHelpButton } from './AppHelpManual';
 import { buildPublicAssessmentsUrl } from '../lib/assessments/publicRoute';
 import { assessmentColumnsForProfile, isAssessmentColumnId } from '../lib/assessments/columns';
 import { AssessmentCheckCell } from './assessments/AssessmentCheckCell';
@@ -6791,7 +6791,10 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                 <>
                     <div className="border-b bg-white shrink-0 bulk-process-header p-4">
                         <div className="flex items-center justify-between">
-                            <h1 className="text-2xl font-bold text-gray-900">Procesos Masivos</h1>
+                            <div className="flex items-center gap-3 min-w-0">
+                                <h1 className="text-2xl font-bold text-gray-900">Procesos Masivos</h1>
+                                <SectionHelpButton sectionId="masivos" />
+                            </div>
                             <div className="flex items-center gap-4">
                                 <div className="text-sm text-gray-500">
                                     {visibleBulkProcesses.length} de {bulkProcesses.length} procesos
@@ -6940,6 +6943,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                                 >
                                     {process?.title}
                                 </span>
+                                <SectionHelpButton sectionId="masivos" className="inline-flex items-center gap-1 shrink-0 rounded-md border border-teal-300 bg-white px-2 py-1 text-xs font-medium text-teal-900 hover:bg-teal-50" />
                                 <span className="text-xs text-gray-500 shrink-0">
                                     {total} candidatos
                                 </span>

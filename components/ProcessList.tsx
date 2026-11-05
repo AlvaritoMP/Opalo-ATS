@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useAppState } from '../App';
+import { SectionHelpButton } from './AppHelpManual';
 import { Plus, MoreVertical, Eye, Edit, Trash2, Users, RefreshCw, Copy, Search, X, AlertTriangle, PlayCircle } from 'lucide-react';
 import { ProcessEditorModal } from './ProcessEditorModal';
 import { Process, UserRole, ProcessStatus, Candidate } from '../types';
@@ -369,6 +370,7 @@ export const ProcessList: React.FC = () => {
             <div className="flex flex-col md:flex-row md:justify-between md:items-center gap-4 mb-6 md:mb-8">
                 <h1 className="text-2xl md:text-3xl font-bold text-gray-800">{getLabel('sidebar_processes', 'Procesos de contratación')}</h1>
                 <div className="flex items-center gap-2 md:gap-3">
+                    <SectionHelpButton sectionId="procesos" />
                     <button
                         onClick={handleReload}
                         disabled={isReloading}

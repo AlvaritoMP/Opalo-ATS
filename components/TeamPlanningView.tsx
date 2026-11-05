@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { CalendarDays, ChevronLeft, ChevronRight, Plus, X } from 'lucide-react';
 import { useAppState } from '../App';
+import { SectionHelpButton } from './AppHelpManual';
 import type { Process, WorkPlanAssignment } from '../types';
 import { workPlanningApi, type WorkPlanSource } from '../lib/api/workPlanning';
 import { getErrorMessage } from '../lib/supabase';
@@ -373,6 +374,8 @@ export const TeamPlanningView: React.FC = () => {
                         Acuerdo de la reunión. El color lo eliges por proceso. Los consultores van en etiquetas propias, debajo del nombre del proceso.
                     </p>
                 </div>
+                <div className="flex items-center gap-2">
+                    <SectionHelpButton sectionId="planeamiento" />
                 {canEdit && (
                     <button
                         type="button"
@@ -384,6 +387,7 @@ export const TeamPlanningView: React.FC = () => {
                         Nueva asignación
                     </button>
                 )}
+                </div>
             </div>
 
             {source === 'local' && !remoteReady && (

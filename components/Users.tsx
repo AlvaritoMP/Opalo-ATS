@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useAppState } from '../App';
+import { SectionHelpButton } from './AppHelpManual';
 import { User, UserRole } from '../types';
 import { UserEditorModal } from './UserEditorModal';
 import { UserPlus, Edit, Trash2, Shield } from 'lucide-react';
@@ -45,7 +46,10 @@ export const Users: React.FC = () => {
         <div className="p-4 md:p-8 h-full flex flex-col overflow-hidden">
             <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center mb-4 md:mb-8 gap-3 sm:gap-4">
                 <div>
-                    <h1 className="text-2xl md:text-3xl font-bold text-gray-800">{getLabel('sidebar_users', 'Gestión de usuarios')}</h1>
+                    <div className="flex items-center gap-3">
+                        <h1 className="text-2xl md:text-3xl font-bold text-gray-800">{getLabel('sidebar_users', 'Gestión de usuarios')}</h1>
+                        <SectionHelpButton sectionId="usuarios" />
+                    </div>
                     <p className="text-sm text-gray-500 mt-1">
                         Cree al usuario con el mismo correo de Mattermost. No necesita su clave: se vincula al primer ingreso.
                     </p>

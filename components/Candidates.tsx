@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { useAppState } from '../App';
+import { SectionHelpButton } from './AppHelpManual';
 import { Candidate, Process } from '../types';
 import { Search, Edit, Send } from 'lucide-react';
 import { CandidateDetailsModal } from './CandidateDetailsModal';
@@ -79,7 +80,10 @@ export const Candidates: React.FC = () => {
     return (
         <div className="p-4 md:p-8 h-full flex flex-col overflow-hidden">
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4 md:mb-6">
-                <h1 className="text-2xl md:text-3xl font-bold text-gray-800">{getLabel('menu_candidates', 'Candidatos')}</h1>
+                <div className="flex items-center gap-3">
+                    <h1 className="text-2xl md:text-3xl font-bold text-gray-800">{getLabel('menu_candidates', 'Candidatos')}</h1>
+                    <SectionHelpButton sectionId="listado" />
+                </div>
                 {canSendToOpsFlow && selectedIds.size > 0 && (
                     <button
                         type="button"
