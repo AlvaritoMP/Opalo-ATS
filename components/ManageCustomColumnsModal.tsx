@@ -127,7 +127,7 @@ export const ManageCustomColumnsModal: React.FC<ManageCustomColumnsModalProps> =
                                                 <span>
                                                     {' · '}
                                                     {col.options?.length
-                                                        ? `${col.options.length} opción(es)`
+                                                        ? `${col.options.length} opción(es)${col.optionStyles && Object.keys(col.optionStyles).length ? ' · con color' : ''}`
                                                         : 'sin opciones'}
                                                 </span>
                                             )}

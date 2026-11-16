@@ -282,7 +282,7 @@ export const COLUMN_TYPE_HELP: Record<CustomColumn['type'], { title: string; bod
     },
     select: {
         title: 'Lista desplegable',
-        body: 'Usted escribe las opciones y en cada fila se elige una. Sirve para turno, resultado, sede o motivo, cuando no quiere texto libre. Las opciones se editan después en Editar columnas propias y valen para toda la tabla. Agregar una opción no borra lo que ya estaba elegido en las filas.',
+        body: 'Usted escribe las opciones y en cada fila se elige una. Sirve para turno, resultado, sede o motivo, cuando no quiere texto libre. Cada opción puede llevar color de fondo, color de texto y formato (negrita, cursiva o subrayado); ese estilo se ve en la celda cuando la opción está elegida. Las opciones se editan después en Editar columnas propias y valen para toda la tabla. Agregar una opción no borra lo que ya estaba elegido en las filas.',
     },
     route: {
         title: 'Ruta en transporte público',

@@ -143,22 +143,49 @@ function defaultMatchMode(type: IdealProfileFieldType): IdealProfileMatchMode {
     return 'contains';
 }
 
-export function criterionHasIdealValue(criterion: IdealProfileCriterion): boolean {
-    const v = criterion.idealValue;
-    if (v === undefined || v === null) return false;
-    if (typeof v === 'number' && !Number.isNaN(v)) return true;
-    if (typeof v === 'boolean') return true;
-    if (typeof v === 'string' && v.trim() !== '') return true;
+/** Lista de textos de un criterio. Un string suelto cuenta como una sola opción (no se parte por comas). */
+export function criterionStringList(value: unknown): string[] {
+    if (Array.isArray(value)) {
+        return value.map(item => String(item ?? '').trim()).filter(Boolean);
+    }
+    if (typeof value === 'string') {
+        const trimmed = value.trim();
+        return trimmed ? [trimmed] : [];
+    }
+    return [];
+}
+
+/** Guarda una opción como string y varias como arreglo, para no partir etiquetas que llevan coma. */
+export function packCriterionStringList(values: string[]): string | string[] {
+    const clean: string[] = [];
+    const seen = new Set<string>();
+    for (const value of values) {
+        const trimmed = value.trim();
+        const key = trimmed.toLowerCase();
+        if (!trimmed || seen.has(key)) continue;
+        seen.add(key);
+        clean.push(trimmed);
+    }
+    if (clean.length === 0) return '';
+    if (clean.length === 1) return clean[0];
+    return clean;
+}
+
+function criterionScalarHasValue(value: unknown): boolean {
+    if (value === undefined || value === null) return false;
+    if (Array.isArray(value)) return criterionStringList(value).length > 0;
+    if (typeof value === 'number' && !Number.isNaN(value)) return true;
+    if (typeof value === 'boolean') return true;
+    if (typeof value === 'string' && value.trim() !== '') return true;
     return false;
 }
 
+export function criterionHasIdealValue(criterion: IdealProfileCriterion): boolean {
+    return criterionScalarHasValue(criterion.idealValue);
+}
+
 export function criterionHasExcludeValue(criterion: IdealProfileCriterion): boolean {
-    const v = criterion.excludeValue;
-    if (v === undefined || v === null) return false;
-    if (typeof v === 'number' && !Number.isNaN(v)) return true;
-    if (typeof v === 'boolean') return true;
-    if (typeof v === 'string' && v.trim() !== '') return true;
-    return false;
+    return criterionScalarHasValue(criterion.excludeValue);
 }
 
 export function criterionHasConstraint(criterion: IdealProfileCriterion): boolean {
@@ -442,7 +469,11 @@ function scoreExcludeCriterion(
         return c === ex ? 0 : 100;
     }
     if (fieldType === 'select') {
-        return normalizeText(candidateVal) === normalizeText(exclude) ? 0 : 100;
+        const parts = criterionStringList(exclude).map(normalizeText).filter(Boolean);
+        if (parts.length === 0) return 100;
+        const c = normalizeText(candidateVal);
+        if (!c) return 100;
+        return parts.some(part => c === part) ? 0 : 100;
     }
     if (fieldType === 'date') {
         const cStr = formatBulkDate(String(candidateVal ?? ''));
@@ -453,13 +484,18 @@ function scoreExcludeCriterion(
     return scoreTextExclude(candidateVal, exclude);
 }
 
+function formatListedConstraint(value: unknown): string {
+    if (Array.isArray(value)) return criterionStringList(value).join(' o ');
+    return String(value ?? '');
+}
+
 function formatCriterionSummary(criterion: IdealProfileCriterion): string {
     const parts: string[] = [];
     if (criterionHasIdealValue(criterion)) {
-        parts.push(String(criterion.idealValue ?? ''));
+        parts.push(formatListedConstraint(criterion.idealValue));
     }
     if (criterionHasExcludeValue(criterion)) {
-        parts.push(`≠ ${criterion.excludeValue}`);
+        parts.push(`≠ ${formatListedConstraint(criterion.excludeValue)}`);
     }
     return parts.join(' · ') || '-';
 }
@@ -504,7 +540,11 @@ function scoreCheckboxMatch(candidateVal: unknown, idealVal: unknown): number {
 }
 
 function scoreSelectMatch(candidateVal: unknown, idealVal: unknown): number {
-    return normalizeText(candidateVal) === normalizeText(idealVal) ? 100 : 0;
+    const parts = criterionStringList(idealVal).map(normalizeText).filter(Boolean);
+    if (parts.length === 0) return 100;
+    const c = normalizeText(candidateVal);
+    if (!c) return 0;
+    return parts.some(part => c === part) ? 100 : 0;
 }
 
 function scoreDateMatch(
@@ -759,6 +799,11 @@ export function buildIdealProfileImportTemplate(
         const f = fields.find(x => x.fieldId === c.fieldId);
         return f?.label || c.fieldId;
     });
-    const values = active.map(c => String(c.idealValue ?? ''));
+    const values = active.map(c => {
+        const list = criterionStringList(c.idealValue);
+        if (list.length > 0) return list.join(' | ');
+        if (c.idealValue === undefined || c.idealValue === null) return '';
+        return String(c.idealValue);
+    });
     return `${headers.join('\t')}\n${values.join('\t')}`;
 }

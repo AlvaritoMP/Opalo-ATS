@@ -85,12 +85,25 @@ export type PsycholaboralReportNamePart =
     | 'maternal_surname'
     | 'surnames_combined';
 
+/** Color y formato de una opción de lista desplegable. */
+export interface SelectOptionStyle {
+    /** Fondo de la opción, en hex (#RRGGBB). */
+    bgColor?: string;
+    /** Color del texto, en hex (#RRGGBB). */
+    textColor?: string;
+    bold?: boolean;
+    italic?: boolean;
+    underline?: boolean;
+}
+
 // Columna personalizada para la tabla de alta densidad en procesos masivos
 export interface CustomColumn {
     id: string;
     name: string;
     type: 'text' | 'number' | 'checkbox' | 'date' | 'select' | 'route' | 'route_cost';
     options?: string[];
+    /** Estilo visual por texto de opción. La clave es el valor exacto de `options`. */
+    optionStyles?: Record<string, SelectOptionStyle>;
     /** Dirección de destino para columnas tipo ruta (transporte público). */
     routeDestination?: string;
     /** ID de columna tipo route de referencia para estimar costo aproximado del tramo. */
@@ -466,9 +479,10 @@ export interface IdealProfileCriterion {
     /** ID de columna: base (p. ej. source) o custom_{uuid} */
     fieldId: string;
     enabled: boolean;
-    idealValue?: string | number | boolean;
-    /** Valor o texto que NO debe aparecer en el campo del candidato */
-    excludeValue?: string | number | boolean;
+    /** Un valor, o varias opciones (lista) que cumplen en modo OR. */
+    idealValue?: string | number | boolean | string[];
+    /** Valor o texto que NO debe aparecer. En listas, varias opciones prohibidas. */
+    excludeValue?: string | number | boolean | string[];
     /** Valor máximo para modo range o maximum */
     maxValue?: number;
     matchMode?: IdealProfileMatchMode;

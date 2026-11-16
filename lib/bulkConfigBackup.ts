@@ -48,6 +48,7 @@ function scoreColumnDef(col: CustomColumn): number {
     let s = 1;
     if (col.type !== 'text') s += 3;
     if (col.options?.length) s += col.options.length;
+    if (col.optionStyles && Object.keys(col.optionStyles).length) s += Object.keys(col.optionStyles).length;
     if (col.routeDestination) s += 2;
     if (col.dashboardSemanticField) s += 1;
     return s;

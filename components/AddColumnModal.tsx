@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { X, Plus, Trash2 } from 'lucide-react';
-import { CustomColumn, PsycholaboralReportNamePart, DashboardSemanticField, DASHBOARD_SEMANTIC_FIELD_OPTIONS } from '../types';
+import { X, Plus, Trash2, Bold, Italic, Underline } from 'lucide-react';
+import { CustomColumn, PsycholaboralReportNamePart, DashboardSemanticField, DASHBOARD_SEMANTIC_FIELD_OPTIONS, SelectOptionStyle } from '../types';
+import { CELL_COLOR_PRESETS } from '../lib/bulkCellMeta';
+import { SELECT_TEXT_COLOR_PRESETS, compactSelectOptionStyle } from '../lib/selectOptionStyle';
 import { identityColumnIdFromLabel } from '../lib/candidateIdentity';
 import { ASSESSMENT_STATUS_COLUMNS, assessmentTrackingLabel } from '../lib/assessments/columns';
 import type { AssessmentTestId } from '../lib/assessments/types';
@@ -25,6 +27,22 @@ interface AddColumnModalProps {
 
 type ColumnType = CustomColumn['type'];
 
+type OptionDraft = { label: string; style: SelectOptionStyle };
+
+function emptyOption(): OptionDraft {
+    return { label: '', style: {} };
+}
+
+function draftsFromColumn(column?: CustomColumn | null): OptionDraft[] {
+    const labels = column?.options?.filter(o => o != null && String(o).trim() !== '') ?? [];
+    if (labels.length === 0) return [emptyOption()];
+    const styles = column?.optionStyles ?? {};
+    return labels.map(label => ({
+        label,
+        style: { ...(styles[label] || {}) },
+    }));
+}
+
 function GuideList({ items }: { items: string[] }) {
     return (
         <ul className="list-disc pl-5 space-y-1.5 text-sm text-gray-700">
@@ -45,7 +63,7 @@ export const AddColumnModal: React.FC<AddColumnModalProps> = ({
 }) => {
     const [name, setName] = useState('');
     const [type, setType] = useState<ColumnType>('text');
-    const [options, setOptions] = useState<string[]>(['']);
+    const [options, setOptions] = useState<OptionDraft[]>([emptyOption()]);
     const [routeDestination, setRouteDestination] = useState('');
     const [sourceRouteColumnId, setSourceRouteColumnId] = useState('');
     const [reportNamePart, setReportNamePart] = useState<'' | PsycholaboralReportNamePart>('');
@@ -68,16 +86,7 @@ export const AddColumnModal: React.FC<AddColumnModalProps> = ({
         if (isOpen && editingColumn) {
             setName(editingColumn.name);
             setType(editingColumn.type);
-            const opts = editingColumn.options?.filter(o => o != null && String(o).trim() !== '') ?? [];
-            setOptions(
-                editingColumn.type === 'select'
-                    ? opts.length > 0
-                        ? [...opts]
-                        : ['']
-                    : opts.length > 0
-                        ? [...opts]
-                        : ['']
-            );
+            setOptions(draftsFromColumn(editingColumn));
             setRouteDestination(editingColumn.routeDestination || '');
             setSourceRouteColumnId(editingColumn.sourceRouteColumnId || '');
             setReportNamePart(editingColumn.reportNamePart ?? '');
@@ -86,7 +95,7 @@ export const AddColumnModal: React.FC<AddColumnModalProps> = ({
         } else if (isOpen) {
             setName('');
             setType('text');
-            setOptions(['']);
+            setOptions([emptyOption()]);
             setRouteDestination('');
             setSourceRouteColumnId('');
             setReportNamePart('');
@@ -98,11 +107,21 @@ export const AddColumnModal: React.FC<AddColumnModalProps> = ({
     if (!isOpen) return null;
 
     const handleAddOption = () => {
-        setOptions(prev => [...prev, '']);
+        setOptions(prev => [...prev, emptyOption()]);
     };
 
     const handleRemoveOption = (index: number) => {
         setOptions(options.filter((_, i) => i !== index));
+    };
+
+    const updateOption = (index: number, patch: Partial<OptionDraft>) => {
+        setOptions(prev => prev.map((opt, i) => (i === index ? { ...opt, ...patch } : opt)));
+    };
+
+    const updateOptionStyle = (index: number, patch: Partial<SelectOptionStyle>) => {
+        setOptions(prev =>
+            prev.map((opt, i) => (i === index ? { ...opt, style: { ...opt.style, ...patch } } : opt))
+        );
     };
 
     const handleSubmit = (e: React.FormEvent) => {
@@ -113,11 +132,22 @@ export const AddColumnModal: React.FC<AddColumnModalProps> = ({
             return;
         }
 
+        const cleanedOptions = options
+            .map(o => ({ label: o.label.trim(), style: compactSelectOptionStyle(o.style) }))
+            .filter(o => o.label);
         if (type === 'select') {
-            const validOptions = options.map(o => o.trim()).filter(Boolean);
-            if (validOptions.length === 0) {
+            if (cleanedOptions.length === 0) {
                 alert('Agregue al menos una opción para la lista desplegable');
                 return;
+            }
+            const seen = new Set<string>();
+            for (const option of cleanedOptions) {
+                const key = option.label.toLowerCase();
+                if (seen.has(key)) {
+                    alert(`La opción «${option.label}» está repetida. Cada valor de la lista debe ser único.`);
+                    return;
+                }
+                seen.add(key);
             }
         }
 
@@ -152,11 +182,19 @@ export const AddColumnModal: React.FC<AddColumnModalProps> = ({
             }
         }
 
+        const optionStyles: Record<string, SelectOptionStyle> = {};
+        for (const option of cleanedOptions) {
+            if (option.style) optionStyles[option.label] = option.style;
+        }
+
         const column: CustomColumn = {
             id: editingColumn?.id || `col_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
             name: name.trim(),
             type,
-            ...(type === 'select' && { options: options.map(o => o.trim()).filter(Boolean) }),
+            ...(type === 'select' && {
+                options: cleanedOptions.map(o => o.label),
+                ...(Object.keys(optionStyles).length > 0 ? { optionStyles } : {}),
+            }),
             ...(type === 'route' && { routeDestination: routeDestination.trim() }),
             ...(type === 'route_cost' && {
                 sourceRouteColumnId,
@@ -177,7 +215,7 @@ export const AddColumnModal: React.FC<AddColumnModalProps> = ({
 
         setName('');
         setType('text');
-        setOptions(['']);
+        setOptions([emptyOption()]);
         setRouteDestination('');
         setSourceRouteColumnId('');
         setReportNamePart('');
@@ -266,7 +304,7 @@ export const AddColumnModal: React.FC<AddColumnModalProps> = ({
                                 const newType = e.target.value as ColumnType;
                                 setType(newType);
                                 if (newType === 'select' && options.length === 0) {
-                                    setOptions(['']);
+                                    setOptions([emptyOption()]);
                                 }
                                 if (newType === 'route_cost' && routeColumns.length === 1) {
                                     setSourceRouteColumnId(routeColumns[0].id);
@@ -384,36 +422,107 @@ export const AddColumnModal: React.FC<AddColumnModalProps> = ({
                             </label>
                             <p className="text-sm text-gray-600 mb-2">
                                 Escriba cada valor que se podrá elegir. Hace falta al menos una opción.
+                                El color y el formato (negrita, cursiva, subrayado) se ven en la tabla cuando esa opción está elegida.
                                 {isEditing
                                     ? ' Al guardar, la lista queda actualizada en toda la tabla. Las filas que ya tenían un valor lo conservan aunque quite esa opción de la lista.'
                                     : ' Podrá agregar más opciones después, desde Editar columnas propias.'}
                             </p>
                             <div className="space-y-2">
-                                {options.map((option, index) => (
-                                    <div key={index} className="flex gap-2 items-center">
-                                        <input
-                                            type="text"
-                                            value={option}
-                                            onChange={(e) => {
-                                                const newOptions = [...options];
-                                                newOptions[index] = e.target.value;
-                                                setOptions(newOptions);
-                                            }}
-                                            placeholder={`Opción ${index + 1}`}
-                                            className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                                        />
-                                        {options.length > 1 && (
+                                {options.map((option, index) => {
+                                    const previewStyle: React.CSSProperties = {
+                                        backgroundColor: option.style.bgColor || undefined,
+                                        color: option.style.textColor || undefined,
+                                        fontWeight: option.style.bold ? 700 : undefined,
+                                        fontStyle: option.style.italic ? 'italic' : undefined,
+                                        textDecoration: option.style.underline ? 'underline' : undefined,
+                                    };
+                                    return (
+                                    <div key={index} className="rounded-lg border border-gray-200 p-3 space-y-2">
+                                        <div className="flex gap-2 items-center">
+                                            <input
+                                                type="text"
+                                                value={option.label}
+                                                onChange={(e) => updateOption(index, { label: e.target.value })}
+                                                placeholder={`Opción ${index + 1}`}
+                                                className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                                            />
+                                            <span
+                                                className="hidden sm:inline-block max-w-[8rem] truncate text-xs px-2 py-1 rounded border border-gray-200"
+                                                style={previewStyle}
+                                                title="Vista previa"
+                                            >
+                                                {option.label.trim() || 'Vista previa'}
+                                            </span>
+                                            {options.length > 1 && (
+                                                <button
+                                                    type="button"
+                                                    onClick={() => handleRemoveOption(index)}
+                                                    className="p-2 text-red-600 hover:bg-red-50 rounded transition-colors"
+                                                    title="Quitar esta opción"
+                                                >
+                                                    <Trash2 className="w-4 h-4" />
+                                                </button>
+                                            )}
+                                        </div>
+                                        <div className="flex flex-wrap items-center gap-2">
+                                            <span className="text-[11px] uppercase tracking-wide text-gray-500">Fondo</span>
+                                            {CELL_COLOR_PRESETS.map(preset => (
+                                                <button
+                                                    key={preset.id}
+                                                    type="button"
+                                                    title={preset.label}
+                                                    onClick={() => updateOptionStyle(index, { bgColor: preset.value || undefined })}
+                                                    className={`w-5 h-5 rounded border-2 ${
+                                                        (option.style.bgColor || '') === preset.value
+                                                            ? 'border-primary-500'
+                                                            : 'border-gray-300'
+                                                    }`}
+                                                    style={{ backgroundColor: preset.value || '#fff' }}
+                                                />
+                                            ))}
+                                            <label className="text-[11px] uppercase tracking-wide text-gray-500 ml-1">
+                                                Texto
+                                                <select
+                                                    value={option.style.textColor || ''}
+                                                    onChange={(e) => updateOptionStyle(index, { textColor: e.target.value || undefined })}
+                                                    className="ml-1 text-xs normal-case tracking-normal px-1.5 py-1 border border-gray-300 rounded"
+                                                >
+                                                    {SELECT_TEXT_COLOR_PRESETS.map(preset => (
+                                                        <option key={preset.id} value={preset.value}>{preset.label}</option>
+                                                    ))}
+                                                </select>
+                                            </label>
                                             <button
                                                 type="button"
-                                                onClick={() => handleRemoveOption(index)}
-                                                className="p-2 text-red-600 hover:bg-red-50 rounded transition-colors"
-                                                title="Quitar esta opción"
+                                                title="Negrita"
+                                                aria-pressed={!!option.style.bold}
+                                                onClick={() => updateOptionStyle(index, { bold: !option.style.bold })}
+                                                className={`p-1.5 rounded border ${option.style.bold ? 'bg-gray-900 text-white border-gray-900' : 'border-gray-300 text-gray-700 hover:bg-gray-50'}`}
                                             >
-                                                <Trash2 className="w-4 h-4" />
+                                                <Bold className="w-3.5 h-3.5" />
                                             </button>
-                                        )}
+                                            <button
+                                                type="button"
+                                                title="Cursiva"
+                                                aria-pressed={!!option.style.italic}
+                                                onClick={() => updateOptionStyle(index, { italic: !option.style.italic })}
+                                                className={`p-1.5 rounded border ${option.style.italic ? 'bg-gray-900 text-white border-gray-900' : 'border-gray-300 text-gray-700 hover:bg-gray-50'}`}
+                                            >
+                                                <Italic className="w-3.5 h-3.5" />
+                                            </button>
+                                            <button
+                                                type="button"
+                                                title="Subrayado"
+                                                aria-pressed={!!option.style.underline}
+                                                onClick={() => updateOptionStyle(index, { underline: !option.style.underline })}
+                                                className={`p-1.5 rounded border ${option.style.underline ? 'bg-gray-900 text-white border-gray-900' : 'border-gray-300 text-gray-700 hover:bg-gray-50'}`}
+                                            >
+                                                <Underline className="w-3.5 h-3.5" />
+                                            </button>
+                                        </div>
                                     </div>
-                                ))}
+                                    );
+                                })}
                                 <button
                                     type="button"
                                     onClick={handleAddOption}

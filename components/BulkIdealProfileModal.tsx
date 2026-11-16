@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { X, Save, Upload, Download, Target, Loader2, Trash2 } from 'lucide-react';
+import { X, Save, Upload, Download, Target, Loader2, Trash2, Plus } from 'lucide-react';
 import {
     Process,
     CustomColumn,
@@ -18,6 +18,8 @@ import {
     criterionHasExcludeValue,
     normalizeIdealProfileCriteria,
     normalizeIdealProfileConfig,
+    criterionStringList,
+    packCriterionStringList,
     ProfileMatchSummary,
 } from '../lib/bulkIdealProfileMatch';
 import { getColumnLabel, normalizeColumnNameKey } from '../lib/bulkTableColumns';
@@ -41,6 +43,84 @@ const MATCH_MODE_LABELS: Record<IdealProfileMatchMode, string> = {
     maximum: 'Máximo',
     range: 'Rango',
 };
+
+function parseImportedSelectValues(raw: string, options: string[]): string | string[] {
+    const trimmed = raw.trim();
+    if (!trimmed) return '';
+    const canonical = (part: string) =>
+        options.find(option => option.toLowerCase() === part.toLowerCase()) || part;
+    const exact = options.find(option => option.toLowerCase() === trimmed.toLowerCase());
+    if (exact) return exact;
+
+    const usesExplicitSeparator = trimmed.includes('|') || trimmed.includes(';');
+    const parts = trimmed
+        .split(usesExplicitSeparator ? /[|;]/ : /,/)
+        .map(part => part.trim())
+        .filter(Boolean);
+    if (parts.length <= 1) return canonical(trimmed);
+    if (!usesExplicitSeparator && !parts.every(part => options.some(option => option.toLowerCase() === part.toLowerCase()))) {
+        return trimmed;
+    }
+    return packCriterionStringList(parts.map(canonical));
+}
+
+function MultiOptionPicker({
+    options,
+    value,
+    onChange,
+    addLabel,
+    hint,
+}: {
+    options: string[];
+    value: unknown;
+    onChange: (next: string | string[]) => void;
+    addLabel: string;
+    hint: string;
+}) {
+    const selected = criterionStringList(value);
+    const remaining = options.filter(
+        option => !selected.some(item => item.toLowerCase() === option.toLowerCase())
+    );
+
+    return (
+        <div className="space-y-1 min-w-[11rem]">
+            {selected.map(option => (
+                <div key={option} className="flex items-center gap-1">
+                    <span className="flex-1 text-xs px-2 py-1 rounded border border-gray-200 bg-gray-50 truncate" title={option}>
+                        {option}
+                    </span>
+                    <button
+                        type="button"
+                        onClick={() => onChange(packCriterionStringList(selected.filter(item => item !== option)))}
+                        className="p-1 text-gray-400 hover:text-red-600 rounded"
+                        title="Quitar opción"
+                    >
+                        <X className="w-3.5 h-3.5" />
+                    </button>
+                </div>
+            ))}
+            {remaining.length > 0 && (
+                <div className="relative">
+                    <Plus className="w-3.5 h-3.5 text-gray-400 absolute left-2 top-1/2 -translate-y-1/2 pointer-events-none" />
+                    <select
+                        value=""
+                        onChange={e => {
+                            if (!e.target.value) return;
+                            onChange(packCriterionStringList([...selected, e.target.value]));
+                        }}
+                        className="w-full pl-7 pr-2 py-1 border border-gray-300 rounded text-sm"
+                    >
+                        <option value="">{addLabel}</option>
+                        {remaining.map(option => (
+                            <option key={option} value={option}>{option}</option>
+                        ))}
+                    </select>
+                </div>
+            )}
+            <p className="text-[10px] text-gray-400 leading-tight">{hint}</p>
+        </div>
+    );
+}
 
 function getMatchModesForType(type: IdealProfileFieldDef['type']): IdealProfileMatchMode[] {
     switch (type) {
@@ -172,9 +252,12 @@ export const BulkIdealProfileModal: React.FC<Props> = ({
                 const val = imported[c.fieldId];
                 if (val === undefined) return c;
                 const field = availableFields.find(f => f.fieldId === c.fieldId);
-                let idealValue: string | number | boolean = val;
+                let idealValue: string | number | boolean | string[] = val;
                 if (field?.type === 'number' || field?.type === 'route_cost') idealValue = parseFloat(val) || 0;
                 if (field?.type === 'checkbox') idealValue = val === 'true' || val === '1' || val.toLowerCase() === 'sí';
+                if (field?.type === 'select' && field.options?.length) {
+                    idealValue = parseImportedSelectValues(val, field.options);
+                }
                 return { ...c, enabled: true, idealValue };
             })
         );
@@ -296,6 +379,7 @@ export const BulkIdealProfileModal: React.FC<Props> = ({
                             entre {yellowThreshold}% y {greenThreshold - 1}% en amarillo, y por debajo de {yellowThreshold}% en rojo.
                             Las celdas de la tabla con criterio activo se colorean según su cumplimiento individual (mapa de calor).
                             Puede definir un valor ideal, valores prohibidos en «No debe contener», o ambos.
+                            En una lista desplegable puede añadir varias opciones en cada restricción: el valor ideal se cumple con cualquiera, y «No debe contener» falla si coincide con cualquiera.
                         </p>
                     </div>
 
@@ -409,21 +493,18 @@ export const BulkIdealProfileModal: React.FC<Props> = ({
                                                         <option value="false">No</option>
                                                     </select>
                                                 ) : field.type === 'select' && field.options?.length ? (
-                                                    <select
-                                                        value={String(c.idealValue ?? '')}
-                                                        onChange={e => updateCriterion(c.fieldId, { idealValue: e.target.value })}
-                                                        className="w-full px-2 py-1 border border-gray-300 rounded text-sm"
-                                                    >
-                                                        <option value="">—</option>
-                                                        {field.options.map(opt => (
-                                                            <option key={opt} value={opt}>{opt}</option>
-                                                        ))}
-                                                    </select>
+                                                    <MultiOptionPicker
+                                                        options={field.options}
+                                                        value={c.idealValue}
+                                                        onChange={next => updateCriterion(c.fieldId, { idealValue: next })}
+                                                        addLabel="Añadir opción ideal"
+                                                        hint="Varias opciones: cumple si el candidato tiene cualquiera."
+                                                    />
                                                 ) : (field.type === 'number' || field.type === 'route_cost') && c.matchMode === 'range' ? (
                                                     <div className="flex gap-1 items-center">
                                                         <input
                                                             type="number"
-                                                            value={c.idealValue ?? ''}
+                                                            value={typeof c.idealValue === 'number' ? c.idealValue : ''}
                                                             onChange={e => updateCriterion(c.fieldId, { idealValue: parseFloat(e.target.value) || 0 })}
                                                             placeholder="Mín"
                                                             className="w-20 px-2 py-1 border border-gray-300 rounded text-sm"
@@ -479,16 +560,13 @@ export const BulkIdealProfileModal: React.FC<Props> = ({
                                                         <option value="false">No</option>
                                                     </select>
                                                 ) : field.type === 'select' && field.options?.length ? (
-                                                    <select
-                                                        value={String(c.excludeValue ?? '')}
-                                                        onChange={e => updateCriterion(c.fieldId, { excludeValue: e.target.value })}
-                                                        className="w-full px-2 py-1 border border-gray-300 rounded text-sm"
-                                                    >
-                                                        <option value="">—</option>
-                                                        {field.options.map(opt => (
-                                                            <option key={opt} value={opt}>{opt}</option>
-                                                        ))}
-                                                    </select>
+                                                    <MultiOptionPicker
+                                                        options={field.options}
+                                                        value={c.excludeValue}
+                                                        onChange={next => updateCriterion(c.fieldId, { excludeValue: next })}
+                                                        addLabel="Añadir restricción"
+                                                        hint="Varias opciones: no cumple si el candidato tiene cualquiera."
+                                                    />
                                                 ) : (
                                                     <div className="space-y-1">
                                                         <input

@@ -166,6 +166,8 @@ import { BulkEmailModal } from './BulkEmailModal';
 import { QuickScheduleModal } from './QuickScheduleModal';
 import { BulkScheduleModal } from './BulkScheduleModal';
 import { AddColumnModal } from './AddColumnModal';
+import { BulkSelectDisplay, BulkSelectEditor } from './BulkSelectCell';
+import { selectOptionCss } from '../lib/selectOptionStyle';
 import { ManageCustomColumnsModal } from './ManageCustomColumnsModal';
 import { BulkColumnVisibilityModal } from './BulkColumnVisibilityModal';
 import { TableTemplateModal, BulkTableTemplateLayout } from './TableTemplateModal';
@@ -5683,16 +5685,11 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                     }
                     if (col.type === 'select' && col.options?.length) {
                         return (
-                            <select
-                                defaultValue={editingCell!.initialValue}
-                                autoFocus
-                                onChange={e => handleSaveEdit(candidate.id, fieldKey, e.target.value)}
-                                className="w-full px-2 py-1 text-xs border border-primary-500 rounded focus:ring-1 focus:ring-primary-500"
-                                onClick={e => e.stopPropagation()}
-                            >
-                                <option value="">-</option>
-                                {col.options.map(opt => <option key={opt} value={opt}>{opt}</option>)}
-                            </select>
+                            <BulkSelectEditor
+                                column={col}
+                                initialValue={editingCell!.initialValue}
+                                onChange={next => handleSaveEdit(candidate.id, fieldKey, next)}
+                            />
                         );
                     }
                     return (
@@ -5703,6 +5700,17 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                             className="w-full px-2 py-1 text-xs border border-primary-500 rounded focus:ring-1 focus:ring-primary-500"
                             onSave={v => handleSaveEdit(candidate.id, fieldKey, v)}
                             onCancel={handleCancelEdit}
+                        />
+                    );
+                }
+
+                if (col.type === 'select') {
+                    return (
+                        <BulkSelectDisplay
+                            column={col}
+                            value={value}
+                            className="min-w-[2rem]"
+                            onDoubleClick={(e) => { e.stopPropagation(); handleStartEdit(candidate.id, fieldKey, value); }}
                         />
                     );
                 }
@@ -7914,11 +7922,12 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                                                             value={columnFilterDraft[filterKey] || ''}
                                                             onChange={(e) => setColumnFilterDraft(prev => ({ ...prev, [filterKey]: e.target.value }))}
                                                             className="text-xs px-2 py-1 border border-gray-300 rounded focus:ring-1 focus:ring-primary-500 focus:border-primary-500 font-normal normal-case"
+                                                            style={selectOptionCss(col, columnFilterDraft[filterKey] || '')}
                                                             onClick={(e) => e.stopPropagation()}
                                                         >
                                                             <option value="">Todos</option>
                                                             {col.options.map(opt => (
-                                                                <option key={opt} value={opt}>{opt}</option>
+                                                                <option key={opt} value={opt} style={selectOptionCss(col, opt)}>{opt}</option>
                                                             ))}
                                                         </select>
                                                     ) : col.type === 'checkbox' ? (
@@ -8621,16 +8630,11 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                                                                 </select>
                                                             ) : col.type === 'select' ? (
                                                                 col.options?.length ? (
-                                                                <select
-                                                                    defaultValue={editingCell!.initialValue}
-                                                                    autoFocus
-                                                                    onChange={e => handleSaveEdit(candidate.id, fieldKey, e.target.value)}
-                                                                    className="w-full px-2 py-1 text-xs border border-primary-500 rounded focus:ring-1 focus:ring-primary-500"
-                                                                    onClick={e => e.stopPropagation()}
-                                                                >
-                                                                    <option value="">-</option>
-                                                                    {col.options.map(opt => <option key={opt} value={opt}>{opt}</option>)}
-                                                                </select>
+                                                                <BulkSelectEditor
+                                                                    column={col}
+                                                                    initialValue={editingCell!.initialValue}
+                                                                    onChange={next => handleSaveEdit(candidate.id, fieldKey, next)}
+                                                                />
                                                                 ) : (
                                                                     <span
                                                                         className="text-xs text-amber-700 cursor-pointer underline"
@@ -8650,6 +8654,13 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                                                                     onCancel={handleCancelEdit}
                                                                 />
                                                             )
+                                                        ) : col.type === 'select' ? (
+                                                            <BulkSelectDisplay
+                                                                column={col}
+                                                                value={value}
+                                                                onDoubleClick={(e) => { e.stopPropagation(); handleStartEdit(candidate.id, fieldKey, value); }}
+                                                                title="Clic para ver el texto completo · Doble clic para editar"
+                                                            />
                                                         ) : (
                                                             <span
                                                                 className="bulk-cell-text text-gray-700 hover:bg-gray-50 px-1 py-0.5 rounded cursor-pointer"
