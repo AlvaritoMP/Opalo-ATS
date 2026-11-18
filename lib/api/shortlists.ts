@@ -69,6 +69,28 @@ function textOf(value: unknown): string {
     return typeof value === 'string' ? value.trim() : '';
 }
 
+function clientNotice(row: { event_type?: unknown; body?: unknown; payload?: unknown }): { title: string; body: string } {
+    const payload = asObject(row.payload);
+    const name = textOf(payload.candidateName) || 'un candidato';
+    const eventType = textOf(row.event_type);
+    if (eventType === 'moved') {
+        const step = payload.to === 'finalista' ? 'Finalista' : payload.to === 'entrevista' ? 'Entrevista' : 'el siguiente paso';
+        return { title: 'Decisión en shortlist', body: `Pasó a ${name} a ${step}.` };
+    }
+    if (eventType === 'rejected') {
+        const reason = textOf(row.body);
+        return { title: 'Rechazo en shortlist', body: reason ? `Rechazó a ${name}: ${reason}` : `Rechazó a ${name}.` };
+    }
+    if (payload.kind === 'interview') {
+        return { title: 'Disponibilidad en shortlist', body: 'Marcó la disponibilidad de la sala para entrevistas.' };
+    }
+    const body = textOf(row.body);
+    if (payload.scope === 'room') {
+        return { title: 'Mensaje en shortlist', body: body || 'Comentó en la sala.' };
+    }
+    return { title: 'Mensaje en shortlist', body: body || `Comentó sobre ${name}.` };
+}
+
 function bulkValue(bulk: Record<string, unknown>, keys: string[]): string {
     const wanted = new Set(keys);
     for (const [key, value] of Object.entries(bulk)) {
@@ -760,16 +782,16 @@ export const shortlistsApi = {
             .eq('app_name', APP_NAME)
             .eq('actor_type', 'client')
             .in('shortlist_id', ids)
-            .in('event_type', ['comment', 'rejected'])
+            .in('event_type', ['comment', 'rejected', 'moved'])
             .order('created_at', { ascending: false })
             .limit(200);
         if (events.error || !events.data) return [];
-        const latest = new Map<string, { id: string; body: string; count: number }>();
+        const latest = new Map<string, { id: string; title: string; body: string; count: number }>();
         for (const row of events.data) {
             const shortlistId = String(row.shortlist_id);
+            const notice = clientNotice(row);
             const current = latest.get(shortlistId);
-            const body = textOf(row.body) || 'El cliente actualizó la sala.';
-            if (!current) latest.set(shortlistId, { id: String(row.id), body, count: 1 });
+            if (!current) latest.set(shortlistId, { id: String(row.id), title: notice.title, body: notice.body, count: 1 });
             else current.count += 1;
         }
         return rooms.data.flatMap(row => {
@@ -779,7 +801,7 @@ export const shortlistsApi = {
                 id: `shortlist-msg:${row.id}`,
                 type: 'shortlist_message',
                 severity: 'warning',
-                title: 'Mensaje en shortlist',
+                title: notice.title,
                 message: notice.body.length > 180 ? `${notice.body.slice(0, 177)}…` : notice.body,
                 processTitle: textOf(row.title) || 'Sala',
                 shortlistId: String(row.id),
@@ -791,7 +813,6 @@ export const shortlistsApi = {
 
     async removeMember(memberId: string, actor: ShortlistActor): Promise<void> {
         const member = await readMember(memberId);
-        await requireOpen(member.shortlistId);
         await insertEvent({
             shortlistId: member.shortlistId,
             memberId,

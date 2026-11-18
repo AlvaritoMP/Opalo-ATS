@@ -57,6 +57,23 @@ export function buildPublicShortlistUrl(token: string): string {
     return url.toString();
 }
 
+export function shareShortlistOnWhatsApp(input: { title: string; token: string; accessDni: string; clientLabel?: string }): void {
+    const url = buildPublicShortlistUrl(input.token);
+    const greeting = input.clientLabel
+        ? `Hola. Le compartimos la presentación de candidatos de ${input.clientLabel}.`
+        : 'Hola. Le compartimos una presentación de candidatos.';
+    const text = [
+        greeting,
+        input.title,
+        '',
+        'Entre con este enlace:',
+        url,
+        '',
+        `Use este DNI para ingresar: ${input.accessDni}`,
+    ].join('\n');
+    window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank', 'noopener,noreferrer');
+}
+
 export function readPublicShortlistToken(): string | null {
     if (typeof window === 'undefined') return null;
     const token = new URLSearchParams(window.location.search).get('sala')?.trim() || '';
@@ -108,4 +125,31 @@ export function formatShortlistWhen(value?: string): string {
         hour: '2-digit',
         minute: '2-digit',
     });
+}
+
+function calendarDaysSince(value?: string): number | null {
+    if (!value) return null;
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return null;
+    const now = new Date();
+    const start = Date.UTC(date.getFullYear(), date.getMonth(), date.getDate());
+    const today = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
+    return Math.max(0, Math.round((today - start) / 86_400_000));
+}
+
+export function shortlistCreatedMessage(value?: string): string {
+    const days = calendarDaysSince(value);
+    if (days == null || !value) return '';
+    const when = new Date(value).toLocaleDateString('es-PE', { day: 'numeric', month: 'long', year: 'numeric' });
+    if (days === 0) return `Esta sala se creó hoy, ${when}.`;
+    if (days === 1) return `Esta sala se creó el ${when}, hace 1 día.`;
+    return `Esta sala se creó el ${when}, hace ${days} días.`;
+}
+
+export function presentedAgeLabel(value?: string): string {
+    const days = calendarDaysSince(value);
+    if (days == null) return '';
+    if (days === 0) return 'Presentado hoy';
+    if (days === 1) return 'Presentado hace 1 día';
+    return `Presentado hace ${days} días`;
 }

@@ -3,7 +3,7 @@ import { useAppState } from '../App';
 import { ShortlistBoard } from './ShortlistBoard';
 import { clientsApi } from '../lib/api/clients';
 import { shortlistsApi, ShortlistSchemaError } from '../lib/api/shortlists';
-import { buildPublicShortlistUrl, isValidAccessDni, normalizeAccessDni } from '../lib/shortlists';
+import { buildPublicShortlistUrl, isValidAccessDni, normalizeAccessDni, shareShortlistOnWhatsApp } from '../lib/shortlists';
 import { setBulkSelectedProcessId } from '../lib/bulkTableColumns';
 import { toUuidOrNull } from '../lib/uuid';
 import type { Client, Shortlist, ShortlistActor, ShortlistColumnKey, ShortlistEvent, ShortlistMember } from '../types';
@@ -175,6 +175,13 @@ export const ShortlistsView: React.FC = () => {
                         <button type="button" onClick={() => { void copyLink(room.shortlist.token); }} className="px-3 py-2 text-sm rounded-lg border border-gray-300 bg-white">
                             Copiar enlace
                         </button>
+                        <button
+                            type="button"
+                            onClick={() => shareShortlistOnWhatsApp(room.shortlist)}
+                            className="px-3 py-2 text-sm rounded-lg border border-gray-300 bg-white"
+                        >
+                            Enviar por WhatsApp
+                        </button>
                         <button type="button" onClick={() => setEditing(room.shortlist)} className="px-3 py-2 text-sm rounded-lg border border-gray-300 bg-white">
                             Editar
                         </button>
@@ -223,7 +230,7 @@ export const ShortlistsView: React.FC = () => {
                     onCommentRoom={body => { void run(() => shortlistsApi.commentOnRoom(room.shortlist.id, body, actor())); }}
                     onConfirmAppointment={(memberId, appointment) => { void run(() => shortlistsApi.confirmAppointment(memberId, appointment, actor())); }}
                     onRemove={memberId => {
-                        if (confirm('¿Quitar a esta persona de la sala? Su proceso de origen no cambia.')) {
+                        if (confirm('¿Eliminar a esta persona de la sala? Su proceso de origen no cambia.')) {
                             void run(() => shortlistsApi.removeMember(memberId, actor()));
                         }
                     }}
@@ -283,6 +290,7 @@ export const ShortlistsView: React.FC = () => {
                             </p>
                         </button>
                         <div className="mt-3 flex gap-2">
+                            <button type="button" onClick={() => shareShortlistOnWhatsApp(item)} className="px-2.5 py-1.5 text-xs rounded-lg border border-gray-300">WhatsApp</button>
                             <button type="button" onClick={() => setEditing(item)} className="px-2.5 py-1.5 text-xs rounded-lg border border-gray-300">Editar</button>
                             <button type="button" onClick={() => { void removeRoom(item); }} className="px-2.5 py-1.5 text-xs rounded-lg border border-red-200 text-red-700">Eliminar</button>
                         </div>

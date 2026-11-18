@@ -4,7 +4,9 @@ import {
     canMoveShortlistColumn,
     formatShortlistWhen,
     nextShortlistColumn,
+    presentedAgeLabel,
     shortlistColumnLabel,
+    shortlistCreatedMessage,
     shortlistEventText,
 } from '../lib/shortlists';
 import { openAttachment } from '../lib/openAttachment';
@@ -106,6 +108,11 @@ export const ShortlistBoard: React.FC<ShortlistBoardProps> = ({
 
     return (
         <div className={`space-y-3 ${phone ? 'pb-20' : ''}`}>
+            {shortlistCreatedMessage(shortlist.createdAt) && (
+                <p className="text-sm text-gray-700 bg-white border border-gray-200 rounded-lg px-3 py-2">
+                    {shortlistCreatedMessage(shortlist.createdAt)}
+                </p>
+            )}
             {phone && phonePane === 'board' && (
                 <div className="sticky top-0 z-20 -mx-1 px-1 py-2 bg-gray-50">
                     <div className="flex gap-1.5 overflow-x-auto">
@@ -179,6 +186,21 @@ export const ShortlistBoard: React.FC<ShortlistBoardProps> = ({
                                                 {member.sourceProcessTitle || 'Proceso'}
                                                 {member.sourceStageName ? ` · ${member.sourceStageName}` : ''}
                                             </p>
+                                            {presentedAgeLabel(member.addedAt) && (
+                                                <p className="text-xs text-gray-500 mt-1">{presentedAgeLabel(member.addedAt)}</p>
+                                            )}
+                                            {mode === 'staff' && member.sourceProcessId && onOpenProcess && (
+                                                <button
+                                                    type="button"
+                                                    className="mt-1 text-xs font-medium text-primary-700 hover:underline"
+                                                    onClick={event => {
+                                                        event.stopPropagation();
+                                                        onOpenProcess(member.sourceProcessId as string);
+                                                    }}
+                                                >
+                                                    Ir a su proceso
+                                                </button>
+                                            )}
                                             {shortlist.clientLabel && member.sourceClientLabel && member.sourceClientLabel !== shortlist.clientLabel && (
                                                 <p className="text-[11px] text-amber-700 mt-1">Viene de {member.sourceClientLabel}</p>
                                             )}
@@ -196,6 +218,19 @@ export const ShortlistBoard: React.FC<ShortlistBoardProps> = ({
                                                     Pasar a {shortlistColumnLabel(nextShortlistColumn(member.column) as ShortlistColumnKey)}
                                                 </button>
                                             )}
+                                            {mode === 'staff' && onRemove && (
+                                                <button
+                                                    type="button"
+                                                    disabled={busy}
+                                                    className="mt-2 w-full text-sm py-2 rounded-lg border border-red-200 text-red-700 disabled:opacity-40"
+                                                    onClick={event => {
+                                                        event.stopPropagation();
+                                                        onRemove(member.id);
+                                                    }}
+                                                >
+                                                    Eliminar de la sala
+                                                </button>
+                                            )}
                                         </article>
                                     ))}
                                 </div>
@@ -209,11 +244,33 @@ export const ShortlistBoard: React.FC<ShortlistBoardProps> = ({
                         <h3 className="text-sm font-semibold text-gray-800 mb-2">Rechazados ({rejected.length})</h3>
                         <ul className="space-y-2">
                             {rejected.map(member => (
-                                <li key={member.id}>
-                                    <button type="button" onClick={() => setSelectedId(member.id)} className="w-full text-left">
-                                        <span className="text-sm font-medium text-gray-800">{memberName(member)}</span>
-                                        <span className="block text-xs text-gray-500">{member.rejectionReason}</span>
-                                    </button>
+                                <li key={member.id} className="flex items-start justify-between gap-3">
+                                    <div className="min-w-0">
+                                        <button type="button" onClick={() => setSelectedId(member.id)} className="text-left">
+                                            <span className="text-sm font-medium text-gray-800">{memberName(member)}</span>
+                                            <span className="block text-xs text-gray-500">{presentedAgeLabel(member.addedAt)}</span>
+                                            <span className="block text-xs text-gray-500">{member.rejectionReason}</span>
+                                        </button>
+                                        {mode === 'staff' && member.sourceProcessId && onOpenProcess && (
+                                            <button
+                                                type="button"
+                                                className="mt-1 block text-xs font-medium text-primary-700 hover:underline"
+                                                onClick={() => onOpenProcess(member.sourceProcessId as string)}
+                                            >
+                                                Ir a su proceso
+                                            </button>
+                                        )}
+                                    </div>
+                                    {mode === 'staff' && onRemove && (
+                                        <button
+                                            type="button"
+                                            disabled={busy}
+                                            onClick={() => onRemove(member.id)}
+                                            className="shrink-0 text-xs px-2 py-1 rounded-lg border border-red-200 text-red-700 disabled:opacity-40"
+                                        >
+                                            Eliminar
+                                        </button>
+                                    )}
                                 </li>
                             ))}
                         </ul>
@@ -340,8 +397,21 @@ const MemberPanel: React.FC<{
                         <p className="text-xs text-primary-700 mt-1">
                             {member.status === 'rejected' ? 'Rechazado' : shortlistColumnLabel(member.column)}
                         </p>
+                        {presentedAgeLabel(member.addedAt) && (
+                            <p className="text-xs text-gray-500 mt-1">{presentedAgeLabel(member.addedAt)}</p>
+                        )}
+                        {mode === 'staff' && onOpenProcess && (
+                            <button type="button" onClick={onOpenProcess} className="mt-2 text-sm font-medium text-primary-700 hover:underline">
+                                Ir a su proceso
+                            </button>
+                        )}
                     </div>
-                    <button type="button" onClick={onClose} className="shrink-0 text-sm text-gray-500 px-2 py-2">Cerrar</button>
+                    <div className="flex items-center gap-3 shrink-0">
+                        {mode === 'staff' && onRemove && (
+                            <button type="button" disabled={busy} onClick={onRemove} className="text-sm text-red-700 disabled:opacity-40">Eliminar</button>
+                        )}
+                        <button type="button" onClick={onClose} className="shrink-0 text-sm text-gray-500 px-2 py-2">Cerrar</button>
+                    </div>
                 </header>
                 <div className="px-5 py-4 space-y-5">
                     {member.status === 'rejected' && (
@@ -480,16 +550,6 @@ const MemberPanel: React.FC<{
                             {!rejecting && (
                                 <button type="button" onClick={() => setRejecting(true)} className="text-sm px-3 py-1.5 rounded-lg border border-red-200 text-red-700">
                                     Rechazar
-                                </button>
-                            )}
-                            {mode === 'staff' && onRemove && (
-                                <button type="button" disabled={busy} onClick={onRemove} className="text-sm px-3 py-1.5 rounded-lg border border-gray-300 text-gray-600 disabled:opacity-40">
-                                    Quitar de la sala
-                                </button>
-                            )}
-                            {mode === 'staff' && onOpenProcess && (
-                                <button type="button" onClick={onOpenProcess} className="text-sm px-3 py-1.5 rounded-lg border border-gray-300 text-gray-700">
-                                    Ver en su proceso
                                 </button>
                             )}
                         </div>
