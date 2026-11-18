@@ -442,6 +442,44 @@ export const shortlistsApi = {
         return dbToShortlist(data as unknown as Record<string, unknown>);
     },
 
+    async update(id: string, input: Omit<CreateShortlistInput, 'actor'>): Promise<Shortlist> {
+        const title = input.title.trim();
+        const dni = normalizeAccessDni(input.accessDni);
+        if (!title) throw new Error('Escriba un nombre para la sala.');
+        if (!isValidAccessDni(dni)) throw new Error('El DNI de acceso debe tener al menos 8 dígitos.');
+        const { data, error } = await supabase
+            .from('shortlists')
+            .update({
+                title,
+                client_id: toUuidOrNull(input.clientId) || null,
+                client_label: input.clientLabel?.trim() || null,
+                access_dni: dni,
+                show_documents: input.showDocuments,
+                show_assessments: input.showAssessments,
+                show_profile: input.showProfile,
+                updated_at: new Date().toISOString(),
+            })
+            .eq('id', id)
+            .eq('app_name', APP_NAME)
+            .select('*')
+            .single();
+        throwIfMissing(error);
+        if (error) throw new Error(error.message);
+        return dbToShortlist(data as unknown as Record<string, unknown>);
+    },
+
+    async remove(id: string): Promise<void> {
+        const { data, error } = await supabase
+            .from('shortlists')
+            .delete()
+            .eq('id', id)
+            .eq('app_name', APP_NAME)
+            .select('id');
+        throwIfMissing(error);
+        if (error) throw new Error(error.message);
+        if (!data?.length) throw new Error('No se pudo eliminar la sala.');
+    },
+
     async getRoom(id: string): Promise<{ shortlist: Shortlist; members: ShortlistMember[]; events: ShortlistEvent[] }> {
         const { data, error } = await supabase
             .from('shortlists')
@@ -637,8 +675,8 @@ export const shortlistsApi = {
         });
     },
 
-    async proposeInterview(
-        memberId: string,
+    async setAvailability(
+        shortlistId: string,
         input: {
             modality: 'presencial' | 'virtual';
             place: string;
@@ -650,23 +688,19 @@ export const shortlistsApi = {
         if (slots.length === 0) throw new Error('Indique al menos una fecha con hora de inicio y fin.');
         const place = input.place.trim();
         if (input.modality === 'presencial' && !place) throw new Error('Indique la dirección de la entrevista.');
-        const member = await readMember(memberId);
-        await requireOpen(member.shortlistId);
+        await requireOpen(shortlistId);
         const modalityLabel = input.modality === 'virtual' ? 'Virtual' : 'Presencial';
         const when = slots
             .map(slot => `${slot.date} ${slot.start}–${slot.end}`)
             .join('\n');
-        const body = [modalityLabel, place, when].filter(Boolean).join('\n');
+        const body = ['Disponibilidad de la sala', modalityLabel, place, when].filter(Boolean).join('\n');
         await insertEvent({
-            shortlistId: member.shortlistId,
-            memberId,
-            candidateId: member.candidateId,
+            shortlistId,
             eventType: 'comment',
             body,
             actor,
             payload: {
                 kind: 'interview',
-                candidateName: member.candidate?.name || 'Candidato',
                 modality: input.modality,
                 place,
                 slots,

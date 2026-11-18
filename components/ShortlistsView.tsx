@@ -20,6 +20,7 @@ export const ShortlistsView: React.FC = () => {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
     const [creating, setCreating] = useState(false);
+    const [editing, setEditing] = useState<Shortlist | null>(null);
     const [openId, setOpenId] = useState<string | null>(null);
     const [room, setRoom] = useState<RoomState | null>(null);
     const [busy, setBusy] = useState(false);
@@ -80,6 +81,41 @@ export const ShortlistsView: React.FC = () => {
         }
     };
 
+    const removeRoom = async (item: Shortlist) => {
+        if (!confirm(`¿Eliminar la sala “${item.title}”? El enlace deja de funcionar y se borra su historial. Los procesos de los candidatos no cambian.`)) return;
+        setError('');
+        try {
+            await shortlistsApi.remove(item.id);
+            if (openId === item.id) {
+                setRoom(null);
+                setOpenId(null);
+                actions.setView('shortlists');
+            }
+            await loadList();
+        } catch (err) {
+            setError(err instanceof Error ? err.message : 'No se pudo eliminar la sala.');
+        }
+    };
+
+    const formModal = (creating || editing) ? (
+        <ShortlistFormModal
+            existing={editing || undefined}
+            onClose={() => { setCreating(false); setEditing(null); }}
+            onSaved={async saved => {
+                const wasNew = !editing;
+                setCreating(false);
+                setEditing(null);
+                await loadList();
+                if (wasNew) {
+                    await copyLink(saved.token);
+                    await loadRoom(saved.id);
+                    return;
+                }
+                if (openId === saved.id) await loadRoom(saved.id);
+            }}
+        />
+    ) : null;
+
     const copyLink = async (token: string) => {
         const url = buildPublicShortlistUrl(token);
         try {
@@ -117,6 +153,12 @@ export const ShortlistsView: React.FC = () => {
                     <div className="flex flex-wrap gap-2">
                         <button type="button" onClick={() => { void copyLink(room.shortlist.token); }} className="px-3 py-2 text-sm rounded-lg border border-gray-300 bg-white">
                             Copiar enlace
+                        </button>
+                        <button type="button" onClick={() => setEditing(room.shortlist)} className="px-3 py-2 text-sm rounded-lg border border-gray-300 bg-white">
+                            Editar
+                        </button>
+                        <button type="button" onClick={() => { void removeRoom(room.shortlist); }} className="px-3 py-2 text-sm rounded-lg border border-red-200 text-red-700 bg-white">
+                            Eliminar
                         </button>
                         {room.shortlist.status === 'open' ? (
                             <button
@@ -157,7 +199,6 @@ export const ShortlistsView: React.FC = () => {
                     onReject={(memberId, reason) => { void run(() => shortlistsApi.rejectMember(memberId, reason, actor())); }}
                     onComment={(memberId, body) => { void run(() => shortlistsApi.commentMember(memberId, body, actor())); }}
                     onCommentRoom={body => { void run(() => shortlistsApi.commentOnRoom(room.shortlist.id, body, actor())); }}
-                    onProposeInterview={(memberId, proposal) => { void run(() => shortlistsApi.proposeInterview(memberId, proposal, actor())); }}
                     onConfirmAppointment={(memberId, appointment) => { void run(() => shortlistsApi.confirmAppointment(memberId, appointment, actor())); }}
                     onRemove={memberId => {
                         if (confirm('¿Quitar a esta persona de la sala? Su proceso de origen no cambia.')) {
@@ -166,6 +207,7 @@ export const ShortlistsView: React.FC = () => {
                     }}
                     onOpenProcess={openProcess}
                 />
+                {formModal}
             </div>
         );
     }
@@ -190,53 +232,49 @@ export const ShortlistsView: React.FC = () => {
             )}
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
                 {rooms.map(item => (
-                    <button
-                        key={item.id}
-                        type="button"
-                        onClick={() => { void loadRoom(item.id).catch(err => setError(err instanceof Error ? err.message : 'No se pudo abrir la sala.')); }}
-                        className="text-left bg-white border border-gray-200 rounded-xl p-4 hover:border-primary-300"
-                    >
-                        <div className="flex items-center justify-between gap-2">
-                            <h2 className="font-medium text-gray-900">{item.title}</h2>
-                            <span className={`text-[11px] px-2 py-0.5 rounded-full ${item.status === 'open' ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-600'}`}>
-                                {item.status === 'open' ? 'Abierta' : 'Cerrada'}
-                            </span>
+                    <article key={item.id} className="bg-white border border-gray-200 rounded-xl p-4">
+                        <button
+                            type="button"
+                            onClick={() => { void loadRoom(item.id).catch(err => setError(err instanceof Error ? err.message : 'No se pudo abrir la sala.')); }}
+                            className="text-left w-full"
+                        >
+                            <div className="flex items-center justify-between gap-2">
+                                <h2 className="font-medium text-gray-900">{item.title}</h2>
+                                <span className={`text-[11px] px-2 py-0.5 rounded-full ${item.status === 'open' ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-600'}`}>
+                                    {item.status === 'open' ? 'Abierta' : 'Cerrada'}
+                                </span>
+                            </div>
+                            <p className="text-sm text-gray-500 mt-1">{item.clientLabel || 'Sin cliente'}</p>
+                            <p className="text-xs text-gray-500 mt-2">
+                                Presentación {item.counts.presentacion} · Entrevista {item.counts.entrevista} · Finalistas {item.counts.finalista} · Rechazados {item.counts.rejected}
+                            </p>
+                        </button>
+                        <div className="mt-3 flex gap-2">
+                            <button type="button" onClick={() => setEditing(item)} className="px-2.5 py-1.5 text-xs rounded-lg border border-gray-300">Editar</button>
+                            <button type="button" onClick={() => { void removeRoom(item); }} className="px-2.5 py-1.5 text-xs rounded-lg border border-red-200 text-red-700">Eliminar</button>
                         </div>
-                        <p className="text-sm text-gray-500 mt-1">{item.clientLabel || 'Sin cliente'}</p>
-                        <p className="text-xs text-gray-500 mt-2">
-                            Presentación {item.counts.presentacion} · Entrevista {item.counts.entrevista} · Finalistas {item.counts.finalista} · Rechazados {item.counts.rejected}
-                        </p>
-                    </button>
+                    </article>
                 ))}
             </div>
-            {creating && (
-                <CreateShortlistModal
-                    onClose={() => setCreating(false)}
-                    onCreated={async roomCreated => {
-                        setCreating(false);
-                        await loadList();
-                        await copyLink(roomCreated.token);
-                        await loadRoom(roomCreated.id);
-                    }}
-                />
-            )}
+            {formModal}
         </div>
     );
 };
 
-const CreateShortlistModal: React.FC<{
+const ShortlistFormModal: React.FC<{
+    existing?: Shortlist;
     onClose: () => void;
-    onCreated: (room: Shortlist) => Promise<void>;
-}> = ({ onClose, onCreated }) => {
+    onSaved: (room: Shortlist) => Promise<void>;
+}> = ({ existing, onClose, onSaved }) => {
     const { state } = useAppState();
     const [clients, setClients] = useState<Client[]>([]);
-    const [title, setTitle] = useState('');
-    const [clientId, setClientId] = useState('');
-    const [clientName, setClientName] = useState('');
-    const [dni, setDni] = useState('');
-    const [showDocuments, setShowDocuments] = useState(true);
-    const [showAssessments, setShowAssessments] = useState(true);
-    const [showProfile, setShowProfile] = useState(true);
+    const [title, setTitle] = useState(existing?.title || '');
+    const [clientId, setClientId] = useState(existing?.clientId || '');
+    const [clientName, setClientName] = useState(existing?.clientLabel || '');
+    const [dni, setDni] = useState(existing?.accessDni || '');
+    const [showDocuments, setShowDocuments] = useState(existing?.showDocuments ?? true);
+    const [showAssessments, setShowAssessments] = useState(existing?.showAssessments ?? true);
+    const [showProfile, setShowProfile] = useState(existing?.showProfile ?? true);
     const [saving, setSaving] = useState(false);
     const [error, setError] = useState('');
 
@@ -252,7 +290,7 @@ const CreateShortlistModal: React.FC<{
         try {
             if (!isValidAccessDni(dni)) throw new Error('El DNI de acceso debe tener al menos 8 dígitos.');
             const client = clients.find(item => item.id === clientId);
-            const created = await shortlistsApi.create({
+            const payload = {
                 title,
                 clientId: clientId || undefined,
                 clientLabel: clientName.trim() || client?.razonSocial,
@@ -260,15 +298,20 @@ const CreateShortlistModal: React.FC<{
                 showDocuments,
                 showAssessments,
                 showProfile,
-                actor: {
-                    actorType: 'staff',
-                    actorName: state.currentUser?.name || 'Equipo ATS',
-                    actorUserId: toUuidOrNull(state.currentUser?.id) || undefined,
-                },
-            });
-            await onCreated(created);
+            };
+            const saved = existing
+                ? await shortlistsApi.update(existing.id, payload)
+                : await shortlistsApi.create({
+                    ...payload,
+                    actor: {
+                        actorType: 'staff',
+                        actorName: state.currentUser?.name || 'Equipo ATS',
+                        actorUserId: toUuidOrNull(state.currentUser?.id) || undefined,
+                    },
+                });
+            await onSaved(saved);
         } catch (err) {
-            setError(err instanceof ShortlistSchemaError || err instanceof Error ? err.message : 'No se pudo crear la sala.');
+            setError(err instanceof ShortlistSchemaError || err instanceof Error ? err.message : 'No se pudo guardar la sala.');
             setSaving(false);
         }
     };
@@ -277,8 +320,12 @@ const CreateShortlistModal: React.FC<{
         <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={onClose}>
             <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg" onClick={event => event.stopPropagation()}>
                 <header className="px-5 py-4 border-b">
-                    <h2 className="text-lg font-semibold text-gray-900">Nueva sala</h2>
-                    <p className="text-sm text-gray-500 mt-1">El cliente entra con el enlace y este DNI. No necesita usuario del ATS.</p>
+                    <h2 className="text-lg font-semibold text-gray-900">{existing ? 'Editar sala' : 'Nueva sala'}</h2>
+                    <p className="text-sm text-gray-500 mt-1">
+                        {existing
+                            ? 'El enlace sigue siendo el mismo. Si cambia el DNI, el anterior deja de servir.'
+                            : 'El cliente entra con el enlace y este DNI. No necesita usuario del ATS.'}
+                    </p>
                 </header>
                 <div className="px-5 py-4 space-y-3">
                     <label className="block text-sm">
@@ -322,7 +369,7 @@ const CreateShortlistModal: React.FC<{
                 <footer className="px-5 py-4 border-t flex justify-end gap-2">
                     <button type="button" onClick={onClose} className="px-3 py-2 text-sm rounded-lg border border-gray-300">Cancelar</button>
                     <button type="button" disabled={saving} onClick={() => { void save(); }} className="px-3 py-2 text-sm rounded-lg bg-primary-600 text-white disabled:opacity-40">
-                        {saving ? 'Creando…' : 'Crear sala'}
+                        {saving ? 'Guardando…' : existing ? 'Guardar' : 'Crear sala'}
                     </button>
                 </footer>
             </div>

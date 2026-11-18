@@ -20,7 +20,7 @@ interface ShortlistBoardProps {
     onReject: (memberId: string, reason: string) => void;
     onComment: (memberId: string, body: string) => void;
     onCommentRoom: (body: string) => void;
-    onProposeInterview: (memberId: string, proposal: InterviewProposal) => void;
+    onSetAvailability?: (proposal: InterviewProposal) => void;
     onConfirmAppointment?: (memberId: string, appointment: FinalAppointment) => void;
     onRemove?: (memberId: string) => void;
     onOpenProcess?: (processId: string) => void;
@@ -54,7 +54,7 @@ export const ShortlistBoard: React.FC<ShortlistBoardProps> = ({
     onReject,
     onComment,
     onCommentRoom,
-    onProposeInterview,
+    onSetAvailability,
     onConfirmAppointment,
     onRemove,
     onOpenProcess,
@@ -178,6 +178,7 @@ export const ShortlistBoard: React.FC<ShortlistBoardProps> = ({
                             closed={closed}
                             busy={busy}
                             onConfirm={onConfirmAppointment}
+                            onSetAvailability={onSetAvailability}
                         />
                     )}
                     {sideTab === 'history' && (
@@ -212,8 +213,7 @@ export const ShortlistBoard: React.FC<ShortlistBoardProps> = ({
                     onMove={column => onMove(selected.id, column)}
                     onReject={reason => onReject(selected.id, reason)}
                     onComment={body => onComment(selected.id, body)}
-                    onProposeInterview={proposal => onProposeInterview(selected.id, proposal)}
-                    interviews={events.filter(event => event.memberId === selected.id && (event.payload?.kind === 'interview' || event.payload?.kind === 'appointment'))}
+                    interviews={events.filter(event => event.memberId === selected.id && event.payload?.kind === 'appointment')}
                     onRemove={onRemove ? () => onRemove(selected.id) : undefined}
                     onOpenProcess={selected.sourceProcessId && onOpenProcess ? () => onOpenProcess(selected.sourceProcessId as string) : undefined}
                 />
@@ -233,11 +233,10 @@ const MemberPanel: React.FC<{
     onMove: (column: ShortlistColumnKey) => void;
     onReject: (reason: string) => void;
     onComment: (body: string) => void;
-    onProposeInterview: (proposal: InterviewProposal) => void;
     interviews: ShortlistEvent[];
     onRemove?: () => void;
     onOpenProcess?: () => void;
-}> = ({ member, comments, mode, closed, busy, showProfile, onClose, onMove, onReject, onComment, onProposeInterview, interviews, onRemove, onOpenProcess }) => {
+}> = ({ member, comments, mode, closed, busy, showProfile, onClose, onMove, onReject, onComment, interviews, onRemove, onOpenProcess }) => {
     const [comment, setComment] = useState('');
     const [reason, setReason] = useState('');
     const [rejecting, setRejecting] = useState(false);
@@ -341,11 +340,12 @@ const MemberPanel: React.FC<{
                     )}
 
                     <PersonAgenda interviews={interviews} />
-                    {!closed && member.status === 'active' && mode === 'client' && (
-                        <InterviewForm busy={busy} onSubmit={onProposeInterview} />
-                    )}
-                    {!closed && member.status === 'active' && mode === 'staff' && (
-                        <p className="text-xs text-gray-500">La cita final se agenda en la pestaña Agenda, sobre los rangos que marcó el cliente.</p>
+                    {!closed && member.status === 'active' && (
+                        <p className="text-xs text-gray-500">
+                            {mode === 'client'
+                                ? 'La disponibilidad se marca una sola vez en Agenda y vale para toda la sala.'
+                                : 'La cita final se agenda en la pestaña Agenda, dentro de la disponibilidad de la sala.'}
+                        </p>
                     )}
 
                     <section>
@@ -543,7 +543,7 @@ const InterviewForm: React.FC<{
     return (
         <section>
             <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-2">Rangos disponibles</h3>
-            <p className="text-xs text-gray-500 mb-2">Marque los tramos en los que puede entrevistar. Opalo agenda la cita final dentro de esos rangos.</p>
+            <p className="text-xs text-gray-500 mb-2">Marque los tramos en los que puede entrevistar a cualquiera de esta sala. Opalo agenda cada cita final dentro de esos rangos.</p>
             <form
                 className="space-y-2 border border-amber-200 bg-amber-50/40 rounded-lg p-3"
                 onSubmit={event => {
@@ -570,7 +570,7 @@ const InterviewForm: React.FC<{
                         <input type="time" value={slot.end} onChange={event => setSlots(current => current.map((item, i) => i === index ? { ...item, end: event.target.value } : item))} className="border border-gray-300 rounded-lg px-2 py-1.5 text-sm" />
                     </div>
                 ))}
-                {slots.length < 4 && (
+                {slots.length < 8 && (
                     <button type="button" onClick={() => setSlots(current => [...current, { date: '', start: '', end: '' }])} className="text-xs text-primary-700">
                         Agregar otro rango
                     </button>
@@ -622,6 +622,33 @@ function dayKey(date: Date): string {
     return `${date.getFullYear()}-${month}-${day}`;
 }
 
+function assignLanes(blocks: AgendaBlock[]): Array<AgendaBlock & { lane: number; lanes: number }> {
+    const sorted = [...blocks].sort((a, b) => a.startMin - b.startMin || a.endMin - b.endMin);
+    const laneEnds: number[] = [];
+    const laneOf = new Map<string, number>();
+    for (const block of sorted) {
+        let lane = laneEnds.findIndex(end => end <= block.startMin);
+        if (lane < 0) {
+            lane = laneEnds.length;
+            laneEnds.push(block.endMin);
+        } else {
+            laneEnds[lane] = block.endMin;
+        }
+        laneOf.set(block.id, lane);
+    }
+    const lanes = Math.max(laneEnds.length, 1);
+    return blocks.map(block => ({ ...block, lane: laneOf.get(block.id) || 0, lanes }));
+}
+
+function trackStyle(lane: number, lanes: number, side: 'availability' | 'appointment'): { left: string; width: string } {
+    const span = 50 / lanes;
+    const origin = side === 'appointment' ? 50 : 0;
+    return {
+        left: `calc(${origin + lane * span}% + 1px)`,
+        width: `calc(${span}% - 2px)`,
+    };
+}
+
 function agendaBlocks(events: ShortlistEvent[], members: ShortlistMember[]): AgendaBlock[] {
     const names = new Map(members.map(member => [member.id, memberName(member)]));
     const blocks: AgendaBlock[] = [];
@@ -629,9 +656,11 @@ function agendaBlocks(events: ShortlistEvent[], members: ShortlistMember[]): Age
         const kind = event.payload?.kind;
         if (kind !== 'interview' && kind !== 'appointment') continue;
         const slots = Array.isArray(event.payload?.slots) ? event.payload.slots : [];
-        const name = typeof event.payload?.candidateName === 'string'
-            ? event.payload.candidateName
-            : (event.memberId && names.get(event.memberId)) || 'Candidato';
+        const name = kind === 'interview'
+            ? 'Disponible'
+            : typeof event.payload?.candidateName === 'string'
+                ? event.payload.candidateName
+                : (event.memberId && names.get(event.memberId)) || 'Candidato';
         const modality = event.payload?.modality === 'virtual' ? 'Virtual' : event.payload?.modality === 'presencial' ? 'Presencial' : '';
         const place = typeof event.payload?.place === 'string' ? event.payload.place : '';
         slots.forEach((slot, index) => {
@@ -658,7 +687,8 @@ const WeekAgenda: React.FC<{
     closed: boolean;
     busy?: boolean;
     onConfirm?: (memberId: string, appointment: FinalAppointment) => void;
-}> = ({ members, events, mode, closed, busy, onConfirm }) => {
+    onSetAvailability?: (proposal: InterviewProposal) => void;
+}> = ({ members, events, mode, closed, busy, onConfirm, onSetAvailability }) => {
     const [weekStart, setWeekStart] = useState(() => mondayOf(new Date()));
     const [memberId, setMemberId] = useState(members.find(member => member.status === 'active')?.id || '');
     const [modality, setModality] = useState<'presencial' | 'virtual'>('presencial');
@@ -683,8 +713,8 @@ const WeekAgenda: React.FC<{
                 <button type="button" onClick={() => setWeekStart(current => shiftDays(current, 7))} className="text-xs px-2 py-1 border border-gray-300 rounded-md">Semana siguiente</button>
             </div>
             <div className="flex flex-wrap gap-3 text-[11px]">
-                <span className="inline-flex items-center gap-1"><span className="w-3 h-3 rounded-sm bg-amber-300 border border-amber-500" /> Disponibilidad del cliente</span>
-                <span className="inline-flex items-center gap-1"><span className="w-3 h-3 rounded-sm bg-indigo-600" /> Cita final de Opalo</span>
+                <span className="inline-flex items-center gap-1"><span className="w-3 h-3 rounded-sm bg-amber-300 border border-amber-500" /> Disponibilidad, a la izquierda</span>
+                <span className="inline-flex items-center gap-1"><span className="w-3 h-3 rounded-sm bg-indigo-600" /> Cita final, a la derecha</span>
             </div>
             <div className="overflow-x-auto">
                 <div className="grid min-w-[560px]" style={{ gridTemplateColumns: '36px repeat(7, minmax(0, 1fr))' }}>
@@ -702,26 +732,31 @@ const WeekAgenda: React.FC<{
                     {days.map(day => {
                         const key = dayKey(day);
                         const dayBlocks = blocks.filter(block => block.date === key);
+                        const availability = assignLanes(dayBlocks.filter(block => block.kind === 'availability'));
+                        const appointments = assignLanes(dayBlocks.filter(block => block.kind === 'appointment'));
+                        const paint = (block: AgendaBlock & { lane: number; lanes: number }, side: 'availability' | 'appointment') => {
+                            const top = ((Math.max(block.startMin, DAY_START) - DAY_START) / 60) * HOUR_PX;
+                            const height = Math.max(((Math.min(block.endMin, DAY_END) - Math.max(block.startMin, DAY_START)) / 60) * HOUR_PX, 14);
+                            const appointment = side === 'appointment';
+                            return (
+                                <div
+                                    key={block.id}
+                                    title={`${block.name}${block.detail ? ` · ${block.detail}` : ''}`}
+                                    className={`absolute rounded px-0.5 overflow-hidden text-[10px] leading-tight ${appointment ? 'bg-indigo-600 text-white' : 'bg-amber-200/90 text-amber-950 border border-amber-400'}`}
+                                    style={{ top, height, ...trackStyle(block.lane, block.lanes, side) }}
+                                >
+                                    <span className="font-medium block truncate">{block.name}</span>
+                                </div>
+                            );
+                        };
                         return (
                             <div key={key} className="relative border-l border-gray-100" style={{ height: hours.length * HOUR_PX }}>
                                 {hours.map(hour => (
                                     <div key={hour} className="border-t border-gray-100" style={{ height: HOUR_PX }} />
                                 ))}
-                                {dayBlocks.map(block => {
-                                    const top = ((Math.max(block.startMin, DAY_START) - DAY_START) / 60) * HOUR_PX;
-                                    const height = Math.max(((Math.min(block.endMin, DAY_END) - Math.max(block.startMin, DAY_START)) / 60) * HOUR_PX, 16);
-                                    const appointment = block.kind === 'appointment';
-                                    return (
-                                        <div
-                                            key={block.id}
-                                            title={`${block.name}${block.detail ? ` · ${block.detail}` : ''}`}
-                                            className={`absolute left-0.5 right-0.5 rounded px-1 overflow-hidden text-[10px] leading-tight ${appointment ? 'bg-indigo-600 text-white z-10' : 'bg-amber-200/90 text-amber-950 border border-amber-400'}`}
-                                            style={{ top, height }}
-                                        >
-                                            <span className="font-medium block truncate">{block.name}</span>
-                                        </div>
-                                    );
-                                })}
+                                <div className="absolute inset-y-0 left-1/2 w-px bg-gray-200" />
+                                {availability.map(block => paint(block, 'availability'))}
+                                {appointments.map(block => paint(block, 'appointment'))}
                             </div>
                         );
                     })}
@@ -740,7 +775,7 @@ const WeekAgenda: React.FC<{
                     }}
                 >
                     <h3 className="text-xs font-semibold text-indigo-900">Cita final</h3>
-                    <p className="text-[11px] text-gray-500">La confirma el consultor. Queda en azul, distinta de los rangos del cliente.</p>
+                    <p className="text-[11px] text-gray-500">La confirma el consultor para un candidato. Queda en azul, distinta de la disponibilidad de la sala.</p>
                     <select value={memberId} onChange={event => setMemberId(event.target.value)} className="w-full border border-gray-300 rounded-lg px-2 py-1.5 text-sm bg-white">
                         <option value="">Candidato</option>
                         {activeMembers.map(member => (
@@ -762,8 +797,11 @@ const WeekAgenda: React.FC<{
                     </button>
                 </form>
             )}
+            {mode === 'client' && !closed && onSetAvailability && (
+                <InterviewForm busy={busy} onSubmit={onSetAvailability} />
+            )}
             {mode === 'client' && (
-                <p className="text-[11px] text-gray-500">Los bloques ámbar son los rangos que usted marca en cada candidato. Los bloques azules son las citas que confirma Opalo.</p>
+                <p className="text-[11px] text-gray-500">Los bloques ámbar son su disponibilidad para toda la sala. Los bloques azules son las citas que confirma Opalo con cada candidato.</p>
             )}
         </div>
     );

@@ -84,7 +84,7 @@ export function shortlistEventText(event: ShortlistEvent): string {
             return `quitó a ${name} de la sala`;
         case 'comment':
             if (payload.kind === 'appointment') return `agendó la cita final de ${name}`;
-            if (payload.kind === 'interview') return `marcó disponibilidad para ${name}`;
+            if (payload.kind === 'interview') return 'marcó la disponibilidad de la sala';
             if (payload.scope === 'room') return 'comentó en la sala';
             return `comentó sobre ${name}`;
         case 'closed':

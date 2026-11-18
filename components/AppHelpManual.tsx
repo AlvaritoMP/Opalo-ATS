@@ -778,8 +778,8 @@ const SCREEN_SECTIONS: HelpSection[] = [
                 <Ol items={[
                     'En Shortlists cree la sala: nombre y el DNI de quien va a entrar. El cliente del catálogo es opcional. Copie el enlace.',
                     'Abra la ficha de un candidato, en un proceso o en un proceso masivo, y use Presentar en shortlist. Puede venir de cualquier estado del proceso.',
-                    'El cliente abre el enlace, ingresa su DNI, comenta, avanza de paso o rechaza con sustento.',
-                    'Cerrar sala apaga el enlace. El historial queda en la sala para que el equipo actualice el proceso cuando lo decida.',
+                    'El cliente abre el enlace, ingresa su DNI, comenta, avanza de paso o rechaza con sustento. En Agenda marca su disponibilidad una vez, para toda la sala.',
+                    'Cerrar sala apaga el enlace. El historial queda en la sala para que el equipo actualice el proceso cuando lo decida. Editar cambia nombre, DNI o lo que ve el cliente, y conserva el enlace. Eliminar borra la sala y su historial.',
                 ]} />
                 <H3>Cómo lo hace</H3>
                 <Ul items={[

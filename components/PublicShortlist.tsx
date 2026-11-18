@@ -164,8 +164,8 @@ export const PublicShortlist: React.FC = () => {
                     onCommentRoom={body => {
                         void run(() => shortlistsApi.commentOnRoom(room.shortlist.id, body, { actorType: 'client', actorName: 'Cliente' }));
                     }}
-                    onProposeInterview={(memberId, proposal) => {
-                        void run(() => shortlistsApi.proposeInterview(memberId, proposal, { actorType: 'client', actorName: 'Cliente' }));
+                    onSetAvailability={proposal => {
+                        void run(() => shortlistsApi.setAvailability(room.shortlist.id, proposal, { actorType: 'client', actorName: 'Cliente' }));
                     }}
                 />
             </main>
