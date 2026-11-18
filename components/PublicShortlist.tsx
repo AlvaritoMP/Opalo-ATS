@@ -132,7 +132,7 @@ export const PublicShortlist: React.FC = () => {
                         inputMode="numeric"
                         autoComplete="off"
                         placeholder="DNI"
-                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                        className="w-full border border-gray-300 rounded-lg px-3 py-3 text-base"
                     />
                     {error && <p className="text-sm text-red-700">{error}</p>}
                     <button type="submit" disabled={busy} className="w-full px-3 py-2 rounded-lg bg-primary-600 text-white text-sm disabled:opacity-40">
@@ -144,13 +144,16 @@ export const PublicShortlist: React.FC = () => {
     }
 
     return (
-        <div className="min-h-screen bg-gray-50">
-            <header className="bg-white border-b px-4 py-3 md:px-8 md:py-4">
-                <p className="text-xs uppercase tracking-wide text-gray-400">Shortlist</p>
-                <h1 className="text-lg md:text-xl font-semibold text-gray-900 break-words">{room.shortlist.title}</h1>
-                <p className="text-sm text-gray-500">{room.shortlist.clientLabel}</p>
+        <div className="min-h-[100dvh] overflow-x-hidden bg-gray-50 [&_input]:text-base [&_select]:text-base [&_textarea]:text-base">
+            <header className="sticky top-0 z-30 bg-white border-b px-4 py-3 flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                    <p className="text-xs uppercase tracking-wide text-gray-400">Shortlist</p>
+                    <h1 className="text-lg md:text-xl font-semibold text-gray-900 break-words">{room.shortlist.title}</h1>
+                    <p className="text-sm text-gray-500">{room.shortlist.clientLabel}</p>
+                </div>
+                {logoUrl && <img src={logoUrl} alt="Opalo" className="h-10 sm:h-12 max-w-[150px] object-contain shrink-0" />}
             </header>
-            <main className="px-3 py-3 md:px-8 md:py-6">
+            <main className="px-3 py-3">
                 {error && <p className="mb-3 text-sm text-red-700">{error}</p>}
                 <ShortlistBoard
                     shortlist={room.shortlist}
@@ -173,7 +176,6 @@ export const PublicShortlist: React.FC = () => {
                     onSetAvailability={proposal => {
                         void run(() => shortlistsApi.setAvailability(room.shortlist.id, proposal, { actorType: 'client', actorName: 'Cliente' }));
                     }}
-                    logoUrl={logoUrl}
                 />
             </main>
         </div>

@@ -24,7 +24,6 @@ interface ShortlistBoardProps {
     onConfirmAppointment?: (memberId: string, appointment: FinalAppointment) => void;
     onRemove?: (memberId: string) => void;
     onOpenProcess?: (processId: string) => void;
-    logoUrl?: string;
 }
 
 export interface InterviewProposal {
@@ -46,7 +45,7 @@ function memberName(member: ShortlistMember): string {
 }
 
 function useNarrowScreen(): boolean {
-    const query = '(max-width: 767px)';
+    const query = '(max-width: 1023px), (hover: none) and (pointer: coarse)';
     const [matches, setMatches] = useState(() => typeof window !== 'undefined' && window.matchMedia(query).matches);
     useEffect(() => {
         const media = window.matchMedia(query);
@@ -72,12 +71,11 @@ export const ShortlistBoard: React.FC<ShortlistBoardProps> = ({
     onConfirmAppointment,
     onRemove,
     onOpenProcess,
-    logoUrl,
 }) => {
     const [selectedId, setSelectedId] = useState<string | null>(null);
     const [draggingId, setDraggingId] = useState<string | null>(null);
     const [sideTab, setSideTab] = useState<'comments' | 'agenda' | 'history'>('comments');
-    const [phonePane, setPhonePane] = useState<'board' | 'room'>('board');
+    const [phonePane, setPhonePane] = useState<'board' | 'comments' | 'agenda' | 'history'>('board');
     const [phoneColumn, setPhoneColumn] = useState<ShortlistColumnKey | 'rejected'>('presentacion');
     const phone = useNarrowScreen();
     const closed = shortlist.status === 'closed';
@@ -107,22 +105,10 @@ export const ShortlistBoard: React.FC<ShortlistBoardProps> = ({
     };
 
     return (
-        <div className="space-y-3">
-            {phone && (
-                <div className={`sticky top-0 z-20 py-2 bg-gray-50 space-y-2 ${mode === 'staff' ? 'pl-12' : ''}`}>
-                    <div className="flex items-center gap-2">
-                        {logoUrl && <img src={logoUrl} alt="Opalo" className="h-8 max-w-[96px] object-contain shrink-0" />}
-                        <div className="grid grid-cols-2 gap-2 flex-1">
-                            <button type="button" onClick={() => setPhonePane('board')} className={`py-2.5 rounded-lg text-sm font-medium ${phonePane === 'board' ? 'bg-gray-900 text-white' : 'bg-white border border-gray-300 text-gray-700'}`}>
-                                Candidatos
-                            </button>
-                            <button type="button" onClick={() => setPhonePane('room')} className={`py-2.5 rounded-lg text-sm font-medium ${phonePane === 'room' ? 'bg-gray-900 text-white' : 'bg-white border border-gray-300 text-gray-700'}`}>
-                                Sala{roomComments.length > 0 ? ` (${roomComments.length})` : ''}
-                            </button>
-                        </div>
-                    </div>
-                    {phonePane === 'board' && (
-                        <div className="flex gap-1.5 overflow-x-auto">
+        <div className={`space-y-3 ${phone ? 'pb-20' : ''}`}>
+            {phone && phonePane === 'board' && (
+                <div className="sticky top-0 z-20 -mx-1 px-1 py-2 bg-gray-50">
+                    <div className="flex gap-1.5 overflow-x-auto">
                             {SHORTLIST_COLUMNS.map(column => {
                                 const count = active.filter(member => member.column === column.key).length;
                                 const selectedColumn = phoneColumn === column.key;
@@ -146,17 +132,11 @@ export const ShortlistBoard: React.FC<ShortlistBoardProps> = ({
                                     Rechazados {rejected.length}
                                 </button>
                             )}
-                        </div>
-                    )}
+                    </div>
                 </div>
             )}
         <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_520px] gap-4 items-start">
             <div className={`space-y-4 min-w-0 ${phone && phonePane !== 'board' ? 'hidden' : ''}`}>
-                {logoUrl && !phone && (
-                    <div className="flex justify-end">
-                        <img src={logoUrl} alt="Opalo" className="h-8 sm:h-10 max-w-[140px] object-contain" />
-                    </div>
-                )}
                 <div className={phone ? '' : 'grid grid-cols-1 md:grid-cols-3 gap-3'}>
                     {SHORTLIST_COLUMNS.map(column => {
                         if (phone && phoneColumn !== column.key) return null;
@@ -241,17 +221,19 @@ export const ShortlistBoard: React.FC<ShortlistBoardProps> = ({
                 )}
             </div>
 
-            <aside className={`bg-white border border-gray-200 rounded-xl flex flex-col overflow-hidden ${phone ? `h-[calc(100dvh-11rem)] ${phonePane === 'room' ? '' : 'hidden'}` : 'h-[min(720px,calc(100vh-7rem))] sticky top-4'}`}>
+            <aside className={`bg-white border border-gray-200 rounded-xl flex flex-col overflow-hidden ${phone ? `h-[calc(100dvh-10.5rem)] ${phonePane === 'board' ? 'hidden' : ''}` : 'h-[min(720px,calc(100vh-7rem))] sticky top-4'}`}>
+                {!phone && (
                 <div className="flex border-b text-sm shrink-0">
                     <SideTab active={sideTab === 'comments'} onClick={() => setSideTab('comments')}>Comentarios{roomComments.length > 0 ? ` (${roomComments.length})` : ''}</SideTab>
                     <SideTab active={sideTab === 'agenda'} onClick={() => setSideTab('agenda')}>Agenda</SideTab>
                     <SideTab active={sideTab === 'history'} onClick={() => setSideTab('history')}>Historial</SideTab>
                 </div>
+                )}
                 <div className="flex-1 min-h-0 overflow-hidden">
-                    {sideTab === 'comments' && (
+                    {(phone ? phonePane : sideTab) === 'comments' && (
                         <RoomThread comments={roomComments} closed={closed} busy={busy} onSend={onCommentRoom} />
                     )}
-                    {sideTab === 'agenda' && (
+                    {(phone ? phonePane : sideTab) === 'agenda' && (
                         <WeekAgenda
                             members={members}
                             events={events}
@@ -263,7 +245,7 @@ export const ShortlistBoard: React.FC<ShortlistBoardProps> = ({
                             compact={phone}
                         />
                     )}
-                    {sideTab === 'history' && (
+                    {(phone ? phonePane : sideTab) === 'history' && (
                         <ul className="h-full overflow-y-auto p-4 space-y-3">
                             {events.length === 0 && <li className="text-xs text-gray-400">Todavía no hay movimientos.</li>}
                             {events.map(event => (
@@ -301,9 +283,27 @@ export const ShortlistBoard: React.FC<ShortlistBoardProps> = ({
                 />
             )}
         </div>
+            {phone && (
+                <nav className="fixed bottom-0 inset-x-0 z-40 grid grid-cols-4 border-t bg-white pb-[env(safe-area-inset-bottom)]">
+                    <PhoneNav active={phonePane === 'board'} onClick={() => setPhonePane('board')}>Candidatos</PhoneNav>
+                    <PhoneNav active={phonePane === 'comments'} onClick={() => setPhonePane('comments')}>Comentarios{roomComments.length > 0 ? ` ${roomComments.length}` : ''}</PhoneNav>
+                    <PhoneNav active={phonePane === 'agenda'} onClick={() => setPhonePane('agenda')}>Agenda</PhoneNav>
+                    <PhoneNav active={phonePane === 'history'} onClick={() => setPhonePane('history')}>Historial</PhoneNav>
+                </nav>
+            )}
         </div>
     );
 };
+
+const PhoneNav: React.FC<{ active: boolean; onClick: () => void; children: React.ReactNode }> = ({ active, onClick, children }) => (
+    <button
+        type="button"
+        onClick={onClick}
+        className={`px-1 py-3 text-[11px] font-medium leading-tight ${active ? 'text-primary-700' : 'text-gray-500'}`}
+    >
+        {children}
+    </button>
+);
 
 const MemberPanel: React.FC<{
     member: ShortlistMember;

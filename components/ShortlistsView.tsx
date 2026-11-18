@@ -167,7 +167,11 @@ export const ShortlistsView: React.FC = () => {
                             {room.shortlist.status === 'closed' ? ' · cerrada' : ' · abierta'}
                         </p>
                     </div>
-                    <div className="grid grid-cols-2 sm:flex sm:flex-wrap gap-2 w-full sm:w-auto">
+                    <div className="flex flex-col items-stretch sm:items-end gap-2 w-full sm:w-auto">
+                        {(state.settings?.logoUrl || state.settings?.poweredByLogoUrl) && (
+                            <img src={state.settings?.logoUrl || state.settings?.poweredByLogoUrl} alt="Opalo" className="h-10 max-w-[150px] object-contain self-end" />
+                        )}
+                        <div className="grid grid-cols-2 sm:flex sm:flex-wrap gap-2 w-full sm:w-auto">
                         <button type="button" onClick={() => { void copyLink(room.shortlist.token); }} className="px-3 py-2 text-sm rounded-lg border border-gray-300 bg-white">
                             Copiar enlace
                         </button>
@@ -200,6 +204,7 @@ export const ShortlistsView: React.FC = () => {
                                 Reabrir sala
                             </button>
                         )}
+                        </div>
                     </div>
                 </div>
                 {room.shortlist.status === 'closed' && (
@@ -223,7 +228,6 @@ export const ShortlistsView: React.FC = () => {
                         }
                     }}
                     onOpenProcess={openProcess}
-                    logoUrl={state.settings?.logoUrl || state.settings?.poweredByLogoUrl}
                 />
                 {formModal}
             </div>
