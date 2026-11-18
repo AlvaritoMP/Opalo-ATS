@@ -8,6 +8,8 @@ import {
     isValidAccessDni,
     normalizeAccessDni,
 } from '../shortlists';
+import { composeWorkerFullName, identityFromDbRow } from '../candidateIdentity';
+import { normalizeColumnNameKey } from '../bulkTableColumns';
 import type {
     Shortlist,
     ShortlistActor,
@@ -19,6 +21,7 @@ import type {
     ShortlistEventType,
     ShortlistMember,
     ShortlistTestSummary,
+    UserAlert,
 } from '../../types';
 
 const EMPTY_COUNTS: ShortlistCounts = { presentacion: 0, entrevista: 0, finalista: 0, rejected: 0 };
@@ -39,8 +42,9 @@ const SUITABILITY_LABELS: Record<string, string> = {
 };
 
 const CANDIDATE_SELECTS = [
-    'id, name, email, phone, age, province, district, description, salary_expectation, linkedin_url, avatar_url, assessment_results, psycholaboral_evaluation, complementary_data',
-    'id, name, email, phone, age, province, district, description, salary_expectation, linkedin_url, avatar_url, psycholaboral_evaluation, complementary_data',
+    'id, name, nombres, apellido_paterno, apellido_materno, email, phone, age, province, district, description, salary_expectation, linkedin_url, avatar_url, assessment_results, psycholaboral_evaluation, complementary_data, bulk_column_values',
+    'id, name, nombres, apellido_paterno, apellido_materno, email, phone, age, province, district, description, salary_expectation, linkedin_url, avatar_url, bulk_column_values',
+    'id, name, email, phone, age, province, district, description, salary_expectation, linkedin_url, avatar_url, assessment_results, psycholaboral_evaluation, complementary_data, bulk_column_values',
     'id, name, email, phone, age, province, district, description, salary_expectation, linkedin_url, avatar_url',
 ];
 
@@ -61,7 +65,50 @@ function asObject(value: unknown): Record<string, unknown> {
 }
 
 function textOf(value: unknown): string {
+    if (typeof value === 'number' && Number.isFinite(value)) return String(value);
     return typeof value === 'string' ? value.trim() : '';
+}
+
+function bulkValue(bulk: Record<string, unknown>, keys: string[]): string {
+    const wanted = new Set(keys);
+    for (const [key, value] of Object.entries(bulk)) {
+        const bare = key.startsWith('__name__') ? key.slice('__name__'.length) : key;
+        const norm = normalizeColumnNameKey(bare).replace(/_/g, ' ');
+        if (!wanted.has(norm)) continue;
+        const text = textOf(value);
+        if (text) return text;
+    }
+    return '';
+}
+
+function displayNameFromRow(row: Record<string, unknown>): string {
+    const identity = identityFromDbRow(row);
+    const bulk = asObject(row.bulk_column_values);
+    const nombres = identity.nombres || bulkValue(bulk, ['nombres', 'nombre']);
+    const apellidoPaterno = identity.apellidoPaterno || bulkValue(bulk, ['apellido paterno', 'ap paterno']);
+    const apellidoMaterno = identity.apellidoMaterno || bulkValue(bulk, ['apellido materno', 'ap materno']);
+    const composed = composeWorkerFullName(nombres, apellidoPaterno, apellidoMaterno);
+    const legacy = textOf(row.name);
+    if (!composed) return legacy || 'Sin nombre';
+    if (!legacy) return composed;
+    return composed.split(/\s+/).length >= legacy.split(/\s+/).length ? composed : legacy;
+}
+
+function ageFromRow(row: Record<string, unknown>): number | undefined {
+    if (typeof row.age === 'number' && row.age > 0 && row.age < 120) return row.age;
+    const bulk = asObject(row.bulk_column_values);
+    const raw = textOf(row.age) || bulkValue(bulk, ['edad', 'age']);
+    const parsed = Number(String(raw).replace(',', '.'));
+    if (Number.isFinite(parsed) && parsed > 0 && parsed < 120) return Math.round(parsed);
+    return undefined;
+}
+
+function placeFromRow(row: Record<string, unknown>): { city?: string; district?: string; province?: string } {
+    const bulk = asObject(row.bulk_column_values);
+    const district = textOf(row.district) || bulkValue(bulk, ['distrito', 'district']) || undefined;
+    const province = textOf(row.province) || bulkValue(bulk, ['provincia', 'province']) || undefined;
+    const city = bulkValue(bulk, ['ciudad', 'city']) || province;
+    return { city: city || undefined, district, province };
 }
 
 function dbToShortlist(row: Record<string, unknown>, counts: ShortlistCounts = EMPTY_COUNTS): Shortlist {
@@ -216,14 +263,16 @@ async function loadCandidateViews(ids: string[], shortlist: Shortlist): Promise<
     for (const row of rows) {
         const id = String(row.id);
         const psych = asObject(row.psycholaboral_evaluation);
+        const place = placeFromRow(row);
         views[id] = {
             id,
-            name: textOf(row.name) || 'Sin nombre',
+            name: displayNameFromRow(row),
             email: shortlist.showProfile ? textOf(row.email) || undefined : undefined,
             phone: shortlist.showProfile ? textOf(row.phone) || undefined : undefined,
-            age: shortlist.showProfile && typeof row.age === 'number' ? row.age : undefined,
-            province: shortlist.showProfile ? textOf(row.province) || undefined : undefined,
-            district: shortlist.showProfile ? textOf(row.district) || undefined : undefined,
+            age: ageFromRow(row),
+            province: place.province,
+            district: place.district,
+            city: place.city,
             description: shortlist.showProfile ? textOf(row.description) || undefined : undefined,
             salaryExpectation: shortlist.showProfile ? textOf(row.salary_expectation) || undefined : undefined,
             linkedinUrl: shortlist.showProfile ? textOf(row.linkedin_url) || undefined : undefined,
@@ -575,6 +624,101 @@ export const shortlistsApi = {
         });
     },
 
+    async commentOnRoom(shortlistId: string, body: string, actor: ShortlistActor): Promise<void> {
+        const text = body.trim();
+        if (!text) throw new Error('Escriba un comentario.');
+        await requireOpen(shortlistId);
+        await insertEvent({
+            shortlistId,
+            eventType: 'comment',
+            body: text,
+            actor,
+            payload: { scope: 'room' },
+        });
+    },
+
+    async proposeInterview(
+        memberId: string,
+        input: {
+            modality: 'presencial' | 'virtual';
+            place: string;
+            slots: { date: string; start: string; end: string }[];
+        },
+        actor: ShortlistActor
+    ): Promise<void> {
+        const slots = input.slots.filter(slot => slot.date && slot.start && slot.end);
+        if (slots.length === 0) throw new Error('Indique al menos una fecha con hora de inicio y fin.');
+        const place = input.place.trim();
+        if (input.modality === 'presencial' && !place) throw new Error('Indique la dirección de la entrevista.');
+        const member = await readMember(memberId);
+        await requireOpen(member.shortlistId);
+        const modalityLabel = input.modality === 'virtual' ? 'Virtual' : 'Presencial';
+        const when = slots
+            .map(slot => `${slot.date} ${slot.start}–${slot.end}`)
+            .join('\n');
+        const body = [modalityLabel, place, when].filter(Boolean).join('\n');
+        await insertEvent({
+            shortlistId: member.shortlistId,
+            memberId,
+            candidateId: member.candidateId,
+            eventType: 'comment',
+            body,
+            actor,
+            payload: {
+                kind: 'interview',
+                candidateName: member.candidate?.name || 'Candidato',
+                modality: input.modality,
+                place,
+                slots,
+            },
+        });
+    },
+
+    async clientAlertsFor(userId: string): Promise<UserAlert[]> {
+        const creatorId = toUuidOrNull(userId);
+        if (!creatorId) return [];
+        const rooms = await supabase
+            .from('shortlists')
+            .select('id, title')
+            .eq('app_name', APP_NAME)
+            .eq('created_by', creatorId);
+        if (isMissingTableError(rooms.error) || rooms.error || !rooms.data?.length) return [];
+        const ids = rooms.data.map(row => String(row.id));
+        const events = await supabase
+            .from('shortlist_events')
+            .select('id, shortlist_id, event_type, body, payload, created_at')
+            .eq('app_name', APP_NAME)
+            .eq('actor_type', 'client')
+            .in('shortlist_id', ids)
+            .in('event_type', ['comment', 'rejected'])
+            .order('created_at', { ascending: false })
+            .limit(200);
+        if (events.error || !events.data) return [];
+        const latest = new Map<string, { id: string; body: string; count: number }>();
+        for (const row of events.data) {
+            const shortlistId = String(row.shortlist_id);
+            const current = latest.get(shortlistId);
+            const body = textOf(row.body) || 'El cliente actualizó la sala.';
+            if (!current) latest.set(shortlistId, { id: String(row.id), body, count: 1 });
+            else current.count += 1;
+        }
+        return rooms.data.flatMap(row => {
+            const notice = latest.get(String(row.id));
+            if (!notice) return [];
+            const alert: UserAlert = {
+                id: `shortlist-msg:${row.id}`,
+                type: 'shortlist_message',
+                severity: 'warning',
+                title: 'Mensaje en shortlist',
+                message: notice.body.length > 180 ? `${notice.body.slice(0, 177)}…` : notice.body,
+                processTitle: textOf(row.title) || 'Sala',
+                shortlistId: String(row.id),
+                count: notice.count,
+            };
+            return [alert];
+        });
+    },
+
     async removeMember(memberId: string, actor: ShortlistActor): Promise<void> {
         const member = await readMember(memberId);
         await requireOpen(member.shortlistId);
@@ -643,7 +787,7 @@ async function readMember(memberId: string): Promise<ShortlistMember> {
     if (!data) throw new Error('El candidato ya no está en la sala.');
     const member = dbToMember(data as unknown as Record<string, unknown>);
     const views = await loadCandidateRows([member.candidateId]);
-    const name = textOf(views[0]?.name);
+    const name = views[0] ? displayNameFromRow(views[0]) : '';
     if (name) member.candidate = { id: member.candidateId, name, documents: [], tests: [], fichaLines: [] };
     return member;
 }

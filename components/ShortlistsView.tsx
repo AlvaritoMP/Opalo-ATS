@@ -52,6 +52,20 @@ export const ShortlistsView: React.FC = () => {
         void loadList();
     }, []);
 
+    const requestedId = typeof state.view.payload === 'string' ? state.view.payload : '';
+    useEffect(() => {
+        if (!requestedId) return;
+        void loadRoom(requestedId).catch(err => setError(err instanceof Error ? err.message : 'No se pudo abrir la sala.'));
+    }, [requestedId]);
+
+    useEffect(() => {
+        if (!openId) return;
+        const timer = window.setInterval(() => {
+            void shortlistsApi.getRoom(openId).then(setRoom).catch(() => undefined);
+        }, 30000);
+        return () => window.clearInterval(timer);
+    }, [openId]);
+
     const run = async (action: () => Promise<void>) => {
         if (!openId) return;
         setBusy(true);
@@ -91,7 +105,7 @@ export const ShortlistsView: React.FC = () => {
             <div className="p-4 md:p-6 space-y-4">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                     <div>
-                        <button type="button" onClick={() => { setRoom(null); setOpenId(null); void loadList(); }} className="text-sm text-primary-700 hover:underline">
+                        <button type="button" onClick={() => { setRoom(null); setOpenId(null); actions.setView('shortlists'); void loadList(); }} className="text-sm text-primary-700 hover:underline">
                             Volver a shortlists
                         </button>
                         <h1 className="text-2xl font-semibold text-gray-900 mt-1">{room.shortlist.title}</h1>
@@ -142,6 +156,8 @@ export const ShortlistsView: React.FC = () => {
                     onMove={(memberId, column: ShortlistColumnKey) => { void run(() => shortlistsApi.moveMember(memberId, column, actor(), 'staff')); }}
                     onReject={(memberId, reason) => { void run(() => shortlistsApi.rejectMember(memberId, reason, actor())); }}
                     onComment={(memberId, body) => { void run(() => shortlistsApi.commentMember(memberId, body, actor())); }}
+                    onCommentRoom={body => { void run(() => shortlistsApi.commentOnRoom(room.shortlist.id, body, actor())); }}
+                    onProposeInterview={(memberId, proposal) => { void run(() => shortlistsApi.proposeInterview(memberId, proposal, actor())); }}
                     onRemove={memberId => {
                         if (confirm('¿Quitar a esta persona de la sala? Su proceso de origen no cambia.')) {
                             void run(() => shortlistsApi.removeMember(memberId, actor()));
@@ -215,6 +231,7 @@ const CreateShortlistModal: React.FC<{
     const [clients, setClients] = useState<Client[]>([]);
     const [title, setTitle] = useState('');
     const [clientId, setClientId] = useState('');
+    const [clientName, setClientName] = useState('');
     const [dni, setDni] = useState('');
     const [showDocuments, setShowDocuments] = useState(true);
     const [showAssessments, setShowAssessments] = useState(true);
@@ -232,13 +249,12 @@ const CreateShortlistModal: React.FC<{
         setSaving(true);
         setError('');
         try {
-            if (!clientId) throw new Error('Elija el cliente de la sala.');
             if (!isValidAccessDni(dni)) throw new Error('El DNI de acceso debe tener al menos 8 dígitos.');
             const client = clients.find(item => item.id === clientId);
             const created = await shortlistsApi.create({
                 title,
-                clientId,
-                clientLabel: client?.razonSocial,
+                clientId: clientId || undefined,
+                clientLabel: clientName.trim() || client?.razonSocial,
                 accessDni: normalizeAccessDni(dni),
                 showDocuments,
                 showAssessments,
@@ -269,13 +285,26 @@ const CreateShortlistModal: React.FC<{
                         <input value={title} onChange={event => setTitle(event.target.value)} className="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2" placeholder="Finalistas analista de crédito" />
                     </label>
                     <label className="block text-sm">
-                        <span className="text-gray-700">Cliente</span>
-                        <select value={clientId} onChange={event => setClientId(event.target.value)} className="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2 bg-white">
-                            <option value="">Seleccione</option>
+                        <span className="text-gray-700">Cliente del ATS, si ya existe</span>
+                        <select
+                            value={clientId}
+                            onChange={event => {
+                                const nextId = event.target.value;
+                                setClientId(nextId);
+                                const match = clients.find(item => item.id === nextId);
+                                if (match && !clientName.trim()) setClientName(match.razonSocial);
+                            }}
+                            className="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2 bg-white"
+                        >
+                            <option value="">Sin cliente del catálogo</option>
                             {clients.map(client => (
                                 <option key={client.id} value={client.id}>{client.razonSocial}</option>
                             ))}
                         </select>
+                    </label>
+                    <label className="block text-sm">
+                        <span className="text-gray-700">Nombre del cliente o de la terna</span>
+                        <input value={clientName} onChange={event => setClientName(event.target.value)} className="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2" placeholder="Opcional si el cliente no tiene proceso abierto" />
                     </label>
                     <label className="block text-sm">
                         <span className="text-gray-700">DNI de acceso</span>

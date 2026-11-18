@@ -255,6 +255,7 @@ import { BulkTableEditInput } from './BulkTableEditInput';
 import { applyBulkCellDomSelection, scrollBulkCellIntoView, clearBulkCellDomSelection } from '../lib/bulkTableCellSelection';
 import { SendToOpsFlowModal } from './SendToOpsFlowModal';
 import { PresentToShortlistModal } from './PresentToShortlistModal';
+import { composeWorkerFullName } from '../lib/candidateIdentity';
 import { BulkCandidateOpsFlowPanel } from './BulkCandidateOpsFlowPanel';
 import { BulkRouteCell } from './BulkRouteCell';
 import { BulkRouteCostCell } from './BulkRouteCostCell';
@@ -761,13 +762,15 @@ const CandidateDrawer: React.FC<{
             </div>
             {isPresentShortlistOpen && candidate && (
                 <PresentToShortlistModal
-                    candidateId={candidate.id}
-                    candidateName={displayCandidate?.name || candidate.name}
-                    processId={candidate.processId}
-                    stageId={candidate.stageId}
-                    processTitle={process?.title}
-                    processClientId={process?.clientId}
-                    processClientLabel={process?.client?.razonSocial}
+                    candidates={[{
+                        id: candidate.id,
+                        name: composeWorkerFullName(candidate.nombres, candidate.apellidoPaterno, candidate.apellidoMaterno) || displayCandidate?.name || candidate.name,
+                        processId: candidate.processId,
+                        stageId: candidate.stageId,
+                        processTitle: process?.title,
+                        processClientId: process?.clientId,
+                        processClientLabel: process?.client?.razonSocial,
+                    }]}
                     onClose={() => setIsPresentShortlistOpen(false)}
                 />
             )}
@@ -923,6 +926,7 @@ const BulkActionsFAB: React.FC<{
     showOpsFlow?: boolean;
     onDownloadDocuments?: () => void;
     downloadingDocuments?: boolean;
+    onShortlist?: () => void;
 }> = ({
     selectedIds,
     onApprove,
@@ -941,6 +945,7 @@ const BulkActionsFAB: React.FC<{
     showOpsFlow,
     onDownloadDocuments,
     downloadingDocuments,
+    onShortlist,
 }) => {
     const [isOpen, setIsOpen] = useState(false);
     if (selectedIds.length === 0) return null;
@@ -989,6 +994,11 @@ const BulkActionsFAB: React.FC<{
                     >
                         {downloadingDocuments ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
                         Documentos ZIP ({selectedIds.length})
+                    </button>
+                    )}
+                    {onShortlist && (
+                    <button onClick={() => { onShortlist(); setIsOpen(false); }} className="flex items-center gap-2 px-4 py-2 bg-primary-700 text-white rounded-lg shadow-lg hover:bg-primary-800 transition-colors">
+                        <Presentation className="w-4 h-4" /> Presentar en shortlist ({selectedIds.length})
                     </button>
                     )}
                     {showOpsFlow && onOpsFlow && (
@@ -1076,6 +1086,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
     const [showRecoveryModal, setShowRecoveryModal] = useState(false);
     const [showAddRowModal, setShowAddRowModal] = useState(false);
     const [showWhatsAppModal, setShowWhatsAppModal] = useState(false);
+    const [shortlistSelection, setShortlistSelection] = useState<BulkCandidate[] | null>(null);
     const [showEmailModal, setShowEmailModal] = useState(false);
     const [showContactTemplatesModal, setShowContactTemplatesModal] = useState(false);
     const [showDocumentTemplatesModal, setShowDocumentTemplatesModal] = useState(false);
@@ -8840,7 +8851,24 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
                 onOpsFlow={() => void openOpsFlowModal(Array.from(selectedIds))}
                 onDownloadDocuments={() => void handleDownloadSelectedDocuments()}
                 downloadingDocuments={isDownloadingDocuments}
+                onShortlist={canSendToOpsFlow ? () => {
+                    setShortlistSelection(candidates.filter(candidate => selectedIds.has(candidate.id)));
+                } : undefined}
             />
+            {shortlistSelection && (
+                <PresentToShortlistModal
+                    candidates={shortlistSelection.map(candidate => ({
+                        id: candidate.id,
+                        name: composeWorkerFullName(candidate.nombres, candidate.apellidoPaterno, candidate.apellidoMaterno) || candidate.name,
+                        processId: candidate.processId,
+                        stageId: candidate.stageId,
+                        processTitle: process?.title,
+                        processClientId: process?.clientId,
+                        processClientLabel: process?.client?.razonSocial,
+                    }))}
+                    onClose={() => setShortlistSelection(null)}
+                />
+            )}
 
             {scriptEditorOpen && process?.isBulkProcess && (
                 <ScriptStructureEditor

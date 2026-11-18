@@ -5,27 +5,22 @@ import { shortlistColumnLabel } from '../lib/shortlists';
 import { toUuidOrNull } from '../lib/uuid';
 import type { Shortlist, ShortlistMember } from '../types';
 
-interface PresentToShortlistModalProps {
-    candidateId: string;
-    candidateName: string;
+export interface PresentableCandidate {
+    id: string;
+    name: string;
     processId: string;
     stageId?: string;
     processTitle?: string;
     processClientId?: string;
     processClientLabel?: string;
+}
+
+interface PresentToShortlistModalProps {
+    candidates: PresentableCandidate[];
     onClose: () => void;
 }
 
-export const PresentToShortlistModal: React.FC<PresentToShortlistModalProps> = ({
-    candidateId,
-    candidateName,
-    processId,
-    stageId,
-    processTitle,
-    processClientId,
-    processClientLabel,
-    onClose,
-}) => {
+export const PresentToShortlistModal: React.FC<PresentToShortlistModalProps> = ({ candidates, onClose }) => {
     const { state, actions } = useAppState();
     const [rooms, setRooms] = useState<Shortlist[]>([]);
     const [memberships, setMemberships] = useState<Pick<ShortlistMember, 'shortlistId' | 'column' | 'status'>[]>([]);
@@ -33,21 +28,15 @@ export const PresentToShortlistModal: React.FC<PresentToShortlistModalProps> = (
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
     const [error, setError] = useState('');
-
-    const process = state.processes.find(item => item.id === processId);
-    const stageName = process?.stages.find(stage => stage.id === stageId)?.name;
-    const resolvedTitle = processTitle || process?.title || 'Proceso';
-    const resolvedClientId = processClientId || process?.clientId;
-    const resolvedClientLabel = processClientLabel || process?.client?.razonSocial;
+    const single = candidates.length === 1 ? candidates[0] : null;
+    const process = single ? state.processes.find(item => item.id === single.processId) : undefined;
 
     useEffect(() => {
         let cancelled = false;
         (async () => {
             try {
-                const [list, current] = await Promise.all([
-                    shortlistsApi.list(),
-                    shortlistsApi.membershipsForCandidate(candidateId),
-                ]);
+                const list = await shortlistsApi.list();
+                const current = single ? await shortlistsApi.membershipsForCandidate(single.id) : [];
                 if (cancelled) return;
                 const open = list.filter(room => room.status === 'open');
                 setRooms(open);
@@ -62,36 +51,54 @@ export const PresentToShortlistModal: React.FC<PresentToShortlistModalProps> = (
         return () => {
             cancelled = true;
         };
-    }, [candidateId]);
+    }, [single?.id]);
 
     const selected = rooms.find(room => room.id === selectedId);
-    const current = memberships.find(item => item.shortlistId === selectedId);
-    const mismatch = Boolean(
-        selected?.clientId && resolvedClientId && selected.clientId !== resolvedClientId
-    );
+    const current = single ? memberships.find(item => item.shortlistId === selectedId) : undefined;
+    const resolvedClientId = single?.processClientId || process?.clientId;
+    const resolvedClientLabel = single?.processClientLabel || process?.client?.razonSocial;
+    const mismatch = Boolean(selected?.clientId && resolvedClientId && selected.clientId !== resolvedClientId);
 
     const present = async () => {
-        if (!selected) return;
+        if (!selected || candidates.length === 0) return;
         setSaving(true);
         setError('');
+        const actor = {
+            actorType: 'staff' as const,
+            actorName: state.currentUser?.name || 'Equipo ATS',
+            actorUserId: toUuidOrNull(state.currentUser?.id) || undefined,
+        };
+        let added = 0;
+        let skipped = 0;
         try {
-            await shortlistsApi.addMember({
-                shortlistId: selected.id,
-                candidateId,
-                candidateName,
-                sourceProcessId: processId,
-                sourceProcessTitle: resolvedTitle,
-                sourceStageId: stageId,
-                sourceStageName: stageName,
-                sourceClientId: resolvedClientId,
-                sourceClientLabel: resolvedClientLabel,
-                actor: {
-                    actorType: 'staff',
-                    actorName: state.currentUser?.name || 'Equipo ATS',
-                    actorUserId: toUuidOrNull(state.currentUser?.id) || undefined,
-                },
-            });
-            actions.showToast(`${candidateName} quedó en Presentación de «${selected.title}». Su etapa en el proceso no cambió.`, 'success', 4500);
+            for (const candidate of candidates) {
+                const source = state.processes.find(item => item.id === candidate.processId);
+                try {
+                    await shortlistsApi.addMember({
+                        shortlistId: selected.id,
+                        candidateId: candidate.id,
+                        candidateName: candidate.name,
+                        sourceProcessId: candidate.processId,
+                        sourceProcessTitle: candidate.processTitle || source?.title || 'Proceso',
+                        sourceStageId: candidate.stageId,
+                        sourceStageName: source?.stages.find(stage => stage.id === candidate.stageId)?.name,
+                        sourceClientId: candidate.processClientId || source?.clientId,
+                        sourceClientLabel: candidate.processClientLabel || source?.client?.razonSocial,
+                        actor,
+                    });
+                    added += 1;
+                } catch (err) {
+                    const message = err instanceof Error ? err.message : '';
+                    if (message.includes('ya está en la sala')) {
+                        skipped += 1;
+                        continue;
+                    }
+                    throw err;
+                }
+            }
+            const who = added === 1 && candidates.length === 1 ? candidates[0].name : `${added} candidato${added === 1 ? '' : 's'}`;
+            const extra = skipped > 0 ? ` ${skipped} ya estaba${skipped === 1 ? '' : 'n'} en la sala.` : '';
+            actions.showToast(`${who} quedó en Presentación de «${selected.title}».${extra} La etapa en el proceso no cambió.`, 'success', 5000);
             onClose();
         } catch (err) {
             setError(err instanceof ShortlistSchemaError || err instanceof Error ? err.message : 'No se pudo presentar.');
@@ -106,7 +113,9 @@ export const PresentToShortlistModal: React.FC<PresentToShortlistModalProps> = (
                 <header className="px-5 py-4 border-b">
                     <h2 className="text-lg font-semibold text-gray-900">Presentar en shortlist</h2>
                     <p className="text-sm text-gray-500 mt-1">
-                        {candidateName} entra a la sala en Presentación. Su registro en {resolvedTitle} queda igual.
+                        {single
+                            ? `${single.name} entra a la sala en Presentación. Su registro en el proceso queda igual.`
+                            : `${candidates.length} candidatos entran a la sala en Presentación. Su registro en el proceso queda igual.`}
                     </p>
                 </header>
                 <div className="px-5 py-4 space-y-3">
@@ -115,7 +124,7 @@ export const PresentToShortlistModal: React.FC<PresentToShortlistModalProps> = (
                         <p className="text-sm text-gray-600">No hay salas abiertas. Créelas en la sección Shortlists.</p>
                     )}
                     {rooms.map(room => {
-                        const place = memberships.find(item => item.shortlistId === room.id);
+                        const place = single ? memberships.find(item => item.shortlistId === room.id) : undefined;
                         return (
                             <label key={room.id} className={`block border rounded-xl px-3 py-3 cursor-pointer ${selectedId === room.id ? 'border-primary-500 bg-primary-50' : 'border-gray-200'}`}>
                                 <span className="flex items-start gap-3">
@@ -128,7 +137,7 @@ export const PresentToShortlistModal: React.FC<PresentToShortlistModalProps> = (
                                     />
                                     <span>
                                         <span className="block text-sm font-medium text-gray-900">{room.title}</span>
-                                        <span className="block text-xs text-gray-500">{room.clientLabel || 'Sin cliente'} · DNI {room.accessDni}</span>
+                                        <span className="block text-xs text-gray-500">{room.clientLabel || 'Sin cliente del catálogo'} · DNI {room.accessDni}</span>
                                         {place?.status === 'active' && (
                                             <span className="block text-xs text-primary-700 mt-1">Ya está en {shortlistColumnLabel(place.column)}</span>
                                         )}
@@ -152,7 +161,7 @@ export const PresentToShortlistModal: React.FC<PresentToShortlistModalProps> = (
                     <button
                         type="button"
                         onClick={() => { void present(); }}
-                        disabled={!selected || saving || current?.status === 'active'}
+                        disabled={!selected || saving || candidates.length === 0 || current?.status === 'active'}
                         className="px-3 py-2 text-sm rounded-lg bg-primary-600 text-white disabled:opacity-40"
                     >
                         {saving ? 'Presentando…' : 'Presentar'}

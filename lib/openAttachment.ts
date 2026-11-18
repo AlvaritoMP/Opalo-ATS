@@ -53,13 +53,8 @@ function triggerDownload(objectUrl: string, filename: string) {
 }
 
 function openHttpUrl(url: string): boolean {
-    try {
-        const win = window.open(url, '_blank', 'noopener,noreferrer');
-        if (win) return true;
-    } catch {
-        /* ignore */
-    }
-
+    // window.open(..., 'noopener') abre la pestaña y a veces devuelve null.
+    // El respaldo con otro click abría el mismo archivo por segunda vez.
     try {
         const anchor = document.createElement('a');
         anchor.href = url;

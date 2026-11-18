@@ -9,9 +9,11 @@ import {
     Megaphone,
     Unlock,
     ChevronRight,
+    MessageCircle,
 } from 'lucide-react';
 import type { Process, User, UserAlert, UserAlertSettings } from '../types';
 import { userAlertsApi } from '../lib/api/userAlerts';
+import { shortlistsApi } from '../lib/api/shortlists';
 import { computeUserAlerts, getSporadicAlerts } from '../lib/userAlerts';
 import { getProcessesVisibleToUser } from '../lib/userAlertAccess';
 import { areAlertsEnabledForProcess } from '../lib/userAlertSettings';
@@ -96,6 +98,7 @@ const TYPE_ICONS: Record<UserAlert['type'], React.ElementType> = {
     stale_without_contact: Clock,
     lock_expired: Unlock,
     no_new_in_process: Megaphone,
+    shortlist_message: MessageCircle,
 };
 
 interface UserAlertsPanelProps {
@@ -103,6 +106,7 @@ interface UserAlertsPanelProps {
     processes: Process[];
     alertSettings?: UserAlertSettings | null;
     onNavigateToProcess?: (processId: string) => void;
+    onNavigateToShortlist?: (shortlistId: string) => void;
 }
 
 export const UserAlertsPanel: React.FC<UserAlertsPanelProps> = ({
@@ -110,8 +114,10 @@ export const UserAlertsPanel: React.FC<UserAlertsPanelProps> = ({
     processes,
     alertSettings,
     onNavigateToProcess,
+    onNavigateToShortlist,
 }) => {
     const [alerts, setAlerts] = useState<UserAlert[]>([]);
+    const [shortlistAlerts, setShortlistAlerts] = useState<UserAlert[]>([]);
     const [acks, setAcks] = useState<Record<string, string>>(() =>
         loadAlertAcknowledgements(currentUser.id)
     );
@@ -130,11 +136,12 @@ export const UserAlertsPanel: React.FC<UserAlertsPanelProps> = ({
 
     const pendingAlerts = useMemo(
         () =>
-            filterPendingAlerts(alerts, acks).filter(alert => {
+            filterPendingAlerts([...alerts, ...shortlistAlerts], acks).filter(alert => {
+                if (alert.type === 'shortlist_message') return true;
                 const process = processes.find(item => item.id === alert.processId);
                 return !!process && isProcessActive(process.status) && areAlertsEnabledForProcess(process, alertSettings);
             }),
-        [alerts, acks, processes, alertSettings]
+        [alerts, shortlistAlerts, acks, processes, alertSettings]
     );
 
     const activeProcessKey = useMemo(
@@ -237,6 +244,31 @@ export const UserAlertsPanel: React.FC<UserAlertsPanelProps> = ({
         });
     }, [currentUser.id, activeProcessKey, loadAlerts, maybeShowAutoModal]);
 
+    useEffect(() => {
+        let cancelled = false;
+        const prompted = new Set<string>();
+        const loadShortlist = async () => {
+            try {
+                const rows = await shortlistsApi.clientAlertsFor(currentUserRef.current.id);
+                if (cancelled) return;
+                setShortlistAlerts(rows);
+                const pending = filterPendingAlerts(rows, acksRef.current);
+                const fresh = pending.find(alert => !prompted.has(`${alert.id}|${alert.message}|${alert.count ?? 0}`));
+                if (!fresh) return;
+                prompted.add(`${fresh.id}|${fresh.message}|${fresh.count ?? 0}`);
+                setShowModal(true);
+            } catch {
+                if (!cancelled) setShortlistAlerts([]);
+            }
+        };
+        void loadShortlist();
+        const timer = window.setInterval(() => { void loadShortlist(); }, 60_000);
+        return () => {
+            cancelled = true;
+            window.clearInterval(timer);
+        };
+    }, [currentUser.id]);
+
     // Polling horario estable (no se reinicia al confirmar avisos).
     useEffect(() => {
         const interval = setInterval(() => {
@@ -306,6 +338,17 @@ export const UserAlertsPanel: React.FC<UserAlertsPanelProps> = ({
                                     Ir al proceso <ChevronRight className="w-3 h-3" />
                                 </button>
                             )}
+                            {alert.shortlistId && onNavigateToShortlist && (
+                                <button
+                                    onClick={() => {
+                                        onNavigateToShortlist(alert.shortlistId!);
+                                        setShowModal(false);
+                                    }}
+                                    className="text-xs text-primary-600 hover:text-primary-800 font-medium flex items-center gap-0.5"
+                                >
+                                    Ir a la sala <ChevronRight className="w-3 h-3" />
+                                </button>
+                            )}
                             <button
                                 onClick={() => acknowledgeAlert(alert)}
                                 className="text-xs px-3 py-1.5 rounded-lg bg-primary-600 text-white hover:bg-primary-700 font-medium"
@@ -320,12 +363,13 @@ export const UserAlertsPanel: React.FC<UserAlertsPanelProps> = ({
         );
     };
 
-    if (loading && alerts.length === 0) return null;
+    if (loading && alerts.length === 0 && shortlistAlerts.length === 0) return null;
 
     return (
         <>
             <button
                 onClick={() => {
+                    void shortlistsApi.clientAlertsFor(currentUser.id).then(setShortlistAlerts).catch(() => undefined);
                     void loadAlerts({ force: true }).then(() => setShowModal(true));
                 }}
                 className="relative p-2 rounded-lg hover:bg-gray-100 text-gray-600 transition-colors"

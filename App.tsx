@@ -570,6 +570,7 @@ const Sidebar: React.FC = () => {
                                     currentUser={state.currentUser}
                                     processes={state.processes}
                                     alertSettings={state.settings?.userAlertSettings}
+                                    onNavigateToShortlist={(shortlistId) => actions.setView('shortlists', shortlistId)}
                                     onNavigateToProcess={(processId) => {
                                         const process = state.processes.find(p => p.id === processId);
                                         if (process?.isBulkProcess) {

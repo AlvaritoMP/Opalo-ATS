@@ -815,6 +815,7 @@ export interface ShortlistCandidateView {
     salaryExpectation?: string;
     linkedinUrl?: string;
     avatarUrl?: string;
+    city?: string;
     documents: ShortlistDocument[];
     tests: ShortlistTestSummary[];
     psycholaboralConclusion?: string;
@@ -892,7 +893,8 @@ export type UserAlertType =
     | 'new_candidates'
     | 'stale_without_contact'
     | 'lock_expired'
-    | 'no_new_in_process';
+    | 'no_new_in_process'
+    | 'shortlist_message';
 
 export type UserAlertSeverity = 'info' | 'warning' | 'urgent';
 
@@ -904,6 +906,7 @@ export interface UserAlert {
     message: string;
     processId?: string;
     processTitle?: string;
+    shortlistId?: string;
     count?: number;
     candidateNames?: string[];
 }

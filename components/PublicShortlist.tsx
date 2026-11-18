@@ -71,6 +71,12 @@ export const PublicShortlist: React.FC = () => {
         setRoom({ shortlist: result.shortlist, members: result.members, events: result.events });
     };
 
+    useEffect(() => {
+        if (!room) return;
+        const timer = window.setInterval(() => { void reload(); }, 30000);
+        return () => window.clearInterval(timer);
+    }, [room?.shortlist.id]);
+
     const run = async (action: () => Promise<void>) => {
         setBusy(true);
         setError('');
@@ -154,6 +160,12 @@ export const PublicShortlist: React.FC = () => {
                     }}
                     onComment={(memberId, body) => {
                         void run(() => shortlistsApi.commentMember(memberId, body, { actorType: 'client', actorName: 'Cliente' }));
+                    }}
+                    onCommentRoom={body => {
+                        void run(() => shortlistsApi.commentOnRoom(room.shortlist.id, body, { actorType: 'client', actorName: 'Cliente' }));
+                    }}
+                    onProposeInterview={(memberId, proposal) => {
+                        void run(() => shortlistsApi.proposeInterview(memberId, proposal, { actorType: 'client', actorName: 'Cliente' }));
                     }}
                 />
             </main>

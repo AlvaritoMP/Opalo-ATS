@@ -83,6 +83,8 @@ export function shortlistEventText(event: ShortlistEvent): string {
         case 'removed':
             return `quitó a ${name} de la sala`;
         case 'comment':
+            if (payload.kind === 'interview') return `propuso una entrevista para ${name}`;
+            if (payload.scope === 'room') return 'comentó en la sala';
             return `comentó sobre ${name}`;
         case 'closed':
             return 'cerró la sala';

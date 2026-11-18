@@ -1872,10 +1872,12 @@ export const CandidateDetailsModal: React.FC<{ candidate: Candidate, onClose: ()
             )}
             {isPresentShortlistOpen && (
                 <PresentToShortlistModal
-                    candidateId={currentCandidate.id}
-                    candidateName={currentCandidate.name}
-                    processId={currentCandidate.processId}
-                    stageId={currentCandidate.stageId}
+                    candidates={[{
+                        id: currentCandidate.id,
+                        name: currentCandidate.name,
+                        processId: currentCandidate.processId,
+                        stageId: currentCandidate.stageId,
+                    }]}
                     onClose={() => setIsPresentShortlistOpen(false)}
                 />
             )}
