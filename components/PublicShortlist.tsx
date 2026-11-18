@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { ShortlistBoard } from './ShortlistBoard';
 import { shortlistsApi } from '../lib/api/shortlists';
+import { settingsApi } from '../lib/api/settings';
 import { normalizeAccessDni, readPublicShortlistToken } from '../lib/shortlists';
 import type { Shortlist, ShortlistColumnKey, ShortlistEvent, ShortlistMember } from '../types';
 
@@ -21,6 +22,7 @@ export const PublicShortlist: React.FC = () => {
     const [gate, setGate] = useState<'form' | 'closed' | 'missing'>('form');
     const [error, setError] = useState('');
     const [busy, setBusy] = useState(false);
+    const [logoUrl, setLogoUrl] = useState('');
 
     const enter = async (value: string) => {
         const digits = normalizeAccessDni(value);
@@ -58,6 +60,10 @@ export const PublicShortlist: React.FC = () => {
         // Solo al abrir el enlace.
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [token]);
+
+    useEffect(() => {
+        void settingsApi.brandLogo().then(setLogoUrl).catch(() => undefined);
+    }, []);
 
     const reload = async () => {
         const stored = sessionStorage.getItem(sessionKey(token));
@@ -139,12 +145,12 @@ export const PublicShortlist: React.FC = () => {
 
     return (
         <div className="min-h-screen bg-gray-50">
-            <header className="bg-white border-b px-4 py-4 md:px-8">
+            <header className="bg-white border-b px-4 py-3 md:px-8 md:py-4">
                 <p className="text-xs uppercase tracking-wide text-gray-400">Shortlist</p>
-                <h1 className="text-xl font-semibold text-gray-900">{room.shortlist.title}</h1>
+                <h1 className="text-lg md:text-xl font-semibold text-gray-900 break-words">{room.shortlist.title}</h1>
                 <p className="text-sm text-gray-500">{room.shortlist.clientLabel}</p>
             </header>
-            <main className="px-4 py-4 md:px-8 md:py-6">
+            <main className="px-3 py-3 md:px-8 md:py-6">
                 {error && <p className="mb-3 text-sm text-red-700">{error}</p>}
                 <ShortlistBoard
                     shortlist={room.shortlist}
@@ -167,6 +173,7 @@ export const PublicShortlist: React.FC = () => {
                     onSetAvailability={proposal => {
                         void run(() => shortlistsApi.setAvailability(room.shortlist.id, proposal, { actorType: 'client', actorName: 'Cliente' }));
                     }}
+                    logoUrl={logoUrl}
                 />
             </main>
         </div>

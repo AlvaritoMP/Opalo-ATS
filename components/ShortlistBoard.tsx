@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
     SHORTLIST_COLUMNS,
     canMoveShortlistColumn,
@@ -24,6 +24,7 @@ interface ShortlistBoardProps {
     onConfirmAppointment?: (memberId: string, appointment: FinalAppointment) => void;
     onRemove?: (memberId: string) => void;
     onOpenProcess?: (processId: string) => void;
+    logoUrl?: string;
 }
 
 export interface InterviewProposal {
@@ -44,6 +45,19 @@ function memberName(member: ShortlistMember): string {
     return member.candidate?.name || 'Candidato no disponible';
 }
 
+function useNarrowScreen(): boolean {
+    const query = '(max-width: 767px)';
+    const [matches, setMatches] = useState(() => typeof window !== 'undefined' && window.matchMedia(query).matches);
+    useEffect(() => {
+        const media = window.matchMedia(query);
+        const onChange = () => setMatches(media.matches);
+        onChange();
+        media.addEventListener('change', onChange);
+        return () => media.removeEventListener('change', onChange);
+    }, []);
+    return matches;
+}
+
 export const ShortlistBoard: React.FC<ShortlistBoardProps> = ({
     shortlist,
     members,
@@ -58,10 +72,14 @@ export const ShortlistBoard: React.FC<ShortlistBoardProps> = ({
     onConfirmAppointment,
     onRemove,
     onOpenProcess,
+    logoUrl,
 }) => {
     const [selectedId, setSelectedId] = useState<string | null>(null);
     const [draggingId, setDraggingId] = useState<string | null>(null);
     const [sideTab, setSideTab] = useState<'comments' | 'agenda' | 'history'>('comments');
+    const [phonePane, setPhonePane] = useState<'board' | 'room'>('board');
+    const [phoneColumn, setPhoneColumn] = useState<ShortlistColumnKey | 'rejected'>('presentacion');
+    const phone = useNarrowScreen();
     const closed = shortlist.status === 'closed';
     const roomComments = events.filter(event => event.eventType === 'comment' && event.payload?.scope === 'room').slice().reverse();
     const active = members.filter(member => member.status === 'active');
@@ -89,15 +107,64 @@ export const ShortlistBoard: React.FC<ShortlistBoardProps> = ({
     };
 
     return (
-        <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_400px] gap-4 items-start">
-            <div className="space-y-4 min-w-0">
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+        <div className="space-y-3">
+            {phone && (
+                <div className={`sticky top-0 z-20 py-2 bg-gray-50 space-y-2 ${mode === 'staff' ? 'pl-12' : ''}`}>
+                    <div className="flex items-center gap-2">
+                        {logoUrl && <img src={logoUrl} alt="Opalo" className="h-8 max-w-[96px] object-contain shrink-0" />}
+                        <div className="grid grid-cols-2 gap-2 flex-1">
+                            <button type="button" onClick={() => setPhonePane('board')} className={`py-2.5 rounded-lg text-sm font-medium ${phonePane === 'board' ? 'bg-gray-900 text-white' : 'bg-white border border-gray-300 text-gray-700'}`}>
+                                Candidatos
+                            </button>
+                            <button type="button" onClick={() => setPhonePane('room')} className={`py-2.5 rounded-lg text-sm font-medium ${phonePane === 'room' ? 'bg-gray-900 text-white' : 'bg-white border border-gray-300 text-gray-700'}`}>
+                                Sala{roomComments.length > 0 ? ` (${roomComments.length})` : ''}
+                            </button>
+                        </div>
+                    </div>
+                    {phonePane === 'board' && (
+                        <div className="flex gap-1.5 overflow-x-auto">
+                            {SHORTLIST_COLUMNS.map(column => {
+                                const count = active.filter(member => member.column === column.key).length;
+                                const selectedColumn = phoneColumn === column.key;
+                                return (
+                                    <button
+                                        key={column.key}
+                                        type="button"
+                                        onClick={() => setPhoneColumn(column.key)}
+                                        className={`shrink-0 px-3 py-2 rounded-full text-xs font-medium ${selectedColumn ? 'bg-primary-600 text-white' : 'bg-white border border-gray-300 text-gray-700'}`}
+                                    >
+                                        {column.label} {count}
+                                    </button>
+                                );
+                            })}
+                            {rejected.length > 0 && (
+                                <button
+                                    type="button"
+                                    onClick={() => setPhoneColumn('rejected')}
+                                    className={`shrink-0 px-3 py-2 rounded-full text-xs font-medium ${phoneColumn === 'rejected' ? 'bg-red-700 text-white' : 'bg-white border border-red-200 text-red-700'}`}
+                                >
+                                    Rechazados {rejected.length}
+                                </button>
+                            )}
+                        </div>
+                    )}
+                </div>
+            )}
+        <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_520px] gap-4 items-start">
+            <div className={`space-y-4 min-w-0 ${phone && phonePane !== 'board' ? 'hidden' : ''}`}>
+                {logoUrl && !phone && (
+                    <div className="flex justify-end">
+                        <img src={logoUrl} alt="Opalo" className="h-8 sm:h-10 max-w-[140px] object-contain" />
+                    </div>
+                )}
+                <div className={phone ? '' : 'grid grid-cols-1 md:grid-cols-3 gap-3'}>
                     {SHORTLIST_COLUMNS.map(column => {
+                        if (phone && phoneColumn !== column.key) return null;
                         const cards = active.filter(member => member.column === column.key);
                         return (
                             <section
                                 key={column.key}
-                                className="bg-gray-100 rounded-xl p-3 min-h-[280px]"
+                                className={`bg-gray-100 rounded-xl p-3 ${phone ? '' : 'min-h-[280px]'}`}
                                 onDragOver={event => {
                                     if (draggingId) event.preventDefault();
                                 }}
@@ -120,7 +187,7 @@ export const ShortlistBoard: React.FC<ShortlistBoardProps> = ({
                                     {cards.map(member => (
                                         <article
                                             key={member.id}
-                                            draggable={!closed && !busy}
+                                            draggable={!phone && !closed && !busy}
                                             onDragStart={() => setDraggingId(member.id)}
                                             onDragEnd={() => setDraggingId(null)}
                                             onClick={() => setSelectedId(member.id)}
@@ -135,6 +202,20 @@ export const ShortlistBoard: React.FC<ShortlistBoardProps> = ({
                                             {shortlist.clientLabel && member.sourceClientLabel && member.sourceClientLabel !== shortlist.clientLabel && (
                                                 <p className="text-[11px] text-amber-700 mt-1">Viene de {member.sourceClientLabel}</p>
                                             )}
+                                            {phone && !closed && nextShortlistColumn(member.column) && (
+                                                <button
+                                                    type="button"
+                                                    disabled={busy}
+                                                    className="mt-3 w-full text-sm py-2 rounded-lg bg-primary-600 text-white disabled:opacity-40"
+                                                    onClick={event => {
+                                                        event.stopPropagation();
+                                                        const next = nextShortlistColumn(member.column);
+                                                        if (next) onMove(member.id, next);
+                                                    }}
+                                                >
+                                                    Pasar a {shortlistColumnLabel(nextShortlistColumn(member.column) as ShortlistColumnKey)}
+                                                </button>
+                                            )}
                                         </article>
                                     ))}
                                 </div>
@@ -143,7 +224,7 @@ export const ShortlistBoard: React.FC<ShortlistBoardProps> = ({
                     })}
                 </div>
 
-                {rejected.length > 0 && (
+                {rejected.length > 0 && (!phone || phoneColumn === 'rejected') && (
                     <section className="bg-white border border-gray-200 rounded-xl p-4">
                         <h3 className="text-sm font-semibold text-gray-800 mb-2">Rechazados ({rejected.length})</h3>
                         <ul className="space-y-2">
@@ -160,7 +241,7 @@ export const ShortlistBoard: React.FC<ShortlistBoardProps> = ({
                 )}
             </div>
 
-            <aside className="bg-white border border-gray-200 rounded-xl flex flex-col h-[min(720px,calc(100vh-7rem))] sticky top-4 overflow-hidden">
+            <aside className={`bg-white border border-gray-200 rounded-xl flex flex-col overflow-hidden ${phone ? `h-[calc(100dvh-11rem)] ${phonePane === 'room' ? '' : 'hidden'}` : 'h-[min(720px,calc(100vh-7rem))] sticky top-4'}`}>
                 <div className="flex border-b text-sm shrink-0">
                     <SideTab active={sideTab === 'comments'} onClick={() => setSideTab('comments')}>Comentarios{roomComments.length > 0 ? ` (${roomComments.length})` : ''}</SideTab>
                     <SideTab active={sideTab === 'agenda'} onClick={() => setSideTab('agenda')}>Agenda</SideTab>
@@ -179,6 +260,7 @@ export const ShortlistBoard: React.FC<ShortlistBoardProps> = ({
                             busy={busy}
                             onConfirm={onConfirmAppointment}
                             onSetAvailability={onSetAvailability}
+                            compact={phone}
                         />
                     )}
                     {sideTab === 'history' && (
@@ -219,6 +301,7 @@ export const ShortlistBoard: React.FC<ShortlistBoardProps> = ({
                 />
             )}
         </div>
+        </div>
     );
 };
 
@@ -258,7 +341,7 @@ const MemberPanel: React.FC<{
                             {member.status === 'rejected' ? 'Rechazado' : shortlistColumnLabel(member.column)}
                         </p>
                     </div>
-                    <button type="button" onClick={onClose} className="text-sm text-gray-500 hover:text-gray-800">Cerrar</button>
+                    <button type="button" onClick={onClose} className="shrink-0 text-sm text-gray-500 px-2 py-2">Cerrar</button>
                 </header>
                 <div className="px-5 py-4 space-y-5">
                     {member.status === 'rejected' && (
@@ -270,7 +353,7 @@ const MemberPanel: React.FC<{
                         </p>
                     )}
                     {showProfile && person && (
-                        <dl className="grid grid-cols-2 gap-3 text-sm">
+                        <dl className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
                             {person.phone && <Info label="Teléfono" value={person.phone} />}
                             {person.email && <Info label="Correo" value={person.email} />}
                             {person.salaryExpectation && <Info label="Expectativa" value={person.salaryExpectation} />}
@@ -564,7 +647,7 @@ const InterviewForm: React.FC<{
                     className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white"
                 />
                 {slots.map((slot, index) => (
-                    <div key={index} className="grid grid-cols-3 gap-2">
+                    <div key={index} className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                         <input type="date" value={slot.date} onChange={event => setSlots(current => current.map((item, i) => i === index ? { ...item, date: event.target.value } : item))} className="border border-gray-300 rounded-lg px-2 py-1.5 text-sm" />
                         <input type="time" value={slot.start} onChange={event => setSlots(current => current.map((item, i) => i === index ? { ...item, start: event.target.value } : item))} className="border border-gray-300 rounded-lg px-2 py-1.5 text-sm" />
                         <input type="time" value={slot.end} onChange={event => setSlots(current => current.map((item, i) => i === index ? { ...item, end: event.target.value } : item))} className="border border-gray-300 rounded-lg px-2 py-1.5 text-sm" />
@@ -601,6 +684,12 @@ function minutesOf(value: string): number {
     const [hour, minute] = value.split(':').map(part => Number(part));
     if (!Number.isFinite(hour) || !Number.isFinite(minute)) return DAY_START;
     return hour * 60 + minute;
+}
+
+function clock(minutes: number): string {
+    const hour = Math.floor(minutes / 60);
+    const minute = minutes % 60;
+    return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
 }
 
 function mondayOf(date: Date): Date {
@@ -688,7 +777,8 @@ const WeekAgenda: React.FC<{
     busy?: boolean;
     onConfirm?: (memberId: string, appointment: FinalAppointment) => void;
     onSetAvailability?: (proposal: InterviewProposal) => void;
-}> = ({ members, events, mode, closed, busy, onConfirm, onSetAvailability }) => {
+    compact?: boolean;
+}> = ({ members, events, mode, closed, busy, onConfirm, onSetAvailability, compact }) => {
     const [weekStart, setWeekStart] = useState(() => mondayOf(new Date()));
     const [memberId, setMemberId] = useState(members.find(member => member.status === 'active')?.id || '');
     const [modality, setModality] = useState<'presencial' | 'virtual'>('presencial');
@@ -700,24 +790,76 @@ const WeekAgenda: React.FC<{
     const blocks = agendaBlocks(events, members);
     const hours = Array.from({ length: 11 }, (_, index) => 8 + index);
     const activeMembers = members.filter(member => member.status === 'active');
+    const [focusDay, setFocusDay] = useState(() => dayKey(new Date()));
+    const changeWeek = (delta: number) => {
+        setWeekStart(current => {
+            const next = shiftDays(current, delta);
+            setFocusDay(dayKey(next));
+            return next;
+        });
+    };
+    const focusBlocks = blocks
+        .filter(block => block.date === focusDay)
+        .sort((a, b) => a.startMin - b.startMin);
+    const focusAvailability = focusBlocks.filter(block => block.kind === 'availability');
 
     return (
         <div className="h-full overflow-y-auto p-3 space-y-3">
             <div className="flex items-center justify-between gap-2">
-                <button type="button" onClick={() => setWeekStart(current => shiftDays(current, -7))} className="text-xs px-2 py-1 border border-gray-300 rounded-md">Semana anterior</button>
-                <p className="text-xs font-medium text-gray-700">
+                <button type="button" onClick={() => changeWeek(-7)} className="text-xs px-2 py-2 border border-gray-300 rounded-md shrink-0">Anterior</button>
+                <p className="text-xs font-medium text-gray-700 text-center">
                     {weekStart.toLocaleDateString('es-PE', { day: 'numeric', month: 'short' })}
                     {' – '}
                     {shiftDays(weekStart, 6).toLocaleDateString('es-PE', { day: 'numeric', month: 'short' })}
                 </p>
-                <button type="button" onClick={() => setWeekStart(current => shiftDays(current, 7))} className="text-xs px-2 py-1 border border-gray-300 rounded-md">Semana siguiente</button>
+                <button type="button" onClick={() => changeWeek(7)} className="text-xs px-2 py-2 border border-gray-300 rounded-md shrink-0">Siguiente</button>
             </div>
+            {compact ? (
+                <>
+                    <div className="flex gap-1.5 overflow-x-auto">
+                        {days.map(day => {
+                            const key = dayKey(day);
+                            const count = blocks.filter(block => block.date === key).length;
+                            return (
+                                <button
+                                    key={key}
+                                    type="button"
+                                    onClick={() => setFocusDay(key)}
+                                    className={`shrink-0 px-3 py-2 rounded-lg text-xs font-medium ${key === focusDay ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-700'}`}
+                                >
+                                    {day.toLocaleDateString('es-PE', { weekday: 'short', day: 'numeric' })}
+                                    {count > 0 ? ` · ${count}` : ''}
+                                </button>
+                            );
+                        })}
+                    </div>
+                    {focusBlocks.length === 0 && <p className="text-xs text-gray-400">Este día no tiene disponibilidad ni citas.</p>}
+                    <ul className="space-y-2">
+                        {focusBlocks.map(block => {
+                            const appointment = block.kind === 'appointment';
+                            const inside = appointment && focusAvailability.some(range => block.startMin < range.endMin && range.startMin < block.endMin);
+                            return (
+                                <li key={block.id} className={`rounded-lg px-3 py-2 border-l-4 ${appointment ? 'bg-indigo-50 border-indigo-600' : 'bg-amber-50 border-amber-400'}`}>
+                                    <p className="text-sm font-medium text-gray-900">{clock(block.startMin)}–{clock(block.endMin)} · {block.name}</p>
+                                    {block.detail && <p className="text-xs text-gray-600 mt-0.5">{block.detail}</p>}
+                                    {appointment && (
+                                        <p className={`text-[11px] mt-1 ${inside ? 'text-amber-800' : 'text-red-700'}`}>
+                                            {inside ? 'Cae dentro de la disponibilidad' : 'Fuera de la disponibilidad de ese día'}
+                                        </p>
+                                    )}
+                                </li>
+                            );
+                        })}
+                    </ul>
+                </>
+            ) : (
+            <>
             <div className="flex flex-wrap gap-3 text-[11px]">
                 <span className="inline-flex items-center gap-1"><span className="w-3 h-3 rounded-sm bg-amber-300 border border-amber-500" /> Disponibilidad, a la izquierda</span>
                 <span className="inline-flex items-center gap-1"><span className="w-3 h-3 rounded-sm bg-indigo-600" /> Cita final, a la derecha</span>
             </div>
             <div className="overflow-x-auto">
-                <div className="grid min-w-[560px]" style={{ gridTemplateColumns: '36px repeat(7, minmax(0, 1fr))' }}>
+                <div className="grid min-w-0" style={{ gridTemplateColumns: '36px repeat(7, minmax(0, 1fr))' }}>
                     <div />
                     {days.map(day => (
                         <div key={dayKey(day)} className="text-center text-[11px] font-medium text-gray-600 pb-1">
@@ -762,6 +904,8 @@ const WeekAgenda: React.FC<{
                     })}
                 </div>
             </div>
+            </>
+            )}
             {mode === 'staff' && !closed && onConfirm && (
                 <form
                     className="space-y-2 border border-indigo-200 rounded-lg p-3"
@@ -787,7 +931,7 @@ const WeekAgenda: React.FC<{
                         <label className="flex items-center gap-1"><input type="radio" checked={modality === 'virtual'} onChange={() => setModality('virtual')} /> Virtual</label>
                     </div>
                     <input value={place} onChange={event => setPlace(event.target.value)} placeholder={modality === 'presencial' ? 'Dirección' : 'Enlace'} className="w-full border border-gray-300 rounded-lg px-2 py-1.5 text-sm" />
-                    <div className="grid grid-cols-3 gap-2">
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                         <input type="date" value={date} onChange={event => setDate(event.target.value)} className="border border-gray-300 rounded-lg px-2 py-1.5 text-sm" />
                         <input type="time" value={start} onChange={event => setStart(event.target.value)} className="border border-gray-300 rounded-lg px-2 py-1.5 text-sm" />
                         <input type="time" value={end} onChange={event => setEnd(event.target.value)} className="border border-gray-300 rounded-lg px-2 py-1.5 text-sm" />

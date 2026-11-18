@@ -381,5 +381,17 @@ export const settingsApi = {
         debugLog('Settings actualizados');
         return result;
     },
+
+    async brandLogo(): Promise<string> {
+        const { data, error } = await supabase
+            .from('app_settings')
+            .select('logo_url, powered_by_logo_url')
+            .eq('app_name', APP_NAME)
+            .maybeSingle();
+        if (error || !data) return '';
+        const logo = typeof data.logo_url === 'string' ? data.logo_url.trim() : '';
+        const powered = typeof data.powered_by_logo_url === 'string' ? data.powered_by_logo_url.trim() : '';
+        return logo || powered;
+    },
 };
 

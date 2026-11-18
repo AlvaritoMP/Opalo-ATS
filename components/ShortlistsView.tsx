@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useAppState } from '../App';
 import { ShortlistBoard } from './ShortlistBoard';
 import { clientsApi } from '../lib/api/clients';
@@ -7,6 +7,10 @@ import { buildPublicShortlistUrl, isValidAccessDni, normalizeAccessDni } from '.
 import { setBulkSelectedProcessId } from '../lib/bulkTableColumns';
 import { toUuidOrNull } from '../lib/uuid';
 import type { Client, Shortlist, ShortlistActor, ShortlistColumnKey, ShortlistEvent, ShortlistMember } from '../types';
+
+function foldSearch(value: string): string {
+    return value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+}
 
 interface RoomState {
     shortlist: Shortlist;
@@ -24,12 +28,25 @@ export const ShortlistsView: React.FC = () => {
     const [openId, setOpenId] = useState<string | null>(null);
     const [room, setRoom] = useState<RoomState | null>(null);
     const [busy, setBusy] = useState(false);
+    const [query, setQuery] = useState('');
 
     const actor = (): ShortlistActor => ({
         actorType: 'staff',
         actorName: state.currentUser?.name || 'Equipo ATS',
         actorUserId: toUuidOrNull(state.currentUser?.id) || undefined,
     });
+
+    const visibleRooms = useMemo(() => {
+        const needle = foldSearch(query);
+        if (!needle) return rooms;
+        return rooms.filter(item => foldSearch([
+            item.title,
+            item.clientLabel,
+            item.accessDni,
+            item.createdByName,
+            item.status === 'open' ? 'abierta' : 'cerrada',
+        ].filter(Boolean).join(' ')).includes(needle));
+    }, [rooms, query]);
 
     const loadList = async () => {
         setLoading(true);
@@ -150,7 +167,7 @@ export const ShortlistsView: React.FC = () => {
                             {room.shortlist.status === 'closed' ? ' · cerrada' : ' · abierta'}
                         </p>
                     </div>
-                    <div className="flex flex-wrap gap-2">
+                    <div className="grid grid-cols-2 sm:flex sm:flex-wrap gap-2 w-full sm:w-auto">
                         <button type="button" onClick={() => { void copyLink(room.shortlist.token); }} className="px-3 py-2 text-sm rounded-lg border border-gray-300 bg-white">
                             Copiar enlace
                         </button>
@@ -206,6 +223,7 @@ export const ShortlistsView: React.FC = () => {
                         }
                     }}
                     onOpenProcess={openProcess}
+                    logoUrl={state.settings?.logoUrl || state.settings?.poweredByLogoUrl}
                 />
                 {formModal}
             </div>
@@ -226,12 +244,23 @@ export const ShortlistsView: React.FC = () => {
                 </button>
             </div>
             {error && <p className="text-sm text-red-700">{error}</p>}
+            {rooms.length > 0 && (
+                <input
+                    value={query}
+                    onChange={event => setQuery(event.target.value)}
+                    placeholder="Buscar por nombre, cliente o DNI"
+                    className="w-full max-w-xl border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white"
+                />
+            )}
             {loading && <p className="text-sm text-gray-500">Cargando salas…</p>}
             {!loading && rooms.length === 0 && !error && (
                 <p className="text-sm text-gray-500">Todavía no hay salas. Cree una y luego, desde la ficha de un candidato, elija Presentar en shortlist.</p>
             )}
+            {!loading && rooms.length > 0 && visibleRooms.length === 0 && (
+                <p className="text-sm text-gray-500">Ninguna sala coincide con “{query.trim()}”.</p>
+            )}
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
-                {rooms.map(item => (
+                {visibleRooms.map(item => (
                     <article key={item.id} className="bg-white border border-gray-200 rounded-xl p-4">
                         <button
                             type="button"
