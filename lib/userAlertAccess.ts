@@ -4,10 +4,10 @@ import { isProcessActive } from './processStatus';
 const DEFAULT_SECTIONS: Record<UserRole, Section[]> = {
     admin: [
         'dashboard', 'intelligence', 'processes', 'archived', 'candidates', 'forms', 'letters',
-        'calendar', 'planning', 'reports', 'compare', 'bulk-processes', 'opsflow-handoffs', 'user-activity', 'users', 'settings',
+        'calendar', 'planning', 'reports', 'compare', 'bulk-processes', 'opsflow-handoffs', 'shortlists', 'user-activity', 'users', 'settings',
     ],
     recruiter: [
-        'dashboard', 'processes', 'archived', 'candidates', 'forms', 'letters',
+        'dashboard', 'processes', 'shortlists', 'archived', 'candidates', 'forms', 'letters',
         'calendar', 'planning', 'reports', 'compare', 'bulk-processes', 'opsflow-handoffs',
     ],
     client: ['dashboard', 'processes', 'candidates', 'calendar', 'reports', 'compare'],
@@ -33,6 +33,9 @@ export function getVisibleSectionsForUser(user: User | null): Section[] {
     }
     if ((user.role === 'admin' || user.role === 'recruiter') && !sections.includes('planning')) {
         sections = [...sections, 'planning'];
+    }
+    if ((user.role === 'admin' || user.role === 'recruiter') && !sections.includes('shortlists')) {
+        sections = [...sections, 'shortlists'];
     }
     return sections;
 }

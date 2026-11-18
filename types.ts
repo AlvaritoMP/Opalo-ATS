@@ -750,6 +750,115 @@ export interface WorkPlanAssignment {
     updatedAt: string;
 }
 
+export type ShortlistColumnKey = 'presentacion' | 'entrevista' | 'finalista';
+export type ShortlistStatus = 'open' | 'closed';
+export type ShortlistMemberStatus = 'active' | 'rejected';
+export type ShortlistEventType =
+    | 'added'
+    | 'comment'
+    | 'moved'
+    | 'rejected'
+    | 'removed'
+    | 'closed'
+    | 'reopened'
+    | 'access';
+
+export interface ShortlistCounts {
+    presentacion: number;
+    entrevista: number;
+    finalista: number;
+    rejected: number;
+}
+
+export interface Shortlist {
+    id: string;
+    title: string;
+    clientId?: string;
+    clientLabel?: string;
+    accessDni: string;
+    token: string;
+    status: ShortlistStatus;
+    showDocuments: boolean;
+    showAssessments: boolean;
+    showProfile: boolean;
+    createdBy?: string;
+    createdByName?: string;
+    closedAt?: string;
+    createdAt: string;
+    updatedAt: string;
+    counts: ShortlistCounts;
+}
+
+export interface ShortlistDocument {
+    id: string;
+    name: string;
+    url: string;
+    type: string;
+}
+
+export interface ShortlistTestSummary {
+    id: string;
+    name: string;
+    summary: string;
+}
+
+/** Vista recortada para la sala. No incluye notas internas ni el historial del proceso. */
+export interface ShortlistCandidateView {
+    id: string;
+    name: string;
+    email?: string;
+    phone?: string;
+    age?: number;
+    province?: string;
+    district?: string;
+    description?: string;
+    salaryExpectation?: string;
+    linkedinUrl?: string;
+    avatarUrl?: string;
+    documents: ShortlistDocument[];
+    tests: ShortlistTestSummary[];
+    psycholaboralConclusion?: string;
+    psycholaboralSuitability?: string;
+    fichaLines: string[];
+}
+
+export interface ShortlistMember {
+    id: string;
+    shortlistId: string;
+    candidateId: string;
+    sourceProcessId?: string;
+    sourceProcessTitle?: string;
+    sourceStageId?: string;
+    sourceStageName?: string;
+    sourceClientLabel?: string;
+    column: ShortlistColumnKey;
+    status: ShortlistMemberStatus;
+    rejectionReason?: string;
+    rejectedAt?: string;
+    addedByName?: string;
+    addedAt: string;
+    candidate?: ShortlistCandidateView;
+}
+
+export interface ShortlistEvent {
+    id: string;
+    shortlistId: string;
+    memberId?: string;
+    candidateId?: string;
+    eventType: ShortlistEventType;
+    body?: string;
+    payload?: Record<string, unknown>;
+    actorType: 'staff' | 'client';
+    actorName?: string;
+    createdAt: string;
+}
+
+export interface ShortlistActor {
+    actorType: 'staff' | 'client';
+    actorName: string;
+    actorUserId?: string;
+}
+
 export type Section = 
     | 'dashboard' 
     | 'processes' 
@@ -764,6 +873,7 @@ export type Section =
     | 'bulk-import' 
     | 'bulk-processes'
     | 'opsflow-handoffs'
+    | 'shortlists'
     | 'intelligence'
     | 'user-activity'
     | 'users' 

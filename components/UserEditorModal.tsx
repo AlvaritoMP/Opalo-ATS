@@ -106,8 +106,8 @@ const DEFAULT_ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
 
 // Secciones visibles por defecto según rol
 const DEFAULT_ROLE_SECTIONS: Record<UserRole, Section[]> = {
-    admin: ['dashboard', 'intelligence', 'processes', 'archived', 'candidates', 'forms', 'letters', 'calendar', 'planning', 'reports', 'compare', 'bulk-processes', 'opsflow-handoffs', 'user-activity', 'users', 'settings'],
-    recruiter: ['dashboard', 'processes', 'archived', 'candidates', 'forms', 'letters', 'calendar', 'planning', 'reports', 'compare', 'bulk-processes', 'opsflow-handoffs'],
+    admin: ['dashboard', 'intelligence', 'processes', 'shortlists', 'archived', 'candidates', 'forms', 'letters', 'calendar', 'planning', 'reports', 'compare', 'bulk-processes', 'opsflow-handoffs', 'user-activity', 'users', 'settings'],
+    recruiter: ['dashboard', 'processes', 'shortlists', 'archived', 'candidates', 'forms', 'letters', 'calendar', 'planning', 'reports', 'compare', 'bulk-processes', 'opsflow-handoffs'],
     client: ['dashboard', 'processes', 'candidates', 'calendar', 'reports', 'compare'],
     viewer: ['dashboard', 'processes', 'candidates', 'calendar', 'planning', 'reports']
 };
@@ -127,6 +127,7 @@ const SECTION_LABELS: Record<Section, string> = {
     'bulk-import': 'Importación Masiva',
     'bulk-processes': 'Procesos Masivos',
     'opsflow-handoffs': 'Envíos OpsFlow',
+    'shortlists': 'Shortlists',
     'user-activity': 'Actividad de usuarios',
     'users': 'Usuarios',
     'settings': 'Configuración'

@@ -14,6 +14,7 @@ export * from './settings';
 export * from './clients';
 export * from './formIntegrations';
 export * from './workerHandoff';
+export * from './shortlists';
 export * from './userMessages';
 export * from './mattermostChat';
 export * from './userAlerts';

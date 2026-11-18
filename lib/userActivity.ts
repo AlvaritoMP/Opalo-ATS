@@ -63,6 +63,7 @@ const VIEW_NAVIGATION: Record<string, { action: string; summary: string }> = {
     'bulk-import': { action: 'view_bulk_import', summary: 'Abrió importación masiva' },
     'bulk-processes': { action: 'view_bulk_processes', summary: 'Abrió procesos masivos' },
     'opsflow-handoffs': { action: 'view_opsflow', summary: 'Abrió envíos OpsFlow' },
+    shortlists: { action: 'view_shortlists', summary: 'Abrió shortlists' },
     'user-activity': { action: 'view_user_activity', summary: 'Abrió actividad de usuarios' },
 };
 

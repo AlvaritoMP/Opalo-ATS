@@ -49,6 +49,7 @@ import { TeamPlanningView } from './components/TeamPlanningView';
 import { BulkImportView } from './components/BulkImportView';
 import { BulkProcessesView } from './components/BulkProcessesView';
 import { OpsFlowHandoffHistory } from './components/OpsFlowHandoffHistory';
+import { ShortlistsView } from './components/ShortlistsView';
 import { Spinner } from './components/Spinner';
 import { ArchivedCandidates } from './components/ArchivedCandidates';
 import { Letters } from './components/Letters';
@@ -56,7 +57,7 @@ import { ToastContainer } from './components/Toast';
 import { MessagingBar } from './components/MessagingBar';
 import { UserAlertsPanel } from './components/UserAlertsPanel';
 import { AppHelpManual, helpSectionIdForView } from './components/AppHelpManual';
-import { LayoutDashboard, Briefcase, FileText, Settings as SettingsIcon, Users as UsersIcon, ChevronsLeft, ChevronsRight, BarChart2, Calendar, CalendarDays, LogOut, X, Archive, RefreshCw, Menu, Grid3x3, Send, Brain, Activity, CircleHelp } from 'lucide-react';
+import { LayoutDashboard, Briefcase, FileText, Settings as SettingsIcon, Users as UsersIcon, ChevronsLeft, ChevronsRight, BarChart2, Calendar, CalendarDays, LogOut, X, Archive, RefreshCw, Menu, Grid3x3, Send, Brain, Activity, CircleHelp, Presentation } from 'lucide-react';
 import { CandidateComparator } from './components/CandidateComparator';
 
 
@@ -384,8 +385,8 @@ const getVisibleSections = (user: User | null): Section[] => {
         sections = [...user.visibleSections];
     } else {
         const defaultSections: Record<UserRole, Section[]> = {
-            admin: ['dashboard', 'intelligence', 'processes', 'archived', 'candidates', 'forms', 'letters', 'calendar', 'planning', 'reports', 'compare', 'bulk-processes', 'opsflow-handoffs', 'user-activity', 'users', 'settings'],
-            recruiter: ['dashboard', 'processes', 'archived', 'candidates', 'forms', 'letters', 'calendar', 'planning', 'reports', 'compare', 'bulk-processes', 'opsflow-handoffs'],
+            admin: ['dashboard', 'intelligence', 'processes', 'shortlists', 'archived', 'candidates', 'forms', 'letters', 'calendar', 'planning', 'reports', 'compare', 'bulk-processes', 'opsflow-handoffs', 'user-activity', 'users', 'settings'],
+            recruiter: ['dashboard', 'processes', 'shortlists', 'archived', 'candidates', 'forms', 'letters', 'calendar', 'planning', 'reports', 'compare', 'bulk-processes', 'opsflow-handoffs'],
             client: ['dashboard', 'processes', 'candidates', 'calendar', 'reports', 'compare'],
             viewer: ['dashboard', 'processes', 'candidates', 'calendar', 'planning', 'reports']
         };
@@ -403,6 +404,9 @@ const getVisibleSections = (user: User | null): Section[] => {
     }
     if ((user.role === 'admin' || user.role === 'recruiter') && !sections.includes('planning')) {
         sections = [...sections, 'planning'];
+    }
+    if ((user.role === 'admin' || user.role === 'recruiter') && !sections.includes('shortlists')) {
+        sections = [...sections, 'shortlists'];
     }
     return sections;
 };
@@ -495,6 +499,7 @@ const Sidebar: React.FC = () => {
                 {canSeeSection('dashboard') && <NavItem icon={LayoutDashboard} label={getLabel('sidebar_dashboard', 'Panel')} view="dashboard" currentView={state.view.type} setView={actions.setView} isCollapsed={isCollapsed} />}
                 {canSeeSection('intelligence') && <NavItem icon={Brain} label={getLabel('sidebar_intelligence', 'Inteligencia')} view="intelligence" currentView={state.view.type} setView={actions.setView} isCollapsed={isCollapsed} />}
                 {canSeeSection('processes') && <NavItem icon={Briefcase} label={getLabel('sidebar_processes', 'Procesos')} view="processes" currentView={state.view.type} setView={actions.setView} isCollapsed={isCollapsed} />}
+                {canSeeSection('shortlists') && <NavItem icon={Presentation} label={getLabel('sidebar_shortlists', 'Shortlists')} view="shortlists" currentView={state.view.type} setView={actions.setView} isCollapsed={isCollapsed} />}
                 {canSeeSection('bulk-processes') && <NavItem icon={Grid3x3} label={getLabel('sidebar_bulk_processes', 'Procesos Masivos')} view="bulk-processes" currentView={state.view.type} setView={actions.setView} isCollapsed={isCollapsed} />}
                 {canSeeSection('archived') && <NavItem icon={Archive} label={getLabel('sidebar_archived', 'Archivados')} view="archived" currentView={state.view.type} setView={actions.setView} isCollapsed={isCollapsed} />}
                 {canSeeSection('candidates') && <NavItem icon={UsersIcon} label={getLabel('menu_candidates', 'Candidatos')} view="candidates" currentView={state.view.type} setView={actions.setView} isCollapsed={isCollapsed} />}
@@ -2426,6 +2431,7 @@ const App: React.FC = () => {
                 'bulk-import': 'bulk-import',
                 'bulk-processes': 'bulk-processes',
                 'opsflow-handoffs': 'opsflow-handoffs',
+                'shortlists': 'shortlists',
                 'user-activity': 'user-activity',
             };
             
@@ -2461,6 +2467,7 @@ const App: React.FC = () => {
             case 'bulk-import': return <BulkImportView />;
             case 'bulk-processes': return null;
             case 'opsflow-handoffs': return <OpsFlowHandoffHistory />;
+            case 'shortlists': return <ShortlistsView />;
             case 'archived': return <ArchivedCandidates />;
             default: return <Dashboard />;
         }

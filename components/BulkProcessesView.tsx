@@ -77,7 +77,7 @@ import {
 } from '../lib/bulkConfigBackup';
 import { useDebouncedValue } from '../lib/useDebouncedValue';
 import { fetchWithRetry } from '../lib/fetchWithRetry';
-import { Check, X, Loader2, Send, Archive, Search, ChevronDown, ChevronUp, Plus, Edit, Trash2, ArrowLeft, MessageCircle, Phone, Upload, Download, Columns3, Mail, Calendar, Settings, ArrowUp, ArrowDown, Pin, FileText, BookOpen, Paperclip, ClipboardList, ListPlus, RefreshCw, HardDrive, CaseSensitive, Package, History, Target, BarChart3, UserCheck, Coins, Bus, Undo2, ArrowRightLeft, LayoutGrid, LineChart, ClipboardCopy, PlayCircle, ClipboardCheck, FolderOpen, ExternalLink } from 'lucide-react';
+import { Check, X, Loader2, Send, Archive, Search, ChevronDown, ChevronUp, Plus, Edit, Trash2, ArrowLeft, MessageCircle, Phone, Upload, Download, Columns3, Mail, Calendar, Settings, ArrowUp, ArrowDown, Pin, FileText, BookOpen, Paperclip, ClipboardList, ListPlus, RefreshCw, HardDrive, CaseSensitive, Package, History, Target, BarChart3, UserCheck, Coins, Bus, Undo2, ArrowRightLeft, LayoutGrid, LineChart, ClipboardCopy, PlayCircle, ClipboardCheck, FolderOpen, ExternalLink, Presentation } from 'lucide-react';
 import { ScriptStructureEditor } from './persuasion/ScriptStructureEditor';
 import { openLienzoWindow, toLienzoCandidate } from '../lib/persuasion/popup';
 import { BulkCandidateTimeline } from './BulkCandidateTimeline';
@@ -254,6 +254,7 @@ import { BulkDocumentsCell } from './BulkDocumentsCell';
 import { BulkTableEditInput } from './BulkTableEditInput';
 import { applyBulkCellDomSelection, scrollBulkCellIntoView, clearBulkCellDomSelection } from '../lib/bulkTableCellSelection';
 import { SendToOpsFlowModal } from './SendToOpsFlowModal';
+import { PresentToShortlistModal } from './PresentToShortlistModal';
 import { BulkCandidateOpsFlowPanel } from './BulkCandidateOpsFlowPanel';
 import { BulkRouteCell } from './BulkRouteCell';
 import { BulkRouteCostCell } from './BulkRouteCostCell';
@@ -430,7 +431,9 @@ const CandidateDrawer: React.FC<{
     const [fullCandidate, setFullCandidate] = useState<BulkCandidate | null>(null);
     const [activeTab, setActiveTab] = useState<CandidateDrawerTab>(initialTab);
     const [isUploadingDocument, setIsUploadingDocument] = useState(false);
+    const [isPresentShortlistOpen, setIsPresentShortlistOpen] = useState(false);
     const documentInputRef = useRef<HTMLInputElement>(null);
+    const canPresentShortlist = state.currentUser?.role === 'admin' || state.currentUser?.role === 'recruiter';
 
     useEffect(() => {
         if (isOpen && candidate && !fullCandidate) {
@@ -734,6 +737,16 @@ const CandidateDrawer: React.FC<{
                                     Generar informe psicolaboral
                                 </button>
                             )}
+                            {canPresentShortlist && candidate && (
+                                <button
+                                    type="button"
+                                    onClick={() => setIsPresentShortlistOpen(true)}
+                                    className="w-full flex items-center justify-center gap-2 px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 text-sm"
+                                >
+                                    <Presentation className="w-4 h-4" />
+                                    Presentar en shortlist
+                                </button>
+                            )}
                             {showOpsFlow && candidate && onOpsFlowSend && (
                                 <BulkCandidateOpsFlowPanel
                                     candidateId={candidate.id}
@@ -746,6 +759,18 @@ const CandidateDrawer: React.FC<{
                     )}
                 </div>
             </div>
+            {isPresentShortlistOpen && candidate && (
+                <PresentToShortlistModal
+                    candidateId={candidate.id}
+                    candidateName={displayCandidate?.name || candidate.name}
+                    processId={candidate.processId}
+                    stageId={candidate.stageId}
+                    processTitle={process?.title}
+                    processClientId={process?.clientId}
+                    processClientLabel={process?.client?.razonSocial}
+                    onClose={() => setIsPresentShortlistOpen(false)}
+                />
+            )}
         </div>
     );
 };

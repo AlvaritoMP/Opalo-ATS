@@ -765,6 +765,32 @@ const SCREEN_SECTIONS: HelpSection[] = [
         ),
     },
     {
+        id: 'shortlists',
+        title: 'Shortlists',
+        keywords: 'shortlist sala cliente dni presentación entrevista finalista enlace rechazo',
+        body: (
+            <>
+                <H3>Qué hace</H3>
+                <P>
+                    Arma una sala temporal para que un cliente revise finalistas sin entrar al ATS. La sala tiene tres pasos: Presentación, Entrevista y Finalista. Presentar a alguien no cambia su etapa ni su historial en el proceso de origen.
+                </P>
+                <H3>Cómo se usa</H3>
+                <Ol items={[
+                    'En Shortlists cree la sala: nombre, cliente y el DNI de quien va a entrar. Copie el enlace.',
+                    'Abra la ficha de un candidato, en un proceso o en un proceso masivo, y use Presentar en shortlist. Puede venir de cualquier estado del proceso.',
+                    'El cliente abre el enlace, ingresa su DNI, comenta, avanza de paso o rechaza con sustento.',
+                    'Cerrar sala apaga el enlace. El historial queda en la sala para que el equipo actualice el proceso cuando lo decida.',
+                ]} />
+                <H3>Cómo lo hace</H3>
+                <Ul items={[
+                    'Cada persona en la sala es una referencia a su ficha. La columna, el comentario y el rechazo se guardan en la sala.',
+                    'El cliente ve documentos, pruebas y la ficha que se marcaron al crear la sala. No ve notas internas del equipo.',
+                    'Reabrir vuelve a habilitar el mismo enlace.',
+                ]} />
+            </>
+        ),
+    },
+    {
         id: 'importacion',
         title: 'Importación de candidatos',
         keywords: 'importar excel archivo masivo etapa celdas vacías origen',
@@ -800,6 +826,7 @@ const VIEW_HELP_SECTION: Record<string, string> = {
     archived: 'archivados',
     candidates: 'listado',
     'opsflow-handoffs': 'opsflow',
+    shortlists: 'shortlists',
     forms: 'tally',
     letters: 'cartas',
     calendar: 'calendario',
