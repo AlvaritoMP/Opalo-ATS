@@ -674,6 +674,42 @@ export const shortlistsApi = {
         });
     },
 
+    async confirmAppointment(
+        memberId: string,
+        input: {
+            modality: 'presencial' | 'virtual';
+            place: string;
+            date: string;
+            start: string;
+            end: string;
+        },
+        actor: ShortlistActor
+    ): Promise<void> {
+        if (!input.date || !input.start || !input.end) throw new Error('Indique fecha, hora de inicio y hora de fin.');
+        if (input.end <= input.start) throw new Error('La hora de fin debe ser posterior a la de inicio.');
+        const place = input.place.trim();
+        if (input.modality === 'presencial' && !place) throw new Error('Indique la dirección de la cita.');
+        const member = await readMember(memberId);
+        await requireOpen(member.shortlistId);
+        const modalityLabel = input.modality === 'virtual' ? 'Virtual' : 'Presencial';
+        const body = [`Cita final · ${modalityLabel}`, place, `${input.date} ${input.start}–${input.end}`].filter(Boolean).join('\n');
+        await insertEvent({
+            shortlistId: member.shortlistId,
+            memberId,
+            candidateId: member.candidateId,
+            eventType: 'comment',
+            body,
+            actor,
+            payload: {
+                kind: 'appointment',
+                candidateName: member.candidate?.name || 'Candidato',
+                modality: input.modality,
+                place,
+                slots: [{ date: input.date, start: input.start, end: input.end }],
+            },
+        });
+    },
+
     async clientAlertsFor(userId: string): Promise<UserAlert[]> {
         const creatorId = toUuidOrNull(userId);
         if (!creatorId) return [];

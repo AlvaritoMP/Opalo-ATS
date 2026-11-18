@@ -158,6 +158,7 @@ export const ShortlistsView: React.FC = () => {
                     onComment={(memberId, body) => { void run(() => shortlistsApi.commentMember(memberId, body, actor())); }}
                     onCommentRoom={body => { void run(() => shortlistsApi.commentOnRoom(room.shortlist.id, body, actor())); }}
                     onProposeInterview={(memberId, proposal) => { void run(() => shortlistsApi.proposeInterview(memberId, proposal, actor())); }}
+                    onConfirmAppointment={(memberId, appointment) => { void run(() => shortlistsApi.confirmAppointment(memberId, appointment, actor())); }}
                     onRemove={memberId => {
                         if (confirm('¿Quitar a esta persona de la sala? Su proceso de origen no cambia.')) {
                             void run(() => shortlistsApi.removeMember(memberId, actor()));
