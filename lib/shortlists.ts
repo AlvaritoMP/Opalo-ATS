@@ -57,6 +57,52 @@ export function buildPublicShortlistUrl(token: string): string {
     return url.toString();
 }
 
+const CLIENT_PREVIEW_QUERY = 'vista';
+const CLIENT_PREVIEW_VALUE = 'cliente';
+
+function clientPreviewStorageKey(token: string): string {
+    return `shortlist-preview:${token}`;
+}
+
+/** Abre la sala pública en otra pestaña e ingresa con el DNI, para verla como el cliente. */
+export function openShortlistAsClient(input: { token: string; accessDni: string }): boolean {
+    const url = new URL(buildPublicShortlistUrl(input.token));
+    url.searchParams.set(CLIENT_PREVIEW_QUERY, CLIENT_PREVIEW_VALUE);
+    const key = clientPreviewStorageKey(input.token);
+    try {
+        localStorage.setItem(key, normalizeAccessDni(input.accessDni));
+    } catch {
+        // Si el navegador bloquea el almacenamiento, la pestaña igual muestra el ingreso con DNI.
+    }
+    const opened = window.open(url.toString(), '_blank');
+    if (!opened) {
+        try { localStorage.removeItem(key); } catch { /* ignore */ }
+        return false;
+    }
+    try { opened.opener = null; } catch { /* el navegador puede impedir soltar la ventana de origen */ }
+    return true;
+}
+
+export function isShortlistClientPreview(): boolean {
+    if (typeof window === 'undefined') return false;
+    return new URLSearchParams(window.location.search).get(CLIENT_PREVIEW_QUERY) === CLIENT_PREVIEW_VALUE;
+}
+
+/** Lee y borra el DNI que dejó el equipo al abrir la vista del cliente. */
+export function consumeShortlistPreviewDni(token: string): string | null {
+    if (!isShortlistClientPreview()) return null;
+    const key = clientPreviewStorageKey(token);
+    let value = '';
+    try {
+        value = localStorage.getItem(key) || '';
+        localStorage.removeItem(key);
+    } catch {
+        return null;
+    }
+    const digits = normalizeAccessDni(value);
+    return digits.length >= 8 ? digits : null;
+}
+
 export function shareShortlistOnWhatsApp(input: { title: string; token: string; accessDni: string; clientLabel?: string }): void {
     const url = buildPublicShortlistUrl(input.token);
     const greeting = input.clientLabel

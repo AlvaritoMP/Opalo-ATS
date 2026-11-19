@@ -3,7 +3,7 @@ import { useAppState } from '../App';
 import { ShortlistBoard } from './ShortlistBoard';
 import { clientsApi } from '../lib/api/clients';
 import { shortlistsApi, ShortlistSchemaError } from '../lib/api/shortlists';
-import { buildPublicShortlistUrl, isValidAccessDni, normalizeAccessDni, shareShortlistOnWhatsApp } from '../lib/shortlists';
+import { buildPublicShortlistUrl, isValidAccessDni, normalizeAccessDni, openShortlistAsClient, shareShortlistOnWhatsApp } from '../lib/shortlists';
 import { setBulkSelectedProcessId } from '../lib/bulkTableColumns';
 import { toUuidOrNull } from '../lib/uuid';
 import type { Client, Shortlist, ShortlistActor, ShortlistColumnKey, ShortlistEvent, ShortlistMember } from '../types';
@@ -133,6 +133,11 @@ export const ShortlistsView: React.FC = () => {
         />
     ) : null;
 
+    const viewAsClient = (item: Pick<Shortlist, 'token' | 'accessDni'>) => {
+        const opened = openShortlistAsClient(item);
+        if (!opened) actions.showToast('Permita ventanas emergentes para ver la sala como el cliente.', 'info', 4000);
+    };
+
     const copyLink = async (token: string) => {
         const url = buildPublicShortlistUrl(token);
         try {
@@ -172,6 +177,9 @@ export const ShortlistsView: React.FC = () => {
                             <img src={state.settings?.logoUrl || state.settings?.poweredByLogoUrl} alt="Opalo" className="h-10 max-w-[150px] object-contain self-end" />
                         )}
                         <div className="grid grid-cols-2 sm:flex sm:flex-wrap gap-2 w-full sm:w-auto">
+                        <button type="button" onClick={() => viewAsClient(room.shortlist)} className="px-3 py-2 text-sm rounded-lg bg-primary-600 text-white">
+                            Ver como cliente
+                        </button>
                         <button type="button" onClick={() => { void copyLink(room.shortlist.token); }} className="px-3 py-2 text-sm rounded-lg border border-gray-300 bg-white">
                             Copiar enlace
                         </button>
@@ -289,7 +297,8 @@ export const ShortlistsView: React.FC = () => {
                                 Presentación {item.counts.presentacion} · Entrevista {item.counts.entrevista} · Finalistas {item.counts.finalista} · Rechazados {item.counts.rejected}
                             </p>
                         </button>
-                        <div className="mt-3 flex gap-2">
+                        <div className="mt-3 flex flex-wrap gap-2">
+                            <button type="button" onClick={() => viewAsClient(item)} className="px-2.5 py-1.5 text-xs rounded-lg bg-primary-600 text-white">Ver como cliente</button>
                             <button type="button" onClick={() => shareShortlistOnWhatsApp(item)} className="px-2.5 py-1.5 text-xs rounded-lg border border-gray-300">WhatsApp</button>
                             <button type="button" onClick={() => setEditing(item)} className="px-2.5 py-1.5 text-xs rounded-lg border border-gray-300">Editar</button>
                             <button type="button" onClick={() => { void removeRoom(item); }} className="px-2.5 py-1.5 text-xs rounded-lg border border-red-200 text-red-700">Eliminar</button>

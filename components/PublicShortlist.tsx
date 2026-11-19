@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { ShortlistBoard } from './ShortlistBoard';
 import { shortlistsApi } from '../lib/api/shortlists';
 import { settingsApi } from '../lib/api/settings';
-import { normalizeAccessDni, readPublicShortlistToken } from '../lib/shortlists';
+import { consumeShortlistPreviewDni, isShortlistClientPreview, normalizeAccessDni, readPublicShortlistToken } from '../lib/shortlists';
 import type { Shortlist, ShortlistColumnKey, ShortlistEvent, ShortlistMember } from '../types';
 
 interface RoomState {
@@ -23,6 +23,12 @@ export const PublicShortlist: React.FC = () => {
     const [error, setError] = useState('');
     const [busy, setBusy] = useState(false);
     const [logoUrl, setLogoUrl] = useState('');
+    const [booting, setBooting] = useState(() => {
+        if (typeof window === 'undefined') return false;
+        return isShortlistClientPreview() || Boolean(sessionStorage.getItem(sessionKey(readPublicShortlistToken() || '')));
+    });
+
+    const staffPreview = isShortlistClientPreview();
 
     const enter = async (value: string) => {
         const digits = normalizeAccessDni(value);
@@ -43,7 +49,7 @@ export const PublicShortlist: React.FC = () => {
             sessionStorage.setItem(sessionKey(token), digits);
             setRoom({ shortlist: result.shortlist, members: result.members, events: result.events });
             const seenKey = `shortlist-access:${token}`;
-            if (!sessionStorage.getItem(seenKey)) {
+            if (!staffPreview && !sessionStorage.getItem(seenKey)) {
                 sessionStorage.setItem(seenKey, '1');
                 void shortlistsApi.logAccess(result.shortlist.id).catch(() => undefined);
             }
@@ -51,12 +57,16 @@ export const PublicShortlist: React.FC = () => {
             setError(err instanceof Error ? err.message : 'No se pudo abrir la sala.');
         } finally {
             setBusy(false);
+            setBooting(false);
         }
     };
 
     useEffect(() => {
+        const previewDni = consumeShortlistPreviewDni(token);
         const stored = sessionStorage.getItem(sessionKey(token));
-        if (stored) void enter(stored);
+        if (previewDni) void enter(previewDni);
+        else if (stored) void enter(stored);
+        else setBooting(false);
         // Solo al abrir el enlace.
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [token]);
@@ -114,6 +124,14 @@ export const PublicShortlist: React.FC = () => {
         );
     }
 
+    if (booting && !room) {
+        return (
+            <Screen>
+                <h1 className="text-xl font-semibold text-gray-900">Abriendo la sala…</h1>
+            </Screen>
+        );
+    }
+
     if (!room) {
         return (
             <Screen>
@@ -145,6 +163,14 @@ export const PublicShortlist: React.FC = () => {
 
     return (
         <div className="min-h-[100dvh] overflow-x-hidden bg-gray-50 [&_input]:text-base [&_select]:text-base [&_textarea]:text-base">
+            {staffPreview && (
+                <div className="bg-amber-50 border-b border-amber-200 px-4 py-2 flex flex-wrap items-center justify-between gap-2">
+                    <p className="text-sm text-amber-950">Así ve esta sala el cliente. Si avanza, comenta o rechaza, queda registrado como acción del cliente.</p>
+                    <button type="button" onClick={() => window.close()} className="text-sm text-amber-950 underline shrink-0">
+                        Cerrar vista
+                    </button>
+                </div>
+            )}
             <header className="sticky top-0 z-30 bg-white border-b px-4 py-3 flex items-center justify-between gap-3">
                 <div className="min-w-0">
                     <p className="text-xs uppercase tracking-wide text-gray-400">Shortlist</p>
