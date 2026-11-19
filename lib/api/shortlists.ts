@@ -205,10 +205,9 @@ async function loadCandidateViews(
     shortlist: Shortlist,
     sourceProcessByCandidate: Map<string, string> = new Map(),
 ): Promise<Record<string, ShortlistCandidateView>> {
-    const [rows, documents, folders, inventory] = await Promise.all([
+    const [rows, documents, inventory] = await Promise.all([
         loadCandidateRows(ids),
         loadDocuments(ids),
-        loadDriveFolders(ids),
         loadPsychInventory(),
     ]);
     const processIds = [
@@ -238,8 +237,7 @@ async function loadCandidateViews(
             district: profile.district,
             city: profile.city,
             avatarUrl: textOf(row.avatar_url) || undefined,
-            documents: documents[id] || [],
-            driveFolderUrl: folders[id],
+            documents: shortlist.showDocuments ? documents[id] || [] : [],
             tests: shortlist.showAssessments ? summarizeTests(row.assessment_results) : [],
             profileFields: profile.profileFields,
         };
@@ -414,22 +412,6 @@ async function loadDocuments(ids: string[]): Promise<Record<string, ShortlistDoc
         grouped[candidateId].push(doc);
     }
     return grouped;
-}
-
-async function loadDriveFolders(ids: string[]): Promise<Record<string, string>> {
-    const folders: Record<string, string> = {};
-    if (ids.length === 0) return folders;
-    const { data, error } = await supabase
-        .from('candidates')
-        .select('id, google_drive_folder_id')
-        .in('id', ids)
-        .eq('app_name', APP_NAME);
-    if (error || !data) return folders;
-    for (const row of data) {
-        const folderId = textOf(row.google_drive_folder_id);
-        if (folderId) folders[String(row.id)] = `https://drive.google.com/drive/folders/${folderId}`;
-    }
-    return folders;
 }
 
 async function attachViews(shortlist: Shortlist, members: ShortlistMember[]): Promise<ShortlistMember[]> {

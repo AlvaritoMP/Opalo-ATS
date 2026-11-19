@@ -857,8 +857,6 @@ export interface ShortlistCandidateView {
     avatarUrl?: string;
     city?: string;
     documents: ShortlistDocument[];
-    /** Carpeta de Google Drive del candidato, cuando existe. */
-    driveFolderUrl?: string;
     tests: ShortlistTestSummary[];
     profileFields: ShortlistProfileField[];
 }

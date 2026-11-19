@@ -352,7 +352,7 @@ export const ShortlistBoard: React.FC<ShortlistBoardProps> = ({
                     closed={closed}
                     busy={busy}
                     showProfile={shortlist.showProfile}
-                    showDocuments={mode === 'staff' || shortlist.showDocuments}
+                    showDocuments={shortlist.showDocuments}
                     readOnly={readOnly}
                     onLocked={lockChange}
                     onClose={() => setSelectedId(null)}
@@ -481,7 +481,7 @@ const MemberPanel: React.FC<{
                             </ul>
                         </section>
                     )}
-                    {showDocuments && person && (person.documents.length > 0 || person.driveFolderUrl) && (
+                    {showDocuments && person && person.documents.length > 0 && (
                         <section>
                             <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-1">Documentos</h3>
                             <ul className="space-y-1">
@@ -504,13 +504,6 @@ const MemberPanel: React.FC<{
                                         )}
                                     </li>
                                 ))}
-                                {person.driveFolderUrl && (
-                                    <li>
-                                        <a href={person.driveFolderUrl} target="_blank" rel="noopener noreferrer" className="text-sm text-primary-700 hover:underline">
-                                            Carpeta de documentos
-                                        </a>
-                                    </li>
-                                )}
                             </ul>
                         </section>
                     )}
