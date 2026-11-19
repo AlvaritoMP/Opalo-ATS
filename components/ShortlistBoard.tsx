@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { Settings } from 'lucide-react';
 import {
     SHORTLIST_COLUMNS,
     canMoveShortlistColumn,
@@ -238,19 +239,6 @@ export const ShortlistBoard: React.FC<ShortlistBoardProps> = ({
                                                     Pasar a {shortlistColumnLabel(nextShortlistColumn(member.column) as ShortlistColumnKey)}
                                                 </button>
                                             )}
-                                            {mode === 'staff' && onRemove && (
-                                                <button
-                                                    type="button"
-                                                    disabled={busy}
-                                                    className="mt-2 w-full text-sm py-2 rounded-lg border border-red-200 text-red-700 disabled:opacity-40"
-                                                    onClick={event => {
-                                                        event.stopPropagation();
-                                                        onRemove(member.id);
-                                                    }}
-                                                >
-                                                    Eliminar de la sala
-                                                </button>
-                                            )}
                                         </article>
                                     ))}
                                 </div>
@@ -281,16 +269,6 @@ export const ShortlistBoard: React.FC<ShortlistBoardProps> = ({
                                             </button>
                                         )}
                                     </div>
-                                    {mode === 'staff' && onRemove && (
-                                        <button
-                                            type="button"
-                                            disabled={busy}
-                                            onClick={() => onRemove(member.id)}
-                                            className="shrink-0 text-xs px-2 py-1 rounded-lg border border-red-200 text-red-700 disabled:opacity-40"
-                                        >
-                                            Eliminar
-                                        </button>
-                                    )}
                                 </li>
                             ))}
                         </ul>
@@ -352,6 +330,7 @@ export const ShortlistBoard: React.FC<ShortlistBoardProps> = ({
                     closed={closed}
                     busy={busy}
                     showProfile={shortlist.showProfile}
+                    showDocuments={shortlist.showDocuments}
                     readOnly={readOnly}
                     onLocked={lockChange}
                     onClose={() => setSelectedId(null)}
@@ -393,6 +372,7 @@ const MemberPanel: React.FC<{
     closed: boolean;
     busy?: boolean;
     showProfile: boolean;
+    showDocuments: boolean;
     readOnly?: boolean;
     onLocked?: () => void;
     onClose: () => void;
@@ -402,11 +382,12 @@ const MemberPanel: React.FC<{
     interviews: ShortlistEvent[];
     onRemove?: () => void;
     onOpenProcess?: () => void;
-}> = ({ member, comments, mode, closed, busy, showProfile, readOnly, onLocked, onClose, onMove, onReject, onComment, interviews, onRemove, onOpenProcess }) => {
+}> = ({ member, comments, mode, closed, busy, showProfile, showDocuments, readOnly, onLocked, onClose, onMove, onReject, onComment, interviews, onRemove, onOpenProcess }) => {
     const [comment, setComment] = useState('');
     const [reason, setReason] = useState('');
     const [rejecting, setRejecting] = useState(false);
     const [blockedNote, setBlockedNote] = useState('');
+    const [configOpen, setConfigOpen] = useState(false);
     const person = member.candidate;
     const next = member.status === 'active' ? nextShortlistColumn(member.column) : null;
 
@@ -432,9 +413,35 @@ const MemberPanel: React.FC<{
                             </button>
                         )}
                     </div>
-                    <div className="flex items-center gap-3 shrink-0">
+                    <div className="flex items-center gap-1 shrink-0">
                         {mode === 'staff' && onRemove && (
-                            <button type="button" disabled={busy} onClick={onRemove} className="text-sm text-red-700 disabled:opacity-40">Eliminar</button>
+                            <div className="relative">
+                                <button
+                                    type="button"
+                                    disabled={busy}
+                                    aria-label="Configuración del candidato"
+                                    aria-expanded={configOpen}
+                                    onClick={() => setConfigOpen(open => !open)}
+                                    className="p-2 rounded-lg text-gray-500 hover:bg-gray-100 disabled:opacity-40"
+                                >
+                                    <Settings className="w-4 h-4" />
+                                </button>
+                                {configOpen && (
+                                    <div className="absolute right-0 top-full mt-1 w-48 rounded-lg border border-gray-200 bg-white shadow-lg py-1 z-10">
+                                        <button
+                                            type="button"
+                                            disabled={busy}
+                                            onClick={() => {
+                                                setConfigOpen(false);
+                                                onRemove();
+                                            }}
+                                            className="w-full text-left px-3 py-2 text-sm text-red-700 hover:bg-red-50 disabled:opacity-40"
+                                        >
+                                            Quitar de la sala
+                                        </button>
+                                    </div>
+                                )}
+                            </div>
                         )}
                         <button type="button" onClick={onClose} className="shrink-0 text-sm text-gray-500 px-2 py-2">Cerrar</button>
                     </div>
@@ -479,7 +486,7 @@ const MemberPanel: React.FC<{
                             </ul>
                         </section>
                     )}
-                    {person && person.documents.length > 0 && (
+                    {showDocuments && person && person.documents.length > 0 && (
                         <section>
                             <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-1">Documentos</h3>
                             <ul className="space-y-1">

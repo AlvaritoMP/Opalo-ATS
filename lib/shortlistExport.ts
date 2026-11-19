@@ -15,7 +15,7 @@ export function downloadShortlistTable(shortlist: Shortlist, members: ShortlistM
         ...fieldHeaders(fields),
     ];
     if (shortlist.showAssessments) headers.push('Pruebas');
-    headers.push('Documentos');
+    if (shortlist.showDocuments) headers.push('Documentos');
 
     const rows = members.map(member => {
         const values = new Map((member.candidate?.profileFields || []).map(field => [field.id, field.value]));
@@ -31,7 +31,9 @@ export function downloadShortlistTable(shortlist: Shortlist, members: ShortlistM
         if (shortlist.showAssessments) {
             row.push((member.candidate?.tests || []).map(test => `${test.name}: ${test.summary}`).join('\n'));
         }
-        row.push((member.candidate?.documents || []).map(doc => doc.name).join('\n'));
+        if (shortlist.showDocuments) {
+            row.push((member.candidate?.documents || []).map(doc => doc.name).join('\n'));
+        }
         return row;
     });
 

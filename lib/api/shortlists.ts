@@ -237,7 +237,7 @@ async function loadCandidateViews(
             district: profile.district,
             city: profile.city,
             avatarUrl: textOf(row.avatar_url) || undefined,
-            documents: documents[id] || [],
+            documents: shortlist.showDocuments ? documents[id] || [] : [],
             tests: shortlist.showAssessments ? summarizeTests(row.assessment_results) : [],
             profileFields: profile.profileFields,
         };

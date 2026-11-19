@@ -466,6 +466,7 @@ const ShortlistFormModal: React.FC<{
     const [clientId, setClientId] = useState(existing?.clientId || '');
     const [clientName, setClientName] = useState(existing?.clientLabel || '');
     const [dni, setDni] = useState(existing?.accessDni || '');
+    const [showDocuments, setShowDocuments] = useState(existing?.showDocuments ?? true);
     const [showAssessments, setShowAssessments] = useState(existing?.showAssessments ?? true);
     const [showProfile, setShowProfile] = useState(existing?.showProfile ?? true);
     const [clientFields, setClientFields] = useState<ShortlistClientField[]>(() => editorFieldsFromSaved(existing?.clientFields));
@@ -492,7 +493,7 @@ const ShortlistFormModal: React.FC<{
                 clientId: clientId || undefined,
                 clientLabel: clientName.trim() || client?.razonSocial,
                 accessDni: normalizeAccessDni(dni),
-                showDocuments: true,
+                showDocuments,
                 showAssessments,
                 showProfile,
                 clientFields,
@@ -558,7 +559,7 @@ const ShortlistFormModal: React.FC<{
                     </label>
                     <div className="text-sm text-gray-700 space-y-2">
                         <p className="font-medium">Qué puede ver el cliente</p>
-                        <p className="text-gray-600">Los archivos adjuntos de cada candidato se muestran al equipo y al cliente. La carpeta de documentos no se comparte.</p>
+                        <label className="flex items-center gap-2"><input type="checkbox" checked={showDocuments} onChange={event => setShowDocuments(event.target.checked)} /> Documentos, incluido el informe adjunto</label>
                         <label className="flex items-center gap-2"><input type="checkbox" checked={showAssessments} onChange={event => setShowAssessments(event.target.checked)} /> Resultados de pruebas</label>
                         <label className="flex items-center gap-2"><input type="checkbox" checked={showProfile} onChange={event => setShowProfile(event.target.checked)} /> Datos del candidato</label>
                         {showProfile && (
