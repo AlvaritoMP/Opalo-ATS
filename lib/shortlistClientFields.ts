@@ -246,6 +246,11 @@ function columnText(
         const cell = presentText(cellText(value), name);
         if (cell) return cell;
     }
+    const baseField = BASE_ROW_FIELDS[wanted];
+    if (baseField) {
+        const direct = presentText(cellText(row[baseField]), name);
+        if (direct) return direct;
+    }
     return '';
 }
 
@@ -254,6 +259,15 @@ function presentText(value: string, field?: string): string {
     if (!raw) return '';
     return normalizeImportTextCase(raw, field ? { field } : {});
 }
+
+const BASE_ROW_FIELDS: Record<string, string> = {
+    telefono: 'phone',
+    email: 'email',
+    provincia: 'province',
+    distrito: 'district',
+    fuente: 'source',
+    edad: 'age',
+};
 
 function fichaText(row: Record<string, unknown>, key: string): string {
     const data = objectOf(row.complementary_data);

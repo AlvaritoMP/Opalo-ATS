@@ -37,6 +37,14 @@ import type {
 
 const EMPTY_COUNTS: ShortlistCounts = { presentacion: 0, entrevista: 0, finalista: 0, rejected: 0 };
 
+const SHORTLIST_BASE_COLUMNS = [
+    { id: 'phone', label: 'Teléfono' },
+    { id: 'email', label: 'Email' },
+    { id: 'province', label: 'Provincia' },
+    { id: 'district', label: 'Distrito' },
+    { id: 'source', label: 'Fuente' },
+];
+
 const TEST_LABELS: Record<string, string> = {
     barsit: 'BARSIT',
     inteligencia: 'Inteligencia',
@@ -605,21 +613,58 @@ export const shortlistsApi = {
         if (!data?.length) throw new Error('No se pudo eliminar la sala.');
     },
 
-    async listClientColumns(): Promise<string[]> {
+    async listClientColumns(shortlistId?: string): Promise<string[]> {
+        if (!shortlistId) return [];
+        const { data: members, error: membersError } = await supabase
+            .from('shortlist_members')
+            .select('candidate_id, source_process_id')
+            .eq('shortlist_id', shortlistId)
+            .eq('app_name', APP_NAME);
+        if (membersError || !members?.length) return [];
+        const candidateIds = members.map(row => textOf(row.candidate_id)).filter(Boolean);
+        const processIds = new Set(members.map(row => textOf(row.source_process_id)).filter(Boolean));
+        if (candidateIds.length > 0) {
+            const { data: candidates } = await supabase
+                .from('candidates')
+                .select('process_id')
+                .in('id', candidateIds)
+                .eq('app_name', APP_NAME);
+            for (const row of candidates || []) {
+                const processId = textOf(row.process_id);
+                if (processId) processIds.add(processId);
+            }
+        }
+        if (processIds.size === 0) return [];
         const { data, error } = await supabase
             .from('processes')
             .select('bulk_config')
+            .in('id', [...processIds])
             .eq('app_name', APP_NAME);
         if (error || !data) return [];
         const names = new Map<string, string>();
+        const add = (name: string) => {
+            const clean = name.trim();
+            const key = normalizeColumnNameKey(clean);
+            if (!key || names.has(key)) return;
+            names.set(key, clean);
+        };
         for (const row of data) {
             const config = asObject(typeof row.bulk_config === 'string' ? safeJson(row.bulk_config) : row.bulk_config);
+            const hidden = new Set(
+                (Array.isArray(config.hiddenColumns) ? config.hiddenColumns : []).map(item => textOf(item)).filter(Boolean),
+            );
+            const order = (Array.isArray(config.columnOrder) ? config.columnOrder : []).map(item => textOf(item)).filter(Boolean);
             const columns = Array.isArray(config.customColumns) ? config.customColumns : [];
             for (const item of columns) {
-                const name = textOf(asObject(item).name);
-                if (!name) continue;
-                const key = normalizeColumnNameKey(name);
-                if (!names.has(key)) names.set(key, name);
+                const column = asObject(item);
+                const id = textOf(column.id);
+                const name = textOf(column.name);
+                if (!name || hidden.has(id) || hidden.has(`custom_${id}`)) continue;
+                add(name);
+            }
+            for (const base of SHORTLIST_BASE_COLUMNS) {
+                const shown = order.length === 0 || order.includes(base.id);
+                if (shown && !hidden.has(base.id)) add(base.label);
             }
         }
         return [...names.values()].sort((a, b) => a.localeCompare(b, 'es'));

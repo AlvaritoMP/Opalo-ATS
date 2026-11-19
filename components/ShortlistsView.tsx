@@ -409,67 +409,48 @@ const ClientShortlistPreview: React.FC<{
     );
 };
 
-const FIELD_GROUPS = ['Contacto', 'Perfil', 'Ficha', 'Informe'];
-
 const ClientFieldsEditor: React.FC<{
     fields: ShortlistClientField[];
     columns: string[];
     onChange: (fields: ShortlistClientField[]) => void;
-}> = ({ fields, columns, onChange }) => {
-    const isOn = (id: string) => fields.some(field => field.id === id);
-    const toggle = (option: (typeof SHORTLIST_FIELD_OPTIONS)[number]) => {
-        onChange(isOn(option.id) ? fields.filter(field => field.id !== option.id) : [...fields, optionToField(option)]);
+    hasPeople: boolean;
+}> = ({ fields, columns, onChange, hasPeople }) => {
+    const setColumn = (option: (typeof SHORTLIST_FIELD_OPTIONS)[number], name: string) => {
+        if (!name) {
+            onChange(fields.filter(field => field.id !== option.id));
+            return;
+        }
+        const next = { ...optionToField(option), columnNames: [name] };
+        const exists = fields.some(field => field.id === option.id);
+        onChange(exists ? fields.map(field => field.id === option.id ? next : field) : [...fields, next]);
     };
-    const setColumn = (id: string, name: string) => {
-        onChange(fields.map(field => field.id === id ? { ...field, columnNames: name ? [name] : undefined } : field));
-    };
-    const extras = fields.filter(field => field.kind === 'column');
 
     return (
-        <div className="border border-gray-200 rounded-lg p-3 space-y-3 bg-gray-50">
-            <p className="text-xs text-gray-500">Active el dato y elija la columna del proceso. El cliente ve esa celda, con el nombre del dato.</p>
-            {FIELD_GROUPS.map(group => (
-                <div key={group}>
-                    <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">{group}</p>
-                    <div className="mt-1 space-y-2">
-                        {SHORTLIST_FIELD_OPTIONS.filter(option => option.group === group).map(option => {
-                            const field = fields.find(item => item.id === option.id);
-                            const selected = field?.columnNames?.[0] || '';
-                            const known = columns.some(name => name === selected);
-                            return (
-                                <div key={option.id}>
-                                    <label className="flex items-center gap-2">
-                                        <input type="checkbox" checked={isOn(option.id)} onChange={() => toggle(option)} />
-                                        <span>{option.label}</span>
-                                    </label>
-                                    {field && (
-                                        <select
-                                            value={selected}
-                                            onChange={event => setColumn(field.id, event.target.value)}
-                                            className="mt-1 ml-6 w-[calc(100%-1.5rem)] border border-gray-300 rounded-lg px-2 py-1 text-xs bg-white"
-                                        >
-                                            <option value="">Elija la columna</option>
-                                            {selected && !known && <option value={selected}>{selected}</option>}
-                                            {columns.map(name => <option key={name} value={name}>{name}</option>)}
-                                        </select>
-                                    )}
-                                </div>
-                            );
-                        })}
-                    </div>
-                </div>
-            ))}
-            {extras.length > 0 && (
-                <div>
-                    <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">Otras columnas</p>
-                    {extras.map(field => (
-                        <label key={field.id} className="mt-1 flex items-center gap-2">
-                            <input type="checkbox" checked onChange={() => onChange(fields.filter(item => item.id !== field.id))} />
-                            <span>{field.label}</span>
+        <div className="border border-gray-200 rounded-lg p-3 space-y-2 bg-gray-50">
+            <p className="text-xs text-gray-500">Elija, para cada dato, la columna de los procesos de estas personas. El cliente ve esa celda.</p>
+            {!hasPeople && <p className="text-xs text-gray-400">Agregue personas a la sala para ver las columnas de sus procesos.</p>}
+            {hasPeople && columns.length === 0 && <p className="text-xs text-gray-400">Esos procesos no tienen columnas para mostrar.</p>}
+            <div className="max-h-64 overflow-y-auto space-y-2">
+                {SHORTLIST_FIELD_OPTIONS.map(option => {
+                    const field = fields.find(item => item.id === option.id);
+                    const selected = field?.columnNames?.[0] || '';
+                    const known = columns.some(name => name === selected);
+                    return (
+                        <label key={option.id} className="grid grid-cols-[9.5rem_1fr] items-center gap-2">
+                            <span>{option.label}</span>
+                            <select
+                                value={selected}
+                                onChange={event => setColumn(option, event.target.value)}
+                                className="w-full border border-gray-300 rounded-lg px-2 py-1 text-xs bg-white"
+                            >
+                                <option value="">No mostrar</option>
+                                {selected && !known && <option value={selected}>{selected}</option>}
+                                {columns.map(name => <option key={name} value={name}>{name}</option>)}
+                            </select>
                         </label>
-                    ))}
-                </div>
-            )}
+                    );
+                })}
+            </div>
         </div>
     );
 };
@@ -497,8 +478,9 @@ const ShortlistFormModal: React.FC<{
         clientsApi.getAll().then(setClients).catch(err => {
             setError(err instanceof Error ? err.message : 'No se pudieron cargar los clientes.');
         });
-        shortlistsApi.listClientColumns().then(setProcessColumns).catch(() => undefined);
-    }, []);
+        if (!existing?.id) return;
+        shortlistsApi.listClientColumns(existing.id).then(setProcessColumns).catch(() => undefined);
+    }, [existing?.id]);
 
     const save = async () => {
         setSaving(true);
@@ -584,6 +566,7 @@ const ShortlistFormModal: React.FC<{
                             <ClientFieldsEditor
                                 fields={clientFields}
                                 columns={processColumns}
+                                hasPeople={Boolean(existing?.id)}
                                 onChange={setClientFields}
                             />
                         )}
