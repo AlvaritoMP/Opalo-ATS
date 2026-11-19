@@ -9,7 +9,7 @@ import {
     normalizeAccessDni,
 } from '../shortlists';
 import { composeWorkerFullName, identityFromDbRow } from '../candidateIdentity';
-import { normalizeColumnNameKey } from '../bulkTableColumns';
+import { buildLegacyColumnIdToName, normalizeColumnNameKey } from '../bulkTableColumns';
 import {
     defaultShortlistClientFields,
     parseShortlistClientFields,
@@ -30,6 +30,8 @@ import type {
     ShortlistMember,
     ShortlistTestSummary,
     UserAlert,
+    BulkProcessConfig,
+    CustomColumn,
 } from '../../types';
 
 const EMPTY_COUNTS: ShortlistCounts = { presentacion: 0, entrevista: 0, finalista: 0, rejected: 0 };
@@ -118,37 +120,50 @@ function displayNameFromRow(row: Record<string, unknown>): string {
     return composed.split(/\s+/).length >= legacy.split(/\s+/).length ? composed : legacy;
 }
 
-async function loadProcessContexts(ids: string[]): Promise<Map<string, ShortlistProcessContext>> {
-    const map = new Map<string, ShortlistProcessContext>();
+async function loadProcessContexts(ids: string[]): Promise<{ byProcess: Map<string, ShortlistProcessContext>; allColumns: { id: string; name: string }[] }> {
+    const byProcess = new Map<string, ShortlistProcessContext>();
+    const allColumns: { id: string; name: string }[] = [];
     const unique = [...new Set(ids.filter(Boolean))];
-    if (unique.length === 0) return map;
+    if (unique.length === 0) return { byProcess, allColumns };
     const { data, error } = await supabase
         .from('processes')
         .select('id, bulk_config')
         .in('id', unique)
         .eq('app_name', APP_NAME);
-    if (error || !data) return map;
+    if (error || !data) return { byProcess, allColumns };
+    const seen = new Set<string>();
     for (const row of data) {
         const config = asObject(typeof row.bulk_config === 'string' ? safeJson(row.bulk_config) : row.bulk_config);
         const columns = Array.isArray(config.customColumns) ? config.customColumns : [];
         const psych = asObject(config.psycholaboral);
         const competencies = Array.isArray(psych.competencies) ? psych.competencies : [];
-        map.set(String(row.id), {
-            columns: columns.flatMap(item => {
-                const column = asObject(item);
-                const id = textOf(column.id);
-                const name = textOf(column.name);
-                return id && name ? [{ id, name }] : [];
-            }),
+        const parsed: CustomColumn[] = columns.flatMap(item => {
+            const column = asObject(item);
+            const id = textOf(column.id);
+            const name = textOf(column.name);
+            const type = textOf(column.type);
+            const columnType: CustomColumn['type'] = type === 'number' || type === 'checkbox' || type === 'date' || type === 'select' || type === 'route' || type === 'route_cost'
+                ? type
+                : 'text';
+            return id && name ? [{ id, name, type: columnType }] : [];
+        });
+        for (const column of parsed) {
+            if (seen.has(column.id)) continue;
+            seen.add(column.id);
+            allColumns.push(column);
+        }
+        byProcess.set(String(row.id), {
+            columns: parsed,
             competencies: competencies.flatMap(item => {
                 const competency = asObject(item);
                 const id = textOf(competency.id);
                 const name = textOf(competency.name);
                 return id && name ? [{ id, name }] : [];
             }),
+            legacyIdToName: buildLegacyColumnIdToName(config as BulkProcessConfig, parsed),
         });
     }
-    return map;
+    return { byProcess, allColumns };
 }
 
 async function loadPsychInventory() {
@@ -176,18 +191,35 @@ function clientFieldsOf(shortlist: Shortlist): ShortlistClientField[] {
     return shortlist.showProfile ? (shortlist.clientFields ?? defaultShortlistClientFields()) : [];
 }
 
-async function loadCandidateViews(ids: string[], shortlist: Shortlist): Promise<Record<string, ShortlistCandidateView>> {
+async function loadCandidateViews(
+    ids: string[],
+    shortlist: Shortlist,
+    sourceProcessByCandidate: Map<string, string> = new Map(),
+): Promise<Record<string, ShortlistCandidateView>> {
     const [rows, documents, inventory] = await Promise.all([
         loadCandidateRows(ids),
         loadDocuments(ids),
         loadPsychInventory(),
     ]);
-    const contexts = await loadProcessContexts(rows.map(row => textOf(row.process_id)));
+    const processIds = [
+        ...rows.map(row => textOf(row.process_id)),
+        ...ids.map(id => sourceProcessByCandidate.get(id) || ''),
+    ];
+    const { byProcess, allColumns } = await loadProcessContexts(processIds);
     const fields = clientFieldsOf(shortlist);
     const views: Record<string, ShortlistCandidateView> = {};
     for (const row of rows) {
         const id = String(row.id);
-        const profile = resolveShortlistProfile(row, fields, contexts.get(textOf(row.process_id)), inventory);
+        const own = byProcess.get(textOf(row.process_id));
+        const source = byProcess.get(sourceProcessByCandidate.get(id) || '');
+        const process = own && source && own !== source
+            ? {
+                columns: [...own.columns, ...source.columns],
+                competencies: [...own.competencies, ...source.competencies],
+                legacyIdToName: { ...(source.legacyIdToName || {}), ...(own.legacyIdToName || {}) },
+            }
+            : (own || source);
+        const profile = resolveShortlistProfile(row, fields, process, inventory, allColumns);
         views[id] = {
             id,
             name: displayNameFromRow(row),
@@ -329,7 +361,8 @@ async function loadDocuments(ids: string[]): Promise<Record<string, ShortlistDoc
 }
 
 async function attachViews(shortlist: Shortlist, members: ShortlistMember[]): Promise<ShortlistMember[]> {
-    const views = await loadCandidateViews(members.map(member => member.candidateId), shortlist);
+    const sourceProcessByCandidate = new Map(members.map(member => [member.candidateId, member.sourceProcessId || '']));
+    const views = await loadCandidateViews(members.map(member => member.candidateId), shortlist, sourceProcessByCandidate);
     return members.map(member => ({ ...member, candidate: views[member.candidateId] }));
 }
 

@@ -2330,7 +2330,8 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
         if (!selectedProcess || !process) return;
         const ok = window.confirm(
             '¿Normalizar mayúsculas en todos los candidatos de este proceso?\n\n' +
-            'Ejemplo: "CALLE Italia 325" → "Calle Italia 325".\n' +
+            'Nombres y lugares: "MARIA DE LOS ANGELES" → "Maria de los Angeles".\n' +
+            'Textos como el perfil: mayúscula al inicio y después de cada punto, no en cada palabra.\n' +
             'Los cambios se guardan en la base de datos.'
         );
         if (!ok) return;

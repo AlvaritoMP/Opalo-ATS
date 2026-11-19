@@ -2385,7 +2385,7 @@ export function repairTextCaseColumnValues(
             if (typeof raw !== 'string' || !raw.trim()) continue;
             const identityField = canonicalIdentityMappingKeyFromCustomColumn(col);
             const fixed = normalizeImportTextCase(raw, {
-                field: identityField && identityField !== 'dni' ? identityField : undefined,
+                field: identityField && identityField !== 'dni' ? identityField : col.name,
                 columnType: col.type,
                 selectOptions: col.options,
             });
@@ -2399,8 +2399,9 @@ export function repairTextCaseColumnValues(
         for (const [key, val] of Object.entries(row)) {
             if (!key.startsWith(BULK_NAME_KEY_PREFIX) || typeof val !== 'string' || !val.trim()) continue;
             const identityField = identityFieldFromNameKey(key);
+            const bare = key.slice(BULK_NAME_KEY_PREFIX.length);
             const fixed = normalizeImportTextCase(val, {
-                field: identityField,
+                field: identityField || bare,
                 columnType: 'text',
             });
             if (fixed !== val) {

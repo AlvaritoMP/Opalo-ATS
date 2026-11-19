@@ -504,7 +504,7 @@ const ColumnSourcePicker: React.FC<{
     const [draft, setDraft] = useState('');
     return (
         <div className="ml-6 mt-1 space-y-1">
-            <p className="text-xs text-gray-500">También leer de una columna del proceso</p>
+            <p className="text-xs text-gray-500">Usar solo esta columna del proceso. Si la elige, no se toma el campo de la ficha ni otro dato del perfil.</p>
             <div className="flex flex-wrap gap-1">
                 {names.map(name => (
                     <button key={name} type="button" onClick={() => onRemove(name)} className="text-xs px-2 py-0.5 rounded-full bg-white border border-gray-300">
@@ -649,7 +649,7 @@ const ShortlistFormModal: React.FC<{
                                 onChange={setClientFields}
                             />
                         )}
-                        <p className="text-xs text-gray-500">La conclusión redactada del informe no se muestra. Si la expectativa o la experiencia están en una columna del proceso, indíquelo en ese dato.</p>
+                        <p className="text-xs text-gray-500">La conclusión redactada del informe no se muestra. Si indica una columna en expectativa o experiencia, se usa esa celda y no el dato de la ficha ni del perfil.</p>
                     </div>
                     {error && <p className="text-sm text-red-700">{error}</p>}
                 </div>

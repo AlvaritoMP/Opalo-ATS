@@ -20,6 +20,7 @@ import type { ChannelContactSummary } from '../contactChannelConfig';
 import { buildInterviewMapFromRows } from '../bulkInterviewUtils';
 import { isMissingColumnError } from '../supabaseColumnErrors';
 import { identityFieldsToDb, identityFromDbRow } from '../candidateIdentity';
+import { normalizeImportTextCase } from '../importTextCase';
 import { hydrateCandidateIdentity } from '../workerNameParts';
 
 /** Select mínimo — siempre disponible */
@@ -239,6 +240,49 @@ export interface BulkCandidatesResult {
     candidates: BulkCandidate[];
     total: number;
     hasMore: boolean;
+}
+
+/** Reescribe el perfil (description) a redacción normal y lo guarda. */
+async function repairStoredDescriptions(processId: string): Promise<string[]> {
+    const changedIds: string[] = [];
+    const pageSize = 400;
+    for (let page = 0; page < 200; page++) {
+        const from = page * pageSize;
+        const to = from + pageSize - 1;
+        const { data, error } = await supabase
+            .from('candidates')
+            .select('id, description')
+            .eq('app_name', APP_NAME)
+            .eq('process_id', processId)
+            .eq('archived', false)
+            .eq('discarded', false)
+            .range(from, to);
+        if (error) throw error;
+        const rows = data || [];
+        const pending = rows.flatMap(row => {
+            const raw = typeof row.description === 'string' ? row.description : '';
+            if (!raw.trim()) return [];
+            const fixed = normalizeImportTextCase(raw, { field: 'description' });
+            if (fixed === raw) return [];
+            return [{ id: String(row.id), description: fixed }];
+        });
+        for (let i = 0; i < pending.length; i += 15) {
+            const chunk = pending.slice(i, i + 15);
+            const results = await Promise.all(chunk.map(item =>
+                supabase
+                    .from('candidates')
+                    .update({ description: item.description })
+                    .eq('id', item.id)
+                    .eq('app_name', APP_NAME)
+            ));
+            for (const result of results) {
+                if (result.error) throw result.error;
+            }
+        }
+        changedIds.push(...pending.map(item => item.id));
+        if (rows.length < pageSize) break;
+    }
+    return changedIds;
 }
 
 export const bulkCandidatesApi = {
@@ -1237,9 +1281,15 @@ export const bulkCandidatesApi = {
             await Promise.all(chunk.map(({ id, patch }) => this.patchFields(id, patch)));
         }
 
+        const descriptionIds = await repairStoredDescriptions(processId);
+
         return {
-            candidates: new Set([...Object.keys(bulkUpdates), ...fieldPatches.map(p => p.id)]).size,
-            cells: cellCount + fieldPatches.reduce((n, p) => n + Object.keys(p.patch).length, 0),
+            candidates: new Set([
+                ...Object.keys(bulkUpdates),
+                ...fieldPatches.map(item => item.id),
+                ...descriptionIds,
+            ]).size,
+            cells: cellCount + fieldPatches.reduce((n, item) => n + Object.keys(item.patch).length, 0) + descriptionIds.length,
         };
     },
 

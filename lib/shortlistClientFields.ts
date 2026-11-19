@@ -1,5 +1,6 @@
 import type { PsycholaboralInventory, ShortlistClientField, ShortlistFieldKind, ShortlistProfileField } from '../types';
-import { normalizeColumnNameKey } from './bulkTableColumns';
+import { normalizeColumnNameKey, resolveColumnValueFromRow } from './bulkTableColumns';
+import type { CustomColumn } from '../types';
 import { createDefaultPsycholaboralInventory } from './psycholaboralDefaults';
 import { getCompetencyLevelLabel, mergePsycholaboralInventory } from './psycholaboralUtils';
 
@@ -11,6 +12,7 @@ export interface ShortlistColumnRef {
 export interface ShortlistProcessContext {
     columns: ShortlistColumnRef[];
     competencies: { id: string; name: string }[];
+    legacyIdToName?: Record<string, string>;
 }
 
 export interface ShortlistFieldOption {
@@ -19,7 +21,7 @@ export interface ShortlistFieldOption {
     kind: ShortlistFieldKind;
     group: string;
     fichaKey?: string;
-    /** El dato puede tomar también el valor de una columna del proceso. */
+    /** Si hay columnas elegidas, reemplazan el dato de la ficha o del perfil. */
     acceptsColumns?: boolean;
 }
 
@@ -107,6 +109,7 @@ export function resolveShortlistProfile(
     fields: ShortlistClientField[],
     process: ShortlistProcessContext | undefined,
     inventoryInput?: PsycholaboralInventory | null,
+    allColumns: ShortlistColumnRef[] = [],
 ): { profileFields: ShortlistProfileField[]; age?: number; city?: string; district?: string; province?: string } {
     const inventory = mergePsycholaboralInventory(inventoryInput || createDefaultPsycholaboralInventory());
     const profileFields: ShortlistProfileField[] = [];
@@ -116,14 +119,14 @@ export function resolveShortlistProfile(
     let province: string | undefined;
 
     for (const field of fields) {
-        const value = valueForField(row, field, process, inventory);
+        const value = valueForField(row, field, process, inventory, allColumns);
         if (!value) continue;
         if (field.kind === 'age') {
             const parsed = Number(value.replace(',', '.'));
             if (Number.isFinite(parsed) && parsed > 0 && parsed < 120) age = Math.round(parsed);
         }
         if (field.kind === 'location') {
-            const place = placeFrom(row, field, process);
+            const place = placeFrom(row, field, process, allColumns);
             district = place.district;
             province = place.province;
             city = place.city;
@@ -145,31 +148,35 @@ function valueForField(
     field: ShortlistClientField,
     process: ShortlistProcessContext | undefined,
     inventory: PsycholaboralInventory,
+    allColumns: ShortlistColumnRef[],
 ): string {
-    const columns = namedColumns(row, field.columnNames || [], process);
+    const chosen = (field.columnNames || []).length > 0
+        ? namedColumns(row, field.columnNames || [], process, allColumns)
+        : '';
+    const lockedToColumn = (field.columnNames || []).length > 0;
     switch (field.kind) {
         case 'phone':
-            return first([text(row.phone), fichaText(row, 'telefono'), columns]);
+            return lockedToColumn ? chosen : first([text(row.phone), fichaText(row, 'telefono')]);
         case 'email':
-            return first([text(row.email), fichaText(row, 'email'), columns]);
+            return lockedToColumn ? chosen : first([text(row.email), fichaText(row, 'email')]);
         case 'age':
-            return first([text(row.age), fichaText(row, 'edad'), columns]);
+            return lockedToColumn ? chosen : first([text(row.age), fichaText(row, 'edad')]);
         case 'location':
-            return placeLabel(placeFrom(row, field, process));
+            return placeLabel(placeFrom(row, field, process, allColumns));
         case 'linkedin':
             return text(row.linkedin_url);
         case 'description':
-            return first([text(row.description), columns]);
+            return lockedToColumn ? chosen : text(row.description);
         case 'salary':
-            return first([text(row.salary_expectation), columns]);
+            return lockedToColumn ? chosen : text(row.salary_expectation);
         case 'experience':
-            return uniqueJoin([experienceText(row), columns]);
+            return lockedToColumn ? chosen : experienceText(row);
         case 'education':
             return educationText(row);
         case 'ficha':
             return field.fichaKey ? fichaText(row, field.fichaKey) : '';
         case 'column':
-            return columnText(row, field.columnName || field.label, process);
+            return columnText(row, field.columnName || field.label, process, allColumns);
         case 'psychSuitability':
             return suitabilityText(row);
         case 'psychIntellectual':
@@ -187,40 +194,65 @@ function placeFrom(
     row: Record<string, unknown>,
     field: ShortlistClientField,
     process: ShortlistProcessContext | undefined,
+    allColumns: ShortlistColumnRef[],
 ): { city?: string; district?: string; province?: string } {
-    const district = first([text(row.district), fichaText(row, 'distrito'), columnText(row, 'distrito', process)]) || undefined;
-    const province = first([text(row.province), fichaText(row, 'provincia'), columnText(row, 'provincia', process)]) || undefined;
-    const city = columnText(row, 'ciudad', process) || province;
-    const extra = namedColumns(row, field.columnNames || [], process);
-    return {
-        district,
-        province,
-        city: city || (extra && !district && !province ? extra : undefined),
-    };
+    const locked = (field.columnNames || []).length > 0;
+    if (locked) {
+        const extra = namedColumns(row, field.columnNames || [], process, allColumns);
+        return { city: extra || undefined };
+    }
+    const district = first([text(row.district), fichaText(row, 'distrito'), columnText(row, 'distrito', process, allColumns)]) || undefined;
+    const province = first([text(row.province), fichaText(row, 'provincia'), columnText(row, 'provincia', process, allColumns)]) || undefined;
+    const city = columnText(row, 'ciudad', process, allColumns) || province;
+    return { district, province, city: city || undefined };
 }
 
 function placeLabel(place: { city?: string; district?: string; province?: string }): string {
     return [place.district, place.city && place.city !== place.province ? place.city : '', place.province].filter(Boolean).join(', ');
 }
 
-function namedColumns(row: Record<string, unknown>, names: string[], process: ShortlistProcessContext | undefined): string {
-    const parts = names.map(name => columnText(row, name, process)).filter(Boolean);
+function namedColumns(
+    row: Record<string, unknown>,
+    names: string[],
+    process: ShortlistProcessContext | undefined,
+    allColumns: ShortlistColumnRef[],
+): string {
+    const parts = names.map(name => columnText(row, name, process, allColumns)).filter(Boolean);
     return uniqueJoin(parts);
 }
 
-function columnText(row: Record<string, unknown>, name: string, process: ShortlistProcessContext | undefined): string {
+function columnText(
+    row: Record<string, unknown>,
+    name: string,
+    process: ShortlistProcessContext | undefined,
+    allColumns: ShortlistColumnRef[] = [],
+): string {
     const wanted = normalizeColumnNameKey(name);
     if (!wanted) return '';
     const bulk = objectOf(row.bulk_column_values);
+    const seen = new Set<string>();
+    const matching = [...(process?.columns || []), ...allColumns].filter(column => {
+        if (normalizeColumnNameKey(column.name) !== wanted || seen.has(column.id)) return false;
+        seen.add(column.id);
+        return true;
+    });
+    const legacy: Record<string, string> = { ...(process?.legacyIdToName || {}) };
+    for (const column of allColumns) legacy[column.id] = column.name;
+    for (const column of matching) {
+        const columnDef: CustomColumn = { id: column.id, name: column.name, type: 'text' };
+        const cell = cellText(resolveColumnValueFromRow(bulk, columnDef, legacy));
+        if (cell) return cell;
+    }
+    const named = cellText(bulk[`__name__${wanted}`]);
+    if (named) return named;
+    const knownIds = new Set([...matching, ...allColumns].map(column => column.id));
     for (const [key, value] of Object.entries(bulk)) {
-        const bare = key.startsWith('__name__') ? key.slice('__name__'.length) : key;
-        if (normalizeColumnNameKey(bare) !== wanted) continue;
+        if (key.startsWith('__name__') || knownIds.has(key)) continue;
+        if (normalizeColumnNameKey(key) !== wanted) continue;
         const cell = cellText(value);
         if (cell) return cell;
     }
-    const column = process?.columns.find(item => normalizeColumnNameKey(item.name) === wanted);
-    if (!column) return '';
-    return cellText(bulk[column.id]);
+    return '';
 }
 
 function fichaText(row: Record<string, unknown>, key: string): string {
@@ -344,10 +376,23 @@ function objectOf(value: unknown): Record<string, unknown> {
     return value as Record<string, unknown>;
 }
 
-function cellText(value: unknown): string {
+function cellText(value: unknown, depth = 0): string {
+    if (depth > 3) return '';
+    if (Array.isArray(value)) return uniqueJoin(value.map(item => cellText(item, depth + 1)));
     if (typeof value === 'boolean') return value ? 'Sí' : '';
     if (typeof value === 'number' && Number.isFinite(value)) return String(value);
-    return typeof value === 'string' ? value.trim() : '';
+    if (typeof value === 'string') return value.trim();
+    if (value && typeof value === 'object') {
+        const record = value as Record<string, unknown>;
+        for (const key of ['text', 'value', 'label', 'name']) {
+            const nested = record[key];
+            if (typeof nested !== 'string' && typeof nested !== 'number') continue;
+            const text = cellText(nested, depth + 1);
+            if (text) return text;
+        }
+        return uniqueJoin(Object.values(record).map(item => cellText(item, depth + 1)));
+    }
+    return '';
 }
 
 function text(value: unknown): string {
