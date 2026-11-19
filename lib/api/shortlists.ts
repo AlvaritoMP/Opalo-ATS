@@ -237,7 +237,7 @@ async function loadCandidateViews(
             district: profile.district,
             city: profile.city,
             avatarUrl: textOf(row.avatar_url) || undefined,
-            documents: shortlist.showDocuments ? documents[id] || [] : [],
+            documents: documents[id] || [],
             tests: shortlist.showAssessments ? summarizeTests(row.assessment_results) : [],
             profileFields: profile.profileFields,
         };
@@ -382,22 +382,31 @@ async function loadCandidateRows(ids: string[]): Promise<Record<string, unknown>
 async function loadDocuments(ids: string[]): Promise<Record<string, ShortlistDocument[]>> {
     const grouped: Record<string, ShortlistDocument[]> = {};
     if (ids.length === 0) return grouped;
-    const plain = await supabase
+    const select = 'id, candidate_id, name, url, type';
+    let result = await supabase
         .from('attachments')
-        .select('id, candidate_id, name, url, type')
-        .in('candidate_id', ids);
-    const withTenant = plain.error
-        ? await supabase
+        .select(select)
+        .in('candidate_id', ids)
+        .is('comment_id', null);
+    if (result.error && isMissingColumnError(result.error)) {
+        result = await supabase.from('attachments').select(select).in('candidate_id', ids);
+    }
+    if (result.error) {
+        result = await supabase
             .from('attachments')
-            .select('id, candidate_id, name, url, type')
+            .select(select)
             .in('candidate_id', ids)
-            .eq('app_name', APP_NAME)
-        : plain;
-    if (withTenant.error) {
-        console.error('[shortlists] documentos', withTenant.error);
+            .is('comment_id', null)
+            .eq('app_name', APP_NAME);
+        if (result.error && isMissingColumnError(result.error)) {
+            result = await supabase.from('attachments').select(select).in('candidate_id', ids).eq('app_name', APP_NAME);
+        }
+    }
+    if (result.error) {
+        console.error('[shortlists] documentos', result.error);
         return grouped;
     }
-    for (const row of withTenant.data || []) {
+    for (const row of result.data || []) {
         const candidateId = textOf((row as { candidate_id?: string }).candidate_id);
         if (!candidateId) continue;
         const url = textOf((row as { url?: string }).url);

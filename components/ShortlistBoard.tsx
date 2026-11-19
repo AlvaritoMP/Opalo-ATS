@@ -352,7 +352,6 @@ export const ShortlistBoard: React.FC<ShortlistBoardProps> = ({
                     closed={closed}
                     busy={busy}
                     showProfile={shortlist.showProfile}
-                    showDocuments={shortlist.showDocuments}
                     readOnly={readOnly}
                     onLocked={lockChange}
                     onClose={() => setSelectedId(null)}
@@ -394,7 +393,6 @@ const MemberPanel: React.FC<{
     closed: boolean;
     busy?: boolean;
     showProfile: boolean;
-    showDocuments: boolean;
     readOnly?: boolean;
     onLocked?: () => void;
     onClose: () => void;
@@ -404,7 +402,7 @@ const MemberPanel: React.FC<{
     interviews: ShortlistEvent[];
     onRemove?: () => void;
     onOpenProcess?: () => void;
-}> = ({ member, comments, mode, closed, busy, showProfile, showDocuments, readOnly, onLocked, onClose, onMove, onReject, onComment, interviews, onRemove, onOpenProcess }) => {
+}> = ({ member, comments, mode, closed, busy, showProfile, readOnly, onLocked, onClose, onMove, onReject, onComment, interviews, onRemove, onOpenProcess }) => {
     const [comment, setComment] = useState('');
     const [reason, setReason] = useState('');
     const [rejecting, setRejecting] = useState(false);
@@ -481,7 +479,7 @@ const MemberPanel: React.FC<{
                             </ul>
                         </section>
                     )}
-                    {showDocuments && person && person.documents.length > 0 && (
+                    {person && person.documents.length > 0 && (
                         <section>
                             <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-1">Documentos</h3>
                             <ul className="space-y-1">
