@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo, useRef, useLayoutEffe
 import { createPortal } from 'react-dom';
 import { useAppState } from '../App';
 import { bulkCandidatesApi, BulkCandidate } from '../lib/api/bulkCandidates';
+import { normalizeProfileWording } from '../lib/importTextCase';
 
 /** Fondo de fila para candidatos trasladados pendientes de revisión (yellow-50) */
 const TRANSFER_PENDING_ROW_BG = '#FEFCE8';
@@ -632,7 +633,7 @@ const CandidateDrawer: React.FC<{
                             {displayCandidate.description && (
                                 <div>
                                     <label className="text-sm font-medium text-gray-500">Descripción</label>
-                                    <p className="text-gray-900 mt-1 whitespace-pre-wrap">{displayCandidate.description}</p>
+                                    <p className="text-gray-900 mt-1 whitespace-pre-wrap">{normalizeProfileWording(displayCandidate.description)}</p>
                                 </div>
                             )}
                             {displayCandidate.metadataIa && (
@@ -1133,6 +1134,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
     const columnMigrationInFlightRef = useRef<string | null>(null);
     const ageSyncDoneRef = useRef<Set<string>>(new Set());
     const contactSyncDoneRef = useRef<Set<string>>(new Set());
+    const proseRepairRef = useRef<Set<string>>(new Set());
     const registrationBackfillDoneRef = useRef<Set<string>>(new Set());
     const actionsRef = useRef(actions);
     actionsRef.current = actions;
@@ -2378,6 +2380,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
         columnMigrationInFlightRef.current = null;
         ageSyncDoneRef.current.delete(selectedProcess);
         contactSyncDoneRef.current.delete(selectedProcess);
+        proseRepairRef.current.delete(selectedProcess);
         registrationBackfillDoneRef.current.delete(selectedProcess);
         setTableReadyProcessId(null);
         setCandidates([]);
@@ -2619,6 +2622,20 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
             window.clearTimeout(timer);
         };
     }, [selectedProcess, tableReadyProcessId]);
+
+    useEffect(() => {
+        if (!selectedProcess || tableReadyProcessId !== selectedProcess) return;
+        if (proseRepairRef.current.has(selectedProcess)) return;
+        proseRepairRef.current.add(selectedProcess);
+        const columns = process?.bulkConfig?.customColumns || customColumns;
+        void bulkCandidatesApi.repairProfileWording(selectedProcess, columns).then(async count => {
+            if (count <= 0) return;
+            await syncColumnValuesFromDatabase(selectedProcess);
+            await loadCandidates(0, true);
+        }).catch(error => {
+            console.warn('No se pudo corregir la redacción de los perfiles:', error);
+        });
+    }, [selectedProcess, tableReadyProcessId, customColumns, process?.bulkConfig, syncColumnValuesFromDatabase, loadCandidates]);
 
     useEffect(() => {
         const intervalId = window.setInterval(() => {

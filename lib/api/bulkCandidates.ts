@@ -20,7 +20,7 @@ import type { ChannelContactSummary } from '../contactChannelConfig';
 import { buildInterviewMapFromRows } from '../bulkInterviewUtils';
 import { isMissingColumnError } from '../supabaseColumnErrors';
 import { identityFieldsToDb, identityFromDbRow } from '../candidateIdentity';
-import { normalizeImportTextCase } from '../importTextCase';
+import { normalizeImportTextCase, normalizeProfileWording } from '../importTextCase';
 import { hydrateCandidateIdentity } from '../workerNameParts';
 
 /** Select mínimo — siempre disponible */
@@ -262,7 +262,7 @@ async function repairStoredDescriptions(processId: string): Promise<string[]> {
         const pending = rows.flatMap(row => {
             const raw = typeof row.description === 'string' ? row.description : '';
             if (!raw.trim()) return [];
-            const fixed = normalizeImportTextCase(raw, { field: 'description' });
+            const fixed = normalizeProfileWording(raw);
             if (fixed === raw) return [];
             return [{ id: String(row.id), description: fixed }];
         });
@@ -1291,6 +1291,34 @@ export const bulkCandidatesApi = {
             ]).size,
             cells: cellCount + fieldPatches.reduce((n, item) => n + Object.keys(item.patch).length, 0) + descriptionIds.length,
         };
+    },
+
+    /** Reescribe párrafos de la ficha y de las columnas que quedaron con mayúscula en cada palabra. */
+    async repairProfileWording(processId: string, customColumns: CustomColumn[] = []): Promise<number> {
+        const descriptionIds = await repairStoredDescriptions(processId);
+        const fromDb = await this.loadAllBulkColumnValues(processId);
+        const updates: Record<string, Record<string, unknown>> = {};
+        let cells = 0;
+        for (const [candidateId, row] of Object.entries(fromDb)) {
+            const next: Record<string, unknown> = { ...row };
+            let changed = false;
+            for (const col of customColumns) {
+                if (col.type === 'number' || col.type === 'date' || col.type === 'checkbox' || col.type === 'select' || col.type === 'route' || col.type === 'route_cost') continue;
+                const raw = resolveColumnValueFromRow(next, col);
+                if (typeof raw !== 'string' || !raw.trim()) continue;
+                const fixed = normalizeProfileWording(raw);
+                if (fixed === raw) continue;
+                next[col.id] = fixed;
+                if (col.name) next[bulkColumnNameKey(col.name)] = fixed;
+                changed = true;
+                cells += 1;
+            }
+            if (changed) updates[candidateId] = next;
+        }
+        if (Object.keys(updates).length > 0) {
+            await this.batchSetBulkColumnValues(updates, customColumns);
+        }
+        return descriptionIds.length + cells;
     },
 
     /**

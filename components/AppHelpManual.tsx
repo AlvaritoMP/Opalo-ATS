@@ -784,7 +784,7 @@ const SCREEN_SECTIONS: HelpSection[] = [
                 <H3>Cómo lo hace</H3>
                 <Ul items={[
                     'Cada persona en la sala es una referencia a su ficha. La columna, el comentario y el rechazo se guardan en la sala.',
-                    'El cliente ve los documentos, las pruebas y las columnas del proceso marcadas en la sala. Cada dato es la celda de esa columna. No se toma la ficha del candidato. La conclusión redactada del informe no se muestra.',
+                    'El cliente ve los documentos, las pruebas y los datos marcados en la sala. Cada dato muestra la columna del proceso que se eligió para él. La conclusión redactada del informe no se muestra.',
                     'Reabrir vuelve a habilitar el mismo enlace.',
                 ]} />
             </>

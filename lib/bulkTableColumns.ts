@@ -1,5 +1,5 @@
 import { BulkProcessConfig, CustomColumn, FieldMapping, Process } from '../types';
-import { normalizeImportTextCase } from './importTextCase.js';
+import { normalizeImportTextCase, normalizeProfileWording } from './importTextCase.js';
 import { migrateBulkColumnOrder, CONTACT_COLUMN_IDS, CONTACT_LAST_USER_COLUMN_ID } from './contactChannelConfig';
 import { ensureHiredStageUserColumnInOrder, HIRED_STAGE_USER_COLUMN_ID } from './hiringStageTracking';
 import {
@@ -2611,6 +2611,7 @@ export function formatCustomCellDisplay(value: any, col: CustomColumn): string {
     }
     if (isDisplayDateColumn(col)) return formatBulkDate(value) || '-';
     if (value === undefined || value === null || value === '') return '-';
+    if (typeof value === 'string') return normalizeProfileWording(value) || '-';
     return String(value);
 }
 

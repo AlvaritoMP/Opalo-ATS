@@ -6,8 +6,8 @@ import { ShortlistBoard } from './ShortlistBoard';
 import { clientsApi } from '../lib/api/clients';
 import { shortlistsApi, ShortlistSchemaError } from '../lib/api/shortlists';
 import { buildPublicShortlistUrl, isValidAccessDni, normalizeAccessDni, shareShortlistOnWhatsApp } from '../lib/shortlists';
-import { columnField, processColumnsFromSaved } from '../lib/shortlistClientFields';
-import { normalizeColumnNameKey, setBulkSelectedProcessId } from '../lib/bulkTableColumns';
+import { editorFieldsFromSaved, optionToField, SHORTLIST_FIELD_OPTIONS } from '../lib/shortlistClientFields';
+import { setBulkSelectedProcessId } from '../lib/bulkTableColumns';
 import { toUuidOrNull } from '../lib/uuid';
 import type { Client, Shortlist, ShortlistActor, ShortlistClientField, ShortlistColumnKey, ShortlistEvent, ShortlistMember } from '../types';
 
@@ -409,56 +409,67 @@ const ClientShortlistPreview: React.FC<{
     );
 };
 
+const FIELD_GROUPS = ['Contacto', 'Perfil', 'Ficha', 'Informe'];
+
 const ClientFieldsEditor: React.FC<{
     fields: ShortlistClientField[];
     columns: string[];
     onChange: (fields: ShortlistClientField[]) => void;
 }> = ({ fields, columns, onChange }) => {
-    const [query, setQuery] = useState('');
-    const selected = fields.filter(field => field.kind === 'column');
-    const selectedKeys = new Set(selected.map(field => normalizeColumnNameKey(field.columnName || field.label)));
-    const byKey = new Map<string, string>();
-    for (const name of columns) byKey.set(normalizeColumnNameKey(name), name);
-    for (const field of selected) {
-        const name = field.columnName || field.label;
-        const key = normalizeColumnNameKey(name);
-        if (key && !byKey.has(key)) byKey.set(key, name);
-    }
-    const needle = foldSearch(query);
-    const visible = [...byKey.values()]
-        .sort((a, b) => a.localeCompare(b, 'es'))
-        .filter(name => !needle || foldSearch(name).includes(needle));
-    const toggle = (name: string) => {
-        const key = normalizeColumnNameKey(name);
-        if (selectedKeys.has(key)) {
-            onChange(selected.filter(field => normalizeColumnNameKey(field.columnName || field.label) !== key));
-            return;
-        }
-        onChange([...selected, columnField(name)]);
+    const isOn = (id: string) => fields.some(field => field.id === id);
+    const toggle = (option: (typeof SHORTLIST_FIELD_OPTIONS)[number]) => {
+        onChange(isOn(option.id) ? fields.filter(field => field.id !== option.id) : [...fields, optionToField(option)]);
     };
+    const setColumn = (id: string, name: string) => {
+        onChange(fields.map(field => field.id === id ? { ...field, columnNames: name ? [name] : undefined } : field));
+    };
+    const extras = fields.filter(field => field.kind === 'column');
 
     return (
-        <div className="border border-gray-200 rounded-lg p-3 space-y-2 bg-gray-50">
-            <p className="text-xs text-gray-500">Marque las columnas del proceso. El cliente ve la celda de cada columna marcada y nada de la ficha.</p>
-            <input
-                value={query}
-                onChange={event => setQuery(event.target.value)}
-                placeholder="Buscar columna"
-                className="w-full border border-gray-300 rounded-lg px-2 py-1.5 text-sm bg-white"
-            />
-            <div className="max-h-52 overflow-y-auto space-y-1">
-                {visible.map(name => {
-                    const key = normalizeColumnNameKey(name);
-                    return (
-                        <label key={key} className="flex items-center gap-2">
-                            <input type="checkbox" checked={selectedKeys.has(key)} onChange={() => toggle(name)} />
-                            <span>{name}</span>
+        <div className="border border-gray-200 rounded-lg p-3 space-y-3 bg-gray-50">
+            <p className="text-xs text-gray-500">Active el dato y elija la columna del proceso. El cliente ve esa celda, con el nombre del dato.</p>
+            {FIELD_GROUPS.map(group => (
+                <div key={group}>
+                    <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">{group}</p>
+                    <div className="mt-1 space-y-2">
+                        {SHORTLIST_FIELD_OPTIONS.filter(option => option.group === group).map(option => {
+                            const field = fields.find(item => item.id === option.id);
+                            const selected = field?.columnNames?.[0] || '';
+                            const known = columns.some(name => name === selected);
+                            return (
+                                <div key={option.id}>
+                                    <label className="flex items-center gap-2">
+                                        <input type="checkbox" checked={isOn(option.id)} onChange={() => toggle(option)} />
+                                        <span>{option.label}</span>
+                                    </label>
+                                    {field && (
+                                        <select
+                                            value={selected}
+                                            onChange={event => setColumn(field.id, event.target.value)}
+                                            className="mt-1 ml-6 w-[calc(100%-1.5rem)] border border-gray-300 rounded-lg px-2 py-1 text-xs bg-white"
+                                        >
+                                            <option value="">Elija la columna</option>
+                                            {selected && !known && <option value={selected}>{selected}</option>}
+                                            {columns.map(name => <option key={name} value={name}>{name}</option>)}
+                                        </select>
+                                    )}
+                                </div>
+                            );
+                        })}
+                    </div>
+                </div>
+            ))}
+            {extras.length > 0 && (
+                <div>
+                    <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">Otras columnas</p>
+                    {extras.map(field => (
+                        <label key={field.id} className="mt-1 flex items-center gap-2">
+                            <input type="checkbox" checked onChange={() => onChange(fields.filter(item => item.id !== field.id))} />
+                            <span>{field.label}</span>
                         </label>
-                    );
-                })}
-                {visible.length === 0 && <p className="text-xs text-gray-400">No hay columnas con ese nombre.</p>}
-            </div>
-            <p className="text-[11px] text-gray-400">{selected.length} columna{selected.length === 1 ? '' : 's'} visible{selected.length === 1 ? '' : 's'}</p>
+                    ))}
+                </div>
+            )}
         </div>
     );
 };
@@ -477,7 +488,7 @@ const ShortlistFormModal: React.FC<{
     const [showDocuments, setShowDocuments] = useState(existing?.showDocuments ?? true);
     const [showAssessments, setShowAssessments] = useState(existing?.showAssessments ?? true);
     const [showProfile, setShowProfile] = useState(existing?.showProfile ?? true);
-    const [clientFields, setClientFields] = useState<ShortlistClientField[]>(() => processColumnsFromSaved(existing?.clientFields));
+    const [clientFields, setClientFields] = useState<ShortlistClientField[]>(() => editorFieldsFromSaved(existing?.clientFields));
     const [processColumns, setProcessColumns] = useState<string[]>([]);
     const [saving, setSaving] = useState(false);
     const [error, setError] = useState('');
@@ -576,7 +587,7 @@ const ShortlistFormModal: React.FC<{
                                 onChange={setClientFields}
                             />
                         )}
-                        <p className="text-xs text-gray-500">La conclusión redactada del informe no se muestra. Los datos del candidato salen solo de las columnas marcadas.</p>
+                        <p className="text-xs text-gray-500">La conclusión redactada del informe no se muestra. Cada dato usa la columna elegida. Sin columna, ese dato no aparece.</p>
                     </div>
                     {error && <p className="text-sm text-red-700">{error}</p>}
                 </div>

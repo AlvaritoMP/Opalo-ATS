@@ -58,22 +58,33 @@ export function defaultShortlistClientFields(): ShortlistClientField[] {
     return [];
 }
 
-/** Deja solo las columnas de proceso ya elegidas. Los datos de ficha no se conservan. */
-export function processColumnsFromSaved(fields: ShortlistClientField[] | undefined): ShortlistClientField[] {
-    const seen = new Set<string>();
-    const columns: ShortlistClientField[] = [];
-    const push = (name: string) => {
-        const clean = name.trim();
-        const key = normalizeColumnNameKey(clean);
-        if (!key || seen.has(key)) return;
-        seen.add(key);
-        columns.push(columnField(clean));
-    };
-    for (const field of fields || []) {
-        if (field.kind === 'column') push(field.columnName || field.label);
-        for (const name of field.columnNames || []) push(name);
+/** Recupera las opciones guardadas y la columna elegida para cada una. */
+export function editorFieldsFromSaved(fields: ShortlistClientField[] | undefined): ShortlistClientField[] {
+    const saved = fields || [];
+    const used = new Set<string>();
+    const options: ShortlistClientField[] = [];
+    for (const option of SHORTLIST_FIELD_OPTIONS) {
+        const direct = saved.find(field => field.id === option.id);
+        if (direct) {
+            options.push(direct);
+            for (const name of direct.columnNames || []) used.add(normalizeColumnNameKey(name));
+            continue;
+        }
+        const match = saved.find(field => field.kind === 'column' && normalizeColumnNameKey(field.columnName || field.label) === normalizeColumnNameKey(option.label));
+        if (!match) continue;
+        used.add(match.id);
+        options.push({
+            ...optionToField(option),
+            columnNames: [match.columnName || match.label],
+        });
     }
-    return columns;
+    for (const field of saved) {
+        if (field.kind !== 'column' || used.has(field.id)) continue;
+        const key = normalizeColumnNameKey(field.columnName || field.label);
+        if ([...used].includes(key)) continue;
+        options.push(field);
+    }
+    return options;
 }
 
 export function optionToField(option: ShortlistFieldOption): ShortlistClientField {
@@ -142,11 +153,8 @@ export function resolveShortlistProfile(
             const parsed = Number(value.replace(',', '.'));
             if (Number.isFinite(parsed) && parsed > 0 && parsed < 120) age = Math.round(parsed);
         }
-        if (field.kind === 'location') {
-            const place = placeFrom(row, field, process, allColumns);
-            district = place.district;
-            province = place.province;
-            city = place.city;
+        if (field.kind === 'location' && value) {
+            city = value;
         }
         profileFields.push({
             id: field.id,
