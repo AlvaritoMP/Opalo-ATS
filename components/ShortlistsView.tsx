@@ -6,8 +6,8 @@ import { ShortlistBoard } from './ShortlistBoard';
 import { clientsApi } from '../lib/api/clients';
 import { shortlistsApi, ShortlistSchemaError } from '../lib/api/shortlists';
 import { buildPublicShortlistUrl, isValidAccessDni, normalizeAccessDni, shareShortlistOnWhatsApp } from '../lib/shortlists';
-import { columnField, defaultShortlistClientFields, optionToField, SHORTLIST_FIELD_OPTIONS, type ShortlistFieldOption } from '../lib/shortlistClientFields';
-import { setBulkSelectedProcessId } from '../lib/bulkTableColumns';
+import { columnField, processColumnsFromSaved } from '../lib/shortlistClientFields';
+import { normalizeColumnNameKey, setBulkSelectedProcessId } from '../lib/bulkTableColumns';
 import { toUuidOrNull } from '../lib/uuid';
 import type { Client, Shortlist, ShortlistActor, ShortlistClientField, ShortlistColumnKey, ShortlistEvent, ShortlistMember } from '../types';
 
@@ -409,129 +409,56 @@ const ClientShortlistPreview: React.FC<{
     );
 };
 
-const FIELD_GROUPS = ['Contacto', 'Perfil', 'Ficha', 'Informe'];
-
 const ClientFieldsEditor: React.FC<{
     fields: ShortlistClientField[];
     columns: string[];
     onChange: (fields: ShortlistClientField[]) => void;
 }> = ({ fields, columns, onChange }) => {
-    const [columnPick, setColumnPick] = useState('');
-    const isOn = (option: ShortlistFieldOption) => fields.some(field => field.id === option.id);
-    const toggle = (option: ShortlistFieldOption) => {
-        onChange(isOn(option) ? fields.filter(field => field.id !== option.id) : [...fields, optionToField(option)]);
+    const [query, setQuery] = useState('');
+    const selected = fields.filter(field => field.kind === 'column');
+    const selectedKeys = new Set(selected.map(field => normalizeColumnNameKey(field.columnName || field.label)));
+    const byKey = new Map<string, string>();
+    for (const name of columns) byKey.set(normalizeColumnNameKey(name), name);
+    for (const field of selected) {
+        const name = field.columnName || field.label;
+        const key = normalizeColumnNameKey(name);
+        if (key && !byKey.has(key)) byKey.set(key, name);
+    }
+    const needle = foldSearch(query);
+    const visible = [...byKey.values()]
+        .sort((a, b) => a.localeCompare(b, 'es'))
+        .filter(name => !needle || foldSearch(name).includes(needle));
+    const toggle = (name: string) => {
+        const key = normalizeColumnNameKey(name);
+        if (selectedKeys.has(key)) {
+            onChange(selected.filter(field => normalizeColumnNameKey(field.columnName || field.label) !== key));
+            return;
+        }
+        onChange([...selected, columnField(name)]);
     };
-    const patch = (id: string, next: Partial<ShortlistClientField>) => {
-        onChange(fields.map(field => field.id === id ? { ...field, ...next } : field));
-    };
-    const addColumnName = (id: string, name: string) => {
-        const clean = name.trim();
-        if (!clean) return;
-        const field = fields.find(item => item.id === id);
-        const current = field?.columnNames || [];
-        if (current.some(item => item.toLowerCase() === clean.toLowerCase())) return;
-        patch(id, { columnNames: [...current, clean] });
-    };
-    const addProcessColumn = (name: string) => {
-        const next = columnField(name);
-        if (!name.trim() || fields.some(field => field.id === next.id)) return;
-        onChange([...fields, next]);
-        setColumnPick('');
-    };
-    const columnFields = fields.filter(field => field.kind === 'column');
 
     return (
-        <div className="border border-gray-200 rounded-lg p-3 space-y-3 bg-gray-50">
-            {FIELD_GROUPS.map(group => (
-                <div key={group}>
-                    <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">{group}</p>
-                    <div className="mt-1 space-y-1">
-                        {SHORTLIST_FIELD_OPTIONS.filter(option => option.group === group).map(option => {
-                            const field = fields.find(item => item.id === option.id);
-                            return (
-                                <div key={option.id}>
-                                    <label className="flex items-center gap-2">
-                                        <input type="checkbox" checked={isOn(option)} onChange={() => toggle(option)} />
-                                        <span>{option.label}</span>
-                                    </label>
-                                    {field && option.acceptsColumns && (
-                                        <ColumnSourcePicker
-                                            names={field.columnNames || []}
-                                            options={columns}
-                                            onAdd={name => addColumnName(field.id, name)}
-                                            onRemove={name => patch(field.id, { columnNames: (field.columnNames || []).filter(item => item !== name) })}
-                                        />
-                                    )}
-                                </div>
-                            );
-                        })}
-                    </div>
-                </div>
-            ))}
-            <div>
-                <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">Columnas del proceso</p>
-                <p className="text-xs text-gray-500 mt-1">Use esto cuando el dato no está en el campo estándar del candidato, sino en una columna de su proceso.</p>
-                {columnFields.map(field => (
-                    <label key={field.id} className="mt-1 flex items-center gap-2">
-                        <input type="checkbox" checked onChange={() => onChange(fields.filter(item => item.id !== field.id))} />
-                        <span>{field.label}</span>
-                    </label>
-                ))}
-                <div className="mt-2 flex gap-2">
-                    <input
-                        list="shortlist-process-columns"
-                        value={columnPick}
-                        onChange={event => setColumnPick(event.target.value)}
-                        placeholder="Nombre de la columna"
-                        className="flex-1 border border-gray-300 rounded-lg px-2 py-1.5 text-sm bg-white"
-                    />
-                    <datalist id="shortlist-process-columns">
-                        {columns.map(name => <option key={name} value={name} />)}
-                    </datalist>
-                    <button type="button" onClick={() => addProcessColumn(columnPick)} className="px-2 py-1.5 text-sm rounded-lg border border-gray-300 bg-white">Agregar</button>
-                </div>
+        <div className="border border-gray-200 rounded-lg p-3 space-y-2 bg-gray-50">
+            <p className="text-xs text-gray-500">Marque las columnas del proceso. El cliente ve la celda de cada columna marcada y nada de la ficha.</p>
+            <input
+                value={query}
+                onChange={event => setQuery(event.target.value)}
+                placeholder="Buscar columna"
+                className="w-full border border-gray-300 rounded-lg px-2 py-1.5 text-sm bg-white"
+            />
+            <div className="max-h-52 overflow-y-auto space-y-1">
+                {visible.map(name => {
+                    const key = normalizeColumnNameKey(name);
+                    return (
+                        <label key={key} className="flex items-center gap-2">
+                            <input type="checkbox" checked={selectedKeys.has(key)} onChange={() => toggle(name)} />
+                            <span>{name}</span>
+                        </label>
+                    );
+                })}
+                {visible.length === 0 && <p className="text-xs text-gray-400">No hay columnas con ese nombre.</p>}
             </div>
-        </div>
-    );
-};
-
-const ColumnSourcePicker: React.FC<{
-    names: string[];
-    options: string[];
-    onAdd: (name: string) => void;
-    onRemove: (name: string) => void;
-}> = ({ names, options, onAdd, onRemove }) => {
-    const [draft, setDraft] = useState('');
-    return (
-        <div className="ml-6 mt-1 space-y-1">
-            <p className="text-xs text-gray-500">Usar solo esta columna del proceso. Si la elige, no se toma el campo de la ficha ni otro dato del perfil.</p>
-            <div className="flex flex-wrap gap-1">
-                {names.map(name => (
-                    <button key={name} type="button" onClick={() => onRemove(name)} className="text-xs px-2 py-0.5 rounded-full bg-white border border-gray-300">
-                        {name} ×
-                    </button>
-                ))}
-            </div>
-            <div className="flex gap-2">
-                <input
-                    list="shortlist-process-columns"
-                    value={draft}
-                    onChange={event => setDraft(event.target.value)}
-                    placeholder="Columna"
-                    className="flex-1 border border-gray-300 rounded-lg px-2 py-1 text-xs bg-white"
-                />
-                <button
-                    type="button"
-                    onClick={() => {
-                        onAdd(draft);
-                        setDraft('');
-                    }}
-                    className="px-2 py-1 text-xs rounded-lg border border-gray-300 bg-white"
-                >
-                    Usar
-                </button>
-            </div>
-            {options.length === 0 && <p className="text-[11px] text-gray-400">Escriba el nombre exacto del encabezado de la columna.</p>}
+            <p className="text-[11px] text-gray-400">{selected.length} columna{selected.length === 1 ? '' : 's'} visible{selected.length === 1 ? '' : 's'}</p>
         </div>
     );
 };
@@ -550,7 +477,7 @@ const ShortlistFormModal: React.FC<{
     const [showDocuments, setShowDocuments] = useState(existing?.showDocuments ?? true);
     const [showAssessments, setShowAssessments] = useState(existing?.showAssessments ?? true);
     const [showProfile, setShowProfile] = useState(existing?.showProfile ?? true);
-    const [clientFields, setClientFields] = useState<ShortlistClientField[]>(existing?.clientFields ?? defaultShortlistClientFields());
+    const [clientFields, setClientFields] = useState<ShortlistClientField[]>(() => processColumnsFromSaved(existing?.clientFields));
     const [processColumns, setProcessColumns] = useState<string[]>([]);
     const [saving, setSaving] = useState(false);
     const [error, setError] = useState('');
@@ -649,7 +576,7 @@ const ShortlistFormModal: React.FC<{
                                 onChange={setClientFields}
                             />
                         )}
-                        <p className="text-xs text-gray-500">La conclusión redactada del informe no se muestra. Si indica una columna en expectativa o experiencia, se usa esa celda y no el dato de la ficha ni del perfil.</p>
+                        <p className="text-xs text-gray-500">La conclusión redactada del informe no se muestra. Los datos del candidato salen solo de las columnas marcadas.</p>
                     </div>
                     {error && <p className="text-sm text-red-700">{error}</p>}
                 </div>

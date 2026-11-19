@@ -20,6 +20,7 @@ import JSZip from 'jszip';
 import { saveAs } from 'file-saver';
 import { openAttachment } from '../lib/openAttachment';
 import { composeIdentityFullName } from '../lib/candidateIdentity';
+import { normalizeImportTextCase } from '../lib/importTextCase';
 
 const fileToBase64 = (file: File): Promise<string> => {
     return new Promise((resolve, reject) => {
@@ -1389,7 +1390,7 @@ export const CandidateDetailsModal: React.FC<{ candidate: Candidate, onClose: ()
                                         {currentCandidate.description && (
                                             <div>
                                                 <h3 className="font-semibold text-gray-700 mb-2">Resumen</h3>
-                                                <p className="text-sm text-gray-600 whitespace-pre-wrap">{currentCandidate.description}</p>
+                                                <p className="text-sm text-gray-600 whitespace-pre-wrap">{normalizeImportTextCase(currentCandidate.description, { field: 'description' })}</p>
                                             </div>
                                         )}
                                     </>

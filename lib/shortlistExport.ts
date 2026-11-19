@@ -1,6 +1,5 @@
 import * as XLSX from 'xlsx';
 import type { Shortlist, ShortlistClientField, ShortlistMember } from '../types';
-import { defaultShortlistClientFields } from './shortlistClientFields';
 import { shortlistColumnLabel } from './shortlists';
 
 /** Tabla con los datos que la sala muestra. No incluye el resto de la ficha del ATS. */
@@ -47,7 +46,7 @@ export function downloadShortlistTable(shortlist: Shortlist, members: ShortlistM
 
 function visibleFields(shortlist: Shortlist): ShortlistClientField[] {
     if (!shortlist.showProfile) return [];
-    return shortlist.clientFields ?? defaultShortlistClientFields();
+    return (shortlist.clientFields ?? []).filter(field => field.kind === 'column' || (field.columnNames && field.columnNames.length > 0));
 }
 
 function fieldHeaders(fields: ShortlistClientField[]): string[] {

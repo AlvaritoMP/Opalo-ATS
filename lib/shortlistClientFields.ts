@@ -1,5 +1,6 @@
 import type { PsycholaboralInventory, ShortlistClientField, ShortlistFieldKind, ShortlistProfileField } from '../types';
 import { normalizeColumnNameKey, resolveColumnValueFromRow } from './bulkTableColumns';
+import { normalizeImportTextCase } from './importTextCase';
 import type { CustomColumn } from '../types';
 import { createDefaultPsycholaboralInventory } from './psycholaboralDefaults';
 import { getCompetencyLevelLabel, mergePsycholaboralInventory } from './psycholaboralUtils';
@@ -51,12 +52,28 @@ export const SHORTLIST_FIELD_OPTIONS: ShortlistFieldOption[] = [
     { id: 'psychCompetencies', label: 'Competencias', kind: 'psychCompetencies', group: 'Informe' },
 ];
 
-const DEFAULT_IDS = ['phone', 'email', 'age', 'location', 'salary', 'linkedin', 'description', 'experience', 'education'];
-
-const WIDE_KINDS = new Set<ShortlistFieldKind>(['description', 'experience', 'education', 'psychPersonality', 'psychCompetencies']);
+const WIDE_KINDS = new Set<ShortlistFieldKind>(['description', 'experience', 'education', 'psychPersonality', 'psychCompetencies', 'column']);
 
 export function defaultShortlistClientFields(): ShortlistClientField[] {
-    return SHORTLIST_FIELD_OPTIONS.filter(option => DEFAULT_IDS.includes(option.id)).map(optionToField);
+    return [];
+}
+
+/** Deja solo las columnas de proceso ya elegidas. Los datos de ficha no se conservan. */
+export function processColumnsFromSaved(fields: ShortlistClientField[] | undefined): ShortlistClientField[] {
+    const seen = new Set<string>();
+    const columns: ShortlistClientField[] = [];
+    const push = (name: string) => {
+        const clean = name.trim();
+        const key = normalizeColumnNameKey(clean);
+        if (!key || seen.has(key)) return;
+        seen.add(key);
+        columns.push(columnField(clean));
+    };
+    for (const field of fields || []) {
+        if (field.kind === 'column') push(field.columnName || field.label);
+        for (const name of field.columnNames || []) push(name);
+    }
+    return columns;
 }
 
 export function optionToField(option: ShortlistFieldOption): ShortlistClientField {
@@ -121,7 +138,7 @@ export function resolveShortlistProfile(
     for (const field of fields) {
         const value = valueForField(row, field, process, inventory, allColumns);
         if (!value) continue;
-        if (field.kind === 'age') {
+        if (field.kind === 'age' || normalizeColumnNameKey(field.columnName || field.label) === 'edad') {
             const parsed = Number(value.replace(',', '.'));
             if (Number.isFinite(parsed) && parsed > 0 && parsed < 120) age = Math.round(parsed);
         }
@@ -147,47 +164,16 @@ function valueForField(
     row: Record<string, unknown>,
     field: ShortlistClientField,
     process: ShortlistProcessContext | undefined,
-    inventory: PsycholaboralInventory,
+    _inventory: PsycholaboralInventory,
     allColumns: ShortlistColumnRef[],
 ): string {
-    const chosen = (field.columnNames || []).length > 0
-        ? namedColumns(row, field.columnNames || [], process, allColumns)
-        : '';
-    const lockedToColumn = (field.columnNames || []).length > 0;
-    switch (field.kind) {
-        case 'phone':
-            return lockedToColumn ? chosen : first([text(row.phone), fichaText(row, 'telefono')]);
-        case 'email':
-            return lockedToColumn ? chosen : first([text(row.email), fichaText(row, 'email')]);
-        case 'age':
-            return lockedToColumn ? chosen : first([text(row.age), fichaText(row, 'edad')]);
-        case 'location':
-            return placeLabel(placeFrom(row, field, process, allColumns));
-        case 'linkedin':
-            return text(row.linkedin_url);
-        case 'description':
-            return lockedToColumn ? chosen : text(row.description);
-        case 'salary':
-            return lockedToColumn ? chosen : text(row.salary_expectation);
-        case 'experience':
-            return lockedToColumn ? chosen : experienceText(row);
-        case 'education':
-            return educationText(row);
-        case 'ficha':
-            return field.fichaKey ? fichaText(row, field.fichaKey) : '';
-        case 'column':
-            return columnText(row, field.columnName || field.label, process, allColumns);
-        case 'psychSuitability':
-            return suitabilityText(row);
-        case 'psychIntellectual':
-            return intellectualText(row, inventory);
-        case 'psychPersonality':
-            return personalityText(row, inventory);
-        case 'psychCompetencies':
-            return competencyText(row, inventory, process);
-        default:
-            return '';
+    if (field.kind === 'column') {
+        return columnText(row, field.columnName || field.label, process, allColumns);
     }
+    if (field.columnNames?.length) {
+        return namedColumns(row, field.columnNames, process, allColumns);
+    }
+    return '';
 }
 
 function placeFrom(
@@ -240,19 +226,25 @@ function columnText(
     for (const column of allColumns) legacy[column.id] = column.name;
     for (const column of matching) {
         const columnDef: CustomColumn = { id: column.id, name: column.name, type: 'text' };
-        const cell = cellText(resolveColumnValueFromRow(bulk, columnDef, legacy));
+        const cell = presentText(cellText(resolveColumnValueFromRow(bulk, columnDef, legacy)), column.name);
         if (cell) return cell;
     }
-    const named = cellText(bulk[`__name__${wanted}`]);
+    const named = presentText(cellText(bulk[`__name__${wanted}`]), name);
     if (named) return named;
     const knownIds = new Set([...matching, ...allColumns].map(column => column.id));
     for (const [key, value] of Object.entries(bulk)) {
         if (key.startsWith('__name__') || knownIds.has(key)) continue;
         if (normalizeColumnNameKey(key) !== wanted) continue;
-        const cell = cellText(value);
+        const cell = presentText(cellText(value), name);
         if (cell) return cell;
     }
     return '';
+}
+
+function presentText(value: string, field?: string): string {
+    const raw = value.trim();
+    if (!raw) return '';
+    return normalizeImportTextCase(raw, field ? { field } : {});
 }
 
 function fichaText(row: Record<string, unknown>, key: string): string {

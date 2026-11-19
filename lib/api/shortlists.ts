@@ -10,6 +10,7 @@ import {
 } from '../shortlists';
 import { composeWorkerFullName, identityFromDbRow } from '../candidateIdentity';
 import { buildLegacyColumnIdToName, normalizeColumnNameKey } from '../bulkTableColumns';
+import { normalizeImportTextCase } from '../importTextCase';
 import {
     defaultShortlistClientFields,
     parseShortlistClientFields,
@@ -233,7 +234,48 @@ async function loadCandidateViews(
             profileFields: profile.profileFields,
         };
     }
+    void persistCorrectedProse(rows, allColumns);
     return views;
+}
+
+function persistCorrectedProse(
+    rows: Record<string, unknown>[],
+    columns: { id: string; name: string }[],
+): void {
+    const nameById = new Map(columns.map(column => [column.id, column.name]));
+    const writes: PromiseLike<unknown>[] = [];
+    for (const row of rows) {
+        const id = textOf(row.id);
+        if (!id) continue;
+        const description = textOf(row.description);
+        if (description) {
+            const fixed = normalizeImportTextCase(description, { field: 'description' });
+            if (fixed !== description) {
+                writes.push(
+                    supabase.from('candidates').update({ description: fixed }).eq('id', id).eq('app_name', APP_NAME)
+                );
+            }
+        }
+        const bulk = asObject(row.bulk_column_values);
+        const next: Record<string, unknown> = { ...bulk };
+        let bulkChanged = false;
+        for (const [key, value] of Object.entries(bulk)) {
+            if (typeof value !== 'string' || !value.trim()) continue;
+            const field = key.startsWith('__name__') ? key.slice('__name__'.length) : nameById.get(key);
+            if (!field) continue;
+            const fixed = normalizeImportTextCase(value, { field });
+            if (fixed === value) continue;
+            next[key] = fixed;
+            bulkChanged = true;
+        }
+        if (bulkChanged) {
+            writes.push(
+                supabase.from('candidates').update({ bulk_column_values: next }).eq('id', id).eq('app_name', APP_NAME)
+            );
+        }
+    }
+    if (writes.length === 0) return;
+    void Promise.all(writes).catch(() => undefined);
 }
 
 function dbToShortlist(row: Record<string, unknown>, counts: ShortlistCounts = EMPTY_COUNTS): Shortlist {
