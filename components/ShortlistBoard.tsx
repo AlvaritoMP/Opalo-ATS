@@ -352,6 +352,7 @@ export const ShortlistBoard: React.FC<ShortlistBoardProps> = ({
                     closed={closed}
                     busy={busy}
                     showProfile={shortlist.showProfile}
+                    showDocuments={mode === 'staff' || shortlist.showDocuments}
                     readOnly={readOnly}
                     onLocked={lockChange}
                     onClose={() => setSelectedId(null)}
@@ -393,6 +394,7 @@ const MemberPanel: React.FC<{
     closed: boolean;
     busy?: boolean;
     showProfile: boolean;
+    showDocuments: boolean;
     readOnly?: boolean;
     onLocked?: () => void;
     onClose: () => void;
@@ -402,7 +404,7 @@ const MemberPanel: React.FC<{
     interviews: ShortlistEvent[];
     onRemove?: () => void;
     onOpenProcess?: () => void;
-}> = ({ member, comments, mode, closed, busy, showProfile, readOnly, onLocked, onClose, onMove, onReject, onComment, interviews, onRemove, onOpenProcess }) => {
+}> = ({ member, comments, mode, closed, busy, showProfile, showDocuments, readOnly, onLocked, onClose, onMove, onReject, onComment, interviews, onRemove, onOpenProcess }) => {
     const [comment, setComment] = useState('');
     const [reason, setReason] = useState('');
     const [rejecting, setRejecting] = useState(false);
@@ -479,7 +481,7 @@ const MemberPanel: React.FC<{
                             </ul>
                         </section>
                     )}
-                    {person && person.documents.length > 0 && (
+                    {showDocuments && person && (person.documents.length > 0 || person.driveFolderUrl) && (
                         <section>
                             <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-1">Documentos</h3>
                             <ul className="space-y-1">
@@ -489,7 +491,7 @@ const MemberPanel: React.FC<{
                                             <a href={doc.url} target="_blank" rel="noopener noreferrer" className="text-sm text-primary-700 hover:underline">
                                                 {doc.name}
                                             </a>
-                                        ) : (
+                                        ) : doc.url ? (
                                             <button
                                                 type="button"
                                                 className="text-sm text-primary-700 hover:underline text-left"
@@ -497,9 +499,18 @@ const MemberPanel: React.FC<{
                                             >
                                                 {doc.name}
                                             </button>
+                                        ) : (
+                                            <span className="text-sm text-gray-700">{doc.name}</span>
                                         )}
                                     </li>
                                 ))}
+                                {person.driveFolderUrl && (
+                                    <li>
+                                        <a href={person.driveFolderUrl} target="_blank" rel="noopener noreferrer" className="text-sm text-primary-700 hover:underline">
+                                            Carpeta de documentos
+                                        </a>
+                                    </li>
+                                )}
                             </ul>
                         </section>
                     )}

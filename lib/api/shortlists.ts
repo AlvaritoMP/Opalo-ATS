@@ -205,9 +205,10 @@ async function loadCandidateViews(
     shortlist: Shortlist,
     sourceProcessByCandidate: Map<string, string> = new Map(),
 ): Promise<Record<string, ShortlistCandidateView>> {
-    const [rows, documents, inventory] = await Promise.all([
+    const [rows, documents, folders, inventory] = await Promise.all([
         loadCandidateRows(ids),
         loadDocuments(ids),
+        loadDriveFolders(ids),
         loadPsychInventory(),
     ]);
     const processIds = [
@@ -237,7 +238,8 @@ async function loadCandidateViews(
             district: profile.district,
             city: profile.city,
             avatarUrl: textOf(row.avatar_url) || undefined,
-            documents: shortlist.showDocuments ? documents[id] || [] : [],
+            documents: documents[id] || [],
+            driveFolderUrl: folders[id],
             tests: shortlist.showAssessments ? summarizeTests(row.assessment_results) : [],
             profileFields: profile.profileFields,
         };
@@ -382,32 +384,52 @@ async function loadCandidateRows(ids: string[]): Promise<Record<string, unknown>
 async function loadDocuments(ids: string[]): Promise<Record<string, ShortlistDocument[]>> {
     const grouped: Record<string, ShortlistDocument[]> = {};
     if (ids.length === 0) return grouped;
-    const withTenant = await supabase
+    const plain = await supabase
         .from('attachments')
         .select('id, candidate_id, name, url, type')
-        .in('candidate_id', ids)
-        .eq('app_name', APP_NAME);
-    const result = withTenant.error
-        ? await supabase.from('attachments').select('id, candidate_id, name, url, type').in('candidate_id', ids)
-        : withTenant;
-    if (result.error) {
-        console.error('[shortlists] documentos', result.error);
+        .in('candidate_id', ids);
+    const withTenant = plain.error
+        ? await supabase
+            .from('attachments')
+            .select('id, candidate_id, name, url, type')
+            .in('candidate_id', ids)
+            .eq('app_name', APP_NAME)
+        : plain;
+    if (withTenant.error) {
+        console.error('[shortlists] documentos', withTenant.error);
         return grouped;
     }
-    for (const row of result.data || []) {
+    for (const row of withTenant.data || []) {
         const candidateId = textOf((row as { candidate_id?: string }).candidate_id);
         if (!candidateId) continue;
+        const url = textOf((row as { url?: string }).url);
         const doc: ShortlistDocument = {
             id: String((row as { id: string }).id),
             name: textOf((row as { name?: string }).name) || 'Documento',
-            url: textOf((row as { url?: string }).url),
+            url,
             type: textOf((row as { type?: string }).type),
         };
-        if (!doc.url) continue;
+        if (!doc.url && !doc.name) continue;
         grouped[candidateId] = grouped[candidateId] || [];
         grouped[candidateId].push(doc);
     }
     return grouped;
+}
+
+async function loadDriveFolders(ids: string[]): Promise<Record<string, string>> {
+    const folders: Record<string, string> = {};
+    if (ids.length === 0) return folders;
+    const { data, error } = await supabase
+        .from('candidates')
+        .select('id, google_drive_folder_id')
+        .in('id', ids)
+        .eq('app_name', APP_NAME);
+    if (error || !data) return folders;
+    for (const row of data) {
+        const folderId = textOf(row.google_drive_folder_id);
+        if (folderId) folders[String(row.id)] = `https://drive.google.com/drive/folders/${folderId}`;
+    }
+    return folders;
 }
 
 async function attachViews(shortlist: Shortlist, members: ShortlistMember[]): Promise<ShortlistMember[]> {
@@ -653,7 +675,6 @@ export const shortlistsApi = {
             const hidden = new Set(
                 (Array.isArray(config.hiddenColumns) ? config.hiddenColumns : []).map(item => textOf(item)).filter(Boolean),
             );
-            const order = (Array.isArray(config.columnOrder) ? config.columnOrder : []).map(item => textOf(item)).filter(Boolean);
             const columns = Array.isArray(config.customColumns) ? config.customColumns : [];
             for (const item of columns) {
                 const column = asObject(item);
@@ -662,10 +683,7 @@ export const shortlistsApi = {
                 if (!name || hidden.has(id) || hidden.has(`custom_${id}`)) continue;
                 add(name);
             }
-            for (const base of SHORTLIST_BASE_COLUMNS) {
-                const shown = order.length === 0 || order.includes(base.id);
-                if (shown && !hidden.has(base.id)) add(base.label);
-            }
+            for (const base of SHORTLIST_BASE_COLUMNS) add(base.label);
         }
         return [...names.values()].sort((a, b) => a.localeCompare(b, 'es'));
     },
