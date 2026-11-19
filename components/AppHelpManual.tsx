@@ -776,15 +776,15 @@ const SCREEN_SECTIONS: HelpSection[] = [
                 </P>
                 <H3>Cómo se usa</H3>
                 <Ol items={[
-                    'En Shortlists cree la sala: nombre y el DNI de quien va a entrar. El cliente del catálogo es opcional. Copie el enlace o envíelo por WhatsApp junto con el DNI. Ver como cliente abre la misma sala que recibe el cliente. El buscador filtra por nombre, cliente o DNI.',
+                    'En Shortlists cree la sala: nombre y el DNI de quien va a entrar. El cliente del catálogo es opcional. Copie el enlace o envíelo por WhatsApp junto con el DNI. Ver como cliente muestra esa misma sala dentro del ATS, solo para revisar la interfaz: se pueden abrir fichas y documentos, y no se guarda ningún cambio. El buscador filtra por nombre, cliente o DNI.',
                     'Abra la ficha de un candidato, en un proceso o en un proceso masivo, y use Presentar en shortlist. Puede venir de cualquier estado del proceso.',
                     'El cliente abre el enlace, ingresa su DNI, comenta, avanza de paso o rechaza con sustento. En Agenda marca su disponibilidad una vez, para toda la sala.',
-                    'Cerrar sala apaga el enlace. El historial queda en la sala para que el equipo actualice el proceso cuando lo decida. Editar cambia nombre, DNI o lo que ve el cliente, y conserva el enlace. Eliminar borra la sala y su historial.',
+                    'Cerrar sala apaga el enlace. El historial queda en la sala para que el equipo actualice el proceso cuando lo decida. Editar cambia nombre, DNI o lo que ve el cliente, y conserva el enlace. Descargar guarda una tabla solo con esos datos visibles. Eliminar borra la sala y su historial.',
                 ]} />
                 <H3>Cómo lo hace</H3>
                 <Ul items={[
                     'Cada persona en la sala es una referencia a su ficha. La columna, el comentario y el rechazo se guardan en la sala.',
-                    'El cliente ve documentos, pruebas y la ficha que se marcaron al crear la sala. No ve notas internas del equipo.',
+                    'El cliente ve los documentos, las pruebas y los datos marcados en la sala. La expectativa y la experiencia salen del campo del candidato o de la columna del proceso que se indique ahí. La conclusión redactada del informe no se muestra.',
                     'Reabrir vuelve a habilitar el mismo enlace.',
                 ]} />
             </>
@@ -963,9 +963,10 @@ export const AppHelpManual: React.FC<{ onClose: () => void; initialSectionId?: s
     );
 };
 
-export const SectionHelpButton: React.FC<{ sectionId: string; className?: string }> = ({
+export const SectionHelpButton: React.FC<{ sectionId: string; className?: string; compact?: boolean }> = ({
     sectionId,
     className,
+    compact,
 }) => {
     const [open, setOpen] = useState(false);
     return (
@@ -977,11 +978,13 @@ export const SectionHelpButton: React.FC<{ sectionId: string; className?: string
                 aria-label="Ayuda de esta sección"
                 className={
                     className ||
-                    'inline-flex items-center gap-1.5 shrink-0 rounded-lg border border-teal-200 bg-teal-50 px-3 py-2 text-sm font-medium text-teal-800 hover:bg-teal-100'
+                    (compact
+                        ? 'inline-flex items-center justify-center w-8 h-8 shrink-0 rounded-full text-gray-400 hover:text-gray-700 hover:bg-gray-100'
+                        : 'inline-flex items-center gap-1.5 shrink-0 rounded-lg border border-teal-200 bg-teal-50 px-3 py-2 text-sm font-medium text-teal-800 hover:bg-teal-100')
                 }
             >
                 <CircleHelp className="w-4 h-4" />
-                Ayuda
+                {compact ? <span className="sr-only">Ayuda</span> : 'Ayuda'}
             </button>
             {open && <AppHelpManual initialSectionId={sectionId} onClose={() => setOpen(false)} />}
         </>

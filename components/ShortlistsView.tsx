@@ -1,12 +1,15 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useAppState } from '../App';
+import { SectionHelpButton } from './AppHelpManual';
+import { ClientShortlistHelp, ShortlistDownloadButton } from './ShortlistGuide';
 import { ShortlistBoard } from './ShortlistBoard';
 import { clientsApi } from '../lib/api/clients';
 import { shortlistsApi, ShortlistSchemaError } from '../lib/api/shortlists';
-import { buildPublicShortlistUrl, isValidAccessDni, normalizeAccessDni, openShortlistAsClient, shareShortlistOnWhatsApp } from '../lib/shortlists';
+import { buildPublicShortlistUrl, isValidAccessDni, normalizeAccessDni, shareShortlistOnWhatsApp } from '../lib/shortlists';
+import { columnField, defaultShortlistClientFields, optionToField, SHORTLIST_FIELD_OPTIONS, type ShortlistFieldOption } from '../lib/shortlistClientFields';
 import { setBulkSelectedProcessId } from '../lib/bulkTableColumns';
 import { toUuidOrNull } from '../lib/uuid';
-import type { Client, Shortlist, ShortlistActor, ShortlistColumnKey, ShortlistEvent, ShortlistMember } from '../types';
+import type { Client, Shortlist, ShortlistActor, ShortlistClientField, ShortlistColumnKey, ShortlistEvent, ShortlistMember } from '../types';
 
 function foldSearch(value: string): string {
     return value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
@@ -29,6 +32,7 @@ export const ShortlistsView: React.FC = () => {
     const [room, setRoom] = useState<RoomState | null>(null);
     const [busy, setBusy] = useState(false);
     const [query, setQuery] = useState('');
+    const [clientPreview, setClientPreview] = useState<RoomState | null>(null);
 
     const actor = (): ShortlistActor => ({
         actorType: 'staff',
@@ -64,6 +68,9 @@ export const ShortlistsView: React.FC = () => {
         const next = await shortlistsApi.getRoom(id);
         setRoom(next);
         setOpenId(id);
+        if (state.view.type !== 'shortlists' || state.view.payload !== id) {
+            actions.setView('shortlists', id);
+        }
     };
 
     useEffect(() => {
@@ -72,9 +79,14 @@ export const ShortlistsView: React.FC = () => {
 
     const requestedId = typeof state.view.payload === 'string' ? state.view.payload : '';
     useEffect(() => {
-        if (!requestedId) return;
-        void loadRoom(requestedId).catch(err => setError(err instanceof Error ? err.message : 'No se pudo abrir la sala.'));
-    }, [requestedId]);
+        if (!requestedId || requestedId === openId) return;
+        void loadRoom(requestedId).catch(err => {
+            setError(err instanceof Error ? err.message : 'No se pudo abrir la sala.');
+            setRoom(null);
+            setOpenId(null);
+            actions.setView('shortlists', null);
+        });
+    }, [requestedId, openId]);
 
     useEffect(() => {
         if (!openId) return;
@@ -106,7 +118,7 @@ export const ShortlistsView: React.FC = () => {
             if (openId === item.id) {
                 setRoom(null);
                 setOpenId(null);
-                actions.setView('shortlists');
+                actions.setView('shortlists', null);
             }
             await loadList();
         } catch (err) {
@@ -133,9 +145,17 @@ export const ShortlistsView: React.FC = () => {
         />
     ) : null;
 
-    const viewAsClient = (item: Pick<Shortlist, 'token' | 'accessDni'>) => {
-        const opened = openShortlistAsClient(item);
-        if (!opened) actions.showToast('Permita ventanas emergentes para ver la sala como el cliente.', 'info', 4000);
+    const viewAsClient = async (item: Shortlist) => {
+        if (room && room.shortlist.id === item.id) {
+            setClientPreview(room);
+            return;
+        }
+        setError('');
+        try {
+            setClientPreview(await shortlistsApi.getRoom(item.id));
+        } catch (err) {
+            setError(err instanceof Error ? err.message : 'No se pudo abrir la vista del cliente.');
+        }
     };
 
     const copyLink = async (token: string) => {
@@ -163,10 +183,14 @@ export const ShortlistsView: React.FC = () => {
             <div className="p-4 md:p-6 space-y-4">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                     <div>
-                        <button type="button" onClick={() => { setRoom(null); setOpenId(null); actions.setView('shortlists'); void loadList(); }} className="text-sm text-primary-700 hover:underline">
+                        <button type="button" onClick={() => { setRoom(null); setOpenId(null); actions.setView('shortlists', null); void loadList(); }} className="text-sm text-primary-700 hover:underline">
                             Volver a shortlists
                         </button>
-                        <h1 className="text-2xl font-semibold text-gray-900 mt-1">{room.shortlist.title}</h1>
+                        <div className="flex items-center gap-2 mt-1">
+                            <h1 className="text-2xl font-semibold text-gray-900">{room.shortlist.title}</h1>
+                            <SectionHelpButton sectionId="shortlists" compact />
+                            <ShortlistDownloadButton shortlist={room.shortlist} members={room.members} />
+                        </div>
                         <p className="text-sm text-gray-500">
                             {room.shortlist.clientLabel || 'Sin cliente'} · acceso con DNI {room.shortlist.accessDni}
                             {room.shortlist.status === 'closed' ? ' · cerrada' : ' · abierta'}
@@ -177,7 +201,7 @@ export const ShortlistsView: React.FC = () => {
                             <img src={state.settings?.logoUrl || state.settings?.poweredByLogoUrl} alt="Opalo" className="h-10 max-w-[150px] object-contain self-end" />
                         )}
                         <div className="grid grid-cols-2 sm:flex sm:flex-wrap gap-2 w-full sm:w-auto">
-                        <button type="button" onClick={() => viewAsClient(room.shortlist)} className="px-3 py-2 text-sm rounded-lg bg-primary-600 text-white">
+                        <button type="button" onClick={() => { void viewAsClient(room.shortlist); }} className="px-3 py-2 text-sm rounded-lg bg-primary-600 text-white">
                             Ver como cliente
                         </button>
                         <button type="button" onClick={() => { void copyLink(room.shortlist.token); }} className="px-3 py-2 text-sm rounded-lg border border-gray-300 bg-white">
@@ -245,6 +269,13 @@ export const ShortlistsView: React.FC = () => {
                     onOpenProcess={openProcess}
                 />
                 {formModal}
+                {clientPreview && (
+                    <ClientShortlistPreview
+                        room={clientPreview}
+                        logoUrl={state.settings?.logoUrl || state.settings?.poweredByLogoUrl}
+                        onClose={() => setClientPreview(null)}
+                    />
+                )}
             </div>
         );
     }
@@ -253,7 +284,10 @@ export const ShortlistsView: React.FC = () => {
         <div className="p-4 md:p-6 space-y-4">
             <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
-                    <h1 className="text-2xl font-semibold text-gray-900">Shortlists</h1>
+                    <div className="flex items-center gap-2">
+                        <h1 className="text-2xl font-semibold text-gray-900">Shortlists</h1>
+                        <SectionHelpButton sectionId="shortlists" compact />
+                    </div>
                     <p className="text-sm text-gray-500 mt-1 max-w-2xl">
                         Arme una sala con tres pasos — Presentación, Entrevista y Finalista — y comparta el enlace. El cliente entra con su DNI. Presentar a alguien no cambia su etapa en el proceso.
                     </p>
@@ -298,7 +332,7 @@ export const ShortlistsView: React.FC = () => {
                             </p>
                         </button>
                         <div className="mt-3 flex flex-wrap gap-2">
-                            <button type="button" onClick={() => viewAsClient(item)} className="px-2.5 py-1.5 text-xs rounded-lg bg-primary-600 text-white">Ver como cliente</button>
+                            <button type="button" onClick={() => { void viewAsClient(item); }} className="px-2.5 py-1.5 text-xs rounded-lg bg-primary-600 text-white">Ver como cliente</button>
                             <button type="button" onClick={() => shareShortlistOnWhatsApp(item)} className="px-2.5 py-1.5 text-xs rounded-lg border border-gray-300">WhatsApp</button>
                             <button type="button" onClick={() => setEditing(item)} className="px-2.5 py-1.5 text-xs rounded-lg border border-gray-300">Editar</button>
                             <button type="button" onClick={() => { void removeRoom(item); }} className="px-2.5 py-1.5 text-xs rounded-lg border border-red-200 text-red-700">Eliminar</button>
@@ -307,6 +341,197 @@ export const ShortlistsView: React.FC = () => {
                 ))}
             </div>
             {formModal}
+            {clientPreview && (
+                <ClientShortlistPreview
+                    room={clientPreview}
+                    logoUrl={state.settings?.logoUrl || state.settings?.poweredByLogoUrl}
+                    onClose={() => setClientPreview(null)}
+                />
+            )}
+        </div>
+    );
+};
+
+const ClientShortlistPreview: React.FC<{
+    room: RoomState;
+    logoUrl?: string;
+    onClose: () => void;
+}> = ({ room, logoUrl, onClose }) => {
+    const closed = room.shortlist.status !== 'open';
+    return (
+        <div className="fixed inset-0 z-[80] overflow-y-auto bg-gray-50 [&_input]:text-base [&_select]:text-base [&_textarea]:text-base">
+            <div className="sticky top-0 z-40">
+                <div className="bg-amber-50 border-b border-amber-200 px-4 py-2 flex flex-wrap items-center justify-between gap-2">
+                    <p className="text-sm text-amber-950">Vista de verificación. Puede abrir fichas y documentos. Los movimientos, comentarios y rechazos no se guardan.</p>
+                    <button type="button" onClick={onClose} className="text-sm font-medium text-amber-950 underline shrink-0">
+                        Volver al ATS
+                    </button>
+                </div>
+                {!closed && (
+                    <header className="bg-white border-b px-4 py-3 flex items-center justify-between gap-3">
+                        <div className="min-w-0">
+                            <p className="text-xs uppercase tracking-wide text-gray-400">Shortlist</p>
+                            <h1 className="text-lg md:text-xl font-semibold text-gray-900 break-words">{room.shortlist.title}</h1>
+                            <p className="text-sm text-gray-500">{room.shortlist.clientLabel}</p>
+                        </div>
+                        <div className="flex items-center gap-1 shrink-0">
+                            <ClientShortlistHelp />
+                            <ShortlistDownloadButton shortlist={room.shortlist} members={room.members} />
+                            {logoUrl && <img src={logoUrl} alt="Opalo" className="h-10 sm:h-12 max-w-[150px] object-contain" />}
+                        </div>
+                    </header>
+                )}
+            </div>
+            {closed ? (
+                <div className="min-h-[70vh] flex items-center justify-center p-4">
+                    <div className="bg-white border border-gray-200 rounded-2xl shadow-sm w-full max-w-md p-6">
+                        <h1 className="text-xl font-semibold text-gray-900">Esta sala ya no está disponible</h1>
+                        <p className="text-sm text-gray-600 mt-2">El enlace se cerró. El equipo conserva el historial de lo que se decidió.</p>
+                    </div>
+                </div>
+            ) : (
+                <main className="px-3 py-3">
+                    <ShortlistBoard
+                        shortlist={room.shortlist}
+                        members={room.members}
+                        events={room.events}
+                        mode="client"
+                        readOnly
+                        onMove={() => undefined}
+                        onReject={() => undefined}
+                        onComment={() => undefined}
+                        onCommentRoom={() => undefined}
+                        onSetAvailability={() => undefined}
+                    />
+                </main>
+            )}
+        </div>
+    );
+};
+
+const FIELD_GROUPS = ['Contacto', 'Perfil', 'Ficha', 'Informe'];
+
+const ClientFieldsEditor: React.FC<{
+    fields: ShortlistClientField[];
+    columns: string[];
+    onChange: (fields: ShortlistClientField[]) => void;
+}> = ({ fields, columns, onChange }) => {
+    const [columnPick, setColumnPick] = useState('');
+    const isOn = (option: ShortlistFieldOption) => fields.some(field => field.id === option.id);
+    const toggle = (option: ShortlistFieldOption) => {
+        onChange(isOn(option) ? fields.filter(field => field.id !== option.id) : [...fields, optionToField(option)]);
+    };
+    const patch = (id: string, next: Partial<ShortlistClientField>) => {
+        onChange(fields.map(field => field.id === id ? { ...field, ...next } : field));
+    };
+    const addColumnName = (id: string, name: string) => {
+        const clean = name.trim();
+        if (!clean) return;
+        const field = fields.find(item => item.id === id);
+        const current = field?.columnNames || [];
+        if (current.some(item => item.toLowerCase() === clean.toLowerCase())) return;
+        patch(id, { columnNames: [...current, clean] });
+    };
+    const addProcessColumn = (name: string) => {
+        const next = columnField(name);
+        if (!name.trim() || fields.some(field => field.id === next.id)) return;
+        onChange([...fields, next]);
+        setColumnPick('');
+    };
+    const columnFields = fields.filter(field => field.kind === 'column');
+
+    return (
+        <div className="border border-gray-200 rounded-lg p-3 space-y-3 bg-gray-50">
+            {FIELD_GROUPS.map(group => (
+                <div key={group}>
+                    <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">{group}</p>
+                    <div className="mt-1 space-y-1">
+                        {SHORTLIST_FIELD_OPTIONS.filter(option => option.group === group).map(option => {
+                            const field = fields.find(item => item.id === option.id);
+                            return (
+                                <div key={option.id}>
+                                    <label className="flex items-center gap-2">
+                                        <input type="checkbox" checked={isOn(option)} onChange={() => toggle(option)} />
+                                        <span>{option.label}</span>
+                                    </label>
+                                    {field && option.acceptsColumns && (
+                                        <ColumnSourcePicker
+                                            names={field.columnNames || []}
+                                            options={columns}
+                                            onAdd={name => addColumnName(field.id, name)}
+                                            onRemove={name => patch(field.id, { columnNames: (field.columnNames || []).filter(item => item !== name) })}
+                                        />
+                                    )}
+                                </div>
+                            );
+                        })}
+                    </div>
+                </div>
+            ))}
+            <div>
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">Columnas del proceso</p>
+                <p className="text-xs text-gray-500 mt-1">Use esto cuando el dato no está en el campo estándar del candidato, sino en una columna de su proceso.</p>
+                {columnFields.map(field => (
+                    <label key={field.id} className="mt-1 flex items-center gap-2">
+                        <input type="checkbox" checked onChange={() => onChange(fields.filter(item => item.id !== field.id))} />
+                        <span>{field.label}</span>
+                    </label>
+                ))}
+                <div className="mt-2 flex gap-2">
+                    <input
+                        list="shortlist-process-columns"
+                        value={columnPick}
+                        onChange={event => setColumnPick(event.target.value)}
+                        placeholder="Nombre de la columna"
+                        className="flex-1 border border-gray-300 rounded-lg px-2 py-1.5 text-sm bg-white"
+                    />
+                    <datalist id="shortlist-process-columns">
+                        {columns.map(name => <option key={name} value={name} />)}
+                    </datalist>
+                    <button type="button" onClick={() => addProcessColumn(columnPick)} className="px-2 py-1.5 text-sm rounded-lg border border-gray-300 bg-white">Agregar</button>
+                </div>
+            </div>
+        </div>
+    );
+};
+
+const ColumnSourcePicker: React.FC<{
+    names: string[];
+    options: string[];
+    onAdd: (name: string) => void;
+    onRemove: (name: string) => void;
+}> = ({ names, options, onAdd, onRemove }) => {
+    const [draft, setDraft] = useState('');
+    return (
+        <div className="ml-6 mt-1 space-y-1">
+            <p className="text-xs text-gray-500">También leer de una columna del proceso</p>
+            <div className="flex flex-wrap gap-1">
+                {names.map(name => (
+                    <button key={name} type="button" onClick={() => onRemove(name)} className="text-xs px-2 py-0.5 rounded-full bg-white border border-gray-300">
+                        {name} ×
+                    </button>
+                ))}
+            </div>
+            <div className="flex gap-2">
+                <input
+                    list="shortlist-process-columns"
+                    value={draft}
+                    onChange={event => setDraft(event.target.value)}
+                    placeholder="Columna"
+                    className="flex-1 border border-gray-300 rounded-lg px-2 py-1 text-xs bg-white"
+                />
+                <button
+                    type="button"
+                    onClick={() => {
+                        onAdd(draft);
+                        setDraft('');
+                    }}
+                    className="px-2 py-1 text-xs rounded-lg border border-gray-300 bg-white"
+                >
+                    Usar
+                </button>
+            </div>
+            {options.length === 0 && <p className="text-[11px] text-gray-400">Escriba el nombre exacto del encabezado de la columna.</p>}
         </div>
     );
 };
@@ -325,6 +550,8 @@ const ShortlistFormModal: React.FC<{
     const [showDocuments, setShowDocuments] = useState(existing?.showDocuments ?? true);
     const [showAssessments, setShowAssessments] = useState(existing?.showAssessments ?? true);
     const [showProfile, setShowProfile] = useState(existing?.showProfile ?? true);
+    const [clientFields, setClientFields] = useState<ShortlistClientField[]>(existing?.clientFields ?? defaultShortlistClientFields());
+    const [processColumns, setProcessColumns] = useState<string[]>([]);
     const [saving, setSaving] = useState(false);
     const [error, setError] = useState('');
 
@@ -332,6 +559,7 @@ const ShortlistFormModal: React.FC<{
         clientsApi.getAll().then(setClients).catch(err => {
             setError(err instanceof Error ? err.message : 'No se pudieron cargar los clientes.');
         });
+        shortlistsApi.listClientColumns().then(setProcessColumns).catch(() => undefined);
     }, []);
 
     const save = async () => {
@@ -348,6 +576,7 @@ const ShortlistFormModal: React.FC<{
                 showDocuments,
                 showAssessments,
                 showProfile,
+                clientFields,
             };
             const saved = existing
                 ? await shortlistsApi.update(existing.id, payload)
@@ -368,7 +597,7 @@ const ShortlistFormModal: React.FC<{
 
     return (
         <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={onClose}>
-            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg" onClick={event => event.stopPropagation()}>
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto" onClick={event => event.stopPropagation()}>
                 <header className="px-5 py-4 border-b">
                     <h2 className="text-lg font-semibold text-gray-900">{existing ? 'Editar sala' : 'Nueva sala'}</h2>
                     <p className="text-sm text-gray-500 mt-1">
@@ -408,11 +637,19 @@ const ShortlistFormModal: React.FC<{
                         <span className="text-gray-700">DNI de acceso</span>
                         <input value={dni} onChange={event => setDni(event.target.value)} inputMode="numeric" className="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2" placeholder="Documento de quien revisa" />
                     </label>
-                    <div className="text-sm text-gray-700 space-y-1">
-                        <p className="font-medium">Qué puede ver</p>
-                        <label className="flex items-center gap-2"><input type="checkbox" checked={showProfile} onChange={event => setShowProfile(event.target.checked)} /> Ficha, contacto y expectativa</label>
-                        <label className="flex items-center gap-2"><input type="checkbox" checked={showDocuments} onChange={event => setShowDocuments(event.target.checked)} /> Documentos</label>
-                        <label className="flex items-center gap-2"><input type="checkbox" checked={showAssessments} onChange={event => setShowAssessments(event.target.checked)} /> Pruebas e informe</label>
+                    <div className="text-sm text-gray-700 space-y-2">
+                        <p className="font-medium">Qué puede ver el cliente</p>
+                        <label className="flex items-center gap-2"><input type="checkbox" checked={showDocuments} onChange={event => setShowDocuments(event.target.checked)} /> Documentos, incluido el informe adjunto</label>
+                        <label className="flex items-center gap-2"><input type="checkbox" checked={showAssessments} onChange={event => setShowAssessments(event.target.checked)} /> Resultados de pruebas</label>
+                        <label className="flex items-center gap-2"><input type="checkbox" checked={showProfile} onChange={event => setShowProfile(event.target.checked)} /> Datos del candidato</label>
+                        {showProfile && (
+                            <ClientFieldsEditor
+                                fields={clientFields}
+                                columns={processColumns}
+                                onChange={setClientFields}
+                            />
+                        )}
+                        <p className="text-xs text-gray-500">La conclusión redactada del informe no se muestra. Si la expectativa o la experiencia están en una columna del proceso, indíquelo en ese dato.</p>
                     </div>
                     {error && <p className="text-sm text-red-700">{error}</p>}
                 </div>

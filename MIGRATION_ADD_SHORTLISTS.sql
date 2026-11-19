@@ -108,6 +108,8 @@ BEGIN
     END IF;
 END $$;
 
+ALTER TABLE public.shortlists ADD COLUMN IF NOT EXISTS client_fields JSONB;
+
 SELECT table_name
 FROM information_schema.tables
 WHERE table_schema = 'public'

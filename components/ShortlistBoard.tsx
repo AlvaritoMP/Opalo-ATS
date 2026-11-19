@@ -17,6 +17,8 @@ interface ShortlistBoardProps {
     members: ShortlistMember[];
     events: ShortlistEvent[];
     mode: 'staff' | 'client';
+    /** Muestra la interfaz del cliente sin guardar movimientos, comentarios ni rechazos. */
+    readOnly?: boolean;
     busy?: boolean;
     onMove: (memberId: string, column: ShortlistColumnKey) => void;
     onReject: (memberId: string, reason: string) => void;
@@ -64,6 +66,7 @@ export const ShortlistBoard: React.FC<ShortlistBoardProps> = ({
     members,
     events,
     mode,
+    readOnly,
     busy,
     onMove,
     onReject,
@@ -77,6 +80,7 @@ export const ShortlistBoard: React.FC<ShortlistBoardProps> = ({
     const [selectedId, setSelectedId] = useState<string | null>(null);
     const [draggingId, setDraggingId] = useState<string | null>(null);
     const [sideTab, setSideTab] = useState<'comments' | 'agenda' | 'history'>('comments');
+    const [lockedNote, setLockedNote] = useState('');
     const [phonePane, setPhonePane] = useState<'board' | 'comments' | 'agenda' | 'history'>('board');
     const [phoneColumn, setPhoneColumn] = useState<ShortlistColumnKey | 'rejected'>('presentacion');
     const phone = useNarrowScreen();
@@ -98,7 +102,16 @@ export const ShortlistBoard: React.FC<ShortlistBoardProps> = ({
         return map;
     }, [events]);
 
+    const lockChange = () => {
+        setLockedNote('Esta vista solo verifica la interfaz. No se guardó ningún cambio.');
+    };
+
     const dropOn = (column: ShortlistColumnKey) => {
+        if (readOnly) {
+            setDraggingId(null);
+            lockChange();
+            return;
+        }
         if (!draggingId || closed) return;
         const member = active.find(item => item.id === draggingId);
         setDraggingId(null);
@@ -108,6 +121,9 @@ export const ShortlistBoard: React.FC<ShortlistBoardProps> = ({
 
     return (
         <div className={`space-y-3 ${phone ? 'pb-20' : ''}`}>
+            {lockedNote && (
+                <p className="text-sm text-amber-950 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">{lockedNote}</p>
+            )}
             {shortlistCreatedMessage(shortlist.createdAt) && (
                 <p className="text-sm text-gray-700 bg-white border border-gray-200 rounded-lg px-3 py-2">
                     {shortlistCreatedMessage(shortlist.createdAt)}
@@ -174,7 +190,7 @@ export const ShortlistBoard: React.FC<ShortlistBoardProps> = ({
                                     {cards.map(member => (
                                         <article
                                             key={member.id}
-                                            draggable={!phone && !closed && !busy}
+                                            draggable={!readOnly && !phone && !closed && !busy}
                                             onDragStart={() => setDraggingId(member.id)}
                                             onDragEnd={() => setDraggingId(null)}
                                             onClick={() => setSelectedId(member.id)}
@@ -211,6 +227,10 @@ export const ShortlistBoard: React.FC<ShortlistBoardProps> = ({
                                                     className="mt-3 w-full text-sm py-2 rounded-lg bg-primary-600 text-white disabled:opacity-40"
                                                     onClick={event => {
                                                         event.stopPropagation();
+                                                        if (readOnly) {
+                                                            lockChange();
+                                                            return;
+                                                        }
                                                         const next = nextShortlistColumn(member.column);
                                                         if (next) onMove(member.id, next);
                                                     }}
@@ -288,7 +308,7 @@ export const ShortlistBoard: React.FC<ShortlistBoardProps> = ({
                 )}
                 <div className="flex-1 min-h-0 overflow-hidden">
                     {(phone ? phonePane : sideTab) === 'comments' && (
-                        <RoomThread comments={roomComments} closed={closed} busy={busy} onSend={onCommentRoom} />
+                        <RoomThread comments={roomComments} closed={closed} busy={busy} readOnly={readOnly} onLocked={lockChange} onSend={onCommentRoom} />
                     )}
                     {(phone ? phonePane : sideTab) === 'agenda' && (
                         <WeekAgenda
@@ -299,6 +319,8 @@ export const ShortlistBoard: React.FC<ShortlistBoardProps> = ({
                             busy={busy}
                             onConfirm={onConfirmAppointment}
                             onSetAvailability={onSetAvailability}
+                            readOnly={readOnly}
+                            onLocked={lockChange}
                             compact={phone}
                         />
                     )}
@@ -330,6 +352,8 @@ export const ShortlistBoard: React.FC<ShortlistBoardProps> = ({
                     closed={closed}
                     busy={busy}
                     showProfile={shortlist.showProfile}
+                    readOnly={readOnly}
+                    onLocked={lockChange}
                     onClose={() => setSelectedId(null)}
                     onMove={column => onMove(selected.id, column)}
                     onReject={reason => onReject(selected.id, reason)}
@@ -369,6 +393,8 @@ const MemberPanel: React.FC<{
     closed: boolean;
     busy?: boolean;
     showProfile: boolean;
+    readOnly?: boolean;
+    onLocked?: () => void;
     onClose: () => void;
     onMove: (column: ShortlistColumnKey) => void;
     onReject: (reason: string) => void;
@@ -376,13 +402,13 @@ const MemberPanel: React.FC<{
     interviews: ShortlistEvent[];
     onRemove?: () => void;
     onOpenProcess?: () => void;
-}> = ({ member, comments, mode, closed, busy, showProfile, onClose, onMove, onReject, onComment, interviews, onRemove, onOpenProcess }) => {
+}> = ({ member, comments, mode, closed, busy, showProfile, readOnly, onLocked, onClose, onMove, onReject, onComment, interviews, onRemove, onOpenProcess }) => {
     const [comment, setComment] = useState('');
     const [reason, setReason] = useState('');
     const [rejecting, setRejecting] = useState(false);
+    const [blockedNote, setBlockedNote] = useState('');
     const person = member.candidate;
     const next = member.status === 'active' ? nextShortlistColumn(member.column) : null;
-    const location = [person?.district, person?.city || person?.province].filter(Boolean).join(', ');
 
     return (
         <div className="fixed inset-0 z-50 bg-black/40 flex justify-end" onClick={onClose}>
@@ -417,37 +443,29 @@ const MemberPanel: React.FC<{
                     {member.status === 'rejected' && (
                         <p className="text-sm bg-red-50 text-red-800 rounded-lg px-3 py-2">{member.rejectionReason}</p>
                     )}
-                    {person && (person.age !== undefined || location) && (
-                        <p className="text-sm text-gray-600">
-                            {[person.age !== undefined ? `${person.age} años` : '', location].filter(Boolean).join(' · ')}
-                        </p>
-                    )}
-                    {showProfile && person && (
+                    {showProfile && person && person.profileFields.some(field => !field.wide) && (
                         <dl className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
-                            {person.phone && <Info label="Teléfono" value={person.phone} />}
-                            {person.email && <Info label="Correo" value={person.email} />}
-                            {person.salaryExpectation && <Info label="Expectativa" value={person.salaryExpectation} />}
-                            {person.linkedinUrl && (
-                                <div className="col-span-2">
-                                    <a href={person.linkedinUrl} target="_blank" rel="noreferrer" className="text-primary-700 text-sm hover:underline">LinkedIn</a>
-                                </div>
-                            )}
+                            {person.profileFields.filter(field => !field.wide).map(field => (
+                                field.href ? (
+                                    <div key={field.id} className="sm:col-span-2">
+                                        <a href={field.href} target="_blank" rel="noreferrer" className="text-primary-700 text-sm hover:underline">{field.label}</a>
+                                    </div>
+                                ) : (
+                                    <Info key={field.id} label={field.label} value={field.value} />
+                                )
+                            ))}
                         </dl>
                     )}
-                    {showProfile && person?.description && (
-                        <section>
-                            <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-1">Perfil</h3>
-                            <p className="text-sm text-gray-700 whitespace-pre-wrap">{person.description}</p>
+                    {showProfile && person?.profileFields.filter(field => field.wide).map(field => (
+                        <section key={field.id}>
+                            <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-1">{field.label}</h3>
+                            {field.href ? (
+                                <a href={field.href} target="_blank" rel="noreferrer" className="text-sm text-primary-700 hover:underline break-all">{field.value}</a>
+                            ) : (
+                                <p className="text-sm text-gray-700 whitespace-pre-wrap">{field.value}</p>
+                            )}
                         </section>
-                    )}
-                    {person && person.fichaLines.length > 0 && (
-                        <section>
-                            <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-1">Ficha</h3>
-                            <ul className="text-sm text-gray-700 space-y-1">
-                                {person.fichaLines.map(line => <li key={line}>{line}</li>)}
-                            </ul>
-                        </section>
-                    )}
+                    ))}
                     {person && person.tests.length > 0 && (
                         <section>
                             <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-1">Pruebas</h3>
@@ -460,12 +478,6 @@ const MemberPanel: React.FC<{
                                 ))}
                             </ul>
                         </section>
-                    )}
-                    {person?.psycholaboralSuitability && (
-                        <p className="text-sm text-gray-700"><span className="font-medium">Informe: </span>{person.psycholaboralSuitability}</p>
-                    )}
-                    {person?.psycholaboralConclusion && (
-                        <p className="text-sm text-gray-700 whitespace-pre-wrap">{person.psycholaboralConclusion}</p>
                     )}
                     {person && person.documents.length > 0 && (
                         <section>
@@ -516,6 +528,11 @@ const MemberPanel: React.FC<{
                             <form
                                 onSubmit={event => {
                                     event.preventDefault();
+                                    if (readOnly) {
+                                        onLocked?.();
+                                        setBlockedNote('No se guardó. Esta vista solo verifica la interfaz.');
+                                        return;
+                                    }
                                     onComment(comment);
                                     setComment('');
                                 }}
@@ -538,12 +555,12 @@ const MemberPanel: React.FC<{
                     {!closed && member.status === 'active' && (
                         <div className="flex flex-wrap gap-2 pt-2 border-t">
                             {next && (
-                                <button type="button" disabled={busy} onClick={() => onMove(next)} className="text-sm px-3 py-1.5 rounded-lg bg-primary-600 text-white disabled:opacity-40">
+                                <button type="button" disabled={busy} onClick={() => { if (readOnly) { onLocked?.(); setBlockedNote('No se guardó. Esta vista solo verifica la interfaz.'); return; } onMove(next); }} className="text-sm px-3 py-1.5 rounded-lg bg-primary-600 text-white disabled:opacity-40">
                                     Pasar a {shortlistColumnLabel(next)}
                                 </button>
                             )}
                             {mode === 'staff' && SHORTLIST_COLUMNS.filter(column => canMoveShortlistColumn(member.column, column.key, 'staff') && column.key !== next).map(column => (
-                                <button key={column.key} type="button" disabled={busy} onClick={() => onMove(column.key)} className="text-sm px-3 py-1.5 rounded-lg border border-gray-300 text-gray-700 disabled:opacity-40">
+                                <button key={column.key} type="button" disabled={busy} onClick={() => { if (readOnly) { onLocked?.(); setBlockedNote('No se guardó. Esta vista solo verifica la interfaz.'); return; } onMove(column.key); }} className="text-sm px-3 py-1.5 rounded-lg border border-gray-300 text-gray-700 disabled:opacity-40">
                                     Mover a {column.label}
                                 </button>
                             ))}
@@ -558,6 +575,11 @@ const MemberPanel: React.FC<{
                         <form
                             onSubmit={event => {
                                 event.preventDefault();
+                                if (readOnly) {
+                                    onLocked?.();
+                                    setBlockedNote('No se guardó. Esta vista solo verifica la interfaz.');
+                                    return;
+                                }
                                 onReject(reason);
                                 setReason('');
                                 setRejecting(false);
@@ -577,6 +599,7 @@ const MemberPanel: React.FC<{
                             </div>
                         </form>
                     )}
+                    {blockedNote && <p className="text-sm text-amber-800">{blockedNote}</p>}
                 </div>
             </div>
         </div>
@@ -607,9 +630,12 @@ const RoomThread: React.FC<{
     comments: ShortlistEvent[];
     closed: boolean;
     busy?: boolean;
+    readOnly?: boolean;
+    onLocked?: () => void;
     onSend: (body: string) => void;
-}> = ({ comments, closed, busy, onSend }) => {
+}> = ({ comments, closed, busy, readOnly, onLocked, onSend }) => {
     const [text, setText] = useState('');
+    const [blockedNote, setBlockedNote] = useState('');
     return (
         <div className="h-full flex flex-col">
             <ul className="flex-1 overflow-y-auto p-3 space-y-2">
@@ -626,6 +652,11 @@ const RoomThread: React.FC<{
                     className="shrink-0 border-t p-3 space-y-2"
                     onSubmit={event => {
                         event.preventDefault();
+                        if (readOnly) {
+                            onLocked?.();
+                            setBlockedNote('No se guardó. Esta vista solo verifica la interfaz.');
+                            return;
+                        }
                         onSend(text);
                         setText('');
                     }}
@@ -640,6 +671,7 @@ const RoomThread: React.FC<{
                     <button type="submit" disabled={busy || !text.trim()} className="px-3 py-1.5 text-sm rounded-lg bg-gray-900 text-white disabled:opacity-40">
                         Enviar
                     </button>
+                    {blockedNote && <p className="text-sm text-amber-800">{blockedNote}</p>}
                 </form>
             )}
         </div>
@@ -678,11 +710,14 @@ const PersonAgenda: React.FC<{ interviews: ShortlistEvent[] }> = ({ interviews }
 
 const InterviewForm: React.FC<{
     busy?: boolean;
+    readOnly?: boolean;
+    onLocked?: () => void;
     onSubmit: (proposal: InterviewProposal) => void;
-}> = ({ busy, onSubmit }) => {
+}> = ({ busy, readOnly, onLocked, onSubmit }) => {
     const [modality, setModality] = useState<'presencial' | 'virtual'>('presencial');
     const [place, setPlace] = useState('');
     const [slots, setSlots] = useState([{ date: '', start: '', end: '' }]);
+    const [blockedNote, setBlockedNote] = useState('');
     return (
         <section>
             <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-2">Rangos disponibles</h3>
@@ -691,6 +726,11 @@ const InterviewForm: React.FC<{
                 className="space-y-2 border border-amber-200 bg-amber-50/40 rounded-lg p-3"
                 onSubmit={event => {
                     event.preventDefault();
+                    if (readOnly) {
+                        onLocked?.();
+                        setBlockedNote('No se guardó. Esta vista solo verifica la interfaz.');
+                        return;
+                    }
                     onSubmit({ modality, place, slots });
                     setPlace('');
                     setSlots([{ date: '', start: '', end: '' }]);
@@ -721,6 +761,7 @@ const InterviewForm: React.FC<{
                 <button type="submit" disabled={busy} className="text-sm px-3 py-1.5 rounded-lg bg-amber-600 text-white disabled:opacity-40">
                     Guardar rangos
                 </button>
+                {blockedNote && <p className="text-sm text-amber-800">{blockedNote}</p>}
             </form>
         </section>
     );
@@ -837,8 +878,10 @@ const WeekAgenda: React.FC<{
     busy?: boolean;
     onConfirm?: (memberId: string, appointment: FinalAppointment) => void;
     onSetAvailability?: (proposal: InterviewProposal) => void;
+    readOnly?: boolean;
+    onLocked?: () => void;
     compact?: boolean;
-}> = ({ members, events, mode, closed, busy, onConfirm, onSetAvailability, compact }) => {
+}> = ({ members, events, mode, closed, busy, onConfirm, onSetAvailability, readOnly, onLocked, compact }) => {
     const [weekStart, setWeekStart] = useState(() => mondayOf(new Date()));
     const [memberId, setMemberId] = useState(members.find(member => member.status === 'active')?.id || '');
     const [modality, setModality] = useState<'presencial' | 'virtual'>('presencial');
@@ -971,6 +1014,10 @@ const WeekAgenda: React.FC<{
                     className="space-y-2 border border-indigo-200 rounded-lg p-3"
                     onSubmit={event => {
                         event.preventDefault();
+                        if (readOnly) {
+                            onLocked?.();
+                            return;
+                        }
                         if (!memberId) return;
                         onConfirm(memberId, { modality, place, date, start, end });
                         setPlace('');
@@ -1002,7 +1049,7 @@ const WeekAgenda: React.FC<{
                 </form>
             )}
             {mode === 'client' && !closed && onSetAvailability && (
-                <InterviewForm busy={busy} onSubmit={onSetAvailability} />
+                <InterviewForm busy={busy} readOnly={readOnly} onLocked={onLocked} onSubmit={onSetAvailability} />
             )}
             {mode === 'client' && (
                 <p className="text-[11px] text-gray-500">Los bloques ámbar son su disponibilidad para toda la sala. Los bloques azules son las citas que confirma Opalo con cada candidato.</p>

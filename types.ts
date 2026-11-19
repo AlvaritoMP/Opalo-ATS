@@ -781,6 +781,8 @@ export interface Shortlist {
     showDocuments: boolean;
     showAssessments: boolean;
     showProfile: boolean;
+    /** Datos que ve el cliente. Si no está definido, se usa el conjunto por defecto. */
+    clientFields?: ShortlistClientField[];
     createdBy?: string;
     createdByName?: string;
     closedAt?: string;
@@ -802,6 +804,44 @@ export interface ShortlistTestSummary {
     summary: string;
 }
 
+export type ShortlistFieldKind =
+    | 'phone'
+    | 'email'
+    | 'age'
+    | 'location'
+    | 'linkedin'
+    | 'description'
+    | 'salary'
+    | 'experience'
+    | 'education'
+    | 'psychSuitability'
+    | 'psychIntellectual'
+    | 'psychPersonality'
+    | 'psychCompetencies'
+    | 'ficha'
+    | 'column';
+
+/** Un dato que la sala puede mostrar al cliente. La conclusión del informe no es un dato seleccionable. */
+export interface ShortlistClientField {
+    id: string;
+    label: string;
+    kind: ShortlistFieldKind;
+    /** Nombre de la columna del proceso, cuando kind es column. */
+    columnName?: string;
+    /** Columnas del proceso que también contienen este dato, además del campo propio del candidato. */
+    columnNames?: string[];
+    /** Campo escalar de la ficha complementaria, cuando kind es ficha. */
+    fichaKey?: string;
+}
+
+export interface ShortlistProfileField {
+    id: string;
+    label: string;
+    value: string;
+    href?: string;
+    wide?: boolean;
+}
+
 /** Vista recortada para la sala. No incluye notas internas ni el historial del proceso. */
 export interface ShortlistCandidateView {
     id: string;
@@ -818,9 +858,7 @@ export interface ShortlistCandidateView {
     city?: string;
     documents: ShortlistDocument[];
     tests: ShortlistTestSummary[];
-    psycholaboralConclusion?: string;
-    psycholaboralSuitability?: string;
-    fichaLines: string[];
+    profileFields: ShortlistProfileField[];
 }
 
 export interface ShortlistMember {

@@ -10,10 +10,18 @@ import {
 } from '../shortlists';
 import { composeWorkerFullName, identityFromDbRow } from '../candidateIdentity';
 import { normalizeColumnNameKey } from '../bulkTableColumns';
+import {
+    defaultShortlistClientFields,
+    parseShortlistClientFields,
+    resolveShortlistProfile,
+    type ShortlistProcessContext,
+} from '../shortlistClientFields';
+import { mergePsycholaboralInventory } from '../psycholaboralUtils';
 import type {
     Shortlist,
     ShortlistActor,
     ShortlistCandidateView,
+    ShortlistClientField,
     ShortlistColumnKey,
     ShortlistCounts,
     ShortlistDocument,
@@ -35,14 +43,8 @@ const TEST_LABELS: Record<string, string> = {
     esfuerzo: 'Esfuerzo',
 };
 
-const SUITABILITY_LABELS: Record<string, string> = {
-    apto: 'Apto',
-    no_apto: 'No apto',
-    apto_reservas: 'Apto con reservas',
-};
-
 const CANDIDATE_SELECTS = [
-    'id, name, nombres, apellido_paterno, apellido_materno, email, phone, age, province, district, description, salary_expectation, linkedin_url, avatar_url, assessment_results, psycholaboral_evaluation, complementary_data, bulk_column_values',
+    'id, process_id, name, nombres, apellido_paterno, apellido_materno, email, phone, age, province, district, description, salary_expectation, linkedin_url, avatar_url, assessment_results, psycholaboral_evaluation, complementary_data, bulk_column_values',
     'id, name, nombres, apellido_paterno, apellido_materno, email, phone, age, province, district, description, salary_expectation, linkedin_url, avatar_url, bulk_column_values',
     'id, name, email, phone, age, province, district, description, salary_expectation, linkedin_url, avatar_url, assessment_results, psycholaboral_evaluation, complementary_data, bulk_column_values',
     'id, name, email, phone, age, province, district, description, salary_expectation, linkedin_url, avatar_url',
@@ -116,21 +118,90 @@ function displayNameFromRow(row: Record<string, unknown>): string {
     return composed.split(/\s+/).length >= legacy.split(/\s+/).length ? composed : legacy;
 }
 
-function ageFromRow(row: Record<string, unknown>): number | undefined {
-    if (typeof row.age === 'number' && row.age > 0 && row.age < 120) return row.age;
-    const bulk = asObject(row.bulk_column_values);
-    const raw = textOf(row.age) || bulkValue(bulk, ['edad', 'age']);
-    const parsed = Number(String(raw).replace(',', '.'));
-    if (Number.isFinite(parsed) && parsed > 0 && parsed < 120) return Math.round(parsed);
-    return undefined;
+async function loadProcessContexts(ids: string[]): Promise<Map<string, ShortlistProcessContext>> {
+    const map = new Map<string, ShortlistProcessContext>();
+    const unique = [...new Set(ids.filter(Boolean))];
+    if (unique.length === 0) return map;
+    const { data, error } = await supabase
+        .from('processes')
+        .select('id, bulk_config')
+        .in('id', unique)
+        .eq('app_name', APP_NAME);
+    if (error || !data) return map;
+    for (const row of data) {
+        const config = asObject(typeof row.bulk_config === 'string' ? safeJson(row.bulk_config) : row.bulk_config);
+        const columns = Array.isArray(config.customColumns) ? config.customColumns : [];
+        const psych = asObject(config.psycholaboral);
+        const competencies = Array.isArray(psych.competencies) ? psych.competencies : [];
+        map.set(String(row.id), {
+            columns: columns.flatMap(item => {
+                const column = asObject(item);
+                const id = textOf(column.id);
+                const name = textOf(column.name);
+                return id && name ? [{ id, name }] : [];
+            }),
+            competencies: competencies.flatMap(item => {
+                const competency = asObject(item);
+                const id = textOf(competency.id);
+                const name = textOf(competency.name);
+                return id && name ? [{ id, name }] : [];
+            }),
+        });
+    }
+    return map;
 }
 
-function placeFromRow(row: Record<string, unknown>): { city?: string; district?: string; province?: string } {
-    const bulk = asObject(row.bulk_column_values);
-    const district = textOf(row.district) || bulkValue(bulk, ['distrito', 'district']) || undefined;
-    const province = textOf(row.province) || bulkValue(bulk, ['provincia', 'province']) || undefined;
-    const city = bulkValue(bulk, ['ciudad', 'city']) || province;
-    return { city: city || undefined, district, province };
+async function loadPsychInventory() {
+    const { data, error } = await supabase
+        .from('app_settings')
+        .select('psycholaboral_inventory')
+        .eq('app_name', APP_NAME)
+        .maybeSingle();
+    if (error || !data?.psycholaboral_inventory) return mergePsycholaboralInventory(null);
+    const raw = typeof data.psycholaboral_inventory === 'string'
+        ? safeJson(data.psycholaboral_inventory)
+        : data.psycholaboral_inventory;
+    return mergePsycholaboralInventory(raw as never);
+}
+
+function safeJson(value: string): unknown {
+    try {
+        return JSON.parse(value);
+    } catch {
+        return null;
+    }
+}
+
+function clientFieldsOf(shortlist: Shortlist): ShortlistClientField[] {
+    return shortlist.showProfile ? (shortlist.clientFields ?? defaultShortlistClientFields()) : [];
+}
+
+async function loadCandidateViews(ids: string[], shortlist: Shortlist): Promise<Record<string, ShortlistCandidateView>> {
+    const [rows, documents, inventory] = await Promise.all([
+        loadCandidateRows(ids),
+        loadDocuments(ids),
+        loadPsychInventory(),
+    ]);
+    const contexts = await loadProcessContexts(rows.map(row => textOf(row.process_id)));
+    const fields = clientFieldsOf(shortlist);
+    const views: Record<string, ShortlistCandidateView> = {};
+    for (const row of rows) {
+        const id = String(row.id);
+        const profile = resolveShortlistProfile(row, fields, contexts.get(textOf(row.process_id)), inventory);
+        views[id] = {
+            id,
+            name: displayNameFromRow(row),
+            age: profile.age,
+            province: profile.province,
+            district: profile.district,
+            city: profile.city,
+            avatarUrl: textOf(row.avatar_url) || undefined,
+            documents: shortlist.showDocuments ? documents[id] || [] : [],
+            tests: shortlist.showAssessments ? summarizeTests(row.assessment_results) : [],
+            profileFields: profile.profileFields,
+        };
+    }
+    return views;
 }
 
 function dbToShortlist(row: Record<string, unknown>, counts: ShortlistCounts = EMPTY_COUNTS): Shortlist {
@@ -145,6 +216,7 @@ function dbToShortlist(row: Record<string, unknown>, counts: ShortlistCounts = E
         showDocuments: row.show_documents !== false,
         showAssessments: row.show_assessments !== false,
         showProfile: row.show_profile !== false,
+        clientFields: parseShortlistClientFields(row.client_fields),
         createdBy: textOf(row.created_by) || undefined,
         createdByName: textOf(row.created_by_name) || undefined,
         closedAt: textOf(row.closed_at) || undefined,
@@ -208,29 +280,6 @@ function summarizeTests(raw: unknown): ShortlistTestSummary[] {
     });
 }
 
-function fichaLines(raw: unknown): string[] {
-    const data = asObject(raw);
-    const lines: string[] = [];
-    const educacion = Array.isArray(data.educacion) ? data.educacion : [];
-    for (const item of educacion.slice(0, 4)) {
-        const row = asObject(item);
-        const line = [textOf(row.nivel), textOf(row.grado), textOf(row.institucion)].filter(Boolean).join(' · ');
-        if (line) lines.push(line);
-    }
-    const experiencia = Array.isArray(data.experienciaLaboral) ? data.experienciaLaboral : [];
-    for (const item of experiencia.slice(0, 4)) {
-        const row = asObject(item);
-        const line = [textOf(row.puesto), textOf(row.empresa)].filter(Boolean).join(' · ');
-        if (line) lines.push(line);
-    }
-    return lines;
-}
-
-function suitabilityLabel(raw: unknown): string | undefined {
-    const status = textOf(asObject(raw).suitabilityStatus);
-    return status ? SUITABILITY_LABELS[status] || status : undefined;
-}
-
 async function loadCandidateRows(ids: string[]): Promise<Record<string, unknown>[]> {
     if (ids.length === 0) return [];
     let lastError: { message?: string; code?: string } | null = null;
@@ -277,36 +326,6 @@ async function loadDocuments(ids: string[]): Promise<Record<string, ShortlistDoc
         grouped[candidateId].push(doc);
     }
     return grouped;
-}
-
-async function loadCandidateViews(ids: string[], shortlist: Shortlist): Promise<Record<string, ShortlistCandidateView>> {
-    const [rows, documents] = await Promise.all([loadCandidateRows(ids), loadDocuments(ids)]);
-    const views: Record<string, ShortlistCandidateView> = {};
-    for (const row of rows) {
-        const id = String(row.id);
-        const psych = asObject(row.psycholaboral_evaluation);
-        const place = placeFromRow(row);
-        views[id] = {
-            id,
-            name: displayNameFromRow(row),
-            email: shortlist.showProfile ? textOf(row.email) || undefined : undefined,
-            phone: shortlist.showProfile ? textOf(row.phone) || undefined : undefined,
-            age: ageFromRow(row),
-            province: place.province,
-            district: place.district,
-            city: place.city,
-            description: shortlist.showProfile ? textOf(row.description) || undefined : undefined,
-            salaryExpectation: shortlist.showProfile ? textOf(row.salary_expectation) || undefined : undefined,
-            linkedinUrl: shortlist.showProfile ? textOf(row.linkedin_url) || undefined : undefined,
-            avatarUrl: textOf(row.avatar_url) || undefined,
-            documents: shortlist.showDocuments ? documents[id] || [] : [],
-            tests: shortlist.showAssessments ? summarizeTests(row.assessment_results) : [],
-            psycholaboralConclusion: shortlist.showAssessments ? textOf(psych.conclusions) || undefined : undefined,
-            psycholaboralSuitability: shortlist.showAssessments ? suitabilityLabel(psych) : undefined,
-            fichaLines: shortlist.showProfile ? fichaLines(row.complementary_data) : [],
-        };
-    }
-    return views;
 }
 
 async function attachViews(shortlist: Shortlist, members: ShortlistMember[]): Promise<ShortlistMember[]> {
@@ -387,6 +406,7 @@ export interface CreateShortlistInput {
     showDocuments: boolean;
     showAssessments: boolean;
     showProfile: boolean;
+    clientFields?: ShortlistClientField[];
     actor: ShortlistActor;
 }
 
@@ -454,12 +474,16 @@ export const shortlistsApi = {
                 show_documents: input.showDocuments,
                 show_assessments: input.showAssessments,
                 show_profile: input.showProfile,
+                client_fields: input.clientFields ?? defaultShortlistClientFields(),
                 created_by: toUuidOrNull(input.actor.actorUserId) || null,
                 created_by_name: input.actor.actorName,
             })
             .select('*')
             .single();
         throwIfMissing(error);
+        if (isMissingColumnError(error) && (error.message || '').includes('client_fields')) {
+            throw new Error('Falta la columna de datos del cliente. En Supabase, ejecute el ALTER de client_fields en MIGRATION_ADD_SHORTLISTS.sql.');
+        }
         if (error) throw new Error(error.message);
         return dbToShortlist(data as unknown as Record<string, unknown>);
     },
@@ -479,6 +503,7 @@ export const shortlistsApi = {
                 show_documents: input.showDocuments,
                 show_assessments: input.showAssessments,
                 show_profile: input.showProfile,
+                client_fields: input.clientFields ?? defaultShortlistClientFields(),
                 updated_at: new Date().toISOString(),
             })
             .eq('id', id)
@@ -486,6 +511,9 @@ export const shortlistsApi = {
             .select('*')
             .single();
         throwIfMissing(error);
+        if (isMissingColumnError(error) && (error.message || '').includes('client_fields')) {
+            throw new Error('Falta la columna de datos del cliente. En Supabase, ejecute el ALTER de client_fields en MIGRATION_ADD_SHORTLISTS.sql.');
+        }
         if (error) throw new Error(error.message);
         return dbToShortlist(data as unknown as Record<string, unknown>);
     },
@@ -500,6 +528,26 @@ export const shortlistsApi = {
         throwIfMissing(error);
         if (error) throw new Error(error.message);
         if (!data?.length) throw new Error('No se pudo eliminar la sala.');
+    },
+
+    async listClientColumns(): Promise<string[]> {
+        const { data, error } = await supabase
+            .from('processes')
+            .select('bulk_config')
+            .eq('app_name', APP_NAME);
+        if (error || !data) return [];
+        const names = new Map<string, string>();
+        for (const row of data) {
+            const config = asObject(typeof row.bulk_config === 'string' ? safeJson(row.bulk_config) : row.bulk_config);
+            const columns = Array.isArray(config.customColumns) ? config.customColumns : [];
+            for (const item of columns) {
+                const name = textOf(asObject(item).name);
+                if (!name) continue;
+                const key = normalizeColumnNameKey(name);
+                if (!names.has(key)) names.set(key, name);
+            }
+        }
+        return [...names.values()].sort((a, b) => a.localeCompare(b, 'es'));
     },
 
     async getRoom(id: string): Promise<{ shortlist: Shortlist; members: ShortlistMember[]; events: ShortlistEvent[] }> {
@@ -879,6 +927,6 @@ async function readMember(memberId: string): Promise<ShortlistMember> {
     const member = dbToMember(data as unknown as Record<string, unknown>);
     const views = await loadCandidateRows([member.candidateId]);
     const name = views[0] ? displayNameFromRow(views[0]) : '';
-    if (name) member.candidate = { id: member.candidateId, name, documents: [], tests: [], fichaLines: [] };
+    if (name) member.candidate = { id: member.candidateId, name, documents: [], tests: [], profileFields: [] };
     return member;
 }

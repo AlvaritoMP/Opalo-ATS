@@ -73,6 +73,8 @@ interface AppState {
     currentUser: User | null;
     view: { type: string; payload?: any };
     lastViewedProcessId: string | null; // ID del último proceso visto
+    /** Sala de shortlist abierta; null = lista de salas */
+    lastViewedShortlistId: string | null;
     /** Proceso masivo abierto; '' = lista de procesos masivos */
     lastViewedBulkProcessId: string;
     dashboardFilters: DashboardFiltersState;
@@ -641,6 +643,7 @@ const App: React.FC = () => {
         currentUser: null,
         view: { type: 'dashboard' },
         lastViewedProcessId: null,
+        lastViewedShortlistId: null,
         lastViewedBulkProcessId: '',
         dashboardFilters: loadDashboardFilters(),
         dashboardCache: null,
@@ -819,6 +822,7 @@ const App: React.FC = () => {
                     currentUser,
                     view: { type: 'dashboard' },
                     lastViewedProcessId: null,
+                    lastViewedShortlistId: null,
                     lastViewedBulkProcessId: bulkProcessId,
                     dashboardFilters: loadDashboardFilters(currentUser?.id),
                     dashboardCache: null,
@@ -894,6 +898,7 @@ const App: React.FC = () => {
                     currentUser,
                     view: { type: 'dashboard' },
                     lastViewedProcessId: null,
+                    lastViewedShortlistId: null,
                     lastViewedBulkProcessId: currentUser
                         ? getBulkSelectedProcessId(currentUser.id) ?? ''
                         : '',
@@ -1047,6 +1052,18 @@ const App: React.FC = () => {
                             return { ...s, view: { type: 'process-view', payload: s.lastViewedProcessId } };
                         }
                         return { ...s, view: { type, payload: undefined }, lastViewedProcessId: null };
+                    }
+                    return { ...s, view: { type, payload: undefined } };
+                }
+                if (type === 'shortlists') {
+                    if (payload === null) {
+                        return { ...s, view: { type, payload: undefined }, lastViewedShortlistId: null };
+                    }
+                    if (typeof payload === 'string' && payload) {
+                        return { ...s, view: { type, payload }, lastViewedShortlistId: payload };
+                    }
+                    if (s.lastViewedShortlistId) {
+                        return { ...s, view: { type, payload: s.lastViewedShortlistId } };
                     }
                     return { ...s, view: { type, payload: undefined } };
                 }

@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import { ShortlistBoard } from './ShortlistBoard';
+import { ClientShortlistHelp, ShortlistDownloadButton } from './ShortlistGuide';
 import { shortlistsApi } from '../lib/api/shortlists';
 import { settingsApi } from '../lib/api/settings';
-import { consumeShortlistPreviewDni, isShortlistClientPreview, normalizeAccessDni, readPublicShortlistToken } from '../lib/shortlists';
+import { normalizeAccessDni, readPublicShortlistToken } from '../lib/shortlists';
 import type { Shortlist, ShortlistColumnKey, ShortlistEvent, ShortlistMember } from '../types';
 
 interface RoomState {
@@ -23,12 +24,6 @@ export const PublicShortlist: React.FC = () => {
     const [error, setError] = useState('');
     const [busy, setBusy] = useState(false);
     const [logoUrl, setLogoUrl] = useState('');
-    const [booting, setBooting] = useState(() => {
-        if (typeof window === 'undefined') return false;
-        return isShortlistClientPreview() || Boolean(sessionStorage.getItem(sessionKey(readPublicShortlistToken() || '')));
-    });
-
-    const staffPreview = isShortlistClientPreview();
 
     const enter = async (value: string) => {
         const digits = normalizeAccessDni(value);
@@ -49,7 +44,7 @@ export const PublicShortlist: React.FC = () => {
             sessionStorage.setItem(sessionKey(token), digits);
             setRoom({ shortlist: result.shortlist, members: result.members, events: result.events });
             const seenKey = `shortlist-access:${token}`;
-            if (!staffPreview && !sessionStorage.getItem(seenKey)) {
+            if (!sessionStorage.getItem(seenKey)) {
                 sessionStorage.setItem(seenKey, '1');
                 void shortlistsApi.logAccess(result.shortlist.id).catch(() => undefined);
             }
@@ -57,16 +52,12 @@ export const PublicShortlist: React.FC = () => {
             setError(err instanceof Error ? err.message : 'No se pudo abrir la sala.');
         } finally {
             setBusy(false);
-            setBooting(false);
         }
     };
 
     useEffect(() => {
-        const previewDni = consumeShortlistPreviewDni(token);
         const stored = sessionStorage.getItem(sessionKey(token));
-        if (previewDni) void enter(previewDni);
-        else if (stored) void enter(stored);
-        else setBooting(false);
+        if (stored) void enter(stored);
         // Solo al abrir el enlace.
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [token]);
@@ -124,14 +115,6 @@ export const PublicShortlist: React.FC = () => {
         );
     }
 
-    if (booting && !room) {
-        return (
-            <Screen>
-                <h1 className="text-xl font-semibold text-gray-900">Abriendo la sala…</h1>
-            </Screen>
-        );
-    }
-
     if (!room) {
         return (
             <Screen>
@@ -163,21 +146,17 @@ export const PublicShortlist: React.FC = () => {
 
     return (
         <div className="min-h-[100dvh] overflow-x-hidden bg-gray-50 [&_input]:text-base [&_select]:text-base [&_textarea]:text-base">
-            {staffPreview && (
-                <div className="bg-amber-50 border-b border-amber-200 px-4 py-2 flex flex-wrap items-center justify-between gap-2">
-                    <p className="text-sm text-amber-950">Así ve esta sala el cliente. Si avanza, comenta o rechaza, queda registrado como acción del cliente.</p>
-                    <button type="button" onClick={() => window.close()} className="text-sm text-amber-950 underline shrink-0">
-                        Cerrar vista
-                    </button>
-                </div>
-            )}
             <header className="sticky top-0 z-30 bg-white border-b px-4 py-3 flex items-center justify-between gap-3">
                 <div className="min-w-0">
                     <p className="text-xs uppercase tracking-wide text-gray-400">Shortlist</p>
                     <h1 className="text-lg md:text-xl font-semibold text-gray-900 break-words">{room.shortlist.title}</h1>
                     <p className="text-sm text-gray-500">{room.shortlist.clientLabel}</p>
                 </div>
-                {logoUrl && <img src={logoUrl} alt="Opalo" className="h-10 sm:h-12 max-w-[150px] object-contain shrink-0" />}
+                <div className="flex items-center gap-1 shrink-0">
+                    <ClientShortlistHelp />
+                    <ShortlistDownloadButton shortlist={room.shortlist} members={room.members} />
+                    {logoUrl && <img src={logoUrl} alt="Opalo" className="h-10 sm:h-12 max-w-[150px] object-contain" />}
+                </div>
             </header>
             <main className="px-3 py-3">
                 {error && <p className="mb-3 text-sm text-red-700">{error}</p>}
