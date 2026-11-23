@@ -91,8 +91,9 @@ export const ShortlistsView: React.FC = () => {
     useEffect(() => {
         if (!openId) return;
         const timer = window.setInterval(() => {
+            if (document.visibilityState !== 'visible') return;
             void shortlistsApi.getRoom(openId).then(setRoom).catch(() => undefined);
-        }, 30000);
+        }, 60_000);
         return () => window.clearInterval(timer);
     }, [openId]);
 

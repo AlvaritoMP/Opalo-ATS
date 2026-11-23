@@ -5,6 +5,7 @@ import { applyStageColorsFromBulkConfig } from '../stageColors';
 import { fetchWithRetry } from '../fetchWithRetry';
 import { isProcessOperational } from '../processStatus';
 import { loadBulkConfigSnapshot } from '../bulkConfigBackup';
+import { dedupedRead, REST_PAGE_SIZE } from './readDedup';
 
 export type BulkQuickReplyListRow = { id: string; title: string; quickReplies: any[] };
 export type BulkProcessCardExtras = {
@@ -417,6 +418,24 @@ function isAbortError(error: unknown): boolean {
     return (error as { name?: string })?.name === 'AbortError';
 }
 
+const PROCESS_LIST_MAX = 500;
+
+async function collectProcessPages<T>(
+    maxRows: number,
+    load: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: { message?: string; code?: string } | null }>
+): Promise<{ data: T[]; error: { message?: string; code?: string } | null }> {
+    const data: T[] = [];
+    for (let from = 0; from < maxRows; from += REST_PAGE_SIZE) {
+        const to = Math.min(from + REST_PAGE_SIZE, maxRows) - 1;
+        const response = await load(from, to);
+        if (response.error) return { data, error: response.error };
+        const page = response.data || [];
+        data.push(...page);
+        if (page.length < to - from + 1) break;
+    }
+    return { data, error: null };
+}
+
 function isMissingRpc(error: unknown): boolean {
     const err = error as { code?: string; message?: string; status?: number };
     const msg = `${err?.message || ''}`.toLowerCase();
@@ -577,14 +596,18 @@ export const processesApi = {
 
     // Cargar attachments de un proceso específico (lazy loading para reducir egress)
     async getAttachments(processId: string): Promise<Attachment[]> {
-        const { data, error } = await supabase
-            .from('attachments')
-            .select('id, process_id, name, url, type, size, category, uploaded_at')
-            .eq('process_id', processId)
-            .is('candidate_id', null) // Solo attachments del proceso, no de candidatos
-            .eq('app_name', APP_NAME) // Filtrar solo attachments de esta app
-            .order('uploaded_at', { ascending: false });
-        
+        const collected = await collectProcessPages<any>(200, (from, to) =>
+            supabase
+                .from('attachments')
+                .select('id, process_id, name, url, type, size, category, uploaded_at')
+                .eq('process_id', processId)
+                .is('candidate_id', null)
+                .eq('app_name', APP_NAME)
+                .order('uploaded_at', { ascending: false })
+                .range(from, to)
+        );
+        const { data, error } = collected;
+
         if (error) throw error;
         if (!data) return [];
 
@@ -608,30 +631,33 @@ export const processesApi = {
         let processes: any[] = [];
         let error: any = null;
         
-        try {
+        const standardFields =
+            'id, title, description, salary_range, experience_level, seniority, flyer_url, flyer_position, service_order_code, start_date, end_date, status, vacancies, google_drive_folder_id, google_drive_folder_name, published_date, need_identified_date, client_id, is_bulk_process, bulk_config, created_at';
+        const standardFieldsFallback =
+            'id, title, description, salary_range, experience_level, seniority, flyer_url, flyer_position, service_order_code, start_date, end_date, status, vacancies, google_drive_folder_id, google_drive_folder_name, published_date, need_identified_date, is_bulk_process, bulk_config, hired_candidate_ids, closed_at, created_at';
+
+        const loadStandardPage = (fields: string, from: number, to: number) => {
             let query = supabase
                 .from('processes')
-                .select('id, title, description, salary_range, experience_level, seniority, flyer_url, flyer_position, service_order_code, start_date, end_date, status, vacancies, google_drive_folder_id, google_drive_folder_name, published_date, need_identified_date, client_id, is_bulk_process, bulk_config, created_at')
+                .select(fields)
                 .eq('app_name', APP_NAME)
                 .eq('is_bulk_process', false)
                 .order('created_at', { ascending: false })
-                .limit(500);
+                .range(from, to);
             query = applyProcessStatusFilter(query as any, options) as typeof query;
-            const primary = await query;
-            
-            // Verificar si hubo error de columna faltante directamente aquí
+            return query;
+        };
+
+        try {
+            const primary = await collectProcessPages<any>(PROCESS_LIST_MAX, (from, to) =>
+                loadStandardPage(standardFields, from, to)
+            );
+
             if (primary.error && (primary.error.message?.includes('client_id') || primary.error.message?.includes('column') || primary.error.code === 'PGRST116')) {
                 console.warn('⚠️ Columna client_id no existe, cargando procesos sin ese campo');
-                let fallbackQuery = supabase
-                    .from('processes')
-                    .select('id, title, description, salary_range, experience_level, seniority, flyer_url, flyer_position, service_order_code, start_date, end_date, status, vacancies, google_drive_folder_id, google_drive_folder_name, published_date, need_identified_date, is_bulk_process, bulk_config, hired_candidate_ids, closed_at, created_at')
-                    .eq('app_name', APP_NAME)
-                    .eq('is_bulk_process', false)
-                    .order('created_at', { ascending: false })
-                    .limit(500);
-                fallbackQuery = applyProcessStatusFilter(fallbackQuery as any, options) as typeof fallbackQuery;
-                const fallbackResult = await fallbackQuery;
-                
+                const fallbackResult = await collectProcessPages<any>(PROCESS_LIST_MAX, (from, to) =>
+                    loadStandardPage(standardFieldsFallback, from, to)
+                );
                 processes = fallbackResult.data || [];
                 error = fallbackResult.error;
             } else {
@@ -1426,7 +1452,7 @@ export const processesApi = {
             .from('processes')
             .delete()
             .eq('id', id)
-            .select();
+            .select('id');
         
         if (error) {
             console.error('Error eliminando proceso:', error);
@@ -1450,15 +1476,17 @@ export const processesApi = {
         let error: any = null;
 
         const runList = async (fields: string) => {
-            let query = supabase
-                .from('processes')
-                .select(fields)
-                .eq('app_name', APP_NAME)
-                .eq('is_bulk_process', true)
-                .order('created_at', { ascending: false })
-                .limit(500);
-            query = applyProcessStatusFilter(query as any, options) as typeof query;
-            const response = await query;
+            const response = await collectProcessPages<any>(PROCESS_LIST_MAX, (from, to) => {
+                let query = supabase
+                    .from('processes')
+                    .select(fields)
+                    .eq('app_name', APP_NAME)
+                    .eq('is_bulk_process', true)
+                    .order('created_at', { ascending: false })
+                    .range(from, to);
+                query = applyProcessStatusFilter(query as any, options) as typeof query;
+                return query;
+            });
             if (response.error) throw response.error;
             return response.data || [];
         };
@@ -1630,13 +1658,17 @@ export const processesApi = {
 
         try {
             if (options?.signal?.aborted) return [];
-            const listResponse = await supabase
-                .from('processes')
-                .select('id, title, status')
-                .eq('app_name', APP_NAME)
-                .eq('is_bulk_process', true)
-                .order('title', { ascending: true })
-                .limit(500);
+            const listResponse = await collectProcessPages<{ id: string; title: string; status?: ProcessStatus }>(
+                PROCESS_LIST_MAX,
+                (from, to) =>
+                    supabase
+                        .from('processes')
+                        .select('id, title, status')
+                        .eq('app_name', APP_NAME)
+                        .eq('is_bulk_process', true)
+                        .order('title', { ascending: true })
+                        .range(from, to)
+            );
             if (listResponse.error) throw listResponse.error;
 
             const processes = ((listResponse.data || []) as Array<{ id: string; title: string; status?: ProcessStatus }>)
@@ -1715,12 +1747,15 @@ export const processesApi = {
         includeAttachments: boolean = false,
         options?: ProcessListOptions
     ): Promise<Process[]> {
-        const regular = await this.getAll(includeAttachments, options);
-        const bulk = await this.getAllBulkProcesses(false, options).catch(err => {
-            console.warn('⚠️ No se pudieron cargar procesos masivos:', err);
-            return [] as Process[];
+        const cacheKey = `processes:${APP_NAME}:${includeAttachments}:${options?.activeOnly ?? ''}:${(options?.statuses || []).join(',')}`;
+        return dedupedRead(cacheKey, 2000, async () => {
+            const regular = await this.getAll(includeAttachments, options);
+            const bulk = await this.getAllBulkProcesses(false, options).catch(err => {
+                console.warn('⚠️ No se pudieron cargar procesos masivos:', err);
+                return [] as Process[];
+            });
+            return [...regular, ...bulk];
         });
-        return [...regular, ...bulk];
     },
 };
 

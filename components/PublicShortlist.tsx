@@ -80,7 +80,10 @@ export const PublicShortlist: React.FC = () => {
 
     useEffect(() => {
         if (!room) return;
-        const timer = window.setInterval(() => { void reload(); }, 30000);
+        const timer = window.setInterval(() => {
+            if (document.visibilityState !== 'visible') return;
+            void reload();
+        }, 60_000);
         return () => window.clearInterval(timer);
     }, [room?.shortlist.id]);
 

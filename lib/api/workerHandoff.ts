@@ -121,6 +121,10 @@ async function ensureProcessesForHandoff(
 }
 
 const DELIVER_FUNCTION_NAME = 'deliver-worker-handoff';
+const PACKAGE_COLUMNS =
+    'id, source_app, target_app, status, worker_count, sender_note, created_by, created_by_name, sent_at, received_at, completed_at, receiver_note, payload_version, delivery_status, opsflow_package_id, delivery_error, delivered_at, created_at, updated_at';
+const ITEM_COLUMNS =
+    'id, package_id, source_candidate_id, source_process_id, worker_name, worker_snapshot, item_status, created_at';
 
 function isMissingColumnError(error: { code?: string; message?: string } | null): boolean {
     if (!error) return false;
@@ -213,7 +217,7 @@ async function deliverToOpsflow(packageId: string): Promise<WorkerHandoffPackage
 
     const { data: pkg, error: pkgError } = await supabase
         .from('worker_handoff_packages')
-        .select('*')
+        .select(PACKAGE_COLUMNS)
         .eq('id', packageId)
         .eq('source_app', APP_NAME)
         .maybeSingle();
@@ -225,7 +229,8 @@ async function deliverToOpsflow(packageId: string): Promise<WorkerHandoffPackage
 
     const { data: items, error: itemsError } = await supabase
         .from('worker_handoff_items')
-        .select('*')
+        .select(ITEM_COLUMNS)
+        .limit(50)
         .eq('package_id', packageId)
         .order('created_at', { ascending: true });
 
@@ -238,13 +243,13 @@ async function deliverToOpsflow(packageId: string): Promise<WorkerHandoffPackage
 }
 
 export const workerHandoffApi = {
-    async listPackages(limit = 100): Promise<WorkerHandoffPackage[]> {
+    async listPackages(limit = 50): Promise<WorkerHandoffPackage[]> {
         const { data, error } = await supabase
             .from('worker_handoff_packages')
-            .select('*')
+            .select(PACKAGE_COLUMNS)
             .eq('source_app', APP_NAME)
             .order('sent_at', { ascending: false })
-            .limit(limit);
+            .limit(Math.min(limit, 50));
 
         if (error) throw error;
         return (data || []).map(row => mapPackage(row as Record<string, unknown>));
@@ -253,7 +258,7 @@ export const workerHandoffApi = {
     async getPackageWithItems(packageId: string): Promise<WorkerHandoffPackage | null> {
         const { data: pkg, error: pkgError } = await supabase
             .from('worker_handoff_packages')
-            .select('*')
+            .select(PACKAGE_COLUMNS)
             .eq('id', packageId)
             .eq('source_app', APP_NAME)
             .maybeSingle();
@@ -263,9 +268,10 @@ export const workerHandoffApi = {
 
         const { data: items, error: itemsError } = await supabase
             .from('worker_handoff_items')
-            .select('*')
+            .select(ITEM_COLUMNS)
             .eq('package_id', packageId)
-            .order('created_at', { ascending: true });
+            .order('created_at', { ascending: true })
+            .limit(50);
 
         if (itemsError) throw itemsError;
 
@@ -431,7 +437,7 @@ export const workerHandoffApi = {
         let { data: pkg, error: pkgError } = await supabase
             .from('worker_handoff_packages')
             .insert(insertPayload)
-            .select('*')
+            .select(PACKAGE_COLUMNS)
             .single();
 
         if (pkgError && isMissingColumnError(pkgError)) {
@@ -439,7 +445,7 @@ export const workerHandoffApi = {
             const retry = await supabase
                 .from('worker_handoff_packages')
                 .insert(insertPayload)
-                .select('*')
+                .select(PACKAGE_COLUMNS)
                 .single();
             pkg = retry.data;
             pkgError = retry.error;

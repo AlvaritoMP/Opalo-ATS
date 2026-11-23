@@ -1,6 +1,10 @@
 import { supabase } from '../supabase';
 import { Client } from '../../types';
 import { APP_NAME } from '../appConfig';
+import { dedupedRead, invalidateDedupedRead, REST_PAGE_SIZE } from './readDedup';
+
+const CLIENT_COLUMNS = 'id, razon_social, ruc, created_at, updated_at';
+const CLIENTS_CACHE_KEY = `clients:${APP_NAME}`;
 
 function throwClientApiError(op: string, error: any): never {
     const code = error?.code ?? '';
@@ -43,21 +47,29 @@ function clientToDb(client: Partial<Client>): any {
 export const clientsApi = {
     // Obtener todos los clientes
     async getAll(): Promise<Client[]> {
-        const { data, error } = await supabase
-            .from('clients')
-            .select('*')
-            .eq('app_name', APP_NAME)
-            .order('razon_social', { ascending: true });
-        
-        if (error) throwClientApiError('getAll', error);
-        return (data || []).map(dbToClient);
+        return dedupedRead(CLIENTS_CACHE_KEY, 2000, async () => {
+            const rows: any[] = [];
+            for (let from = 0; from < 500; from += REST_PAGE_SIZE) {
+                const { data, error } = await supabase
+                    .from('clients')
+                    .select(CLIENT_COLUMNS)
+                    .eq('app_name', APP_NAME)
+                    .order('razon_social', { ascending: true })
+                    .range(from, from + REST_PAGE_SIZE - 1);
+                if (error) throwClientApiError('getAll', error);
+                const page = data || [];
+                rows.push(...page);
+                if (page.length < REST_PAGE_SIZE) break;
+            }
+            return rows.map(dbToClient);
+        });
     },
 
     // Obtener un cliente por ID
     async getById(id: string): Promise<Client | null> {
         const { data, error } = await supabase
             .from('clients')
-            .select('*')
+            .select(CLIENT_COLUMNS)
             .eq('id', id)
             .eq('app_name', APP_NAME)
             .single();
@@ -77,10 +89,11 @@ export const clientsApi = {
         const { data, error } = await supabase
             .from('clients')
             .insert(dbData)
-            .select()
+            .select(CLIENT_COLUMNS)
             .single();
         
         if (error) throwClientApiError('create', error);
+        invalidateDedupedRead(CLIENTS_CACHE_KEY);
         return dbToClient(data);
     },
 
@@ -93,10 +106,11 @@ export const clientsApi = {
             .update(dbData)
             .eq('id', id)
             .eq('app_name', APP_NAME)
-            .select()
+            .select(CLIENT_COLUMNS)
             .single();
         
         if (error) throwClientApiError('update', error);
+        invalidateDedupedRead(CLIENTS_CACHE_KEY);
         return dbToClient(data);
     },
 
@@ -109,5 +123,6 @@ export const clientsApi = {
             .eq('app_name', APP_NAME);
         
         if (error) throwClientApiError('delete', error);
+        invalidateDedupedRead(CLIENTS_CACHE_KEY);
     },
 };

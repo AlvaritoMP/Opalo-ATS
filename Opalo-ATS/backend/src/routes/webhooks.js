@@ -72,7 +72,7 @@ router.post('/tally/:webhookId', async (req, res) => {
         // Primero intentar con https (más común en producción)
         let result = await supabase
             .from('form_integrations')
-            .select('*')
+            .select('id, app_name, platform, form_name, form_id_or_url, process_id, webhook_url, field_mapping')
             .eq('webhook_url', webhookUrlHttps)
             .maybeSingle();
         
@@ -84,7 +84,7 @@ router.post('/tally/:webhookId', async (req, res) => {
             // Si no se encuentra con https, intentar con http
             result = await supabase
                 .from('form_integrations')
-                .select('*')
+                .select('id, app_name, platform, form_name, form_id_or_url, process_id, webhook_url, field_mapping')
                 .eq('webhook_url', webhookUrlHttp)
                 .maybeSingle();
             
@@ -200,7 +200,7 @@ router.post('/tally/:webhookId', async (req, res) => {
 
         const { data: candidate, error: candidateError } = await supabase
             .from('candidates')
-            .select('*')
+            .select('id, name, email')
             .eq('id', upsertResult.candidateId)
             .single();
 

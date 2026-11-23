@@ -128,7 +128,7 @@ export const bulkTableTemplatesApi = {
             return template;
         }
 
-        const { data, error } = await supabase.from(TABLE).insert(row).select().single();
+        const { data, error } = await supabase.from(TABLE).insert(row).select('id, name, layout, created_by, created_by_name, created_at').single();
 
         if (error) {
             if (isMissingTableError(error)) {

@@ -2,6 +2,10 @@ import { supabase } from '../supabase';
 import { APP_NAME } from '../appConfig';
 import { logUserActivitySafe } from './userActivity';
 import { categoryForBulkAction, summaryForBulkAction } from '../userActivity';
+import { REST_PAGE_SIZE } from './readDedup';
+
+const ACTIVITY_COLUMNS =
+    'id, process_id, candidate_id, candidate_name, user_id, user_name, action_type, field_name, old_value, new_value, details, created_at';
 
 export type BulkActivityActionType =
     | 'cell_edit'
@@ -128,24 +132,24 @@ export const bulkProcessActivityApi = {
     async getByProcess(processId: string, limit = 200): Promise<BulkProcessActivityEntry[]> {
         const { data, error } = await supabase
             .from('bulk_process_activity_log')
-            .select('*')
+            .select(ACTIVITY_COLUMNS)
             .eq('process_id', processId)
             .eq('app_name', APP_NAME)
             .order('created_at', { ascending: false })
-            .limit(limit);
+            .limit(Math.min(limit, REST_PAGE_SIZE));
 
         if (error) throw error;
         return (data || []).map(mapRow);
     },
 
-    async getByCandidate(candidateId: string, limit = 300): Promise<BulkProcessActivityEntry[]> {
+    async getByCandidate(candidateId: string, limit = 50): Promise<BulkProcessActivityEntry[]> {
         const { data, error } = await supabase
             .from('bulk_process_activity_log')
-            .select('*')
+            .select(ACTIVITY_COLUMNS)
             .eq('candidate_id', candidateId)
             .eq('app_name', APP_NAME)
             .order('created_at', { ascending: false })
-            .limit(limit);
+            .limit(Math.min(limit, REST_PAGE_SIZE));
 
         if (error) throw error;
         return (data || []).map(mapRow);
@@ -157,38 +161,48 @@ export const bulkProcessActivityApi = {
 
         const all: BulkProcessActivityEntry[] = [];
         for (const processId of processIds) {
-            const { data, error } = await supabase
-                .from('bulk_process_activity_log')
-                .select('*')
-                .eq('process_id', processId)
-                .eq('app_name', APP_NAME)
-                .in('action_type', ['contact_attempt', 'contact_status'])
-                .order('created_at', { ascending: true })
-                .limit(5000);
+            for (let from = 0; from < 500; from += REST_PAGE_SIZE) {
+                const { data, error } = await supabase
+                    .from('bulk_process_activity_log')
+                    .select(ACTIVITY_COLUMNS)
+                    .eq('process_id', processId)
+                    .eq('app_name', APP_NAME)
+                    .in('action_type', ['contact_attempt', 'contact_status'])
+                    .order('created_at', { ascending: true })
+                    .range(from, from + REST_PAGE_SIZE - 1);
 
-            if (error) throw error;
-            all.push(...(data || []).map(mapRow));
+                if (error) throw error;
+                const page = data || [];
+                all.push(...page.map(mapRow));
+                if (page.length < REST_PAGE_SIZE) break;
+            }
         }
         return all;
     },
 
     /** Traslados entre procesos (para Inteligencia / métricas de cartera). */
-    async getTransfersForProcesses(processIds: string[], limitPerProcess = 2000): Promise<BulkProcessActivityEntry[]> {
+    async getTransfersForProcesses(processIds: string[], limitPerProcess = 50): Promise<BulkProcessActivityEntry[]> {
         if (processIds.length === 0) return [];
 
         const all: BulkProcessActivityEntry[] = [];
+        const maxRows = Math.min(Math.max(limitPerProcess, REST_PAGE_SIZE), 500);
         for (const processId of processIds) {
-            const { data, error } = await supabase
-                .from('bulk_process_activity_log')
-                .select('*')
-                .eq('process_id', processId)
-                .eq('app_name', APP_NAME)
-                .eq('action_type', 'candidate_transfer')
-                .order('created_at', { ascending: false })
-                .limit(limitPerProcess);
+            for (let from = 0; from < maxRows; from += REST_PAGE_SIZE) {
+                const to = Math.min(from + REST_PAGE_SIZE, maxRows) - 1;
+                const { data, error } = await supabase
+                    .from('bulk_process_activity_log')
+                    .select(ACTIVITY_COLUMNS)
+                    .eq('process_id', processId)
+                    .eq('app_name', APP_NAME)
+                    .eq('action_type', 'candidate_transfer')
+                    .order('created_at', { ascending: false })
+                    .range(from, to);
 
-            if (error) throw error;
-            all.push(...(data || []).map(mapRow));
+                if (error) throw error;
+                const page = data || [];
+                all.push(...page.map(mapRow));
+                if (page.length < to - from + 1) break;
+            }
         }
         return all;
     },

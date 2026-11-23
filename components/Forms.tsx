@@ -36,7 +36,7 @@ export const Forms: React.FC = () => {
         if (state.formIntegrations.length === 0) {
             void actions.loadFormIntegrations();
         }
-    // Solo al entrar a Formularios si aún no se cargaron en segundo plano
+    // Una sola carga al abrir Formularios. getAll deduplica el doble montaje.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 

@@ -19,7 +19,7 @@ export const attachmentsApi = {
                 uploaded_by: uploadedBy || null,
                 app_name: APP_NAME, // Asegurar que siempre se asigne el app_name
             })
-            .select()
+            .select('id, name, url, type, size, category, uploaded_at')
             .single();
         
         if (error) throw error;

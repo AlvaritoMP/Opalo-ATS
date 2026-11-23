@@ -4,6 +4,8 @@ import type { UserMessage } from '../../types';
 import { isMissingColumnError } from '../supabaseColumnErrors';
 import { getErrorMessage } from '../supabase';
 
+const MESSAGE_COLUMNS = 'id, sender_id, recipient_id, text, read_at, created_at';
+
 function dbToMessage(row: Record<string, unknown>): UserMessage {
     return {
         id: row.id as string,
@@ -30,10 +32,10 @@ export const userMessagesApi = {
         return !error;
     },
 
-    async getRecent(userId: string, limit = 100): Promise<UserMessage[]> {
+    async getRecent(userId: string, limit = 50): Promise<UserMessage[]> {
         const { data, error } = await supabase
             .from('user_messages')
-            .select('*')
+            .select(MESSAGE_COLUMNS)
             .eq('app_name', APP_NAME)
             .or(userInvolvedFilter(userId))
             .order('created_at', { ascending: false })
@@ -49,7 +51,7 @@ export const userMessagesApi = {
     async getConversation(partnerId: string, currentUserId: string, limit = 50): Promise<UserMessage[]> {
         const { data, error } = await supabase
             .from('user_messages')
-            .select('*')
+            .select(MESSAGE_COLUMNS)
             .eq('app_name', APP_NAME)
             .or(
                 `and(sender_id.eq.${currentUserId},recipient_id.eq.${partnerId}),and(sender_id.eq.${partnerId},recipient_id.eq.${currentUserId})`
@@ -76,7 +78,7 @@ export const userMessagesApi = {
                 text: trimmed,
                 app_name: APP_NAME,
             })
-            .select()
+            .select(MESSAGE_COLUMNS)
             .single();
 
         if (error) {

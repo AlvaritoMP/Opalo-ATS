@@ -217,11 +217,11 @@ export const candidateContactologyHistoryApi = {
                 .single(),
             supabase
                 .from('candidate_contact_attempts')
-                .select('*')
+                .select('id, candidate_id, process_id, user_id, user_name, channel, outcome, attempt_number, status_after, notes, created_at')
                 .eq('candidate_id', candidateId)
                 .eq('app_name', APP_NAME)
                 .order('created_at', { ascending: false })
-                .limit(200),
+                .limit(50),
             bulkProcessActivityApi.getByCandidate(candidateId).catch(() => [] as BulkProcessActivityEntry[]),
         ]);
 

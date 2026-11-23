@@ -1,6 +1,14 @@
 import { supabase, setCurrentUser } from '../supabase';
 import { User } from '../../types';
 import { APP_NAME } from '../appConfig';
+import { isMissingColumnError } from '../supabaseColumnErrors';
+import { dedupedRead, invalidateDedupedRead, REST_PAGE_SIZE } from './readDedup';
+
+const USERS_CACHE_KEY = `users:${APP_NAME}`;
+const USER_COLUMNS =
+    'id, name, email, role, password_hash, avatar_url, permissions, visible_sections, allowed_client_ids, mattermost_user_id, mattermost_username, app_name';
+const USER_COLUMNS_CORE =
+    'id, name, email, role, password_hash, avatar_url, permissions, visible_sections, allowed_client_ids, app_name';
 
 // Convertir de DB a tipo de aplicación
 function dbToUser(dbUser: any): User {
@@ -75,21 +83,40 @@ export function formatUsersApiError(error: unknown, action: 'create' | 'update' 
 export const usersApi = {
     // Obtener todos los usuarios (solo de esta app)
     async getAll(): Promise<User[]> {
-        const { data, error } = await supabase
-            .from('users')
-            .select('*')
-            .eq('app_name', APP_NAME)
-            .order('created_at', { ascending: false });
-        
+        return dedupedRead(USERS_CACHE_KEY, 2000, () => this.readAll());
+    },
+
+    async readAll(): Promise<User[]> {
+        const load = async (columns: string) => {
+            const rows: any[] = [];
+            for (let from = 0; from < 500; from += REST_PAGE_SIZE) {
+                const { data, error } = await supabase
+                    .from('users')
+                    .select(columns)
+                    .eq('app_name', APP_NAME)
+                    .order('created_at', { ascending: false })
+                    .range(from, from + REST_PAGE_SIZE - 1);
+                if (error) return { rows, error };
+                const page = data || [];
+                rows.push(...page);
+                if (page.length < REST_PAGE_SIZE) break;
+            }
+            return { rows, error: null };
+        };
+
+        let { rows, error } = await load(USER_COLUMNS);
+        if (error && isMissingColumnError(error)) {
+            ({ rows, error } = await load(USER_COLUMNS_CORE));
+        }
         if (error) throw error;
-        return (data || []).map(dbToUser);
+        return rows.map(dbToUser);
     },
 
     // Obtener un usuario por ID (solo de esta app)
     async getById(id: string): Promise<User | null> {
         const { data, error } = await supabase
             .from('users')
-            .select('*')
+            .select(USER_COLUMNS)
             .eq('id', id)
             .eq('app_name', APP_NAME)
             .maybeSingle();
@@ -102,7 +129,7 @@ export const usersApi = {
     async getByEmail(email: string): Promise<User | null> {
         const { data, error } = await supabase
             .from('users')
-            .select('*')
+            .select(USER_COLUMNS)
             .eq('email', normalizeEmail(email))
             .eq('app_name', APP_NAME)
             .maybeSingle();
@@ -135,7 +162,7 @@ export const usersApi = {
         const { data, error } = await supabase
             .from('users')
             .insert(dbData)
-            .select()
+            .select(USER_COLUMNS)
             .single();
         
         if (error) {
@@ -147,6 +174,7 @@ export const usersApi = {
                 'Ejecuta MIGRATION_FIX_USERS_ANON_GRANTS.sql en Supabase.'
             );
         }
+        invalidateDedupedRead(USERS_CACHE_KEY);
         const verified = await this.getById(data.id);
         if (!verified) {
             throw new Error(
@@ -174,12 +202,13 @@ export const usersApi = {
             .update(dbData)
             .eq('id', id)
             .eq('app_name', APP_NAME) // Asegurar que solo se actualicen usuarios de esta app
-            .select()
+            .select(USER_COLUMNS)
             .single();
         
         if (error) {
             throw new Error(formatUsersApiError(error, 'update'));
         }
+        invalidateDedupedRead(USERS_CACHE_KEY);
         return dbToUser(data);
     },
 
@@ -226,6 +255,7 @@ export const usersApi = {
             throw new Error(errorMsg);
         }
         
+        invalidateDedupedRead(USERS_CACHE_KEY);
         console.log('User deleted successfully. Verified by checking if user still exists.');
     },
 

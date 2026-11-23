@@ -14,7 +14,7 @@ export const postItsApi = {
                 created_by: postIt.createdBy,
                 app_name: APP_NAME, // Agregar app_name para multi-tenant
             })
-            .select()
+            .select('id, text, color, created_by, created_at')
             .single();
         
         if (error) throw error;

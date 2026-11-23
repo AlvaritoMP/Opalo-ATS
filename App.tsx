@@ -852,19 +852,7 @@ const App: React.FC = () => {
                         }
                     })();
 
-                    void (async () => {
-                        await new Promise(r => setTimeout(r, 1200));
-                        try {
-                            const integrations = await runWithAbortTimeout(
-                                signal => formIntegrationsApi.getAll(signal),
-                                INITIAL_LOAD_TIMEOUT_MS
-                            );
-                            setState(s => (s.formIntegrations.length > 0 ? s : { ...s, formIntegrations: integrations }));
-                            debugLog('Form integrations loaded in background');
-                        } catch (error) {
-                            console.warn('No se pudieron cargar integraciones de formularios:', error);
-                        }
-                    })();
+                    // Las integraciones se cargan al abrir Formularios (evita select masivo en cada sesión).
                 }            } catch (error) {
                 console.error('Error loading data:', error);
                 // NO usar datos de prueba como fallback - usar arrays vacíos

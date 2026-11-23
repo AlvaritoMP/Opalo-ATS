@@ -4,6 +4,13 @@ import { APP_NAME } from '../appConfig';
 import { getSettings } from '../settings';
 import { debugLog, debugWarn } from '../debugLog';
 import { normalizeUserAlertSettings } from '../userAlertSettings';
+import { dedupedRead, invalidateDedupedRead } from './readDedup';
+
+const SETTINGS_CACHE_KEY = `app_settings:${APP_NAME}`;
+const SETTINGS_COLUMNS =
+    'id, app_name, database_config, file_storage_config, google_drive_config, currency_symbol, logo_url, powered_by_logo_url, custom_labels, dashboard_layout, templates, report_theme, candidate_sources, provinces, districts, interview_locations, transport_fares, user_alert_settings, psycholaboral_inventory';
+const SETTINGS_COLUMNS_CORE =
+    'id, app_name, database_config, file_storage_config, google_drive_config, currency_symbol, logo_url, powered_by_logo_url, custom_labels, dashboard_layout, templates, report_theme, candidate_sources, provinces, districts';
 
 const SETTINGS_ID = '00000000-0000-0000-0000-000000000000';
 
@@ -89,17 +96,31 @@ function settingsToDb(settings: Partial<AppSettings>): any {
 }
 
 export const settingsApi = {
-    // Obtener configuración (solo de esta app)
     async get(): Promise<AppSettings> {
+        return dedupedRead(SETTINGS_CACHE_KEY, 2000, () => this.readUncached());
+    },
+
+    // Obtener configuración (solo de esta app)
+    async readUncached(): Promise<AppSettings> {
         try {
             // Intentar primero con filtro por app_name
             const { data, error } = await supabase
                 .from('app_settings')
-                .select('*')
+                .select(SETTINGS_COLUMNS)
                 .eq('app_name', APP_NAME) // Filtrar solo settings de esta app
                 .maybeSingle();
             
             if (error) {
+                if (/column|schema cache|could not find/i.test(error.message || '') || error.code === '42703' || error.code === 'PGRST204') {
+                    const retry = await supabase
+                        .from('app_settings')
+                        .select(SETTINGS_COLUMNS_CORE)
+                        .eq('app_name', APP_NAME)
+                        .maybeSingle();
+                    if (!retry.error && retry.data) {
+                        return mergeWithLocalSettings(dbToSettings(retry.data));
+                    }
+                }
                 // Si el error es 406 o relacionado con app_name, intentar sin filtro
                 if (error.code === 'PGRST116' || error.message?.includes('app_name') || error.message?.includes('406')) {
                     console.warn('⚠️ Error al cargar settings con filtro app_name, intentando sin filtro:', error.message);
@@ -107,7 +128,7 @@ export const settingsApi = {
                     // Intentar sin filtro (para compatibilidad con tablas sin app_name)
                     const { data: allData, error: allError } = await supabase
                         .from('app_settings')
-                        .select('*')
+                        .select(SETTINGS_COLUMNS)
                         .maybeSingle();
                     
                     if (allError) {
@@ -197,7 +218,7 @@ export const settingsApi = {
                     onConflict: 'id',
                     ignoreDuplicates: false 
                 })
-                .select()
+                .select(SETTINGS_COLUMNS)
                 .single();
             
             if (error) {
@@ -212,11 +233,14 @@ export const settingsApi = {
                             onConflict: 'id',
                             ignoreDuplicates: false 
                         })
-                        .select()
+                        .select(SETTINGS_COLUMNS)
                         .single();
                     
                     if (retryError) throw retryError;
-                    if (retryData) return dbToSettings(retryData);
+                    if (retryData) {
+                        invalidateDedupedRead(SETTINGS_CACHE_KEY);
+                        return dbToSettings(retryData);
+                    }
                 }
                 throw error;
             }
@@ -225,6 +249,7 @@ export const settingsApi = {
                 throw new Error('No se creó/actualizó el registro de settings');
             }
             
+            invalidateDedupedRead(SETTINGS_CACHE_KEY);
             return dbToSettings(data);
         } catch (error: any) {
             console.error('❌ Error al crear settings:', error);
@@ -239,7 +264,8 @@ export const settingsApi = {
         debugLog('settingsApi.update - dbData keys:', Object.keys(dbData));
         
         // Primero obtener la configuración actual para hacer merge
-        const current = await this.get();
+        invalidateDedupedRead(SETTINGS_CACHE_KEY);
+        const current = await this.readUncached();
         const mergedSettings = { ...current, ...settings };
         const mergedDbData = settingsToDb(mergedSettings);
         
@@ -354,7 +380,7 @@ export const settingsApi = {
         // Obtener configuración actualizada
         const { data, error: fetchError } = await supabase
             .from('app_settings')
-            .select('*')
+            .select(SETTINGS_COLUMNS)
             .eq('app_name', APP_NAME)
             .single();
         
@@ -379,6 +405,7 @@ export const settingsApi = {
             result.userAlertSettings = mergedSettings.userAlertSettings;
         }
         debugLog('Settings actualizados');
+        invalidateDedupedRead(SETTINGS_CACHE_KEY);
         return result;
     },
 
