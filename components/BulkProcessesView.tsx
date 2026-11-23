@@ -2066,8 +2066,11 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
 
     useEffect(() => {
         if (isEmbedded) return;
-        loadBulkProcesses();
-    }, [isEmbedded, loadBulkProcesses]);
+        void loadBulkProcesses();
+        // Solo al entrar. Si esto depende de loadBulkProcesses, cada cambio de
+        // proceso seleccionado vuelve a bajar los flyers (~84 MB).
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [isEmbedded]);
 
     // Carga las respuestas de En Proceso y Stand By al abrir "Todas",
     // y las va mostrando por lote para no quedarse solo con el proceso actual.

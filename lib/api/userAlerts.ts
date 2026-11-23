@@ -106,9 +106,6 @@ const ALERT_ROW_LIMIT = 50;
 /** Evita saturar PostgREST/DB con un Promise.all por cada proceso. */
 const ALERT_CONCURRENCY = 3;
 
-/** Tamaño de lote para filtros `.in('process_id', ...)`. */
-const ALERT_PROCESS_CHUNK = 40;
-
 const ALERT_SELECT_FALLBACK =
     'id, name, process_id, stage_id, created_at, contact_status, contact_attempt_count, contact_last_attempt_at, contact_last_user_id, contact_lock_user_id, contact_lock_until, contact_lock_reason, created_by, registration_origin';
 
@@ -141,14 +138,6 @@ async function mapWithConcurrency<T, R>(
 
     await Promise.all(workers);
     return results;
-}
-
-function chunkIds(ids: string[], size: number): string[][] {
-    const chunks: string[][] = [];
-    for (let i = 0; i < ids.length; i += size) {
-        chunks.push(ids.slice(i, i + size));
-    }
-    return chunks;
 }
 
 function applyAbort(query: AlertQuery, abortSignal?: AbortSignal): AlertQuery {
@@ -254,69 +243,7 @@ function parseLatestMs(value: unknown): number | null {
     return Number.isFinite(ms) && ms > 0 ? ms : null;
 }
 
-const AGG_SKIP_KEY = 'ats_skip_created_at_agg';
-
-function aggregationUnsupported(): boolean {
-    try {
-        return sessionStorage.getItem(AGG_SKIP_KEY) === '1';
-    } catch {
-        return false;
-    }
-}
-
-function rememberAggregationUnsupported(): void {
-    try {
-        sessionStorage.setItem(AGG_SKIP_KEY, '1');
-    } catch {
-        /* ignore */
-    }
-}
-
-function aggregationErrorText(error: unknown): string {
-    if (!error || typeof error !== 'object') return String(error || 'error');
-    const row = error as { message?: string; code?: string; details?: string; hint?: string; status?: number };
-    const text = [row.code, row.status, row.message, row.details, row.hint].filter(Boolean).join(' | ');
-    return text || 'error';
-}
-
-/** Timeout de Postgres: reintentar la agregación más adelante. Un 400 de PostgREST no. */
-function shouldStopAggregating(error: unknown): boolean {
-    const text = aggregationErrorText(error);
-    return !/timeout|aborted|57014|canceling statement/i.test(text);
-}
-
-/** Una query agregada por lote en lugar de N consultas `limit 1`. */
-async function fetchLatestViaAggregation(
-    processIds: string[],
-    abortSignal?: AbortSignal
-): Promise<Map<string, number>> {
-    const result = new Map<string, number>();
-    const chunks = chunkIds(processIds, ALERT_PROCESS_CHUNK);
-
-    await mapWithConcurrency(chunks, ALERT_CONCURRENCY, async chunk => {
-        if (abortSignal?.aborted) return;
-        let query = supabase
-            .from('candidates')
-            .select('process_id, latest:created_at.max()')
-            .eq('app_name', APP_NAME)
-            .in('process_id', chunk);
-        if (abortSignal) query = query.abortSignal(abortSignal);
-
-        const { data, error } = await query;
-        if (error) throw error;
-
-        for (const row of (data || []) as Record<string, unknown>[]) {
-            const processId = row.process_id as string | undefined;
-            if (!processId) continue;
-            const ms = parseLatestMs(row.latest);
-            if (ms != null) result.set(processId, ms);
-        }
-    });
-
-    return result;
-}
-
-/** Fallback: una fila por proceso, con concurrencia limitada. */
+/** Una fila por proceso. PostgREST de este proyecto rechaza agregados (PGRST123). */
 async function fetchLatestPerProcess(
     processIds: string[],
     abortSignal?: AbortSignal
@@ -384,33 +311,18 @@ export const userAlertsApi = {
 
     /**
      * Fecha de registro del último candidato de cada proceso.
-     * Preferimos agregación (pocas queries); si falla, un `limit 1` por proceso
-     * con concurrencia acotada. Errores parciales no tumban el resto de avisos.
+     * Un `limit 1` por proceso. El agregado `max()` responde 400 (PGRST123).
      */
     async fetchLatestCandidateCreatedAt(
         processIds: string[],
         abortSignal?: AbortSignal
     ): Promise<Map<string, number>> {
         if (processIds.length === 0) return new Map();
-
-        if (aggregationUnsupported()) {
-            return fetchLatestPerProcess(processIds, abortSignal);
-        }
-
         try {
-            return await fetchLatestViaAggregation(processIds, abortSignal);
-        } catch (aggError) {
-            if (shouldStopAggregating(aggError)) rememberAggregationUnsupported();
-            console.warn(
-                'Avisos: agregación de created_at falló, usando fallback por proceso:',
-                aggregationErrorText(aggError)
-            );
-            try {
-                return await fetchLatestPerProcess(processIds, abortSignal);
-            } catch (fallbackError) {
-                console.warn('Avisos: no se pudo obtener último created_at por proceso:', fallbackError);
-                return new Map();
-            }
+            return await fetchLatestPerProcess(processIds, abortSignal);
+        } catch (error) {
+            console.warn('Avisos: no se pudo obtener último created_at por proceso:', error);
+            return new Map();
         }
     },
 };

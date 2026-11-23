@@ -15,6 +15,17 @@ export type BulkProcessCardExtras = {
     description?: string;
 };
 
+/** Los flyers masivos pesan ~84 MB. Si la pantalla se vuelve a montar, no se vuelven a bajar. */
+const processCardFieldCache = new Map<string, BulkProcessCardExtras>();
+
+function rememberProcessCardFields(rows: BulkProcessCardExtras[]) {
+    for (const row of rows) processCardFieldCache.set(row.id, row);
+}
+
+function dropProcessCardFields(id: string) {
+    processCardFieldCache.delete(id);
+}
+
 const STAGE_LIST_FIELDS = 'id, process_id, name, order_index, required_documents, is_critical, color';
 
 /** Etapas que no se pudieron borrar (FK) se aparcan con order_index >= este valor y no se muestran en la UI. */
@@ -631,10 +642,13 @@ export const processesApi = {
         let processes: any[] = [];
         let error: any = null;
         
+        // flyer_url queda fuera de la lista: en producción son data-URLs (~8 MB
+        // entre los procesos estándar) y esa consulta es la que dispara el egress
+        // al arrancar. La tarjeta los pide de uno en uno; getById los trae al editar.
         const standardFields =
-            'id, title, description, salary_range, experience_level, seniority, flyer_url, flyer_position, service_order_code, start_date, end_date, status, vacancies, google_drive_folder_id, google_drive_folder_name, published_date, need_identified_date, client_id, is_bulk_process, bulk_config, created_at';
+            'id, title, description, salary_range, experience_level, seniority, flyer_position, service_order_code, start_date, end_date, status, vacancies, google_drive_folder_id, google_drive_folder_name, published_date, need_identified_date, client_id, is_bulk_process, bulk_config, created_at';
         const standardFieldsFallback =
-            'id, title, description, salary_range, experience_level, seniority, flyer_url, flyer_position, service_order_code, start_date, end_date, status, vacancies, google_drive_folder_id, google_drive_folder_name, published_date, need_identified_date, is_bulk_process, bulk_config, hired_candidate_ids, closed_at, created_at';
+            'id, title, description, salary_range, experience_level, seniority, flyer_position, service_order_code, start_date, end_date, status, vacancies, google_drive_folder_id, google_drive_folder_name, published_date, need_identified_date, is_bulk_process, bulk_config, hired_candidate_ids, closed_at, created_at';
 
         const loadStandardPage = (fields: string, from: number, to: number) => {
             let query = supabase
@@ -997,6 +1011,7 @@ export const processesApi = {
 
         const saved = await this.getById(process.id, { omitFlyer: true });
         if (!saved) throw new Error('No se pudo leer el proceso creado');
+        dropProcessCardFields(process.id);
         return applyFlyerFromPayload(saved, processData);
     },
 
@@ -1320,6 +1335,7 @@ export const processesApi = {
             // así que no necesitamos insertarlos aquí
         }
 
+        dropProcessCardFields(id);
         const saved = await this.getById(id, { omitFlyer: true });
         if (!saved) throw new Error('No se pudo leer el proceso guardado');
         if (!saved.bulkConfig && processData.bulkConfig) saved.bulkConfig = processData.bulkConfig;
@@ -1584,12 +1600,19 @@ export const processesApi = {
     ): Promise<BulkProcessCardExtras[]> {
         const ids = [...new Set(processIds.filter(Boolean))];
         const collected: BulkProcessCardExtras[] = [];
+        const missing = ids.filter(id => !processCardFieldCache.has(id));
+        const cached = ids
+            .filter(id => processCardFieldCache.has(id))
+            .map(id => processCardFieldCache.get(id)!);
 
         const emit = (rows: BulkProcessCardExtras[]) => {
             if (rows.length === 0) return;
+            rememberProcessCardFields(rows);
             collected.push(...rows);
             onBatch?.(rows);
         };
+
+        if (cached.length > 0) emit(cached);
 
         const fetchIds = async (chunk: string[]): Promise<void> => {
             if (chunk.length === 0) return;
@@ -1617,8 +1640,8 @@ export const processesApi = {
         };
 
         const cardChunk = 1;
-        for (let i = 0; i < ids.length; i += cardChunk) {
-            await fetchIds(ids.slice(i, i + cardChunk));
+        for (let i = 0; i < missing.length; i += cardChunk) {
+            await fetchIds(missing.slice(i, i + cardChunk));
         }
         return collected;
     },
