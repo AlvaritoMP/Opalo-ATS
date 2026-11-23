@@ -10,6 +10,7 @@ import { StageColorPicker } from './StageColorPicker';
 import { DateInput } from './DateInput';
 import { suggestStageColor } from '../lib/stageColors';
 import { openAttachment } from '../lib/openAttachment';
+import { downloadFlyer, uploadFlyerFile } from '../lib/flyerStorage';
 import { AssessmentProfileField } from './AssessmentProfileField';
 import type { AssessmentProfile } from '../lib/assessments/types';
 
@@ -244,27 +245,25 @@ export const ProcessEditorModal: React.FC<ProcessEditorModalProps> = ({ process,
 
     const handleFlyerUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
-        if (file && file.type.startsWith('image/')) {
-            const dataUrl = await fileToBase64(file);
-            setFlyerUrl(dataUrl);
-            setFlyerPosition('center center'); // Resetear posición al subir nueva imagen
-            setShowFlyerEditor(true); // Mostrar editor automáticamente
+        if (e.target) e.target.value = '';
+        if (!file || !file.type.startsWith('image/')) return;
+        try {
+            const url = await uploadFlyerFile(file);
+            setFlyerUrl(url);
+            setFlyerPosition('center center');
+            setShowFlyerEditor(true);
+        } catch (error) {
+            console.error('No se pudo subir el flyer:', error);
+            alert('No se pudo subir la imagen. Inténtalo de nuevo.');
         }
     };
 
     const handleFlyerDownload = () => {
         if (!flyerUrl) return;
-        const mimeMatch = flyerUrl.match(/^data:image\/([\w+.-]+);/);
-        const rawExt = mimeMatch?.[1]?.split('+')[0] || 'png';
-        const ext = rawExt === 'jpeg' ? 'jpg' : rawExt;
-        const safeTitle = (title || 'proceso').replace(/[^\w\-]+/g, '_').slice(0, 50);
-        const a = document.createElement('a');
-        a.href = flyerUrl;
-        a.download = `flyer_${safeTitle}.${ext}`;
-        a.rel = 'noopener';
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
+        void downloadFlyer(flyerUrl, title).catch(error => {
+            console.error('No se pudo descargar el flyer:', error);
+            alert('No se pudo descargar la imagen.');
+        });
     };
 
     const handleFlyerPositionChange = (x: number, y: number) => {
