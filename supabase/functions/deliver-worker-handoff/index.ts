@@ -67,7 +67,7 @@ Deno.serve(async (req) => {
 
     const { data: pkg, error: pkgError } = await supabase
       .from('worker_handoff_packages')
-      .select('*')
+      .select('id, source_app, worker_count, sender_note, created_by_name, sent_at, payload_version, delivery_status')
       .eq('id', packageId)
       .eq('source_app', APP_NAME)
       .maybeSingle()
@@ -79,16 +79,23 @@ Deno.serve(async (req) => {
       return json({ error: 'Package not found' }, 404)
     }
 
-    const { data: items, error: itemsError } = await supabase
-      .from('worker_handoff_items')
-      .select('*')
-      .eq('package_id', packageId)
-      .order('created_at', { ascending: true })
+    const items: Record<string, unknown>[] = []
+    for (let from = 0; from < 200; from += 50) {
+      const { data, error: itemsError } = await supabase
+        .from('worker_handoff_items')
+        .select('source_candidate_id, source_process_id, worker_name, worker_snapshot')
+        .eq('package_id', packageId)
+        .order('created_at', { ascending: true })
+        .range(from, from + 49)
 
-    if (itemsError) {
-      return json({ error: 'Failed to load package items', details: itemsError.message }, 500)
+      if (itemsError) {
+        return json({ error: 'Failed to load package items', details: itemsError.message }, 500)
+      }
+      const page = data || []
+      items.push(...page)
+      if (page.length < 50) break
     }
-    if (!items || items.length === 0) {
+    if (items.length === 0) {
       return json({ error: 'Package has no items' }, 400)
     }
 

@@ -52,7 +52,10 @@ export const PersuasionPopup: React.FC = () => {
             });
         };
         look();
-        const poll = window.setInterval(look, 20000);
+        const poll = window.setInterval(() => {
+            if (document.visibilityState !== 'visible') return;
+            look();
+        }, 60_000);
         return () => {
             channel.close();
             window.removeEventListener('storage', onStorage);

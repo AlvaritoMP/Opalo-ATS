@@ -1,6 +1,10 @@
 import { supabase } from '../supabase';
 import { InterviewEvent } from '../../types';
 import { APP_NAME } from '../appConfig';
+import { dedupedRead, REST_PAGE_SIZE } from './readDedup';
+
+const INTERVIEW_COLUMNS =
+    'id, title, start_time, end_time, candidate_id, interviewer_id, notes, attendee_emails';
 
 // Convertir de DB a tipo de aplicación
 function dbToInterviewEvent(dbEvent: any): InterviewEvent {
@@ -53,9 +57,10 @@ export const interviewsApi = {
     async getAll(abortSignal?: AbortSignal): Promise<InterviewEvent[]> {
         let query = supabase
             .from('interview_events')
-            .select('*')
+            .select(INTERVIEW_COLUMNS)
             .eq('app_name', APP_NAME)
-            .order('start_time', { ascending: true });
+            .order('start_time', { ascending: true })
+            .limit(REST_PAGE_SIZE);
         if (abortSignal) query = query.abortSignal(abortSignal);
 
         const { data, error } = await query;
@@ -66,24 +71,31 @@ export const interviewsApi = {
     /** Ventana acotada para carga inicial (evita leer toda la tabla). */
     async getForAppWindow(abortSignal?: AbortSignal): Promise<InterviewEvent[]> {
         const { start, end } = getInterviewCalendarWindow();
-        return this.getByDateRange(start, end, abortSignal);
+        return dedupedRead(`interviews:${APP_NAME}:${start.toISOString()}`, 2000, () =>
+            this.getByDateRange(start, end, abortSignal)
+        );
     },
 
     // Obtener eventos por rango de fechas (solo de esta app)
     async getByDateRange(start: Date, end: Date, abortSignal?: AbortSignal): Promise<InterviewEvent[]> {
-        let query = supabase
-            .from('interview_events')
-            .select('*')
-            .eq('app_name', APP_NAME)
-            .gte('start_time', start.toISOString())
-            .lte('start_time', end.toISOString())
-            .order('start_time', { ascending: true });
-        if (abortSignal) query = query.abortSignal(abortSignal);
-
-        const { data, error } = await query;
-        
-        if (error) throw error;
-        return (data || []).map(dbToInterviewEvent);
+        const rows: any[] = [];
+        for (let from = 0; from < 500; from += REST_PAGE_SIZE) {
+            let query = supabase
+                .from('interview_events')
+                .select(INTERVIEW_COLUMNS)
+                .eq('app_name', APP_NAME)
+                .gte('start_time', start.toISOString())
+                .lte('start_time', end.toISOString())
+                .order('start_time', { ascending: true })
+                .range(from, from + REST_PAGE_SIZE - 1);
+            if (abortSignal) query = query.abortSignal(abortSignal);
+            const { data, error } = await query;
+            if (error) throw error;
+            const page = data || [];
+            rows.push(...page);
+            if (page.length < REST_PAGE_SIZE) break;
+        }
+        return rows.map(dbToInterviewEvent);
     },
 
     // Crear evento (con app_name automático)
@@ -95,7 +107,7 @@ export const interviewsApi = {
         let { data, error } = await supabase
             .from('interview_events')
             .insert(dbData)
-            .select()
+            .select(INTERVIEW_COLUMNS)
             .single();
 
         if (error && createdBy && isMissingInterviewColumnError(error)) {
@@ -104,7 +116,7 @@ export const interviewsApi = {
             ({ data, error } = await supabase
                 .from('interview_events')
                 .insert(retryPayload)
-                .select()
+                .select(INTERVIEW_COLUMNS)
                 .single());
         }
 
@@ -122,7 +134,7 @@ export const interviewsApi = {
             .update(dbData)
             .eq('id', id)
             .eq('app_name', APP_NAME) // Asegurar que solo se actualicen eventos de esta app
-            .select()
+            .select(INTERVIEW_COLUMNS)
             .single();
         
         if (error) throw error;

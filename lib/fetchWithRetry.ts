@@ -20,7 +20,13 @@ export function isTransientFetchError(error: unknown): boolean {
     // Timeout de SQL (57014) o 500 de PostgREST: reintentar satura más la BD.
     if (
         code === '57014' ||
+        code === '23505' ||
+        code === '23503' ||
+        status === 402 ||
+        status === 409 ||
         status === 500 ||
+        msg.includes('duplicate key') ||
+        msg.includes('23505') ||
         msg.includes('canceling statement') ||
         msg.includes('statement timeout')
     ) {

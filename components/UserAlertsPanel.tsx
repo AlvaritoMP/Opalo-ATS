@@ -262,7 +262,10 @@ export const UserAlertsPanel: React.FC<UserAlertsPanelProps> = ({
             }
         };
         void loadShortlist();
-        const timer = window.setInterval(() => { void loadShortlist(); }, 60_000);
+        const timer = window.setInterval(() => {
+            if (document.visibilityState !== 'visible') return;
+            void loadShortlist();
+        }, 60_000);
         return () => {
             cancelled = true;
             window.clearInterval(timer);
@@ -272,6 +275,7 @@ export const UserAlertsPanel: React.FC<UserAlertsPanelProps> = ({
     // Polling horario estable (no se reinicia al confirmar avisos).
     useEffect(() => {
         const interval = setInterval(() => {
+            if (document.visibilityState !== 'visible') return;
             void loadAlerts({ force: true }).then(computed => {
                 const sporadic = getSporadicAlerts(computed);
                 const hasNewPending = sporadic.some(a =>

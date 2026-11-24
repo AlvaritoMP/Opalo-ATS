@@ -1,6 +1,20 @@
 import { supabase } from '../supabase';
 import { FormIntegration, FieldMapping } from '../../types';
 import { APP_NAME } from '../appConfig';
+import { dedupedRead, invalidateDedupedRead, REST_PAGE_SIZE } from './readDedup';
+
+const FORM_INTEGRATION_COLUMNS =
+    'id, app_name, platform, form_name, form_id_or_url, process_id, webhook_url, field_mapping, created_at';
+const FORM_INTEGRATION_COLUMNS_CORE =
+    'id, app_name, platform, form_name, form_id_or_url, process_id, webhook_url, created_at';
+
+function isMissingIntegrationColumn(error: { message?: string; code?: string } | null): boolean {
+    if (!error) return false;
+    const msg = (error.message || '').toLowerCase();
+    return error.code === '42703' || msg.includes('field_mapping') || msg.includes('schema cache') || msg.includes('column');
+}
+
+const formIntegrationsCacheKey = `form_integrations:${APP_NAME}`;
 
 // Convertir de DB a tipo de aplicación
 function dbToFormIntegration(dbIntegration: any): FormIntegration {
@@ -52,26 +66,39 @@ function formIntegrationToDb(integration: Partial<FormIntegration>): any {
 export const formIntegrationsApi = {
     // Obtener todas las integraciones
     async getAll(abortSignal?: AbortSignal): Promise<FormIntegration[]> {
-        let query = supabase
-            .from('form_integrations')
-            .select('*')
-            .eq('app_name', APP_NAME)
-            .order('created_at', { ascending: false });
-        if (abortSignal) query = query.abortSignal(abortSignal);
-
-        const { data, error } = await query;
-        
-        if (error) throw error;
-        if (!data) return [];
-        
-        return data.map(dbToFormIntegration);
+        return dedupedRead(formIntegrationsCacheKey, 2000, async () => {
+            const rows: any[] = [];
+            let columns = FORM_INTEGRATION_COLUMNS;
+            for (let from = 0; from < 200; from += REST_PAGE_SIZE) {
+                const run = (cols: string) => {
+                    let query = supabase
+                        .from('form_integrations')
+                        .select(cols)
+                        .eq('app_name', APP_NAME)
+                        .order('created_at', { ascending: false })
+                        .range(from, from + REST_PAGE_SIZE - 1);
+                    if (abortSignal) query = query.abortSignal(abortSignal);
+                    return query;
+                };
+                let { data, error } = await run(columns);
+                if (error && columns !== FORM_INTEGRATION_COLUMNS_CORE && isMissingIntegrationColumn(error)) {
+                    columns = FORM_INTEGRATION_COLUMNS_CORE;
+                    ({ data, error } = await run(columns));
+                }
+                if (error) throw error;
+                const page = data || [];
+                rows.push(...page);
+                if (page.length < REST_PAGE_SIZE) break;
+            }
+            return rows.map(dbToFormIntegration);
+        });
     },
 
     // Obtener una integración por ID
     async getById(id: string): Promise<FormIntegration | null> {
         const { data, error } = await supabase
             .from('form_integrations')
-            .select('*')
+            .select(FORM_INTEGRATION_COLUMNS)
             .eq('id', id)
             .eq('app_name', APP_NAME)
             .maybeSingle();
@@ -86,7 +113,7 @@ export const formIntegrationsApi = {
     async getByWebhookUrl(webhookUrl: string): Promise<FormIntegration | null> {
         const { data, error } = await supabase
             .from('form_integrations')
-            .select('*')
+            .select(FORM_INTEGRATION_COLUMNS)
             .eq('webhook_url', webhookUrl)
             .eq('app_name', APP_NAME)
             .maybeSingle();
@@ -127,7 +154,7 @@ export const formIntegrationsApi = {
         let { data, error } = await supabase
             .from('form_integrations')
             .insert(standardFields)
-            .select()
+            .select(FORM_INTEGRATION_COLUMNS)
             .single();
         
         if (error) {
@@ -148,6 +175,7 @@ export const formIntegrationsApi = {
         }
         
         if (!data) throw new Error('No se creó la integración');
+        invalidateDedupedRead(formIntegrationsCacheKey);
         
         // Si hay field_mapping y se creó correctamente, intentar actualizarlo
         if (field_mapping && data.id) {
@@ -197,11 +225,12 @@ export const formIntegrationsApi = {
             .update(standardFields)
             .eq('id', id)
             .eq('app_name', APP_NAME)
-            .select()
+            .select(FORM_INTEGRATION_COLUMNS)
             .single();
         
         if (error) throw error;
         if (!data) throw new Error('No se actualizó la integración');
+        invalidateDedupedRead(formIntegrationsCacheKey);
         
         // Si hay field_mapping, intentar actualizarlo por separado
         if (field_mapping !== undefined && data.id) {
@@ -246,5 +275,6 @@ export const formIntegrationsApi = {
             .eq('app_name', APP_NAME);
         
         if (error) throw error;
+        invalidateDedupedRead(formIntegrationsCacheKey);
     },
 };

@@ -41,7 +41,7 @@ export async function findAtsUserByEmail(email, appName) {
     const db = getSupabaseAdmin();
     const { data, error } = await db
         .from('users')
-        .select('*')
+        .select('id, name, email, role, password_hash, avatar_url, permissions, visible_sections, allowed_client_ids, mattermost_user_id, mattermost_username')
         .eq('email', normalizeEmail(email))
         .eq('app_name', appName)
         .maybeSingle();

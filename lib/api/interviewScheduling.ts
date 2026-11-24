@@ -3,6 +3,11 @@ import { APP_NAME } from '../appConfig';
 import { isMissingTableError } from '../supabaseColumnErrors';
 import type { InterviewEvent } from '../../types';
 
+const CYCLE_COLUMNS =
+    'id, candidate_id, process_id, status, current_interview_event_id, primary_interviewer_id, opened_by_user_id, opened_by_user_name, action_count, reschedule_count, opened_at, closed_at, attended_at';
+const LOG_COLUMNS =
+    'id, cycle_id, candidate_id, process_id, interview_event_id, action, performed_by, performed_by_name, interviewer_id, start_time, end_time, previous_start_time, previous_interviewer_id, created_at';
+
 export type InterviewSchedulingAction = 'scheduled' | 'rescheduled' | 'cancelled' | 'attended';
 
 export interface InterviewSchedulingLogRow {
@@ -80,7 +85,7 @@ async function getCandidateProcessId(candidateId: string): Promise<string | null
 async function findOpenCycle(candidateId: string): Promise<InterviewSchedulingCycleRow | null> {
     const { data, error } = await supabase
         .from('interview_scheduling_cycles')
-        .select('*')
+        .select(CYCLE_COLUMNS)
         .eq('candidate_id', candidateId)
         .eq('app_name', APP_NAME)
         .eq('status', 'open')
@@ -224,7 +229,7 @@ export const interviewSchedulingApi = {
                     action_count: 1,
                     reschedule_count: 0,
                 })
-                .select()
+                .select(CYCLE_COLUMNS)
                 .single();
 
             if (cycleError) throw cycleError;
@@ -431,16 +436,16 @@ export const interviewSchedulingApi = {
     ): Promise<InterviewSchedulingLogRow[]> {
         if (!processIds.length || trackingTablesAvailable === false) return [];
         try {
-            const pageSize = 1000;
+            const pageSize = 50;
             const all: InterviewSchedulingLogRow[] = [];
 
-            for (let page = 0; page < 500; page++) {
+            for (let page = 0; page < 80; page++) {
                 const from = page * pageSize;
                 const to = from + pageSize - 1;
 
                 let query = supabase
                     .from('interview_scheduling_log')
-                    .select('*')
+                    .select(LOG_COLUMNS)
                     .eq('app_name', APP_NAME)
                     .in('process_id', processIds)
                     .order('created_at', { ascending: false })
@@ -481,16 +486,16 @@ export const interviewSchedulingApi = {
     ): Promise<InterviewSchedulingCycleRow[]> {
         if (!processIds.length || trackingTablesAvailable === false) return [];
         try {
-            const pageSize = 1000;
+            const pageSize = 50;
             const all: InterviewSchedulingCycleRow[] = [];
 
-            for (let page = 0; page < 500; page++) {
+            for (let page = 0; page < 80; page++) {
                 const from = page * pageSize;
                 const to = from + pageSize - 1;
 
                 let query = supabase
                     .from('interview_scheduling_cycles')
-                    .select('*')
+                    .select(CYCLE_COLUMNS)
                     .eq('app_name', APP_NAME)
                     .in('process_id', processIds)
                     .order('opened_at', { ascending: false })

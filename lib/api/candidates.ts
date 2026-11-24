@@ -11,7 +11,7 @@ import { identityFieldsToDb, identityFromDbRow } from '../candidateIdentity';
 import { hydrateCandidateIdentity } from '../workerNameParts';
 import { toUuidOrNull } from '../uuid';
 
-const CANDIDATE_PAGE_SIZE = 250;
+const CANDIDATE_PAGE_SIZE = 50;
 const CANDIDATE_MAX_ROWS = 2000;
 
 const CANDIDATE_LIST_SELECT_CORE =
@@ -292,34 +292,38 @@ async function dbToCandidate(dbCandidate: any): Promise<Candidate> {
     // Obtener historial (solo de esta app)
     const { data: history } = await supabase
         .from('candidate_history')
-        .select('*')
+        .select('id, candidate_id, stage_id, moved_at, moved_by')
         .eq('candidate_id', dbCandidate.id)
         .eq('app_name', APP_NAME)
-        .order('moved_at', { ascending: true });
+        .order('moved_at', { ascending: true })
+        .limit(CANDIDATE_PAGE_SIZE);
 
     // Obtener post-its (solo de esta app)
     const { data: postIts } = await supabase
         .from('post_its')
-        .select('*')
+        .select('id, candidate_id, text, color, created_by, created_at')
         .eq('candidate_id', dbCandidate.id)
         .eq('app_name', APP_NAME)
-        .order('created_at', { ascending: false });
+        .order('created_at', { ascending: false })
+        .limit(CANDIDATE_PAGE_SIZE);
 
     // Obtener comentarios (solo de esta app)
     const { data: comments } = await supabase
         .from('comments')
-        .select('*')
+        .select('id, candidate_id, text, user_id, created_at')
         .eq('candidate_id', dbCandidate.id)
         .eq('app_name', APP_NAME)
-        .order('created_at', { ascending: false });
+        .order('created_at', { ascending: false })
+        .limit(CANDIDATE_PAGE_SIZE);
 
-    // Obtener adjuntos (solo de esta app)
+    // Obtener adjuntos (solo de esta app). Sin columnas binarias ni base64.
     const { data: attachments } = await supabase
         .from('attachments')
-        .select('*')
+        .select('id, candidate_id, comment_id, name, url, type, size, category, uploaded_at')
         .eq('candidate_id', dbCandidate.id)
         .eq('app_name', APP_NAME)
-        .order('uploaded_at', { ascending: false });
+        .order('uploaded_at', { ascending: false })
+        .limit(CANDIDATE_PAGE_SIZE);
 
     // Obtener adjuntos de comentarios
     const commentIds = (comments || []).map(c => c.id);
@@ -327,9 +331,10 @@ async function dbToCandidate(dbCandidate: any): Promise<Candidate> {
     if (commentIds.length > 0) {
         const { data: commentAtts } = await supabase
             .from('attachments')
-            .select('*')
+            .select('id, comment_id, name, url, type, size, category, uploaded_at')
             .in('comment_id', commentIds)
-            .eq('app_name', APP_NAME);
+            .eq('app_name', APP_NAME)
+            .limit(CANDIDATE_PAGE_SIZE);
         commentAttachments = commentAtts || [];
     }
 
@@ -647,20 +652,29 @@ export const candidatesApi = {
         includeRelations: boolean = false,
         abortSignal?: AbortSignal,
     ): Promise<Candidate[]> {
-        const { data, error } = await fetchCandidatesWithSelectFallback((selectFields) => {
-            let query = supabase
-                .from('candidates')
-                .select(selectFields)
-                .eq('app_name', APP_NAME)
-                .eq('process_id', processId)
-                .order('created_at', { ascending: false });
-            if (!includeArchived) {
-                query = query.eq('archived', false);
-            }
-            return query;
-        });
-        if (error) throw error;
-        if (!data?.length) return [];
+        const data: any[] = [];
+        for (let from = 0; from < CANDIDATE_MAX_ROWS; from += CANDIDATE_PAGE_SIZE) {
+            const to = Math.min(from + CANDIDATE_PAGE_SIZE - 1, CANDIDATE_MAX_ROWS - 1);
+            const pageResult = await fetchCandidatesWithSelectFallback((selectFields) => {
+                let query = supabase
+                    .from('candidates')
+                    .select(selectFields)
+                    .eq('app_name', APP_NAME)
+                    .eq('process_id', processId)
+                    .order('created_at', { ascending: false })
+                    .range(from, to);
+                if (!includeArchived) {
+                    query = query.eq('archived', false);
+                }
+                if (abortSignal) query = query.abortSignal(abortSignal);
+                return query;
+            });
+            if (pageResult.error) throw pageResult.error;
+            const page = pageResult.data || [];
+            data.push(...page);
+            if (page.length < CANDIDATE_PAGE_SIZE) break;
+        }
+        if (!data.length) return [];
 
         if (!includeRelations) {
             return data.map(dbCandidate => mapListCandidate(dbCandidate));

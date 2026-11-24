@@ -10,7 +10,6 @@ import {
 import type { ContactSummaryCandidate } from './contactAttemptReconcile';
 import {
     backfillContactAttemptProcessIds,
-    mergeContactAttemptsDedupe,
 } from './contactAttemptReconcile';
 import {
     mapRawHiringMoves,
@@ -221,19 +220,21 @@ export async function fetchDashboardData(
                 }
             }
 
-            const bulkCandidateIds = pool.map(c => c.id);
             const candidateProcessIdMap = new Map<string, string>();
             for (const c of pool) candidateProcessIdMap.set(c.id, c.processId);
 
             try {
-                const byProcessAttempts = await contactTrackingApi.getAttemptsForProcesses(allProcessIds);
-                const byCandidates = bulkCandidateIds.length > 0
-                    ? await contactTrackingApi.getAttemptsForCandidateIds(bulkCandidateIds)
-                    : [];
-                const logs = await interviewSchedulingApi.getLogsForProcesses(allProcessIds);
-                const cycles = await interviewSchedulingApi.getCyclesForProcesses(allProcessIds);
+                const since = new Date();
+                since.setDate(since.getDate() - 400);
+                const sinceIso = since.toISOString();
+                const byProcessAttempts = await contactTrackingApi.getAttemptsForProcessesSince(
+                    allProcessIds,
+                    sinceIso
+                );
+                const logs = await interviewSchedulingApi.getLogsForProcesses(allProcessIds, sinceIso);
+                const cycles = await interviewSchedulingApi.getCyclesForProcesses(allProcessIds, sinceIso);
                 contactAttempts = backfillContactAttemptProcessIds(
-                    mergeContactAttemptsDedupe([...byProcessAttempts, ...byCandidates]),
+                    byProcessAttempts,
                     candidateProcessIdMap
                 );
                 schedulingLogs = logs;

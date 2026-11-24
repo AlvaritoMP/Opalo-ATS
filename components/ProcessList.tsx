@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useAppState } from '../App';
 import { SectionHelpButton } from './AppHelpManual';
 import { Plus, MoreVertical, Eye, Edit, Trash2, Users, RefreshCw, Copy, Search, X, AlertTriangle, PlayCircle } from 'lucide-react';
@@ -218,8 +218,32 @@ export const ProcessList: React.FC = () => {
     const [statusFilter, setStatusFilter] = useState<ProcessStatus | 'all'>('all');
     const [searchQuery, setSearchQuery] = useState('');
     const [isReloading, setIsReloading] = useState(false);
+    const [flyerById, setFlyerById] = useState<Record<string, { flyerUrl?: string; flyerPosition?: string }>>({});
+    const requestedFlyers = useRef(new Set<string>());
     
     const canManageProcesses = ['admin', 'recruiter'].includes(state.currentUser?.role as UserRole);
+
+    useEffect(() => {
+        const ids = state.processes
+            .filter(p => !p.isBulkProcess && !p.flyerUrl && !requestedFlyers.current.has(p.id))
+            .map(p => p.id);
+        if (ids.length === 0) return;
+        ids.forEach(id => requestedFlyers.current.add(id));
+        let cancelled = false;
+        void processesApi.hydrateBulkProcessCardFields(ids).then(rows => {
+            if (cancelled) return;
+            setFlyerById(prev => {
+                const next = { ...prev };
+                for (const row of rows) {
+                    next[row.id] = { flyerUrl: row.flyerUrl, flyerPosition: row.flyerPosition };
+                }
+                return next;
+            });
+        }).catch(error => {
+            console.warn('No se pudieron cargar los flyers de las tarjetas:', error);
+        });
+        return () => { cancelled = true; };
+    }, [state.processes]);
 
     // Stand By / cerrados deben verse en "Todos"; se piden al listar o al filtrar por estado.
     useEffect(() => {
@@ -278,12 +302,19 @@ export const ProcessList: React.FC = () => {
         setIsEditorOpen(true);
     };
 
-    const handleDuplicate = (processToDuplicate: Process) => {
-        // Crear una copia del proceso sin el ID y sin la carpeta de Google Drive
-        // El modal verifica si process tiene ID para decidir si crear o actualizar
-        // Al pasar un proceso sin ID válido, se tratará como nuevo proceso
+    const handleDuplicate = async (processToDuplicate: Process) => {
+        // El listado ya no trae el flyer (pesa megabytes). Hay que leerlo aquí
+        // para que la copia no se guarde sin imagen.
+        let source = processToDuplicate;
+        try {
+            const fresh = await processesApi.getById(processToDuplicate.id);
+            if (fresh) source = fresh;
+        } catch {
+            const cached = flyerById[processToDuplicate.id];
+            if (cached?.flyerUrl) source = { ...processToDuplicate, flyerUrl: cached.flyerUrl, flyerPosition: cached.flyerPosition || processToDuplicate.flyerPosition };
+        }
         const duplicatedProcess: Process = {
-            ...processToDuplicate,
+            ...source,
             id: `temp-duplicate-${Date.now()}`, // ID temporal que no existe en BD
             title: `${processToDuplicate.title} (Copia)`, // Agregar "(Copia)" al título
             googleDriveFolderId: undefined, // No copiar la carpeta de Google Drive
@@ -466,10 +497,15 @@ export const ProcessList: React.FC = () => {
                         ? hasCandidatesInCriticalStages(process, filteredCandidates)
                         : { hasCritical: false, count: 0, stageNames: [] as string[] };
                     
+                    const flyer = flyerById[process.id];
+                    const cardProcess = flyer?.flyerUrl
+                        ? { ...process, flyerUrl: flyer.flyerUrl, flyerPosition: flyer.flyerPosition || process.flyerPosition }
+                        : process;
+
                     return (
                         <ProcessCard
                             key={process.id}
-                            process={process}
+                            process={cardProcess}
                             canEdit={canManageProcesses}
                             candidateCount={candidatesLoaded ? filteredCandidates.length : null}
                             criticalInfo={criticalInfo}

@@ -245,7 +245,7 @@ export interface BulkCandidatesResult {
 /** Reescribe el perfil (description) a redacción normal y lo guarda. */
 async function repairStoredDescriptions(processId: string): Promise<string[]> {
     const changedIds: string[] = [];
-    const pageSize = 400;
+    const pageSize = 50;
     for (let page = 0; page < 200; page++) {
         const from = page * pageSize;
         const to = from + pageSize - 1;
@@ -508,7 +508,7 @@ export const bulkCandidatesApi = {
             withCount?: boolean;
         }
     ): Promise<BulkCandidate[]> {
-        const pageSize = 400;
+        const pageSize = 50;
         const out: BulkCandidate[] = [];
         for (let page = 0; page < 500; page++) {
             const r = await this.getCandidates(processId, page, pageSize, filters);
@@ -563,7 +563,7 @@ export const bulkCandidatesApi = {
         options?: { includeInactive?: boolean }
     ): Promise<Record<string, Record<string, unknown>>> {
         const out: Record<string, Record<string, unknown>> = {};
-        const pageSize = 500;
+        const pageSize = 50;
 
         for (let page = 0; page < 200; page++) {
             const from = page * pageSize;
@@ -902,9 +902,9 @@ export const bulkCandidatesApi = {
         lastStageId: string,
         signal?: AbortSignal
     ): Promise<Array<{ candidate_id: string; moved_at: string; moved_by: string | null }>> {
-        const pageSize = 500;
+        const pageSize = 50;
         const out: Array<{ candidate_id: string; moved_at: string; moved_by: string | null }> = [];
-        for (let page = 0; page < 40; page++) {
+        for (let page = 0; page < 80; page++) {
             const from = page * pageSize;
             const to = from + pageSize - 1;
             if (signal?.aborted) {

@@ -59,7 +59,7 @@ Deno.serve(async (req) => {
 
     const { data: integration, error: integrationError } = await supabase
       .from('form_integrations')
-      .select('*')
+      .select('id, app_name, platform, form_name, form_id_or_url, process_id, webhook_url, field_mapping')
       .eq('webhook_url', webhookUrl)
       .maybeSingle()
 

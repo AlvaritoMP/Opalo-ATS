@@ -13,7 +13,7 @@ export const commentsApi = {
                 user_id: comment.userId,
                 app_name: APP_NAME, // Asegurar que siempre se asigne el app_name
             })
-            .select()
+            .select('id, text, user_id, created_at')
             .single();
         
         if (error) throw error;
@@ -37,9 +37,10 @@ export const commentsApi = {
         // Obtener comentario con adjuntos (solo de esta app)
         const { data: attachments } = await supabase
             .from('attachments')
-            .select('*')
+            .select('id, name, url, type, size, category, uploaded_at, comment_id')
             .eq('comment_id', data.id)
-            .eq('app_name', APP_NAME);
+            .eq('app_name', APP_NAME)
+            .limit(20);
 
         return {
             id: data.id,

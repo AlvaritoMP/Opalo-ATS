@@ -36,6 +36,12 @@ import type {
 } from '../../types';
 
 const EMPTY_COUNTS: ShortlistCounts = { presentacion: 0, entrevista: 0, finalista: 0, rejected: 0 };
+const SHORTLIST_COLUMNS =
+    'id, title, client_id, client_label, access_dni, token, status, show_documents, show_assessments, show_profile, client_fields, created_by, created_by_name, closed_at, created_at, updated_at';
+const SHORTLIST_MEMBER_COLUMNS =
+    'id, shortlist_id, candidate_id, source_process_id, source_process_title, source_stage_id, source_stage_name, source_client_label, column_key, status, rejection_reason, rejected_at, added_by_name, added_at';
+const SHORTLIST_EVENT_COLUMNS =
+    'id, shortlist_id, member_id, candidate_id, event_type, body, payload, actor_type, actor_name, created_at';
 
 const SHORTLIST_BASE_COLUMNS = [
     { id: 'phone', label: 'Teléfono' },
@@ -467,28 +473,33 @@ async function requireOpen(shortlistId: string): Promise<void> {
 }
 
 async function loadRoom(shortlist: Shortlist): Promise<{ members: ShortlistMember[]; events: ShortlistEvent[] }> {
-    const [membersResult, eventsResult] = await Promise.all([
-        supabase
+    const memberRows: Record<string, unknown>[] = [];
+    for (let from = 0; from < 200; from += 50) {
+        const page = await supabase
             .from('shortlist_members')
-            .select('*')
+            .select(SHORTLIST_MEMBER_COLUMNS)
             .eq('shortlist_id', shortlist.id)
             .eq('app_name', APP_NAME)
-            .order('added_at', { ascending: true }),
-        supabase
-            .from('shortlist_events')
-            .select('*')
-            .eq('shortlist_id', shortlist.id)
-            .eq('app_name', APP_NAME)
-            .order('created_at', { ascending: false })
-            .limit(80),
-    ]);
-    throwIfMissing(membersResult.error);
+            .order('added_at', { ascending: true })
+            .range(from, from + 49);
+        throwIfMissing(page.error);
+        if (page.error) throw new Error(page.error.message);
+        const rows = (page.data || []) as unknown as Record<string, unknown>[];
+        memberRows.push(...rows);
+        if (rows.length < 50) break;
+    }
+    const eventsResult = await supabase
+        .from('shortlist_events')
+        .select(SHORTLIST_EVENT_COLUMNS)
+        .eq('shortlist_id', shortlist.id)
+        .eq('app_name', APP_NAME)
+        .order('created_at', { ascending: false })
+        .limit(50);
     throwIfMissing(eventsResult.error);
-    if (membersResult.error) throw new Error(membersResult.error.message);
     if (eventsResult.error) throw new Error(eventsResult.error.message);
     const members = await attachViews(
         shortlist,
-        ((membersResult.data || []) as unknown as Record<string, unknown>[]).map(dbToMember)
+        memberRows.map(dbToMember)
     );
     const events = ((eventsResult.data || []) as unknown as Record<string, unknown>[]).map(dbToEvent);
     return { members, events };
@@ -523,9 +534,10 @@ export const shortlistsApi = {
     async list(): Promise<Shortlist[]> {
         const { data, error } = await supabase
             .from('shortlists')
-            .select('*')
+            .select(SHORTLIST_COLUMNS)
             .eq('app_name', APP_NAME)
-            .order('created_at', { ascending: false });
+            .order('created_at', { ascending: false })
+            .limit(50);
         throwIfMissing(error);
         if (error) throw new Error(error.message);
         const rows = (data || []) as unknown as Record<string, unknown>[];
@@ -574,7 +586,7 @@ export const shortlistsApi = {
                 created_by: toUuidOrNull(input.actor.actorUserId) || null,
                 created_by_name: input.actor.actorName,
             })
-            .select('*')
+            .select(SHORTLIST_COLUMNS)
             .single();
         throwIfMissing(error);
         if (isMissingColumnError(error) && (error.message || '').includes('client_fields')) {
@@ -604,7 +616,7 @@ export const shortlistsApi = {
             })
             .eq('id', id)
             .eq('app_name', APP_NAME)
-            .select('*')
+            .select(SHORTLIST_COLUMNS)
             .single();
         throwIfMissing(error);
         if (isMissingColumnError(error) && (error.message || '').includes('client_fields')) {
@@ -682,7 +694,7 @@ export const shortlistsApi = {
     async getRoom(id: string): Promise<{ shortlist: Shortlist; members: ShortlistMember[]; events: ShortlistEvent[] }> {
         const { data, error } = await supabase
             .from('shortlists')
-            .select('*')
+            .select(SHORTLIST_COLUMNS)
             .eq('id', id)
             .eq('app_name', APP_NAME)
             .maybeSingle();
@@ -700,7 +712,7 @@ export const shortlistsApi = {
     > {
         const { data, error } = await supabase
             .from('shortlists')
-            .select('*')
+            .select(SHORTLIST_COLUMNS)
             .eq('token', token.trim())
             .eq('app_name', APP_NAME)
             .maybeSingle();
@@ -1046,7 +1058,7 @@ export const shortlistsApi = {
 async function readMember(memberId: string): Promise<ShortlistMember> {
     const { data, error } = await supabase
         .from('shortlist_members')
-        .select('*')
+        .select(SHORTLIST_MEMBER_COLUMNS)
         .eq('id', memberId)
         .eq('app_name', APP_NAME)
         .maybeSingle();

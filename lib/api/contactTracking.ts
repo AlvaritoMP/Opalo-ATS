@@ -258,10 +258,10 @@ export const contactTrackingApi = {
         const selectFields =
             'id, candidate_id, process_id, user_id, user_name, channel, outcome, attempt_number, status_after, notes, created_at';
 
-        const pageSize = 1000;
+        const pageSize = 50;
         const all: ContactAttempt[] = [];
 
-        for (let page = 0; page < 500; page++) {
+        for (let page = 0; page < 80; page++) {
             const from = page * pageSize;
             const to = from + pageSize - 1;
 
@@ -303,14 +303,14 @@ export const contactTrackingApi = {
 
         const selectFields =
             'id, candidate_id, process_id, user_id, user_name, channel, outcome, attempt_number, status_after, notes, created_at';
-        const pageSize = 1000;
+        const pageSize = 50;
         const chunkSize = 20;
         const all: ContactAttempt[] = [];
         const seen = new Set<string>();
 
         for (let i = 0; i < ids.length; i += chunkSize) {
             const chunk = ids.slice(i, i + chunkSize);
-            for (let page = 0; page < 40; page++) {
+            for (let page = 0; page < 80; page++) {
                 const from = page * pageSize;
                 const to = from + pageSize - 1;
                 const { data, error } = await supabase
@@ -351,7 +351,7 @@ export const contactTrackingApi = {
         const selectFields =
             'id, candidate_id, process_id, user_id, user_name, channel, outcome, attempt_number, status_after, notes, created_at';
 
-        const pageSize = 1000;
+        const pageSize = 50;
         const idChunkSize = 150;
         const all: ContactAttempt[] = [];
         const seen = new Set<string>();
@@ -359,7 +359,7 @@ export const contactTrackingApi = {
         for (let chunkStart = 0; chunkStart < candidateIds.length; chunkStart += idChunkSize) {
             const idChunk = candidateIds.slice(chunkStart, chunkStart + idChunkSize);
 
-            for (let page = 0; page < 500; page++) {
+            for (let page = 0; page < 80; page++) {
                 const from = page * pageSize;
                 const to = from + pageSize - 1;
 
@@ -403,7 +403,7 @@ export const contactTrackingApi = {
         const baseQuery = () =>
             supabase
                 .from('candidate_contact_attempts')
-                .select('*')
+                .select('id, candidate_id, process_id, user_id, user_name, channel, outcome, attempt_number, status_after, notes, created_at')
                 .eq('candidate_id', candidateId)
                 .eq('channel', channel)
                 .eq('app_name', APP_NAME)
