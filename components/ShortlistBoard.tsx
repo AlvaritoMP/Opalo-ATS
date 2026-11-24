@@ -11,7 +11,8 @@ import {
     shortlistEventText,
 } from '../lib/shortlists';
 import { openAttachment } from '../lib/openAttachment';
-import type { Shortlist, ShortlistColumnKey, ShortlistEvent, ShortlistMember } from '../types';
+import { downloadShortlistDocument, isGoogleDriveFileUrl } from '../lib/api/shortlistDocuments';
+import type { Shortlist, ShortlistColumnKey, ShortlistDocument, ShortlistEvent, ShortlistMember } from '../types';
 
 interface ShortlistBoardProps {
     shortlist: Shortlist;
@@ -47,6 +48,22 @@ export interface FinalAppointment {
 
 function memberName(member: ShortlistMember): string {
     return member.candidate?.name || 'Candidato no disponible';
+}
+
+async function openShortlistDocument(shortlist: Shortlist, doc: ShortlistDocument): Promise<void> {
+    if (/\/folders\//i.test(doc.url || '')) {
+        throw new Error('La carpeta de documentos no se comparte.');
+    }
+    if (isGoogleDriveFileUrl(doc.url)) {
+        await downloadShortlistDocument({
+            token: shortlist.token,
+            dni: shortlist.accessDni,
+            attachmentId: doc.id,
+            fallbackName: doc.name,
+        });
+        return;
+    }
+    if (!openAttachment(doc)) throw new Error('No se pudo abrir el documento.');
 }
 
 function useNarrowScreen(): boolean {
@@ -340,6 +357,7 @@ export const ShortlistBoard: React.FC<ShortlistBoardProps> = ({
                     interviews={events.filter(event => event.memberId === selected.id && event.payload?.kind === 'appointment')}
                     onRemove={onRemove ? () => onRemove(selected.id) : undefined}
                     onOpenProcess={selected.sourceProcessId && onOpenProcess ? () => onOpenProcess(selected.sourceProcessId as string) : undefined}
+                    onOpenDocument={doc => openShortlistDocument(shortlist, doc)}
                 />
             )}
         </div>
@@ -382,12 +400,15 @@ const MemberPanel: React.FC<{
     interviews: ShortlistEvent[];
     onRemove?: () => void;
     onOpenProcess?: () => void;
-}> = ({ member, comments, mode, closed, busy, showProfile, showDocuments, readOnly, onLocked, onClose, onMove, onReject, onComment, interviews, onRemove, onOpenProcess }) => {
+    onOpenDocument: (doc: ShortlistDocument) => Promise<void>;
+}> = ({ member, comments, mode, closed, busy, showProfile, showDocuments, readOnly, onLocked, onClose, onMove, onReject, onComment, interviews, onRemove, onOpenProcess, onOpenDocument }) => {
     const [comment, setComment] = useState('');
     const [reason, setReason] = useState('');
     const [rejecting, setRejecting] = useState(false);
     const [blockedNote, setBlockedNote] = useState('');
     const [configOpen, setConfigOpen] = useState(false);
+    const [downloadingId, setDownloadingId] = useState<string | null>(null);
+    const [documentError, setDocumentError] = useState('');
     const person = member.candidate;
     const next = member.status === 'active' ? nextShortlistColumn(member.column) : null;
 
@@ -492,17 +513,22 @@ const MemberPanel: React.FC<{
                             <ul className="space-y-1">
                                 {person.documents.map(doc => (
                                     <li key={doc.id}>
-                                        {doc.url.startsWith('http') ? (
-                                            <a href={doc.url} target="_blank" rel="noopener noreferrer" className="text-sm text-primary-700 hover:underline">
-                                                {doc.name}
-                                            </a>
-                                        ) : doc.url ? (
+                                        {doc.url ? (
                                             <button
                                                 type="button"
-                                                className="text-sm text-primary-700 hover:underline text-left"
-                                                onClick={() => openAttachment(doc)}
+                                                disabled={downloadingId === doc.id}
+                                                className="text-sm text-primary-700 hover:underline text-left disabled:opacity-40"
+                                                onClick={() => {
+                                                    setDocumentError('');
+                                                    setDownloadingId(doc.id);
+                                                    void onOpenDocument(doc)
+                                                        .catch(err => {
+                                                            setDocumentError(err instanceof Error ? err.message : 'No se pudo descargar el documento.');
+                                                        })
+                                                        .finally(() => setDownloadingId(current => current === doc.id ? null : current));
+                                                }}
                                             >
-                                                {doc.name}
+                                                {downloadingId === doc.id ? 'Descargando…' : doc.name}
                                             </button>
                                         ) : (
                                             <span className="text-sm text-gray-700">{doc.name}</span>
@@ -510,6 +536,7 @@ const MemberPanel: React.FC<{
                                     </li>
                                 ))}
                             </ul>
+                            {documentError && <p className="text-xs text-red-700 mt-2">{documentError}</p>}
                         </section>
                     )}
 

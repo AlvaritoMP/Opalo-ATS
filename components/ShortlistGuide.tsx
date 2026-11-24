@@ -46,7 +46,7 @@ export const ClientShortlistHelp: React.FC = () => {
                         </header>
                         <ol className="px-5 py-4 space-y-3 text-sm text-gray-700 list-decimal list-inside">
                             <li>La sala tiene tres pasos: Presentación, Entrevista y Finalista.</li>
-                            <li>Abra un candidato para ver las columnas de su proceso, sus documentos y sus pruebas.</li>
+                            <li>Abra un candidato para ver las columnas de su proceso, sus documentos y sus pruebas. Los documentos se descargan desde esta sala.</li>
                             <li>Puede comentar sobre una persona o dejar un comentario para toda la sala.</li>
                             <li>Puede avanzar un solo paso. Para rechazar, escriba el sustento.</li>
                             <li>En Agenda marque su disponibilidad una vez. Vale para todos los candidatos.</li>
