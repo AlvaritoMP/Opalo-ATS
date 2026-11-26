@@ -23,6 +23,7 @@ import { clearMattermostSession } from './lib/mattermostSession';
 import { runWithAbortTimeout, isAbortOrTimeoutError } from './lib/runWithAbortTimeout';
 import { toUuidOrNull } from './lib/uuid';
 import { isProcessActive } from './lib/processStatus';
+import { canViewDemoOnlyContent, excludeDemoInterviewEvents, filterProcessesForUser, isCandidateHiddenAsDemo, isDemoProcessId } from './lib/demoProcessAccess';
 import {
     clearAllLocalBulkColumnValues,
     getBulkSelectedProcessId,
@@ -710,11 +711,7 @@ const App: React.FC = () => {
                     candidates: Candidate[],
                     currentUser: User | null
                 ) => {
-                    if (!currentUser?.allowedClientIds) {
-                        return { processes, candidates };
-                    }
-                    const allowed = new Set(currentUser.allowedClientIds);
-                    const filteredProcesses = processes.filter(p => p.clientId && allowed.has(p.clientId));
+                    const filteredProcesses = filterProcessesForUser(currentUser, processes);
                     const allowedProcessIds = new Set(filteredProcesses.map(p => p.id));
                     const filteredCandidates = candidates.filter(c => allowedProcessIds.has(c.processId));
                     return { processes: filteredProcesses, candidates: filteredCandidates };
@@ -840,11 +837,14 @@ const App: React.FC = () => {
 
                     void (async () => {
                         try {
-                            const interviewEvents = await loadStep(
-                                signal => interviewsApi.getForAppWindow(signal),
-                                'interviewEvents',
-                                [] as InterviewEvent[],
-                                BACKGROUND_LOAD_TIMEOUT_MS
+                            const interviewEvents = await excludeDemoInterviewEvents(
+                                currentUser,
+                                await loadStep(
+                                    signal => interviewsApi.getForAppWindow(signal),
+                                    'interviewEvents',
+                                    [] as InterviewEvent[],
+                                    BACKGROUND_LOAD_TIMEOUT_MS
+                                )
                             );
                             setState(s => ({ ...s, interviewEvents }));
                         } catch (error) {
@@ -1317,12 +1317,10 @@ const App: React.FC = () => {
         },
         reloadProcesses: async () => {
             try {
-                let processes = await processesApi.getAllIncludingBulkSequential();
-                const currentUser = state.currentUser;
-                if (currentUser?.allowedClientIds != null) {
-                    const allowed = new Set(currentUser.allowedClientIds);
-                    processes = processes.filter(p => p.clientId && allowed.has(p.clientId));
-                }
+                const processes = filterProcessesForUser(
+                    state.currentUser,
+                    await processesApi.getAllIncludingBulkSequential()
+                );
                 setState(s => ({ ...s, processes }));
             } catch (error: any) {
                 console.error('Error reloading processes:', error);
@@ -1505,6 +1503,7 @@ const App: React.FC = () => {
         ensureProcessCandidatesLoaded: async (processId: string, force = false) => {
             const current = stateRef.current;
             const process = current.processes.find(p => p.id === processId);
+            if (isDemoProcessId(processId) && !canViewDemoOnlyContent(current.currentUser)) return;
             if (process?.isBulkProcess) return;
 
             // Stand By / cerrados: sin precarga automática; solo si el usuario abre el proceso (force).
@@ -1560,9 +1559,10 @@ const App: React.FC = () => {
                     processesApi.getAll(false, { statuses: [status] }),
                     processesApi.getAllBulkProcesses(false, { statuses: [status] }).catch(() => [] as Process[]),
                 ]);
+                const visible = filterProcessesForUser(stateRef.current.currentUser, [...regular, ...bulk]);
                 setState(s => {
                     const byId = new Map(s.processes.map(p => [p.id, p]));
-                    for (const p of [...regular, ...bulk]) {
+                    for (const p of visible) {
                         byId.set(p.id, p);
                     }
                     return { ...s, processes: Array.from(byId.values()) };
@@ -1577,9 +1577,10 @@ const App: React.FC = () => {
                     processesApi.getAll(false, { activeOnly: false }),
                     processesApi.getAllBulkProcesses(false, { activeOnly: false }).catch(() => [] as Process[]),
                 ]);
+                const visible = filterProcessesForUser(stateRef.current.currentUser, [...regular, ...bulk]);
                 setState(s => {
                     const byId = new Map(s.processes.map(p => [p.id, p]));
-                    for (const p of [...regular, ...bulk]) {
+                    for (const p of visible) {
                         byId.set(p.id, p);
                     }
                     return { ...s, processes: Array.from(byId.values()) };
@@ -2079,7 +2080,10 @@ const App: React.FC = () => {
         },
         refreshInterviewEvents: async () => {
             try {
-                const events = await interviewsApi.getForAppWindow();
+                const events = await excludeDemoInterviewEvents(
+                    state.currentUser,
+                    await interviewsApi.getForAppWindow()
+                );
                 setState(s => ({ ...s, interviewEvents: events }));
             } catch (error) {
                 console.error('Error refreshing interview events:', error);
@@ -2278,11 +2282,10 @@ const App: React.FC = () => {
         },
         loadArchivedCandidates: async () => {
             try {
-                // Cargar solo candidatos archivados (incluye descartados) con relaciones
-                const archivedCandidates = await candidatesApi.getAll(true, true); // true = include archived, true = include relations
+                const archivedCandidates = (await candidatesApi.getAll(true, true))
+                    .filter(candidate => !isCandidateHiddenAsDemo(state.currentUser, candidate, state.processes));
                 // Agregar/actualizar candidatos archivados en el estado sin eliminar los no archivados
                 setState(s => {
-                    const existingCandidatesMap = new Map(s.candidates.map(c => [c.id, c]));
                     const updatedCandidates = [...s.candidates];
                     
                     // Actualizar candidatos existentes o agregar nuevos

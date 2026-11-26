@@ -13,6 +13,7 @@ import html2canvas from 'html2canvas';
 import PizZip from 'pizzip';
 import Docxtemplater from 'docxtemplater';
 import { saveAs } from 'file-saver';
+import { isCandidateHiddenAsDemo } from '../lib/demoProcessAccess';
 
 type WidgetType = 'bar' | 'line' | 'radar' | 'pie' | 'area' | 'table' | 'summary' | 'list';
 type DataField = 
@@ -85,7 +86,7 @@ export const CandidateComparator: React.FC = () => {
     const filteredCandidates = useMemo(() => {
         const q = candidateQuery.trim().toLowerCase();
         return state.candidates.filter(c => {
-            // Filtrar por visibilidad según el rol
+            if (isCandidateHiddenAsDemo(state.currentUser, c, state.processes)) return false;
             if (isClientOrViewer && !c.visibleToClients) return false;
             
             return !q ||
@@ -94,7 +95,7 @@ export const CandidateComparator: React.FC = () => {
                 (c.phone || '').toLowerCase().includes(q) ||
                 (state.processes.find(p => p.id === c.processId)?.title || '').toLowerCase().includes(q);
         });
-    }, [state.candidates, state.processes, candidateQuery, isClientOrViewer]);
+    }, [state.candidates, state.processes, state.currentUser, candidateQuery, isClientOrViewer]);
 
     // Función para obtener el valor de un campo de datos
     const getFieldValue = (candidate: Candidate, field: DataField): any => {

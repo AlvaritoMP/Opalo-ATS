@@ -4,6 +4,7 @@ import { SectionHelpButton } from './AppHelpManual';
 import { Candidate } from '../types';
 import { Undo2, Eye, Archive } from 'lucide-react';
 import { CandidateDetailsModal } from './CandidateDetailsModal';
+import { isCandidateHiddenAsDemo } from '../lib/demoProcessAccess';
 import { Spinner } from './Spinner';
 
 export const ArchivedCandidates: React.FC = () => {
@@ -32,6 +33,7 @@ export const ArchivedCandidates: React.FC = () => {
     
     const archivedCandidates = state.candidates.filter(c => {
         if (!c.archived) return false;
+        if (isCandidateHiddenAsDemo(state.currentUser, c, state.processes)) return false;
         // Filtrar por visibilidad según el rol
         if (isClientOrViewer && !c.visibleToClients) return false;
         return true;

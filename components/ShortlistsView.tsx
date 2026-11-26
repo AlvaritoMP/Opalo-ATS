@@ -10,6 +10,7 @@ import { editorFieldsFromSaved, optionToField, SHORTLIST_FIELD_OPTIONS } from '.
 import { setBulkSelectedProcessId } from '../lib/bulkTableColumns';
 import { toUuidOrNull } from '../lib/uuid';
 import type { Client, Shortlist, ShortlistActor, ShortlistClientField, ShortlistColumnKey, ShortlistEvent, ShortlistMember } from '../types';
+import { canViewDemoOnlyContent, isDemoOnlyShortlist } from '../lib/demoProcessAccess';
 
 function foldSearch(value: string): string {
     return value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
@@ -40,17 +41,24 @@ export const ShortlistsView: React.FC = () => {
         actorUserId: toUuidOrNull(state.currentUser?.id) || undefined,
     });
 
+    const accessibleRooms = useMemo(
+        () => canViewDemoOnlyContent(state.currentUser)
+            ? rooms
+            : rooms.filter(item => !isDemoOnlyShortlist(item)),
+        [rooms, state.currentUser]
+    );
+
     const visibleRooms = useMemo(() => {
         const needle = foldSearch(query);
-        if (!needle) return rooms;
-        return rooms.filter(item => foldSearch([
+        if (!needle) return accessibleRooms;
+        return accessibleRooms.filter(item => foldSearch([
             item.title,
             item.clientLabel,
             item.accessDni,
             item.createdByName,
             item.status === 'open' ? 'abierta' : 'cerrada',
         ].filter(Boolean).join(' ')).includes(needle));
-    }, [rooms, query]);
+    }, [accessibleRooms, query]);
 
     const loadList = async () => {
         setLoading(true);
@@ -66,6 +74,9 @@ export const ShortlistsView: React.FC = () => {
 
     const loadRoom = async (id: string) => {
         const next = await shortlistsApi.getRoom(id);
+        if (!canViewDemoOnlyContent(state.currentUser) && isDemoOnlyShortlist(next.shortlist)) {
+            throw new Error('No tienes acceso a esta sala.');
+        }
         setRoom(next);
         setOpenId(id);
         if (state.view.type !== 'shortlists' || state.view.payload !== id) {
@@ -298,7 +309,7 @@ export const ShortlistsView: React.FC = () => {
                 </button>
             </div>
             {error && <p className="text-sm text-red-700">{error}</p>}
-            {rooms.length > 0 && (
+            {accessibleRooms.length > 0 && (
                 <input
                     value={query}
                     onChange={event => setQuery(event.target.value)}
@@ -307,10 +318,10 @@ export const ShortlistsView: React.FC = () => {
                 />
             )}
             {loading && <p className="text-sm text-gray-500">Cargando salas…</p>}
-            {!loading && rooms.length === 0 && !error && (
+            {!loading && accessibleRooms.length === 0 && !error && (
                 <p className="text-sm text-gray-500">Todavía no hay salas. Cree una y luego, desde la ficha de un candidato, elija Presentar en shortlist.</p>
             )}
-            {!loading && rooms.length > 0 && visibleRooms.length === 0 && (
+            {!loading && accessibleRooms.length > 0 && visibleRooms.length === 0 && (
                 <p className="text-sm text-gray-500">Ninguna sala coincide con “{query.trim()}”.</p>
             )}
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">

@@ -1,4 +1,5 @@
 import type { Process, Section, User, UserRole } from '../types';
+import { filterProcessesForUser } from './demoProcessAccess';
 import { isProcessActive } from './processStatus';
 
 const DEFAULT_SECTIONS: Record<UserRole, Section[]> = {
@@ -40,18 +41,13 @@ export function getVisibleSectionsForUser(user: User | null): Section[] {
     return sections;
 }
 
-/** Procesos activos que el usuario puede ver según clientes y secciones del menú. */
+/** Procesos activos que el usuario puede ver según clientes, procesos DEMO y secciones del menú. */
 export function getProcessesVisibleToUser(user: User, processes: Process[]): Process[] {
     const sections = new Set(getVisibleSectionsForUser(user));
-    let filtered = processes.filter(p => isProcessActive(p.status));
-
-    if (user.allowedClientIds && user.allowedClientIds.length > 0) {
-        const allowed = new Set(user.allowedClientIds);
-        filtered = filtered.filter(p => p.clientId && allowed.has(p.clientId));
-    }
-
-    return filtered.filter(p => {
-        if (p.isBulkProcess) return sections.has('bulk-processes');
-        return sections.has('processes');
-    });
+    return filterProcessesForUser(user, processes)
+        .filter(p => isProcessActive(p.status))
+        .filter(p => {
+            if (p.isBulkProcess) return sections.has('bulk-processes');
+            return sections.has('processes');
+        });
 }

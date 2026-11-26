@@ -23,6 +23,7 @@ import {
     Users,
 } from 'lucide-react';
 import { useAppState } from '../App';
+import { filterProcessesForUser } from '../lib/demoProcessAccess';
 import { SectionHelpButton } from './AppHelpManual';
 import type { ContactConsultantPeriod } from '../lib/contactDashboardStats';
 import {
@@ -169,11 +170,10 @@ export const IntelligenceView: React.FC = () => {
         [users, currentUser]
     );
 
-    const visibleProcesses = useMemo(() => {
-        if (!currentUser?.allowedClientIds?.length) return processes;
-        const allowed = new Set(currentUser.allowedClientIds);
-        return processes.filter(p => p.clientId && allowed.has(p.clientId));
-    }, [processes, currentUser]);
+    const visibleProcesses = useMemo(
+        () => filterProcessesForUser(currentUser, processes),
+        [processes, currentUser]
+    );
 
     const processIds = useMemo(() => visibleProcesses.map(p => p.id), [visibleProcesses]);
 

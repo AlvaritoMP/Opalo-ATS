@@ -6,6 +6,7 @@ import type { Process, WorkPlanAssignment } from '../types';
 import { workPlanningApi, type WorkPlanSource } from '../lib/api/workPlanning';
 import { getErrorMessage } from '../lib/supabase';
 import { isProcessOperational } from '../lib/processStatus';
+import { canViewDemoOnlyContent, isDemoProcessId } from '../lib/demoProcessAccess';
 import {
     PROCESS_COLOR_OPTIONS,
     WEEKDAY_LABELS,
@@ -74,7 +75,10 @@ export const TeamPlanningView: React.FC = () => {
         setLoadError('');
         try {
             const result = await workPlanningApi.list();
-            setItems(result.items);
+            const visiblePlans = canViewDemoOnlyContent(state.currentUser)
+                ? result.items
+                : result.items.filter(item => !isDemoProcessId(item.processId));
+            setItems(visiblePlans);
             setProcessColors(result.colors);
             setSource(result.source);
             setRemoteReady(result.remoteReady);

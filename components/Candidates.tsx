@@ -4,6 +4,7 @@ import { SectionHelpButton } from './AppHelpManual';
 import { Candidate, Process } from '../types';
 import { Search, Edit, Send } from 'lucide-react';
 import { CandidateDetailsModal } from './CandidateDetailsModal';
+import { isCandidateHiddenAsDemo } from '../lib/demoProcessAccess';
 import { SendToOpsFlowModal } from './SendToOpsFlowModal';
 
 export const Candidates: React.FC = () => {
@@ -28,6 +29,7 @@ export const Candidates: React.FC = () => {
     const lower = query.trim().toLowerCase();
     const results = useMemo(() => {
         return state.candidates.filter(c => {
+            if (isCandidateHiddenAsDemo(state.currentUser, c, state.processes)) return false;
             if (isClientOrViewer && !c.visibleToClients) return false;
             
             const matchesText =
@@ -43,7 +45,7 @@ export const Candidates: React.FC = () => {
             const matchesStage = stageId === 'all' || c.stageId === stageId;
             return matchesText && matchesProcess && matchesStage;
         });
-    }, [state.candidates, state.processes, lower, processId, stageId, isClientOrViewer]);
+    }, [state.candidates, state.processes, state.currentUser, lower, processId, stageId, isClientOrViewer]);
 
     const selectedCandidates = useMemo(
         () => state.candidates.filter(candidate => selectedIds.has(candidate.id)),

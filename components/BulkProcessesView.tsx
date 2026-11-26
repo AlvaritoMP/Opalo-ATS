@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef, useLayoutEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { useAppState } from '../App';
+import { canViewDemoOnlyContent, filterProcessesForUser, isDemoOnlyProcess, isDemoProcessId } from '../lib/demoProcessAccess';
 import { bulkCandidatesApi, BulkCandidate } from '../lib/api/bulkCandidates';
 import { normalizeProfileWording } from '../lib/importTextCase';
 
@@ -2000,10 +2001,10 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
 
         void fetchWithRetry(() => processesApi.getById(embeddedProcessId), { attempts: 4, delayMs: 1000 })
             .then(fresh => {
-                if (fresh) {
-                    applyProcess(fresh);
-                    void repairStoredDatesForProcesses([fresh]);
-                }
+                if (!fresh) return;
+                if (!canViewDemoOnlyContent(state.currentUser) && isDemoOnlyProcess(fresh)) return;
+                applyProcess(fresh);
+                void repairStoredDatesForProcesses([fresh]);
             })
             .catch(err => {
                 console.warn('No se pudo cargar el proceso embebido:', err);
@@ -2014,13 +2015,10 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
     const loadBulkProcesses = useCallback(async () => {
         setIsLoadingProcesses(true);
         try {
-            const processes = await processesApi.getAllBulkProcesses(false);
-            let filteredProcesses = processes;
-            const currentUser = state.currentUser;
-            if (currentUser && currentUser.allowedClientIds !== undefined && currentUser.allowedClientIds !== null) {
-                const allowedClientIdsSet = new Set(currentUser.allowedClientIds);
-                filteredProcesses = processes.filter(p => p.clientId && allowedClientIdsSet.has(p.clientId));
-            }
+            const filteredProcesses = filterProcessesForUser(
+                state.currentUser,
+                await processesApi.getAllBulkProcesses(false)
+            );
             setBulkProcesses(prev => mergePreservingBulkConfig(prev, filteredProcesses));
             void repairStoredDatesForProcesses(filteredProcesses);
             void processesApi.hydrateBulkProcessCardFields(
@@ -2267,7 +2265,7 @@ export const BulkProcessesView: React.FC<BulkProcessesViewProps> = ({
         reset: boolean = false,
         options?: { bulkConfig?: BulkProcessConfig; manageLoading?: boolean }
     ) => {
-        if (!selectedProcess) {
+        if (!selectedProcess || (isDemoProcessId(selectedProcess) && !canViewDemoOnlyContent(state.currentUser))) {
             setCandidates([]);
             setTotal(0);
             return;

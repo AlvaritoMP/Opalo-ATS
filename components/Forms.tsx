@@ -5,6 +5,7 @@ import { Plus, Trash2, Link as LinkIcon, ExternalLink, Edit2 } from 'lucide-reac
 import { FormEditorModal } from './FormEditorModal'; // This is now the FormIntegrationModal
 import { FormIntegration, Process } from '../types';
 import { processesApi } from '../lib/api/processes';
+import { filterProcessesForUser } from '../lib/demoProcessAccess';
 
 const PlatformLogo: React.FC<{platform: string}> = ({platform}) => {
     const baseClasses = "w-8 h-8 mr-4 rounded-md flex items-center justify-center text-white font-bold";
@@ -43,14 +44,10 @@ export const Forms: React.FC = () => {
     useEffect(() => {
         const loadBulkProcesses = async () => {
             try {
-                const processes = await processesApi.getAllBulkProcesses(false);
-                let filteredProcesses = processes;
-                const currentUser = state.currentUser;
-                if (currentUser && currentUser.allowedClientIds !== undefined && currentUser.allowedClientIds !== null) {
-                    const allowedClientIdsSet = new Set(currentUser.allowedClientIds);
-                    filteredProcesses = processes.filter(p => p.clientId && allowedClientIdsSet.has(p.clientId));
-                }
-                setBulkProcesses(filteredProcesses);
+                setBulkProcesses(filterProcessesForUser(
+                    state.currentUser,
+                    await processesApi.getAllBulkProcesses(false)
+                ));
             } catch (error) {
                 console.error('Error loading bulk processes for forms:', error);
             }
