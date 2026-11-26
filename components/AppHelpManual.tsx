@@ -69,14 +69,29 @@ const FLOW_SECTIONS: HelpSection[] = [
         body: (
             <>
                 <P>
-                    Opalo ATS sigue a una persona desde que postula hasta que se decide. Hay dos entradas distintas que no se mezclan: el formulario de postulación (Tally) crea o actualiza la ficha, y el enlace de pruebas es otra pantalla donde la persona rinde la batería del proceso.
+                    Opalo ATS sigue a una persona desde que postula hasta que se decide. Hay dos entradas que no se mezclan: el formulario de Tally crea o actualiza la ficha, y el enlace de pruebas es otra pantalla donde la persona rinde la batería del proceso.
                 </P>
+                <H3>Dónde se escribe cada cosa</H3>
+                <Table
+                    headers={['Quiere hacer esto', 'Menú', 'Dónde se escribe']}
+                    rows={[
+                        ['Abrir una vacante', 'Procesos o Procesos masivos', 'Nuevo proceso. Título, cliente, etapas y estado.'],
+                        ['Recibir postulaciones', 'Formularios', 'Nueva integración. URL de Tally, proceso y mapeo de preguntas. El webhook se pega en Tally.'],
+                        ['Cargar a alguien a mano', 'Dentro del proceso', 'Nueva fila, o agregar candidato. Nombres, apellidos, DNI, teléfono, email y fuente.'],
+                        ['Cargar un Excel', 'Dentro del proceso', 'Importar candidatos. Revise proceso y etapa antes de confirmar.'],
+                        ['Seguir el día a día', 'Procesos masivos', 'Doble clic en la celda. Enter guarda. La etapa se cambia en la columna Etapa.'],
+                        ['Activar pruebas', 'Editar el proceso masivo', 'Pestaña Configuración avanzada, bloque Pruebas para candidatos.'],
+                        ['Calificar el informe', 'Tabla del proceso', 'Informe psico. o Eval. masiva. Notas, idoneidad y conclusiones.'],
+                        ['Mostrar finalistas al cliente', 'Shortlists y la ficha', 'Nueva sala (nombre y DNI). Luego Presentar en shortlist desde la ficha.'],
+                        ['Ver cómo va la operación', 'Panel e Inteligencia', 'Filtros de arriba. Esas pantallas no editan fichas.'],
+                    ]}
+                />
                 <H3>Orden de trabajo</H3>
                 <Ol items={[
-                    'Cree el proceso y ordene las etapas. La primera etapa, la de arriba en la lista, es donde cae cada postulación nueva de Tally.',
+                    'Cree el proceso y ordene las etapas. La primera, la de arriba, es donde cae cada postulación nueva de Tally.',
                     'Si las postulaciones llegan por formulario, abra Formularios, cree la integración, copie el webhook y péguelo en Tally. El detalle está en Integración con Tally.',
-                    'Si el puesto lleva pruebas, edite el proceso masivo y elija la jerarquía: mandos medios y superiores, u operativos y básicos. Ahí también se activan las pruebas de conducta. Sin esa elección el enlace público no tiene batería.',
-                    'Si va a emitir informe psicolaboral, arme el set de competencias en el Inventario y asígnelo al proceso. Esas notas las pone el consultor: las pruebas no las calculan.',
+                    'Si el puesto lleva pruebas, edite el proceso masivo, abra Configuración avanzada y elija la jerarquía. Sin esa elección el enlace público no tiene batería.',
+                    'Si va a emitir informe psicolaboral, arme el set en el Inventario y asígnelo al proceso. Esas notas las pone el consultor: las pruebas no las calculan.',
                     'Comparta la URL pública de Tally para postular, y por separado Link pruebas o Invitar a pruebas para rendir.',
                     'En la tabla o el tablero revise la ficha, lea Resultados pruebas, califique competencias, genere el informe y mueva la etapa, archive o envíe a OpsFlow.',
                 ]} />
@@ -95,7 +110,7 @@ const FLOW_SECTIONS: HelpSection[] = [
                     ]}
                 />
                 <P>
-                    El menú lateral cambia según el rol y las secciones habilitadas para ese usuario. Cada pantalla tiene un botón Ayuda junto al título. Abre este manual en el capítulo de esa pantalla: qué hace, cómo se usa y cómo lo hace el sistema. El botón Ayuda del menú abre el capítulo de la pantalla en la que está.
+                    El menú lateral cambia según el rol y las secciones habilitadas. El botón Ayuda de cada pantalla abre este capítulo. El botón Ayuda del menú abre el capítulo de la pantalla en la que está. Nada de lo que se escribe aquí modifica fichas: es solo la guía.
                 </P>
             </>
         ),
@@ -107,24 +122,47 @@ const FLOW_SECTIONS: HelpSection[] = [
         body: (
             <>
                 <P>
-                    Un proceso es una vacante o una convocatoria, con un cliente, un título y una lista ordenada de etapas. El orden de las etapas es operativo: Tally siempre deposita la postulación en la primera.
+                    Un proceso es una vacante. Se crea en Procesos (Nuevo proceso) o en Procesos masivos. Lleva cliente, título y una lista ordenada de etapas. Tally siempre deposita la postulación nueva en la primera etapa de esa lista.
                 </P>
                 <H3>Dos formas de trabajar el mismo proceso</H3>
                 <Table
-                    headers={['Vista', 'Para qué sirve']}
+                    headers={['Vista', 'Para qué sirve', 'Cómo entra']}
                     rows={[
-                        ['Procesos', 'Tablero por etapas. Sirve para mover pocas personas de una columna a otra y abrir la ficha.'],
-                        ['Procesos masivos', 'Tabla de alta densidad. Ahí viven columnas propias, contacto, documentos, pruebas, perfil ideal e informe psicolaboral.'],
+                        ['Procesos', 'Tablero: una columna por etapa y una tarjeta por persona. Sirve para mover pocas personas.', 'Menú Procesos y luego la tarjeta de la vacante.'],
+                        ['Procesos masivos', 'Tabla de muchas filas. Ahí se escriben columnas propias, contacto, documentos, pruebas e informe.', 'Menú Procesos masivos y luego la vacante. Desde el tablero también existe Modo tabla.'],
                     ]}
                 />
-                <H3>Al crear o editar</H3>
+                <H3>Campos de la pestaña Básico</H3>
+                <P>Al crear o editar, la pestaña Básico es la ficha de la vacante. Pulse Crear o Actualizar al final. Cancelar descarta lo que no se guardó.</P>
+                <Table
+                    headers={['Campo', 'Qué escribir', 'Para qué sirve']}
+                    rows={[
+                        ['Título del proceso', 'El nombre con el que el equipo reconoce la vacante. Es obligatorio.', 'Sale en el menú, en filtros del Panel y en la tarjeta.'],
+                        ['Descripción', 'El contexto del puesto, en texto libre.', 'Lo lee el equipo al abrir el proceso. No lo ve quien postula en Tally.'],
+                        ['Cliente', 'Elija uno de la lista, o Sin cliente.', 'La lista se arma en Configuración, bloque Clientes. El nombre y el RUC se muestran en la opción.'],
+                        ['Imagen de portada', 'Subir imagen. Clic en la vista previa ajusta el encuadre.', 'Se ve en la tarjeta del proceso. Quitar vuelve a la imagen predeterminada.'],
+                        ['Documentación de consulta', 'Agregar documento: requisitos, formatos, bases.', 'El equipo los abre desde la tarjeta. Si Drive está conectado, se suben a la carpeta de la vacante.'],
+                        ['Etapas del proceso', 'Un nombre por fila. Arrastre el ícono o use las flechas. El color es de la columna.', 'La etapa 1, la de arriba, es la bandeja de Tally. Agregar etapa suma una columna nueva. Eliminar etapa solo se permite si queda al menos una.'],
+                        ['Estado', 'En Proceso, Stand By, Terminado, Cancelado o Trunco.', 'Solo En Proceso mantiene la operación habitual y las alertas. Los demás siguen visibles para reactivar, pero dejan de generar trabajo automático.'],
+                        ['Vacantes', 'Un número, mínimo 1.', 'Cuántos cupos tiene la convocatoria. Lo usan cobertura y reportes.'],
+                        ['Fecha de inicio del proceso', 'Día en que el equipo empezó a trabajarla.', 'Respaldo de Time to Hire si no hay fecha de publicación.'],
+                        ['Fecha de publicación de la oferta', 'Día en que se publicó.', 'Inicio del cómputo de Time to Hire en el Panel.'],
+                        ['Fecha de identificación de necesidad', 'Día en que el cliente pidió el puesto.', 'Inicio del cómputo de Time to Fill en el Panel.'],
+                    ]}
+                />
+                <H3>Pestaña Configuración avanzada</H3>
+                <P>Solo en el proceso masivo. Aquí no se mueven personas: se define cómo se va a trabajar la tabla.</P>
                 <Ul items={[
-                    'Defina título, cliente y etapas antes de conectar Tally. Si el proceso no tiene etapas, el webhook rechaza la postulación.',
-                    'Reordene las etapas con cuidado: la que quede primera pasa a ser la bandeja de entrada del formulario.',
-                    'Al crear el proceso, el sistema intenta abrir una carpeta en Google Drive para los archivos de esa vacante, si Drive está configurado.',
-                    'Un proceso cerrado deja de aceptar la gestión operativa hasta que vuelva a En proceso.',
-                    'Las pruebas y el informe psicolaboral se configuran al editar el proceso masivo, en las secciones Pruebas para candidatos e Informes psicolaborales.',
+                    'Prompt de IA para análisis de CV: instrucciones en texto libre para cuando el sistema lee un currículum. Ejemplo: experiencia en ventas y Excel avanzado.',
+                    'Killer questions: preguntas de filtro. Escriba el texto, elija Sí/No u Opción múltiple, y marque Requerida si debe contestarse. Quien no cumple queda marcado como no apto.',
+                    'Ficha complementaria: enlace público aparte, con sus campos obligatorios, para datos que el formulario inicial no trajo.',
+                    'Acceso rápido a WhatsApp: la casilla enciende el botón de WhatsApp en la tabla.',
+                    'Pruebas para candidatos e Informes psicolaborales: el detalle está en Ejecución de las pruebas y en Competencias.',
+                    'Puntaje de corte y filtrado automático por Score IA aparecen solo si esa columna está visible. El número, de 0 a 100, oculta de la vista principal a quien quede por debajo.',
                 ]} />
+                <P>
+                    Defina título, cliente y etapas antes de conectar Tally. Si el proceso no tiene etapas, el webhook rechaza la postulación. Al crear el proceso, si Drive está configurado, el sistema abre una carpeta para los archivos de esa vacante.
+                </P>
             </>
         ),
     },
@@ -135,14 +173,29 @@ const FLOW_SECTIONS: HelpSection[] = [
         body: (
             <>
                 <P>
-                    Cada persona pertenece a un proceso y a una etapa. El origen queda registrado para el panel: formulario (llegó por Tally), manual (fila o ficha creada en el ATS) o masivo (Excel u otra carga por lote).
+                    Cada persona pertenece a un proceso y a una etapa. El origen queda registrado para el Panel: formulario (llegó por Tally), manual (fila o ficha creada en el ATS) o masivo (Excel u otra carga por lote).
                 </P>
                 <H3>Tres puertas de entrada</H3>
                 <Ul items={[
-                    'Formulario: la persona llena Tally. El webhook crea o actualiza la ficha y la deja en la primera etapa.',
-                    'Manual: Nueva fila en la tabla, o agregar candidato en el proceso. El reclutador elige la etapa.',
-                    'Masivo: importación de archivo. Rellena filas y columnas. Las celdas que ya tenían un valor se conservan.',
+                    'Formulario: la persona llena Tally. El webhook crea o actualiza la ficha y la deja en la primera etapa. Usted no escribe esos datos: los trae el formulario si las preguntas están mapeadas.',
+                    'Manual: en la tabla, Nueva fila. En el tablero, agregar candidato. El reclutador elige la etapa.',
+                    'Masivo: Importar candidatos dentro del proceso. El archivo rellena filas. Las celdas que ya tenían un valor se conservan.',
                 ]} />
+                <H3>Campos de Nueva fila</H3>
+                <P>Esta ventana solo pide lo mínimo para crear la fila. El resto se completa después con doble clic en la celda, o abriendo la ficha con doble clic en la fila.</P>
+                <Table
+                    headers={['Campo', 'Obligatorio', 'Qué escribir']}
+                    rows={[
+                        ['Nombres', 'Sí', 'Nombres de pila. Junto con los apellidos arma el nombre que se ve en tarjetas y listados.'],
+                        ['Apellido paterno', 'Sí', 'Primer apellido.'],
+                        ['Apellido materno', 'No', 'Segundo apellido. Puede quedar vacío.'],
+                        ['DNI', 'Sí', 'Documento. Sirve para reconocer a la persona si vuelve a postular y para entrar al enlace de pruebas.'],
+                        ['Teléfono', 'No', 'Número de contacto. También se usa para reconocer una re-postulación si no hay DNI ni correo.'],
+                        ['Email', 'No', 'Correo real. Si lo deja vacío, el sistema guarda uno interno de respaldo para que la fila exista. Ese correo interno no sirve para invitar a pruebas ni para reconocer una postulación posterior.'],
+                        ['Fuente', 'No', 'De dónde llegó: la lista sale de Configuración, Fuentes de candidatos. El Panel la usa en los gráficos de canal.'],
+                    ]}
+                />
+                <P>Añadir fila guarda y vuelve a la tabla. Cancelar no crea a nadie.</P>
                 <H3>Si la misma persona vuelve a postular</H3>
                 <P>
                     Dentro del mismo proceso, y solo entre fichas que no están archivadas, el sistema busca una coincidencia en este orden: DNI, correo real, teléfono. Si encuentra la ficha, suma una postulación y completa solo los campos y columnas que estaban vacíos. Lo que el equipo ya escribió se mantiene. Una ficha archivada no se reabre por un webhook: llega como registro nuevo.
@@ -150,11 +203,13 @@ const FLOW_SECTIONS: HelpSection[] = [
                 <P>
                     Si Tally no trae correo, el sistema guarda un correo interno de respaldo para que la ficha pueda existir. Ese correo no se usa para reconocer a la persona en una postulación posterior; el reconocimiento sigue siendo DNI, correo real o teléfono.
                 </P>
-                <H3>Después del alta</H3>
+                <H3>Después del alta, dónde se sigue escribiendo</H3>
                 <Ul items={[
-                    'Mover de etapa registra el avance. En el tablero se arrastra la tarjeta. En la tabla se cambia la etapa de la fila.',
-                    'Archivar la saca del trabajo activo. Restaurar la devuelve. Descartar la archiva con un motivo.',
-                    'La ficha guarda comentarios, documentos, historial y, si el proceso lo tiene, resultados de pruebas e informe.',
+                    'Etapa: en el tablero arrastre la tarjeta a otra columna. En la tabla cambie la celda Etapa. El movimiento queda en el historial.',
+                    'Datos de contacto y columnas propias: doble clic en la celda, escriba y confirme. Enter guarda. Ctrl+Z deshace. Ctrl+C y Ctrl+V copian y pegan entre celdas.',
+                    'Comentarios, documentos e historial: doble clic en la fila, o abra la tarjeta. Ahí también está Presentar en shortlist.',
+                    'Archivar saca a la persona del trabajo activo. Descartar la archiva con un motivo. Restaurar, desde Archivados, la devuelve a la etapa en la que estaba.',
+                    'Resultados de pruebas e informe aparecen en la ficha solo si el proceso tiene esa batería y los informes habilitados.',
                 ]} />
             </>
         ),
@@ -166,8 +221,17 @@ const FLOW_SECTIONS: HelpSection[] = [
         body: (
             <>
                 <P>
-                    La tabla es la mesa de trabajo de un volumen alto. Cada fila es una persona. Cada columna es un dato del proceso: identidad, etapa, o una columna que usted creó.
+                    La tabla es la mesa de un volumen alto. Entre por Procesos masivos y abra la vacante. Cada fila es una persona. Cada columna es un dato: identidad, etapa, o una columna que usted creó.
                 </P>
+                <H3>Cómo se escribe en la tabla</H3>
+                <Ul items={[
+                    'Doble clic o Enter en una celda abre la edición. Escriba el valor y confirme. La celda guarda ese dato de esa persona.',
+                    'Clic derecho en una celda abre color y comentario de esa celda. El comentario no sustituye el valor: es una nota encima.',
+                    'Flechas mueven la selección. Shift y arrastre marcan un bloque. Ctrl y clic marca filas sueltas para cartas, WhatsApp, pruebas o el ZIP de documentos.',
+                    'Doble clic en la fila (fuera de una celda en edición) abre la ficha: comentarios, documentos, historial, shortlist y consola de llamada.',
+                    'Actualizar, en la barra de la tabla, vuelve a leer candidatos y columnas. El Actualizar del menú lateral recarga procesos y candidatos de toda la sesión.',
+                    'El aviso de la barra resume los atajos: copiar, pegar, deshacer y el panel violeta de fidelización, que se desliza sobre la tabla.',
+                ]} />
                 <H3>Qué se configura en el proceso</H3>
                 <Ul items={[
                     'Columnas propias: texto, fechas, sí/no y listas. Esas columnas también pueden recibir respuestas de Tally si se mapean.',
@@ -179,25 +243,38 @@ const FLOW_SECTIONS: HelpSection[] = [
                 ]} />
                 <H3>Qué se hace desde la tabla</H3>
                 <Table
-                    headers={['Acción', 'Efecto']}
+                    headers={['Botón', 'Dónde se escribe', 'Qué queda guardado']}
                     rows={[
-                        ['Agregar columna', 'Crea un dato extra del proceso. Clasificación para el Panel e Informe psicolaboral son opcionales: no crean otra columna. Dicen a los gráficos y al PDF cómo leer el valor. En Automático, el sistema usa el título.'],
-                        ['Editar columnas propias', 'Cambia nombre, tipo y opciones de las columnas creadas en el proceso. No muestra ni oculta columnas. Las columnas fijas (Nombres, Teléfono, Llamadas, pruebas) no están en esta lista.'],
-                        ['Mostrar columnas', 'Enciende, apaga o fija columnas de la tabla, del sistema y propias. Agrupa las que se parecen (Email y Correo, Teléfono y Llamadas, estado de una prueba y una casilla) y explica por qué conviven.'],
-                        ['Link pruebas', 'Copia el enlace público del ATS (?pruebas=1). La persona escribe su DNI ahí. Es distinto de la URL de Tally.'],
-                        ['Invitar a pruebas', 'Abre el correo de las filas seleccionadas que tienen email, con los pasos y el enlace. Si el proceso aún no tiene batería, el sistema lo avisa.'],
-                        ['Resultados pruebas', 'Abre la batería de la fila seleccionada: puntaje, ítems, clave y opción de reevaluación.'],
-                        ['Guía de pruebas', 'Abre este manual en el capítulo de ejecución de las pruebas.'],
-                        ['Informe psico. y Eval. masiva', 'Califican competencias y arman el PDF. Aparecen cuando el proceso tiene informes habilitados.'],
-                        ['Inventario', 'Edita niveles, rasgos, sets de competencias y plantillas de todo el sistema.'],
-                        ['Perfil ideal', 'Define reglas sobre columnas y marca qué tan cerca está cada fila.'],
-                        ['Documentación', 'Genera Word por persona y permite bajar un ZIP de las filas seleccionadas.'],
-                        ['Estructura del guion', 'Arma las preguntas del guion de llamada. La consola se abre desde la ficha, durante el contacto.'],
-                        ['Mensajes contacto, Tarifas, Estadísticas, Performance, Historial', 'Plantillas de salida, costos de ruta, gráficos del proceso, cobertura y bitácora de cambios.'],
+                        ['Nueva fila', 'Nombres, apellidos, DNI, teléfono, email y fuente.', 'Una persona nueva en la etapa que corresponda. El resto de celdas queda vacío para completarlo en la grilla.'],
+                        ['Agregar columna', 'Nombre y tipo. Si es lista, una opción por fila, con color. Si es ruta, la dirección de destino. Si es costo, la columna de ruta que se cotiza.', 'Un dato nuevo del proceso, igual para todas las filas. Clasificación para el Panel e Informe psicolaboral son opcionales y no crean otra columna: dicen a los gráficos y al PDF cómo leer el valor. En Automático, el sistema usa el título.'],
+                        ['Editar columnas propias', 'Nombre, tipo y opciones de las columnas que usted creó.', 'Cambia la definición. No muestra ni oculta columnas. Las fijas (Nombres, Teléfono, Llamadas, pruebas) no están en esta lista. Cambiar el tipo no convierte solo los valores viejos.'],
+                        ['Mostrar columnas', 'Casilla para ver u ocultar. El pin fija la columna a la izquierda al desplazar.', 'Solo la vista de esta tabla. Agrupa nombres parecidos (Email y Correo, Teléfono y Llamadas, estado de una prueba y una casilla) y explica por qué conviven.'],
+                        ['Link pruebas', 'No se escribe nada: copia el enlace.', 'La dirección del ATS con pruebas=1. La persona escribe su DNI al abrirla. No es la URL de Tally.'],
+                        ['Invitar a pruebas', 'Seleccione filas con correo real. Revise asunto y cuerpo.', 'Abre el redactor con los pasos y el enlace. Las filas sin correo real, o con el correo interno de respaldo, se omiten.'],
+                        ['Resultados pruebas', 'Una fila seleccionada.', 'Puntaje, ítems, clave y reevaluación. La reevaluación se habilita ahí.'],
+                        ['Informe psico. y Eval. masiva', 'Nota obtenida y observación por competencia, nivel, rasgos, idoneidad y texto.', 'El PDF del informe. Aparecen cuando el proceso tiene informes habilitados.'],
+                        ['Inventario', 'Niveles, rasgos, sets y plantillas.', 'La biblioteca de todo el sistema, no de una sola fila.'],
+                        ['Perfil ideal', 'Reglas sobre columnas.', 'Una marca de cercanía en cada fila. No mueve la etapa.'],
+                        ['Documentación', 'Plantilla Word y filas seleccionadas.', 'Un Word por persona y un ZIP de las filas marcadas.'],
+                        ['Estructura del guion', 'Preguntas de la llamada.', 'El guion. La consola se abre desde la ficha, durante el contacto.'],
+                        ['Mensajes contacto, Tarifas, Estadísticas, Performance, Historial', 'Plantillas, costos de ruta, gráficos, cobertura y bitácora.', 'Salidas y lecturas del proceso. Historial no deshace: solo muestra quién cambió qué.'],
+                    ]}
+                />
+                <H3>Tipos de columna y cómo se llena la celda</H3>
+                <Table
+                    headers={['Tipo', 'Qué se escribe en la celda', 'Detalle al crearla']}
+                    rows={[
+                        ['Texto', 'Cualquier frase.', 'Sirve para observaciones, turno, disponibilidad.'],
+                        ['Número', 'Una cifra.', 'Edad, años de experiencia, monto suelto.'],
+                        ['Casilla', 'Sí o no.', 'Si elige una prueba en «se marca sola», el visto se pone al enviar esa prueba. La columna de estado (Pendiente, En curso, Realizada) sigue siendo otra columna.'],
+                        ['Fecha', 'Un día.', 'Si la clasifica como Fecha de cita, el Panel la usa en agendamiento.'],
+                        ['Lista', 'Una de las opciones.', 'Escriba cada opción al crear la columna. El color se ve cuando esa opción está elegida. Quitar una opción no borra el texto ya guardado en una fila.'],
+                        ['Ruta', 'No se escribe el trayecto a mano.', 'Al crearla ponga el destino, igual para todas las filas. Cada fila arma el enlace desde la ubicación de esa persona.'],
+                        ['Costo de ruta', 'Pulse Calcular en la fila.', 'Antes tiene que existir una columna Ruta. El monto se guarda y no se vuelve a pedir hasta que alguien recalcule.'],
                     ]}
                 />
                 <P>
-                    Actualizar, en la barra de la tabla, vuelve a leer candidatos y columnas desde la base. El botón Actualizar del menú lateral recarga procesos y candidatos de toda la sesión.
+                    Clasificación para el Panel: déjela en Automático si el título ya dice Fuente, Distrito, Provincia, Edad, Asistencia o Fecha de cita. Si el título es otro, elija a mano para que el gráfico lea esa columna. Informe psicolaboral, en el mismo formulario, marca si el texto es Nombres, Apellido paterno, Apellido materno o Apellidos. Marcar una parte del nombre oculta esa columna propia en la tabla, porque ya existe la columna fija.
                 </P>
             </>
         ),
@@ -226,14 +303,18 @@ const TALLY_SECTION: HelpSection = {
                 'Si la tabla usa columnas propias (distrito, turno, experiencia, etc.), créelas antes de mapear. El mapeo lista las columnas que el proceso tiene en ese momento.',
             ]} />
             <H3>2. Cree la integración</H3>
-            <Ol items={[
-                'Menú Formularios → Nueva integración.',
-                'Plataforma: Tally. Nombre interno, para reconocerla en la lista.',
-                'URL del formulario: pegue la dirección pública, la que empieza por tally.so. Esa URL no recibe datos; solo queda guardada como referencia.',
-                'Vincular a proceso: elija el proceso normal o masivo que debe recibir a estas personas.',
-                'Abra Mapeo de campos personalizado si los títulos de las preguntas de Tally no coinciden con los nombres de Opalo.',
-                'Guarde. Opalo muestra una URL de webhook, única para esta integración. Cópiela.',
-            ]} />
+            <P>Menú Formularios, botón Nueva integración. Estos son los campos del formulario. Guarde al final: hasta entonces no existe webhook.</P>
+            <Table
+                headers={['Campo', 'Qué escribir', 'Qué hace']}
+                rows={[
+                    ['Plataforma', 'Tally, si las fichas deben crearse solas.', 'Google Forms y Microsoft Forms solo guardan el enlace. No crean fichas ni mapean labels.'],
+                    ['Nombre del formulario', 'Un nombre interno, por ejemplo Postulación analista de crédito.', 'Solo lo ve el equipo en la lista de integraciones.'],
+                    ['URL del formulario', 'La dirección pública, la que empieza por tally.so/r/.', 'No recibe datos. Queda como referencia para saber qué formulario es.'],
+                    ['Vincular a proceso', 'El proceso normal o masivo que debe recibir a estas personas.', 'Sin proceso, el envío no tiene dónde caer. La postulación entra en la primera etapa de ese proceso.'],
+                    ['Mapeo de campos', 'El título exacto de la pregunta de Tally, solo si no coincide con el nombre de Opalo.', 'Vacío significa: usar el título tal cual. El aviso ámbar cuenta cuántos campos del proceso siguen sin label.'],
+                ]}
+            />
+            <P>Al guardar, Opalo muestra una URL de webhook, única para esta integración. Cópiela. Si más adelante edita la integración, la plataforma no cambia y el webhook sigue siendo el mismo. Puede corregir el proceso vinculado y los labels.</P>
             <H3>3. Conecte el webhook en Tally</H3>
             <Ol items={[
                 'En el formulario de Tally abra Settings → Integrations.',
@@ -297,15 +378,18 @@ const TESTS_FLOW_SECTION: HelpSection = {
             <P>
                 Las pruebas viven en el proceso masivo. La persona las rinde en un enlace público del propio ATS, identificándose con su documento. El consultor configura la batería, invita, sigue el estado en la tabla y lee el detalle en Resultados pruebas. Los capítulos siguientes (Cómo se aplica, Barsit, Figuras, Personalidad D y las tres de conducta) explican ítems, tiempo, puntaje e interpretación de cada una.
             </P>
-            <H3>Implementarlas en un proceso</H3>
-            <Ol items={[
-                'Abra el proceso masivo y entre a editarlo.',
-                'En Pruebas para candidatos elija la jerarquía. «Sin pruebas» deja el enlace vacío de batería clásica.',
-                'Mandos medios y superiores asigna Barsit y Personalidad D. Operativos y básicos asigna Figuras (Raven) y Personalidad D.',
-                'Marque Incluir pruebas de conducta si además deben rendir Riesgo y recompensa, Atención bajo presión, y Esfuerzo y retorno. Se suman a la jerarquía, en mandos y en operativos.',
-                'Guarde el proceso. Hasta ese guardado, Link pruebas e Invitar a pruebas no tienen una batería que mostrar.',
-                'En la tabla, abra Mostrar columnas y active, en Estado de las pruebas, Barsit, Raven, Personalidad D, Riesgo, Atención o Esfuerzo. Cada celda pasa por Pendiente, En curso y Realizada. Una casilla propia marcada al completar la prueba es otro dato: un sí/no, no el avance.',
-            ]} />
+            <H3>Dónde se configuran</H3>
+            <P>Edite el proceso masivo, pestaña Configuración avanzada, bloque Pruebas para candidatos. Guarde el proceso. Hasta ese guardado, Link pruebas e Invitar a pruebas no tienen batería.</P>
+            <Table
+                headers={['Campo', 'Qué elegir', 'Qué rinde la persona']}
+                rows={[
+                    ['Jerarquía: Sin pruebas', 'Déjelo así si el puesto no lleva batería clásica.', 'El enlace no muestra Barsit, Figuras ni Personalidad D.'],
+                    ['Jerarquía: Mandos medios y superiores', 'Puestos de coordinación o jefatura.', 'Barsit (10 minutos) y Personalidad D. Los resultados se leen en Resultados pruebas. No reescriben el informe.'],
+                    ['Jerarquía: Operativos y básicos', 'Puestos operativos.', 'Figuras (Raven) y Personalidad D. Al terminar, el informe recibe el nivel intelectual y los rasgos.'],
+                    ['Incluir pruebas de conducta', 'Casilla, además de la jerarquía.', 'Se suman Riesgo y recompensa, Atención bajo presión, y Esfuerzo y retorno. El dictamen queda en Resultados pruebas. No reemplazan el nivel intelectual ni los rasgos.'],
+                ]}
+            />
+            <P>En la tabla, abra Mostrar columnas y active, en Estado de las pruebas, Barsit, Raven, Personalidad D, Riesgo, Atención o Esfuerzo. Cada celda pasa por Pendiente, En curso y Realizada. Una casilla propia marcada al completar la prueba es otro dato: un sí/no, no el avance.</P>
             <H3>Llevar a la persona al enlace</H3>
             <Ul items={[
                     'Link pruebas copia la dirección del ATS con el parámetro pruebas=1, sin documento. Quien la abre escribe su DNI en la pantalla.',
@@ -369,8 +453,19 @@ const COMPETENCY_SECTION: HelpSection = {
             ]} />
             <H3>Qué hace el consultor al evaluar</H3>
             <P>
-                Informe psico. abre un candidato. Eval. masiva abre la misma grilla para varias filas. En ambos casos el consultor asigna, por competencia, la nota obtenida y una observación. También elige el nivel intelectual si Figuras aún no lo escribió, el nivel de cada rasgo si Personalidad D aún no lo escribió, la idoneidad (apto, apto con reservas, no apto) y las conclusiones.
+                Informe psico. abre un candidato. Eval. masiva abre la misma grilla para varias filas. Estos son los campos que se escriben ahí. Guardar arma el informe. Las pruebas no rellenan estas notas.
             </P>
+            <Table
+                headers={['Campo de la grilla', 'Qué escribir', 'De dónde puede venir ya lleno']}
+                rows={[
+                    ['Nota obtenida', 'Un número por competencia. Arranca en el puntaje esperado, así que el porcentaje sale en 100 hasta que lo baje o lo suba.', 'Nadie lo calcula. Es del consultor.'],
+                    ['Observación', 'Una frase por competencia, si hace falta matizar la nota.', 'Texto libre. Entra al informe junto a la nota.'],
+                    ['Nivel intelectual', 'Elija el nivel del inventario si todavía está vacío.', 'En operativos, Figuras lo escribe al terminar. En mandos lo elige el consultor.'],
+                    ['Nivel de cada rasgo', 'Bajo, promedio o alto.', 'En operativos, Personalidad D lo escribe si el nombre del rasgo corresponde a un factor. Si no corresponde, conserva el valor que ya tenía.'],
+                    ['Idoneidad', 'Apto, apto con reservas o no apto.', 'Decisión del consultor. Pasa a la variable de estado: APTO, APTO CON RESERVAS o NO APTO.'],
+                    ['Conclusiones', 'Elija una plantilla para armar el borrador y luego edite el texto.', 'La plantilla por defecto del proceso entra sola si se eligió al guardar el proceso. Si quedó en blanco, se escoge aquí.'],
+                ]}
+            />
             <P>
                 Una evaluación nueva arranca cada nota obtenida en el puntaje esperado. El porcentaje sale en 100 hasta que el consultor baje o suba cada nota. Eso es un valor inicial de la grilla, no un cálculo de las pruebas.
             </P>
@@ -410,15 +505,25 @@ const SCREEN_SECTIONS: HelpSection[] = [
             <>
                 <H3>Qué hace</H3>
                 <P>
-                    Resume la operación sin editar fichas. Arriba están los volúmenes (procesos activos, candidatos en alcance, descartados y contratados). Después vienen contactología, canales de atención, generación de registros, agendamiento de citas, ingresos a contratación y el perfil promedio de quien fue contratado.
+                    Resume la operación sin editar fichas. No hay celdas para cargar candidatos: los números salen de lo que ya está guardado en procesos, etapas y contactos. Arriba están los volúmenes (procesos activos, candidatos en alcance, descartados y contratados). Después vienen contactología, canales de atención, generación de registros, agendamiento de citas, ingresos a contratación y el perfil promedio de quien fue contratado.
                 </P>
-                <H3>Cómo se usa</H3>
+                <H3>Filtros de arriba: qué acotan</H3>
+                <Table
+                    headers={['Campo', 'Qué elegir', 'Qué cambia']}
+                    rows={[
+                        ['Tipo de proceso', 'Todos (regulares + masivos), Solo procesos masivos o Solo procesos regulares.', 'Deja fuera del Panel los procesos del otro tipo.'],
+                        ['Proceso', 'Una vacante, o todas.', 'Los gráficos pasan a leer solo esa vacante.'],
+                        ['Postulación desde', 'Una fecha.', 'Solo entran fichas cuya postulación es de ese día en adelante.'],
+                        ['Postulación hasta', 'Una fecha.', 'Cierra el rango. Vacío significa sin tope.'],
+                    ]}
+                />
+                <P>Esos cuatro filtros se recuerdan en este navegador. Actualizar vuelve a leer el Panel. «Datos al…» es la hora de esa lectura, no la hora de las postulaciones.</P>
+                <H3>Cómo leer cada bloque</H3>
                 <Ol items={[
-                    'Recorra cada bloque de arriba hacia abajo. El título del bloque dice qué pregunta responde.',
-                    'Cuando un bloque ofrece semana, mes o año, ese periodo acota las tarjetas y los gráficos de ese bloque.',
+                    'Recorra de arriba hacia abajo. El título del bloque dice qué pregunta responde.',
+                    'Cuando un bloque ofrece semana, mes o año, ese periodo acota solo las tarjetas y los gráficos de ese bloque. No mueve los filtros de postulación de arriba.',
+                    'En contactología, el rango semanal, mensual o anual aplica a la fecha del intento de contacto, no a la fecha en que la persona postuló.',
                     'Pase el cursor por el signo de ayuda de una tarjeta para leer la definición exacta de ese número.',
-                    'Actualizar vuelve a leer el panel. «Datos al…» es la hora de esa lectura.',
-                    'Los filtros que deje puestos se recuerdan en este navegador.',
                 ]} />
                 <H3>Cómo lo hace</H3>
                 <Ul items={[
@@ -442,10 +547,10 @@ const SCREEN_SECTIONS: HelpSection[] = [
                 </P>
                 <H3>Cómo se usa</H3>
                 <Ol items={[
-                    'Elija últimos 7 días, último mes o último año. Ese periodo acota ingresos, llamadas y contrataciones.',
+                    'Arriba elija últimos 7 días, último mes o último año. Ese único campo acota ingresos, llamadas y contrataciones de toda la pantalla.',
                     'Lea las tarjetas de arriba y después el flujo diario, el desempeño por usuario y el resumen de procesos.',
-                    'En el resumen filtre por estado del proceso y ordene columnas para ver qué vacante pide atención.',
-                    'Actualizar vuelve a pedir flujo, traspasos e intentos de contacto.',
+                    'En el resumen, el filtro de estado deja ver solo En Proceso, Stand By o terminados. Pulse el título de una columna para ordenar y ver qué vacante pide atención.',
+                    'Actualizar vuelve a pedir flujo, traspasos e intentos de contacto. No edita fichas ni etapas.',
                 ]} />
                 <H3>Cómo lo hace</H3>
                 <Ul items={[
@@ -469,12 +574,12 @@ const SCREEN_SECTIONS: HelpSection[] = [
                 </P>
                 <H3>Cómo se usa</H3>
                 <Ol items={[
-                    'Arrastre una tarjeta de una columna a otra para cambiarle la etapa.',
-                    'Abra la tarjeta para ver ficha, comentarios, documentos e historial.',
-                    'Marque varias tarjetas para emitir cartas o comunicar solo a esa selección. Comunicación masiva escribe a todo el proceso.',
-                    'Performance abre cobertura y desempeño. Ver documentos abre los archivos del proceso. Editar proceso cambia título, cliente y etapas.',
-                    'Importar candidatos carga un archivo. Importar CV lee un currículum hacia la ficha.',
-                    'Modo tabla, cuando el proceso lo admite, pasa a la mesa de alta densidad. Finalizar cierra la operación. Si ya no está En proceso, Reactivar lo devuelve.',
+                    'Cada columna del tablero es una etapa, en el orden guardado al editar el proceso. Arrastre una tarjeta de una columna a otra para cambiarle la etapa. El movimiento queda en el historial de esa persona.',
+                    'Abra la tarjeta para la ficha: datos, comentarios, documentos, historial y, si aplica, pruebas e informe. Presentar en shortlist también está ahí.',
+                    'Marque varias tarjetas para emitir cartas o usar Comunicar solo con esa selección. Comunicación masiva escribe a todo el proceso, no solo a las marcadas.',
+                    'Performance abre cobertura y desempeño de esta vacante. Ver documentos abre los archivos subidos en Documentación de consulta. Editar proceso cambia título, cliente, etapas, estado y fechas.',
+                    'Importar candidatos carga un archivo hacia una etapa. Importar CVs lee currículums hacia fichas ya existentes o nuevas.',
+                    'Modo tabla, cuando el proceso lo admite, pasa a la mesa de alta densidad. Finalizar proceso cierra la operación. Si ya no está En Proceso, Reactivar lo devuelve y vuelven las alertas de esa vacante.',
                 ]} />
                 <H3>Cómo lo hace</H3>
                 <Ul items={[
@@ -497,9 +602,9 @@ const SCREEN_SECTIONS: HelpSection[] = [
                 </P>
                 <H3>Cómo se usa</H3>
                 <Ol items={[
-                    'Busque a la persona en la lista.',
-                    'Ábrala para leer la ficha y el historial.',
-                    'Restaure si debe volver al trabajo activo.',
+                    'Use el buscador de la pantalla para filtrar por nombre u otro dato visible. La lista mezcla procesos: no hace falta saber en cuál estaba.',
+                    'Abra la fila para leer la ficha y el historial. Desde aquí no se edita la etapa ni se contacta: es consulta.',
+                    'Restaure si debe volver al trabajo activo. Vuelve al mismo proceso y a la etapa en la que estaba al archivarse.',
                 ]} />
                 <H3>Cómo lo hace</H3>
                 <Ul items={[
@@ -522,10 +627,10 @@ const SCREEN_SECTIONS: HelpSection[] = [
                 </P>
                 <H3>Cómo se usa</H3>
                 <Ol items={[
-                    'Escriba nombre, correo, teléfono, DNI o proceso.',
-                    'Filtre por proceso y, si eligió uno, por etapa.',
-                    'Abra la fila para ver la ficha.',
-                    'Marque filas y use Enviar a OpsFlow. El historial de ese envío queda en Envíos OpsFlow.',
+                    'El buscador de arriba acepta nombre, correo, teléfono, DNI o nombre de proceso. Escriba y la lista se reduce. No crea personas.',
+                    'El filtro de proceso deja una sola vacante. Si eligió una, aparece el filtro de etapa para quedarse con una columna del tablero.',
+                    'Abra la fila para la ficha completa: los mismos datos que en el proceso de origen.',
+                    'Marque las casillas de las filas y pulse Enviar a OpsFlow. Revise el paquete antes de confirmar. El envío no cambia la etapa. El historial queda en Envíos OpsFlow.',
                 ]} />
                 <H3>Cómo lo hace</H3>
                 <Ul items={[
@@ -548,9 +653,9 @@ const SCREEN_SECTIONS: HelpSection[] = [
                 </P>
                 <H3>Cómo se usa</H3>
                 <Ol items={[
-                    'Actualizar vuelve a leer el historial.',
-                    'Abra un paquete para ver a quién incluía, quién lo envió y el estado de entrega.',
-                    'Si la entrega falló, Reintentar vuelve a enviarlo.',
+                    'Esta pantalla no arma el envío. El paquete se crea en Candidatos o en la tabla masiva, con Enviar a OpsFlow. Aquí solo se consulta.',
+                    'Actualizar vuelve a leer el historial. Cada fila es un paquete: personas incluidas, fecha, quién lo envió y si OpsFlow lo recibió.',
+                    'Abra un paquete para leer ese detalle. Si la entrega falló, Reintentar vuelve a entregar el mismo paquete. No crea fichas nuevas ni duplica el lote en el historial.',
                 ]} />
                 <H3>Cómo lo hace</H3>
                 <Ul items={[
@@ -572,10 +677,10 @@ const SCREEN_SECTIONS: HelpSection[] = [
                 </P>
                 <H3>Cómo se usa</H3>
                 <Ol items={[
-                    'En Word escriba el texto y deje marcadores con doble llave, por ejemplo {{Nombre}} o {{DNI}}.',
-                    'Suba el archivo .docx, elija a la persona y revise los avisos de campos vacíos.',
-                    'Descargue la carta. Puede guardar la plantilla para usarla otra vez.',
-                    'Ver guía de plantillas, en esta misma pantalla, lista cada marcador y las variaciones de nombre que el sistema reconoce.',
+                    'En Word escriba el texto fijo y deje huecos con doble llave, por ejemplo {{Nombre}} o {{DNI}}. Guarde el archivo como .docx.',
+                    'En Cartas suba ese archivo. Elija a la persona: el sistema lee su ficha y avisa qué marcadores quedaron vacíos porque ese dato no está cargado.',
+                    'Si el aviso señala un campo vacío, vuelva a la ficha o a la celda de la tabla, escriba el dato y genere la carta otra vez. Descargue el Word resultante.',
+                    'Puede guardar la plantilla para no subirla de nuevo. Ver guía de plantillas, en esta misma pantalla, lista cada marcador y las variaciones de nombre que el sistema reconoce.',
                 ]} />
                 <H3>Cómo lo hace</H3>
                 <Ul items={[
@@ -598,15 +703,26 @@ const SCREEN_SECTIONS: HelpSection[] = [
                 </P>
                 <H3>Cómo se usa</H3>
                 <Ol items={[
-                    'Agendar entrevista abre el formulario de una cita nueva.',
-                    'Pulse un hueco del calendario para agendar en ese horario.',
-                    'Pulse un evento ya puesto para abrirlo o cambiarlo.',
+                    'Agendar entrevista abre el formulario. También puede pulsar un hueco del calendario: la fecha y la hora de ese hueco entran solas.',
+                    'Pulse un evento ya puesto para abrirlo o cambiarlo. Guardar actualiza esa cita. No crea otra.',
                 ]} />
+                <H3>Campos de la cita</H3>
+                <Table
+                    headers={['Campo', 'Qué escribir', 'Qué hace']}
+                    rows={[
+                        ['Candidato', 'La persona de la lista.', 'La cita queda colgada de su ficha. Si entra desde la ficha o desde filas marcadas, este campo ya viene elegido.'],
+                        ['Entrevistador', 'Quién del equipo la recibe.', 'Sale en el título del evento: persona con entrevistador.'],
+                        ['Título', 'Un nombre corto de la cita.', 'Es el texto del evento en el calendario.'],
+                        ['Fecha, hora inicio y hora fin', 'Día y rango.', 'El calendario dibuja el bloque entre esas dos horas.'],
+                        ['Notas', 'Texto libre: dirección, enlace, qué llevar.', 'Lo lee quien abre la cita. No cambia la etapa.'],
+                        ['Emails de asistentes', 'Un correo y pulse agregar. La pastilla se puede quitar.', 'Esos correos quedan en la cita para avisar a quien acompaña.'],
+                    ]}
+                />
                 <H3>Cómo lo hace</H3>
                 <Ul items={[
                     'Cada evento guarda candidato, entrevistador, inicio y fin.',
                     'Las citas se crean desde esta pantalla, desde la ficha o desde la selección en la tabla masiva.',
-                    'El calendario las dibuja. Abrir un evento vuelve a esa misma cita, no crea otra.',
+                    'Planeamiento no aparece aquí: ese acuerdo de equipo no es una entrevista.',
                 ]} />
             </>
         ),
@@ -623,16 +739,25 @@ const SCREEN_SECTIONS: HelpSection[] = [
                 </P>
                 <H3>Cómo se usa</H3>
                 <Ol items={[
-                    'Nueva asignación elige proceso, color, consultores y el rango de fecha y hora.',
-                    'Cambie de semana o de mes para ver la carga.',
-                    'Abra una asignación ya puesta para corregirla o quitarla.',
+                    'Cambie de semana o de mes para ver la carga. Un clic en un día abre Nueva asignación con esa fecha.',
+                    'Abra una asignación ya puesta para corregirla. Quitar la borra. No mueve candidatos.',
                 ]} />
+                <H3>Campos de Nueva asignación</H3>
+                <Table
+                    headers={['Campo', 'Qué escribir', 'Qué hace']}
+                    rows={[
+                        ['Atajos de fecha', 'Solo este día, Hasta el viernes, Semana laboral o Hasta fin de mes.', 'Rellena Desde y Hasta. Puede corregir las fechas después.'],
+                        ['Desde y Hasta', 'El primer y el último día del acuerdo.', 'El bloque se pinta en ese rango.'],
+                        ['Indicar hora de inicio y de fin', 'Active la casilla solo si el acuerdo no es el día completo.', 'Aparecen Hora de inicio y Hora de fin, el último día. Si la casilla está apagada, el acuerdo es de día completo.'],
+                        ['Procesos', 'Busque y marque uno o varios. Incluir procesos cerrados los suma a la lista.', 'Al crear puede marcar varios. Al editar, uno. El color de cada proceso se elige en la fila de bolitas y se recuerda para ese proceso.'],
+                        ['Consultores', 'Busque y marque a quienes lo trabajan.', 'Salen como etiquetas debajo del nombre del proceso.'],
+                        ['Nota del acuerdo', 'Texto libre, por ejemplo solo operarios de limpieza hasta el viernes.', 'La lee el equipo al abrir la asignación. No cambia etapas ni crea entrevistas.'],
+                    ]}
+                />
                 <H3>Cómo lo hace</H3>
-                <Ul items={[
-                    'Guarda proceso, personas, inicio y fin. El color pertenece al proceso.',
-                    'Los consultores se muestran como etiquetas debajo del nombre del proceso.',
-                    'No cambia etapas y no aparece como entrevista en el Calendario.',
-                ]} />
+                <P>
+                    Guarda proceso, personas, inicio, fin, color y nota. No cambia etapas y no aparece como entrevista en el Calendario.
+                </P>
             </>
         ),
     },
@@ -648,8 +773,9 @@ const SCREEN_SECTIONS: HelpSection[] = [
                 </P>
                 <H3>Cómo se usa</H3>
                 <Ol items={[
-                    'En cada tabla abra Seleccionar columnas y deje marcadas las que necesita.',
-                    'Exporte. El archivo descargado es JSON con esas columnas.',
+                    'Hay dos tablas: Candidatos y Procesos. Trabaje una por vez.',
+                    'Seleccionar columnas abre la lista de campos. Marque solo los que quiere llevarse. Una casilla apagada no borra el dato: solo lo deja fuera del archivo.',
+                    'Exporte. Se descarga un JSON con las filas visibles y las columnas marcadas. Exportar no modifica nada en el ATS.',
                 ]} />
                 <H3>Cómo lo hace</H3>
                 <P>
@@ -670,10 +796,10 @@ const SCREEN_SECTIONS: HelpSection[] = [
                 </P>
                 <H3>Cómo se usa</H3>
                 <Ol items={[
-                    'Busque y marque a las personas que quiere contrastar.',
-                    'Agregue un widget (barras, línea, radar, torta, área, tabla, resumen o lista) y elija qué campos entran.',
-                    'Si el widget debe usar cifras sueltas, active datos manuales y escriba las filas.',
-                    'Exporte el informe cuando el contraste esté listo.',
+                    'Busque por nombre y marque a las personas. Sin marcas, los gráficos de ficha quedan vacíos.',
+                    'Agregue un widget: barras, línea, radar, torta, área, tabla, resumen o lista. En el widget elija qué campos de la ficha entran (edad, salario, etapa, días en el proceso, documentos y el resto de la lista).',
+                    'Si el contraste no sale de fichas, active datos manuales en ese widget y escriba usted las filas y los números. Ese widget ignora la base.',
+                    'Exporte el informe cuando el contraste esté listo. Si adjunta el PDF a una ficha, el archivo queda entre los documentos de esa persona.',
                 ]} />
                 <H3>Cómo lo hace</H3>
                 <Ul items={[
@@ -697,9 +823,9 @@ const SCREEN_SECTIONS: HelpSection[] = [
                 </P>
                 <H3>Cómo se usa</H3>
                 <Ol items={[
-                    'Elija Hoy, 7 días o 30 días.',
-                    'Busque por nombre y filtre por categoría: sesión, navegación o cambios.',
-                    'Lea el resumen de cada fila. La hora es la del hecho, no la de abrir esta pantalla.',
+                    'Elija Hoy, 7 días o 30 días. Ese campo acota la lista por la hora del hecho.',
+                    'El buscador filtra por el nombre de quien hizo la acción. La categoría deja solo sesión (entró o salió), navegación o cambios.',
+                    'Cada fila trae usuario, categoría, resumen y hora. La hora es la del hecho. Esta pantalla no deshace lo que la persona hizo.',
                 ]} />
                 <H3>Cómo lo hace</H3>
                 <Ul items={[
@@ -720,12 +846,19 @@ const SCREEN_SECTIONS: HelpSection[] = [
                     Da de alta a quien puede entrar, le asigna un rol y decide qué secciones del menú ve.
                 </P>
                 <H3>Cómo se usa</H3>
-                <Ol items={[
-                    'Añadir usuario con el mismo correo que esa persona tiene en Mattermost.',
-                    'No escriba su clave. Al primer ingreso con Mattermost el ATS la vincula.',
-                    'Edite el rol y, si hace falta, la lista de secciones visibles.',
-                    'Un usuario no puede borrarse a sí mismo.',
-                ]} />
+                <P>Añadir usuario abre el formulario. No hay campo de clave: al primer ingreso con Entrar con Mattermost el ATS vincula ese correo.</P>
+                <Table
+                    headers={['Campo', 'Qué escribir', 'Qué hace']}
+                    rows={[
+                        ['Foto', 'Subir foto, o pegar una URL https.', 'El avatar del menú. Es opcional.'],
+                        ['Nombre completo', 'Cómo debe verse en actividad, planeamiento y firmas internas.', 'No tiene que coincidir con Mattermost. El correo sí.'],
+                        ['Correo electrónico', 'El mismo correo de Mattermost, en minúsculas.', 'Es la llave del ingreso. Si no coincide, la persona no entra.'],
+                        ['Rol', 'Admin (Edición), Recruiter (Consultor), Client (Cliente) o Viewer (Consulta).', 'Al cambiarlo, permisos y secciones vuelven a los de ese rol, salvo que después los personalice.'],
+                        ['Permisos', 'Déjelos por defecto o marque acciones concretas.', 'El texto indica si se usan los del rol. Una lista propia manda sobre el rol.'],
+                        ['Secciones visibles', 'Las pantallas del menú que esa persona verá.', 'Actividad sigue siendo solo de administrador. Planeamiento se conserva para administrador y reclutador.'],
+                    ]}
+                />
+                <P>Guardar crea o actualiza. Un usuario no puede borrarse a sí mismo. Eliminar, en la lista, quita el acceso. No borra las fichas que esa persona cargó.</P>
                 <H3>Cómo lo hace</H3>
                 <Ul items={[
                     'Administrador ve todo, incluidas Inteligencia, Actividad, Usuarios y Configuración.',
@@ -748,19 +881,24 @@ const SCREEN_SECTIONS: HelpSection[] = [
                     Guarda los ajustes de toda la instalación: aspecto, listas compartidas, Drive y alertas. No configura una sola vacante.
                 </P>
                 <H3>Cómo se usa</H3>
-                <Ol items={[
-                    'Cambie el bloque que necesite.',
-                    'Pulse Save Changes. Hasta guardar, el resto del sistema sigue con los valores anteriores.',
-                ]} />
-                <H3>Cómo lo hace</H3>
-                <Ul items={[
-                    'Branding cambia el nombre y los logos del menú, incluido «Powered by».',
-                    'Informe (PDF) define el membrete de los documentos que se exportan.',
-                    'Fuentes, clientes, sedes, provincias y distritos son las listas que aparecen al crear procesos, fichas y entrevistas.',
-                    'Las etiquetas de la interfaz renombran entradas del menú.',
-                    'Si Google Drive está conectado, al crear un proceso el sistema abre una carpeta para los archivos de esa vacante.',
-                    'Las alertas arman la campana junto al nombre: candidatos nuevos, sin contacto y el resto de reglas guardadas.',
-                ]} />
+                <P>Recorra los bloques, cambie los campos y pulse Save Changes arriba a la derecha. Hasta ese botón, el resto del sistema sigue con los valores anteriores. No hay guardado por bloque.</P>
+                <H3>Qué se escribe en cada bloque</H3>
+                <Table
+                    headers={['Bloque', 'Campos', 'Dónde se usa después']}
+                    rows={[
+                        ['Branding', 'Application Name, Company Logo y POWERED BY Logo.', 'El nombre y los logos del menú, incluido el pie «Powered by».'],
+                        ['Informe (PDF)', 'Membrete del informe general y del informe psicolaboral.', 'Los documentos que se exportan. No cambia los datos de la persona.'],
+                        ['Fuentes de candidatos', 'Agregue o quite nombres de canal.', 'La lista Fuente al crear una fila y los gráficos de canal del Panel.'],
+                        ['Clientes', 'Nuevo cliente pide Razón social y RUC, los dos obligatorios.', 'El desplegable Cliente al crear un proceso y al armar una sala de shortlist. Editar cambia esos datos. Eliminar lo saca de la lista.'],
+                        ['Alertas', 'Busque un cliente o un proceso y use el interruptor. Activar todas los vuelve a encender.', 'Apaga los avisos de la campana para ese cliente o esa vacante. Si apaga el cliente, ninguno de sus procesos avisa. Solo lista procesos En Proceso. Hace falta Save Changes.'],
+                        ['Sedes de entrevista', 'Nombre y dirección de cada sede.', 'Punto de destino de las rutas en transporte público desde la ficha, en procesos normales.'],
+                        ['Provincias y distritos', 'Agregue o quite nombres de la lista.', 'Los campos Provincia y Distrito de la ficha y de la tabla.'],
+                        ['UI Labels', 'El texto de cada entrada de menú y de títulos del Panel.', 'Solo el rótulo. No cambia lo que hace la pantalla.'],
+                        ['Localization', 'Currency Symbol, por ejemplo S/.', 'El símbolo de moneda en salarios y montos.'],
+                        ['Database Connection', 'API URL y API Token. Database Type queda en Baserow.', 'Lo toca quien administra la instalación. No es un campo de una vacante.'],
+                        ['Almacenamiento de archivos', 'Conectar Google Drive. Solo el superadministrador configura la conexión.', 'Al crear un proceso se abre una carpeta para los archivos de esa vacante, si Drive está conectado. El resto del equipo ve si está conectado y a qué cuenta.'],
+                    ]}
+                />
             </>
         ),
     },
@@ -776,11 +914,25 @@ const SCREEN_SECTIONS: HelpSection[] = [
                 </P>
                 <H3>Cómo se usa</H3>
                 <Ol items={[
-                    'En Shortlists cree la sala: nombre y el DNI de quien va a entrar. El cliente del catálogo es opcional. Copie el enlace o envíelo por WhatsApp junto con el DNI. Ver como cliente muestra esa misma sala dentro del ATS, solo para revisar la interfaz: se pueden abrir fichas y documentos, y no se guarda ningún cambio. El buscador filtra por nombre, cliente o DNI.',
-                    'Abra la ficha de un candidato, en un proceso o en un proceso masivo, y use Presentar en shortlist. Puede venir de cualquier estado del proceso.',
-                    'El cliente abre el enlace, ingresa su DNI, comenta, avanza de paso o rechaza con sustento. En Agenda marca su disponibilidad una vez, para toda la sala.',
-                    'Cerrar sala apaga el enlace. El historial queda en la sala para que el equipo actualice el proceso cuando lo decida. Editar cambia nombre, DNI o lo que ve el cliente, y conserva el enlace. Descargar guarda una tabla solo con esos datos visibles. Eliminar borra la sala y su historial.',
+                    'En Shortlists pulse nueva sala y complete el formulario de abajo. Copie el enlace o envíelo por WhatsApp junto con el DNI. El buscador de la lista filtra por nombre, cliente o DNI.',
+                    'Ver como cliente abre esa misma sala dentro del ATS para revisar la interfaz. Se pueden abrir fichas y documentos, y no se guarda ningún cambio.',
+                    'Abra la ficha de un candidato, en un proceso o en un proceso masivo, y use Presentar en shortlist. Puede venir de cualquier etapa. Presentar no cambia su etapa ni su historial en el proceso.',
+                    'El cliente abre el enlace, escribe el DNI de acceso, comenta, avanza de paso o rechaza con sustento. En Agenda marca su disponibilidad una vez, para toda la sala.',
+                    'Cerrar sala apaga el enlace. El historial queda para que el equipo actualice el proceso cuando lo decida. Editar conserva el enlace. Descargar guarda una tabla solo con los datos visibles. Eliminar borra la sala y su historial. Reabrir vuelve a habilitar el mismo enlace.',
                 ]} />
+                <H3>Campos de Nueva sala</H3>
+                <Table
+                    headers={['Campo', 'Qué escribir', 'Qué hace']}
+                    rows={[
+                        ['Nombre', 'Cómo reconoce el equipo la sala, por ejemplo Finalistas analista de crédito.', 'Título interno y de la sala.'],
+                        ['Cliente del ATS, si ya existe', 'Uno del catálogo, o Sin cliente del catálogo.', 'Si elige uno y el nombre de abajo está vacío, se copia la razón social.'],
+                        ['Nombre del cliente o de la terna', 'Texto libre si el cliente no está en el catálogo.', 'Es la etiqueta que ve el equipo en la lista.'],
+                        ['DNI de acceso', 'Al menos 8 dígitos, el documento de quien revisa.', 'Es la clave del enlace. No es un usuario del ATS. Si lo cambia al editar, el DNI anterior deja de servir y el enlace sigue siendo el mismo.'],
+                        ['Documentos', 'Casilla.', 'El cliente puede abrir y descargar documentos, incluido el informe adjunto. La conclusión redactada del informe no se muestra.'],
+                        ['Resultados de pruebas', 'Casilla.', 'El cliente ve los resultados de la batería.'],
+                        ['Datos del candidato', 'Casilla, y debajo una fila por dato con la columna del proceso.', 'Sin columna elegida, ese dato no aparece. Cada dato muestra el valor de la columna que usted señaló.'],
+                    ]}
+                />
                 <H3>Cómo lo hace</H3>
                 <Ul items={[
                     'Cada persona en la sala es una referencia a su ficha. La columna, el comentario y el rechazo se guardan en la sala.',
@@ -802,9 +954,9 @@ const SCREEN_SECTIONS: HelpSection[] = [
                 </P>
                 <H3>Cómo se usa</H3>
                 <Ol items={[
-                    'Abra el proceso en Procesos y use Importar candidatos.',
-                    'En un proceso masivo, use la importación de filas de la tabla.',
-                    'Revise el proceso y la etapa de destino antes de confirmar.',
+                    'Abra el proceso en Procesos y use Importar candidatos. En un proceso masivo, use la importación de filas de la tabla. Esta entrada ya no está suelta en el menú.',
+                    'Elija el archivo. Revise el proceso de destino y la etapa antes de confirmar: las filas nuevas caen en esa etapa.',
+                    'Confirme solo cuando las columnas del archivo coincidan con los campos de la ficha o con columnas propias del proceso. Un encabezado que no coincide no llena ninguna celda.',
                 ]} />
                 <H3>Cómo lo hace</H3>
                 <Ul items={[
@@ -908,7 +1060,7 @@ export const AppHelpManual: React.FC<{ onClose: () => void; initialSectionId?: s
                     <div>
                         <p className="text-xs font-semibold uppercase tracking-wide text-teal-700">Manual de la aplicación</p>
                         <h2 id="app-help-title" className="text-lg font-semibold text-slate-900">Ayuda</h2>
-                        <p className="text-sm text-slate-500">Qué hace cada pantalla, cómo se usa y cómo lo hace el sistema. El candidato no ve esta pantalla.</p>
+                        <p className="text-sm text-slate-500">Dónde escribir cada dato, qué hace cada campo y cómo sigue el flujo. El candidato no ve esta pantalla.</p>
                     </div>
                     <button type="button" onClick={onClose} className="rounded-lg p-2 text-slate-500 hover:bg-slate-100" aria-label="Cerrar">
                         <X className="w-5 h-5" />
@@ -974,7 +1126,7 @@ export const SectionHelpButton: React.FC<{ sectionId: string; className?: string
             <button
                 type="button"
                 onClick={() => setOpen(true)}
-                title="Qué hace esta sección, cómo usarla y cómo funciona"
+                title="Cómo usar esta pantalla: dónde escribir, qué hace cada campo y cómo sigue el flujo"
                 aria-label="Ayuda de esta sección"
                 className={
                     className ||
