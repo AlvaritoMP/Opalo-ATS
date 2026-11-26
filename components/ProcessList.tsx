@@ -6,7 +6,8 @@ import { ProcessEditorModal } from './ProcessEditorModal';
 import { Process, UserRole, ProcessStatus, Candidate } from '../types';
 import { PROCESS_STATUS_LABELS, PROCESS_STATUS_COLORS, isProcessActive } from '../lib/processStatus';
 import { getHiredCandidatesForProcessCard } from '../lib/hiringStageTracking';
-import { processesApi } from '../lib/api/processes';
+import { processesApi, type BulkProcessCardExtras } from '../lib/api/processes';
+import { candidatesApi } from '../lib/api/candidates';
 
 // Función utility para detectar si un proceso tiene candidatos en etapas críticas (no revisados)
 const hasCandidatesInCriticalStages = (process: Process, candidates: Candidate[]): { hasCritical: boolean; count: number; stageNames: string[] } => {
@@ -48,15 +49,16 @@ const ProcessCard: React.FC<{
     onDuplicate: () => void;
     onReactivate?: () => void;
     canEdit: boolean;
-}> = ({ process, candidateCount, criticalInfo, onView, onEdit, onDelete, onDuplicate, onReactivate, canEdit }) => {
+    previewCandidates?: Candidate[];
+}> = ({ process, candidateCount, criticalInfo, onView, onEdit, onDelete, onDuplicate, onReactivate, canEdit, previewCandidates }) => {
     const [dropdownOpen, setDropdownOpen] = useState(false);
     const { state } = useAppState();
 
     const processLoaded = state.loadedStandardProcessIds.includes(process.id);
     const { hiredCandidates, hiredCountFallback } = getHiredCandidatesForProcessCard(
         process,
-        state.candidates,
-        processLoaded
+        processLoaded ? state.candidates : (previewCandidates || []),
+        processLoaded || previewCandidates != null
     );
 
     const statusLabels = PROCESS_STATUS_LABELS;
@@ -218,32 +220,74 @@ export const ProcessList: React.FC = () => {
     const [statusFilter, setStatusFilter] = useState<ProcessStatus | 'all'>('all');
     const [searchQuery, setSearchQuery] = useState('');
     const [isReloading, setIsReloading] = useState(false);
-    const [flyerById, setFlyerById] = useState<Record<string, { flyerUrl?: string; flyerPosition?: string }>>({});
+    const [flyerById, setFlyerById] = useState<Record<string, BulkProcessCardExtras>>({});
+    const [cardCandidates, setCardCandidates] = useState<Candidate[] | null>(null);
     const requestedFlyers = useRef(new Set<string>());
+    const listMounted = useRef(true);
+
+    const standardProcessIdsKey = useMemo(
+        () => state.processes.filter(process => !process.isBulkProcess).map(process => process.id).sort().join(','),
+        [state.processes]
+    );
+    const flyerIdsKey = useMemo(
+        () => state.processes
+            .filter(process => !process.isBulkProcess && !process.flyerUrl)
+            .map(process => process.id)
+            .sort()
+            .join(','),
+        [state.processes]
+    );
     
     const canManageProcesses = ['admin', 'recruiter'].includes(state.currentUser?.role as UserRole);
 
     useEffect(() => {
-        const ids = state.processes
-            .filter(p => !p.isBulkProcess && !p.flyerUrl && !requestedFlyers.current.has(p.id))
-            .map(p => p.id);
+        listMounted.current = true;
+        return () => { listMounted.current = false; };
+    }, []);
+
+    useEffect(() => {
+        const ids = flyerIdsKey.split(',').filter(id => id && !requestedFlyers.current.has(id));
         if (ids.length === 0) return;
         ids.forEach(id => requestedFlyers.current.add(id));
-        let cancelled = false;
         void processesApi.hydrateBulkProcessCardFields(ids).then(rows => {
-            if (cancelled) return;
+            if (!listMounted.current) return;
             setFlyerById(prev => {
                 const next = { ...prev };
-                for (const row of rows) {
-                    next[row.id] = { flyerUrl: row.flyerUrl, flyerPosition: row.flyerPosition };
-                }
+                for (const row of rows) next[row.id] = row;
                 return next;
             });
         }).catch(error => {
+            ids.forEach(id => requestedFlyers.current.delete(id));
             console.warn('No se pudieron cargar los flyers de las tarjetas:', error);
         });
+    }, [flyerIdsKey]);
+
+    useEffect(() => {
+        const ids = standardProcessIdsKey.split(',').filter(Boolean);
+        if (ids.length === 0) {
+            setCardCandidates([]);
+            return;
+        }
+        let cancelled = false;
+        void candidatesApi.listForProcessCards(ids).then(rows => {
+            if (cancelled) return;
+            setCardCandidates(rows.map(row => ({
+                id: row.id,
+                name: row.name,
+                email: '',
+                processId: row.processId,
+                stageId: row.stageId,
+                history: [],
+                attachments: [],
+                discarded: row.discarded,
+                criticalStageReviewedAt: row.criticalStageReviewedAt || undefined,
+                visibleToClients: row.visibleToClients,
+            })));
+        }).catch(error => {
+            console.warn('No se pudo completar la información de las tarjetas:', error);
+        });
         return () => { cancelled = true; };
-    }, [state.processes]);
+    }, [standardProcessIdsKey]);
 
     // Stand By / cerrados deben verse en "Todos"; se piden al listar o al filtrar por estado.
     useEffect(() => {
@@ -486,29 +530,38 @@ export const ProcessList: React.FC = () => {
                     const userRole = state.currentUser?.role;
                     const isClientOrViewer = userRole === 'client' || userRole === 'viewer';
                     const candidatesLoaded = state.loadedStandardProcessIds.includes(process.id);
-                    
-                    const filteredCandidates = state.candidates.filter(c => {
+                    const liveCandidates = state.candidates.filter(c => {
                         if (c.processId !== process.id || c.archived) return false;
                         if (isClientOrViewer && !c.visibleToClients) return false;
                         return true;
                     });
-                    
-                    const criticalInfo = candidatesLoaded
-                        ? hasCandidatesInCriticalStages(process, filteredCandidates)
+                    const previewCandidates = (cardCandidates || []).filter(c => {
+                        if (c.processId !== process.id) return false;
+                        if (isClientOrViewer && c.visibleToClients === false) return false;
+                        return true;
+                    });
+                    const cardSource = candidatesLoaded ? liveCandidates : (cardCandidates ? previewCandidates : null);
+
+                    const criticalInfo = cardSource
+                        ? hasCandidatesInCriticalStages(process, cardSource)
                         : { hasCritical: false, count: 0, stageNames: [] as string[] };
-                    
+
                     const flyer = flyerById[process.id];
-                    const cardProcess = flyer?.flyerUrl
-                        ? { ...process, flyerUrl: flyer.flyerUrl, flyerPosition: flyer.flyerPosition || process.flyerPosition }
-                        : process;
+                    const cardProcess = {
+                        ...process,
+                        flyerUrl: flyer?.flyerUrl || process.flyerUrl,
+                        flyerPosition: flyer?.flyerPosition || process.flyerPosition,
+                        description: process.description || flyer?.description || '',
+                    };
 
                     return (
                         <ProcessCard
                             key={process.id}
                             process={cardProcess}
                             canEdit={canManageProcesses}
-                            candidateCount={candidatesLoaded ? filteredCandidates.length : null}
+                            candidateCount={cardSource ? cardSource.length : null}
                             criticalInfo={criticalInfo}
+                            previewCandidates={candidatesLoaded ? undefined : (cardCandidates ? previewCandidates : undefined)}
                             onView={() => actions.setView('process-view', process.id)}
                             onEdit={() => handleEdit(process)}
                             onDuplicate={() => handleDuplicate(process)}

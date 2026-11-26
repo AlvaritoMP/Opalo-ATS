@@ -752,6 +752,77 @@ export const candidatesApi = {
         }));
     },
 
+    /**
+     * Filas mínimas para las tarjetas de procesos normales: conteo, etapa crítica
+     * y nombres de contratados, sin cargar la ficha completa de cada candidato.
+     */
+    async listForProcessCards(processIds: string[]): Promise<Array<{
+        id: string;
+        processId: string;
+        stageId: string;
+        name: string;
+        discarded: boolean;
+        criticalStageReviewedAt?: string | null;
+        visibleToClients?: boolean;
+    }>> {
+        const ids = [...new Set(processIds.filter(Boolean))];
+        if (ids.length === 0) return [];
+
+        const selects = [
+            'id, name, process_id, stage_id, discarded, critical_stage_reviewed_at, visible_to_clients',
+            'id, name, process_id, stage_id, discarded, visible_to_clients',
+            'id, name, process_id, stage_id, discarded',
+        ];
+        const rows: Array<{
+            id: string;
+            processId: string;
+            stageId: string;
+            name: string;
+            discarded: boolean;
+            criticalStageReviewedAt?: string | null;
+            visibleToClients?: boolean;
+        }> = [];
+
+        const mapRow = (row: any) => ({
+            id: row.id as string,
+            processId: row.process_id as string,
+            stageId: row.stage_id as string,
+            name: (row.name as string) || 'Sin nombre',
+            discarded: Boolean(row.discarded),
+            criticalStageReviewedAt: row.critical_stage_reviewed_at || null,
+            visibleToClients: row.visible_to_clients ?? undefined,
+        });
+
+        for (let index = 0; index < ids.length; index += 40) {
+            const chunk = ids.slice(index, index + 40);
+            let selectIndex = 0;
+            for (let from = 0; from < 5000; from += 200) {
+                let response = await supabase
+                    .from('candidates')
+                    .select(selects[selectIndex])
+                    .in('process_id', chunk)
+                    .eq('app_name', APP_NAME)
+                    .eq('archived', false)
+                    .range(from, from + 199);
+                while (response.error && isMissingColumnError(response.error) && selectIndex < selects.length - 1) {
+                    selectIndex += 1;
+                    response = await supabase
+                        .from('candidates')
+                        .select(selects[selectIndex])
+                        .in('process_id', chunk)
+                        .eq('app_name', APP_NAME)
+                        .eq('archived', false)
+                        .range(from, from + 199);
+                }
+                if (response.error) throw response.error;
+                const page = response.data || [];
+                rows.push(...page.map(mapRow));
+                if (page.length < 200) break;
+            }
+        }
+        return rows;
+    },
+
     // Obtener solo el conteo de attachments de un candidato (sin cargar los datos)
     async getAttachmentsCount(candidateId: string): Promise<number> {
         const { count, error } = await supabase
